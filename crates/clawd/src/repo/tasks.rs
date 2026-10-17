@@ -194,6 +194,10 @@ pub(crate) fn claim_next_task(state: &AppState) -> anyhow::Result<Option<Claimed
          LEFT JOIN child_task_graph_nodes graph_node
            ON graph_node.child_task_id = task.task_id
          WHERE task.status = 'queued'
+           AND COALESCE(
+                 CAST(json_extract(task.result_json, '$.task_lifecycle.next_check_after') AS INTEGER),
+                 0
+               ) <= CAST(strftime('%s', 'now') AS INTEGER)
            AND (
                graph_node.child_task_id IS NULL
                OR graph_node.readiness IN ('ready', 'running')
@@ -272,6 +276,50 @@ pub(crate) fn claim_next_task(state: &AppState) -> anyhow::Result<Option<Claimed
         state.worker.worker_id, task.task_id, task.user_id, task.chat_id, task.kind
     );
     Ok(Some(task))
+}
+
+pub(crate) fn requeue_task_after_resource_wait(
+    state: &AppState,
+    task_id: &str,
+    claim_attempt: i64,
+    result_json: &str,
+) -> anyhow::Result<()> {
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let changed = db.execute(
+        "UPDATE tasks
+         SET status = 'queued',
+             result_json = ?2,
+             error_text = NULL,
+             updated_at = ?3,
+             lease_owner = NULL,
+             lease_expires_at = 0
+         WHERE task_id = ?1
+           AND status = 'running'
+           AND lease_owner = ?4
+           AND claim_attempt = ?5",
+        params![
+            task_id,
+            result_json,
+            now_ts(),
+            state.worker.worker_id.as_str(),
+            claim_attempt
+        ],
+    )?;
+    if changed == 0 {
+        return Err(worker_task_write_rejection(
+            &db,
+            state,
+            task_id,
+            claim_attempt,
+            "requeue_task_after_resource_wait",
+            &["running"],
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn update_task_success(

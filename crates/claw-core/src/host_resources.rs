@@ -50,6 +50,7 @@ pub struct HostResourceSnapshot {
     pub effective_memory_limit_bytes: Option<u64>,
     pub memory_available_bytes: Option<u64>,
     pub memory_current_bytes: Option<u64>,
+    pub swap_available_bytes: Option<u64>,
     pub swap_used_bytes: Option<u64>,
     pub cpu_parallelism: usize,
     pub cgroup_version: Option<u8>,
@@ -70,6 +71,10 @@ impl HostResourceSnapshot {
 
     pub fn available_memory_mib(&self) -> Option<u64> {
         self.memory_available_bytes.map(|value| value / MIB)
+    }
+
+    pub fn available_swap_mib(&self) -> Option<u64> {
+        self.swap_available_bytes.map(|value| value / MIB)
     }
 
     pub fn available_ratio(&self) -> Option<f64> {
@@ -239,6 +244,10 @@ fn collect_platform_snapshot() -> HostResourceSnapshot {
         .map(|available| {
             effective_memory_limit_bytes.map_or(available, |limit| available.min(limit))
         });
+    let cgroup_swap_available = match (cgroup.swap_limit_bytes, cgroup.swap_used_bytes) {
+        (Some(limit), Some(current)) => Some(limit.saturating_sub(current)),
+        _ => None,
+    };
     let pressure = cgroup
         .pressure
         .clone()
@@ -268,6 +277,7 @@ fn collect_platform_snapshot() -> HostResourceSnapshot {
         effective_memory_limit_bytes,
         memory_available_bytes,
         memory_current_bytes: cgroup.memory_current_bytes,
+        swap_available_bytes: minimum_known(memory.swap_available_bytes, cgroup_swap_available),
         swap_used_bytes: cgroup.swap_used_bytes.or(memory.swap_used_bytes),
         cpu_parallelism: cpu_parallelism(),
         cgroup_version: cgroup.version,
@@ -298,6 +308,7 @@ fn collect_platform_snapshot() -> HostResourceSnapshot {
             (Some(total), Some(available)) => Some(total.saturating_sub(available)),
             _ => None,
         },
+        swap_available_bytes: None,
         swap_used_bytes: parse_macos_swap_used(
             &command_output("/usr/sbin/sysctl", &["-n", "vm.swapusage"]).unwrap_or_default(),
         ),
@@ -323,6 +334,7 @@ fn collect_platform_snapshot() -> HostResourceSnapshot {
         effective_memory_limit_bytes: None,
         memory_available_bytes: None,
         memory_current_bytes: None,
+        swap_available_bytes: None,
         swap_used_bytes: None,
         cpu_parallelism: cpu_parallelism(),
         cgroup_version: None,
@@ -387,6 +399,7 @@ fn command_output(_program: &str, _args: &[&str]) -> Option<String> {
 struct LinuxMemoryInfo {
     physical_memory_bytes: Option<u64>,
     memory_available_bytes: Option<u64>,
+    swap_available_bytes: Option<u64>,
     swap_used_bytes: Option<u64>,
 }
 
@@ -410,6 +423,7 @@ fn parse_linux_meminfo(text: &str) -> LinuxMemoryInfo {
     LinuxMemoryInfo {
         physical_memory_bytes: total,
         memory_available_bytes: available,
+        swap_available_bytes: swap_free,
         swap_used_bytes: match (swap_total, swap_free) {
             (Some(total), Some(free)) => Some(total.saturating_sub(free)),
             _ => None,
@@ -433,6 +447,7 @@ struct LinuxCgroupSnapshot {
     version: Option<u8>,
     memory_limit_bytes: Option<u64>,
     memory_current_bytes: Option<u64>,
+    swap_limit_bytes: Option<u64>,
     swap_used_bytes: Option<u64>,
     events: CgroupMemoryEvents,
     pressure: Option<MemoryPressureSample>,
@@ -504,6 +519,7 @@ fn collect_cgroup_v2_dir(directory: &Path) -> LinuxCgroupSnapshot {
         version: Some(2),
         memory_limit_bytes: read_limit_file(&directory.join("memory.max")),
         memory_current_bytes: read_u64_file(&directory.join("memory.current")),
+        swap_limit_bytes: read_limit_file(&directory.join("memory.swap.max")),
         swap_used_bytes: read_u64_file(&directory.join("memory.swap.current")),
         events: read_bounded_text(&directory.join("memory.events"))
             .map(|value| parse_cgroup_events(&value))
@@ -515,12 +531,18 @@ fn collect_cgroup_v2_dir(directory: &Path) -> LinuxCgroupSnapshot {
 
 #[cfg(any(target_os = "linux", test))]
 fn collect_cgroup_v1_dir(directory: &Path) -> LinuxCgroupSnapshot {
+    let memory_limit_bytes = read_limit_file(&directory.join("memory.limit_in_bytes"));
     let memory_current_bytes = read_u64_file(&directory.join("memory.usage_in_bytes"));
+    let memsw_limit = read_limit_file(&directory.join("memory.memsw.limit_in_bytes"));
     let memsw_current = read_u64_file(&directory.join("memory.memsw.usage_in_bytes"));
     LinuxCgroupSnapshot {
         version: Some(1),
-        memory_limit_bytes: read_limit_file(&directory.join("memory.limit_in_bytes")),
+        memory_limit_bytes,
         memory_current_bytes,
+        swap_limit_bytes: match (memsw_limit, memory_limit_bytes) {
+            (Some(memsw), Some(memory)) => Some(memsw.saturating_sub(memory)),
+            _ => None,
+        },
         swap_used_bytes: match (memsw_current, memory_current_bytes) {
             (Some(memsw), Some(memory)) => Some(memsw.saturating_sub(memory)),
             _ => None,

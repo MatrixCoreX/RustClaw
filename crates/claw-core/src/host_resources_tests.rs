@@ -8,6 +8,7 @@ fn snapshot(limit_mib: u64, available_mib: u64) -> HostResourceSnapshot {
         effective_memory_limit_bytes: Some(limit_mib * MIB),
         memory_available_bytes: Some(available_mib * MIB),
         memory_current_bytes: Some((limit_mib - available_mib) * MIB),
+        swap_available_bytes: Some(4096 * MIB),
         swap_used_bytes: Some(0),
         cpu_parallelism: 4,
         cgroup_version: Some(2),
@@ -25,6 +26,7 @@ fn linux_meminfo_parser_uses_bytes_and_saturates_swap() {
     );
     assert_eq!(value.physical_memory_bytes, Some(2_048_000 * 1024));
     assert_eq!(value.memory_available_bytes, Some(512_000 * 1024));
+    assert_eq!(value.swap_available_bytes, Some(120 * 1024));
     assert_eq!(value.swap_used_bytes, Some(0));
 }
 
@@ -79,6 +81,7 @@ fn effective_limit_and_available_helpers_are_consistent() {
     let value = snapshot(2048, 512);
     assert_eq!(value.effective_memory_mib(), Some(2048));
     assert_eq!(value.available_memory_mib(), Some(512));
+    assert_eq!(value.available_swap_mib(), Some(4096));
     assert_eq!(value.available_ratio(), Some(0.25));
 }
 

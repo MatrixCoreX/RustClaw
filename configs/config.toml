@@ -367,9 +367,11 @@ tasks_retention_days = 7
 # 建议修改/Recommended change: 通常保持空配置，让运行时根据宿主/cgroup 自动判断。
 # 风险/Risk: 过低的安全储备或过宽阈值可能增加 OOM 风险；非法配置会阻止启动。
 [runtime_resources]
-# 可选字段包括 safety_reserve_mib、critical_available_floor_mib、
+# 可选字段包括 safety_reserve_mib、serial_swap_headroom_mib、critical_available_floor_mib、
 # critical/constrained/compact_available_ratio、对应的 psi_avg10，以及
 # escalation_samples/recovery_samples。默认值只由 Rust 运行时维护。
+# serial_swap_headroom_mib 默认关闭；只应在有足够本地 swap、且重任务已串行化的
+# 低内存设备上显式设置。它不会改变其他设备的默认物理内存准入规则。
 
 # 用途/Purpose: 记忆模块独立配置入口.
 # 建议修改/Recommended change: 一般不改，除非你迁移了路径.

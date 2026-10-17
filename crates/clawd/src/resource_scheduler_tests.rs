@@ -8,6 +8,7 @@ fn resource_snapshot(total_mib: u64, available_mib: u64) -> HostResourceSnapshot
         effective_memory_limit_bytes: Some(total_mib * 1024 * 1024),
         memory_available_bytes: Some(available_mib * 1024 * 1024),
         memory_current_bytes: Some((total_mib - available_mib) * 1024 * 1024),
+        swap_available_bytes: Some(4096 * 1024 * 1024),
         swap_used_bytes: Some(0),
         cpu_parallelism: 4,
         cgroup_version: Some(2),
@@ -681,6 +682,56 @@ fn broker_uses_validated_safety_reserve_override() {
         .try_acquire_for_snapshot(None, 2, resource_snapshot(8192, 2048), false)
         .expect("default lease");
     assert_eq!(lease.grant().projection["host_safety_reserve_mb"], 512);
+}
+
+#[test]
+fn serial_swap_headroom_is_opt_in_and_never_allows_parallel_heavy_leases() {
+    let request = SkillResourceRequest {
+        class: SkillResourceClass::Memory,
+        memory_mb: 700,
+        ..SkillResourceRequest::default()
+    };
+    let snapshot = resource_snapshot(1024, 400);
+    let default_broker = ResourceBroker::default();
+    let denied = default_broker
+        .try_acquire_for_snapshot(Some(&request), 2, snapshot.clone(), false)
+        .expect_err("physical-memory admission remains the default");
+    assert_eq!(denied.wait_reason, Some("memory_unavailable"));
+
+    let broker = ResourceBroker::default().with_serial_swap_headroom_mib(Some(512));
+    let lease = broker
+        .try_acquire_for_snapshot(Some(&request), 2, snapshot.clone(), false)
+        .expect("explicit serial swap headroom admits one heavy task");
+    assert_eq!(lease.grant().projection["granted_swap_headroom_mb"], 428);
+    assert_eq!(
+        lease.grant().projection["configured_serial_swap_headroom_mb"],
+        512
+    );
+
+    let denied = broker
+        .try_acquire_for_snapshot(Some(&request), 2, snapshot, false)
+        .expect_err("a second heavy task must not consume serial swap headroom");
+    assert!(matches!(
+        denied.wait_reason,
+        Some("resource_pressure" | "memory_unavailable")
+    ));
+}
+
+#[test]
+fn serial_swap_headroom_is_bounded_by_detected_free_swap() {
+    let mut snapshot = resource_snapshot(1024, 400);
+    snapshot.swap_available_bytes = Some(128 * 1024 * 1024);
+    let request = SkillResourceRequest {
+        class: SkillResourceClass::Memory,
+        memory_mb: 700,
+        ..SkillResourceRequest::default()
+    };
+    let broker = ResourceBroker::default().with_serial_swap_headroom_mib(Some(512));
+    let denied = broker
+        .try_acquire_for_snapshot(Some(&request), 2, snapshot, false)
+        .expect_err("configured headroom cannot exceed detected free swap");
+    assert_eq!(denied.wait_reason, Some("memory_unavailable"));
+    assert_eq!(denied.projection["granted_swap_headroom_mb"], 128);
 }
 
 #[tokio::test]

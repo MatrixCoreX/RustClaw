@@ -9,10 +9,10 @@ use super::{
     list_all_task_history_internal, list_due_paused_checkpoint_tasks_internal,
     list_ready_paused_checkpoint_resume_executors_internal, list_task_history_for_user_internal,
     record_paused_checkpoint_resume_executor_state_internal,
-    record_paused_checkpoint_resume_work_item_internal, touch_running_task,
-    update_task_checkpointed_result, update_task_failure, update_task_failure_with_result,
-    update_task_success, TaskViewerAccessError, WorkerTaskWriteRejected,
-    WORKER_LEASE_LOST_STATUS_CODE,
+    record_paused_checkpoint_resume_work_item_internal, requeue_task_after_resource_wait,
+    touch_running_task, update_task_checkpointed_result, update_task_failure,
+    update_task_failure_with_result, update_task_success, TaskViewerAccessError,
+    WorkerTaskWriteRejected, WORKER_LEASE_LOST_STATUS_CODE,
 };
 use crate::child_task_contract::{
     ChildTaskBudget, ChildTaskMergePolicy, ChildTaskPermissionProfile, ChildTaskSpec,
@@ -459,6 +459,75 @@ fn claim_next_task_records_worker_lease_fields() {
     assert_eq!(claim_attempt, 1);
     assert!(claimed_at > 0);
     assert!(lease_expires_at > claimed_at);
+}
+
+#[test]
+fn resource_wait_requeue_is_not_claimed_before_due_and_remains_cancelable() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4().to_string();
+    insert_task(&state, &task_id, "queued", None, crate::now_ts_u64() as i64);
+    let claimed = claim_next_task(&state).expect("claim task").expect("task");
+    let next_check_after = crate::now_ts_u64() as i64 + 300;
+    let waiting = json!({
+        "status_code": "resource_admission_wait",
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "waiting",
+            "resume_reason": "resource_admission_wait",
+            "next_check_after": next_check_after,
+            "can_cancel": true,
+        }
+    });
+    requeue_task_after_resource_wait(
+        &state,
+        task_id.as_str(),
+        claimed.claim_attempt,
+        &waiting.to_string(),
+    )
+    .expect("requeue resource wait");
+
+    insert_task(
+        &state,
+        "task-light-control",
+        "queued",
+        None,
+        crate::now_ts_u64() as i64,
+    );
+    let next = claim_next_task(&state)
+        .expect("claim while resource wait is delayed")
+        .expect("unrelated task remains runnable");
+    assert_eq!(next.task_id, "task-light-control");
+    assert_eq!(stored_status(&state, &task_id), "queued");
+    assert_eq!(
+        cancel_task_by_id(&state, &task_id).expect("cancel waiting task"),
+        1
+    );
+    assert_eq!(stored_status(&state, &task_id), "canceled");
+}
+
+#[test]
+fn due_resource_wait_requeue_can_be_claimed_again() {
+    let state = state_with_tasks_table();
+    let task_id = Uuid::new_v4().to_string();
+    insert_task(
+        &state,
+        &task_id,
+        "queued",
+        Some(&json!({
+            "task_lifecycle": {
+                "state": "waiting",
+                "resume_reason": "resource_admission_wait",
+                "next_check_after": 1,
+            }
+        })),
+        1,
+    );
+
+    let claimed = claim_next_task(&state)
+        .expect("claim due resource wait")
+        .expect("due task");
+    assert_eq!(claimed.task_id, task_id);
+    assert_eq!(claimed.claim_attempt, 1);
 }
 
 #[test]

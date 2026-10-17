@@ -639,6 +639,7 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         config.runtime_resources.pressure_policy(),
         config.runtime_resources.safety_reserve_mib,
     )
+    .with_serial_swap_headroom_mib(config.runtime_resources.serial_swap_headroom_mib)
     .with_estimate_store_path(resource_estimate_store);
     info!(
         configured_workers = config.worker.concurrency,

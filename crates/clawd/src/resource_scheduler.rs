@@ -139,6 +139,7 @@ struct ResourceBrokerState {
 pub(crate) struct ResourceBroker {
     state: Arc<Mutex<ResourceBrokerState>>,
     safety_reserve_mib: Option<u64>,
+    serial_swap_headroom_mib: Option<u64>,
     estimate_store_path: Option<Arc<PathBuf>>,
     estimate_store_write: Arc<Mutex<()>>,
 }
@@ -330,9 +331,15 @@ impl ResourceBroker {
                 runtime_process_memory: None,
             })),
             safety_reserve_mib,
+            serial_swap_headroom_mib: None,
             estimate_store_path: None,
             estimate_store_write: Arc::new(Mutex::new(())),
         }
+    }
+
+    pub(crate) fn with_serial_swap_headroom_mib(mut self, value: Option<u64>) -> Self {
+        self.serial_swap_headroom_mib = value;
+        self
     }
 
     pub(crate) fn with_estimate_store_path(mut self, path: PathBuf) -> Self {
@@ -449,15 +456,11 @@ impl ResourceBroker {
         let safety_reserve_mib = self
             .safety_reserve_mib
             .unwrap_or_else(|| host_safety_reserve_mib(snapshot.effective_memory_mib()));
-        let reservable_memory_mib = snapshot
+        let physical_reservable_memory_mib = snapshot
             .available_memory_mib()
             .unwrap_or(1024)
             .saturating_sub(safety_reserve_mib)
             .saturating_sub(reserved_before);
-        let mut budget_snapshot = snapshot.clone();
-        budget_snapshot.memory_available_bytes = Some(reservable_memory_mib * 1024 * 1024);
-        budget_snapshot.cpu_parallelism =
-            snapshot.cpu_parallelism.saturating_sub(reserved_cpu_before);
         let mut request = request.cloned().unwrap_or_default();
         let declared_memory_mib = request.memory_mb;
         let observed_memory_mib =
@@ -465,6 +468,26 @@ impl ResourceBroker {
         request.memory_mb = request
             .memory_mb
             .max(observed_memory_mib.unwrap_or_default());
+        let heavy = resource_request_is_heavy(&request);
+        let configured_swap_headroom_mib = self.serial_swap_headroom_mib.unwrap_or_default();
+        let available_swap_headroom_mib = snapshot
+            .available_swap_mib()
+            .unwrap_or_default()
+            .min(configured_swap_headroom_mib);
+        let required_swap_headroom_mib = request
+            .memory_mb
+            .saturating_sub(physical_reservable_memory_mib);
+        let granted_swap_headroom_mib = if heavy && active_heavy_leases == 0 {
+            required_swap_headroom_mib.min(available_swap_headroom_mib)
+        } else {
+            0
+        };
+        let admission_memory_mib =
+            physical_reservable_memory_mib.saturating_add(granted_swap_headroom_mib);
+        let mut budget_snapshot = snapshot.clone();
+        budget_snapshot.memory_available_bytes = Some(admission_memory_mib * 1024 * 1024);
+        budget_snapshot.cpu_parallelism =
+            snapshot.cpu_parallelism.saturating_sub(reserved_cpu_before);
         let network_capacity = network_slot_capacity(&snapshot);
         let provider_capacity = provider_slot_capacity(&snapshot);
         let browser_capacity = browser_slot_capacity(&snapshot);
@@ -480,7 +503,6 @@ impl ResourceBroker {
             &budget_snapshot,
             gpu_available,
         );
-        let heavy = resource_request_is_heavy(&request);
         let pressure_blocks_request = heavy
             && (pressure == ResourcePressureState::Critical
                 || (pressure == ResourcePressureState::Constrained && active_heavy_leases > 0)
@@ -509,6 +531,22 @@ impl ResourceBroker {
             object.insert(
                 "host_safety_reserve_mb".to_string(),
                 json!(safety_reserve_mib),
+            );
+            object.insert(
+                "host_swap_available_mb".to_string(),
+                json!(snapshot.available_swap_mib()),
+            );
+            object.insert(
+                "physical_reservable_memory_mb".to_string(),
+                json!(physical_reservable_memory_mib),
+            );
+            object.insert(
+                "configured_serial_swap_headroom_mb".to_string(),
+                json!(self.serial_swap_headroom_mib),
+            );
+            object.insert(
+                "granted_swap_headroom_mb".to_string(),
+                json!(granted_swap_headroom_mib),
             );
             object.insert(
                 "reserved_memory_mb_before".to_string(),

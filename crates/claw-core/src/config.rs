@@ -1206,6 +1206,10 @@ pub struct RuntimeResourcesConfig {
     /// Optional fixed host reserve. When absent, the runtime derives a reserve
     /// from the effective host or cgroup memory limit.
     pub safety_reserve_mib: Option<u64>,
+    /// Optional swap allowance for one heavy task at a time. This is disabled
+    /// by default and is intended for explicitly configured low-memory hosts
+    /// that have adequate local swap.
+    pub serial_swap_headroom_mib: Option<u64>,
     pub critical_available_floor_mib: Option<u64>,
     pub critical_available_ratio: Option<f64>,
     pub constrained_available_ratio: Option<f64>,
@@ -1257,6 +1261,9 @@ impl RuntimeResourcesConfig {
             || self
                 .critical_available_floor_mib
                 .is_some_and(|value| !(32..=65_536).contains(&value))
+            || self
+                .serial_swap_headroom_mib
+                .is_some_and(|value| !(64..=8_192).contains(&value))
         {
             return Err("runtime_resource_memory_threshold_invalid".to_string());
         }

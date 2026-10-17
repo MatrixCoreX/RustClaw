@@ -13,6 +13,7 @@ use super::run_skill_permission::DirectRunSkillVerification;
 
 const DIRECT_RUN_SKILL_ASYNC_SOURCE: &str = "direct_run_skill_async_start_adapter";
 const DIRECT_RUN_SKILL_ASYNC_ERROR_PREFIX: &str = "direct_run_skill_async_job_invalid";
+const DIRECT_RUN_SKILL_RESOURCE_WAIT_SOURCE: &str = "direct_run_skill_resource_admission";
 
 async fn finalize_run_skill_canceled(task: &crate::ClaimedTask, skill_name: &str) -> Result<()> {
     info!(
@@ -311,13 +312,28 @@ fn run_skill_failure_machine_payload(err_text: &str) -> Value {
     let failure_attribution = crate::task_journal::failure_attribution_for_error_text(err_text)
         .map(|value| value.as_str())
         .unwrap_or("tool_gap");
+    let retryable = structured
+        .as_ref()
+        .and_then(|error| error.extra.as_ref())
+        .and_then(|extra| extra.get("retryable"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     json!({
         "error_code": error_code,
         "status_code": error_code,
         "message_key": message_key,
         "failure_attribution": failure_attribution,
-        "retryable": false,
+        "retryable": retryable,
     })
+}
+
+fn direct_run_skill_resource_retry_after_seconds(claim_attempt: i64) -> i64 {
+    match claim_attempt.max(1) {
+        1 => 15,
+        2 => 30,
+        3 => 60,
+        _ => 120,
+    }
 }
 
 fn record_run_skill_task_observation(
@@ -849,6 +865,78 @@ async fn finalize_run_skill_failure(
         None,
         external_skill_admission.as_ref(),
     );
+    if crate::skills::is_retryable_resource_admission_error(err_text) {
+        let now_ts = crate::now_ts_u64() as i64;
+        let retry_after_seconds = direct_run_skill_resource_retry_after_seconds(task.claim_attempt);
+        let next_check_after = now_ts.saturating_add(retry_after_seconds);
+        let structured = crate::skills::parse_structured_skill_error(err_text);
+        let wait_reason = structured
+            .as_ref()
+            .and_then(|error| error.extra.as_ref())
+            .and_then(|extra| extra.get("wait_reason"))
+            .cloned()
+            .unwrap_or_else(|| json!("resource_pressure"));
+        let resource_grant = structured
+            .as_ref()
+            .and_then(|error| error.extra.as_ref())
+            .and_then(|extra| extra.get("resource_grant"))
+            .cloned()
+            .unwrap_or(Value::Null);
+        let lifecycle = json!({
+            "schema_version": 1,
+            "state": TaskLifecycleState::Waiting,
+            "source": DIRECT_RUN_SKILL_RESOURCE_WAIT_SOURCE,
+            "resume_reason": "resource_admission_wait",
+            "waiting_reason_code": wait_reason,
+            "message_key": "clawd.task.resource_waiting",
+            "next_check_after": next_check_after,
+            "retry_after_seconds": retry_after_seconds,
+            "resource_wait_attempts": task.claim_attempt.max(1),
+            "resource_grant": resource_grant,
+            "can_poll": true,
+            "can_cancel": true,
+            "can_pause": true,
+            "last_heartbeat_ts": now_ts,
+        });
+        journal.record_task_lifecycle(lifecycle.clone());
+        journal.record_final_stop_signal("resource_admission_wait");
+        let result = journal.attach_to_result(json!({
+            "text": "",
+            "status_code": "resource_admission_wait",
+            "message_key": "clawd.task.resource_waiting",
+            "retryable": true,
+            "task_lifecycle": lifecycle,
+        }));
+        repo::requeue_task_after_resource_wait(
+            state,
+            &task.task_id,
+            task.claim_attempt,
+            &result.to_string(),
+        )?;
+        let _ = repo::insert_audit_log(
+            state,
+            Some(task.user_id),
+            "run_skill",
+            Some(
+                &json!({
+                    "task_id": task.task_id,
+                    "chat_id": task.chat_id,
+                    "skill_name": skill_name,
+                    "status": "waiting",
+                    "resume_reason": "resource_admission_wait",
+                    "retry_after_seconds": retry_after_seconds,
+                })
+                .to_string(),
+            ),
+            None,
+        );
+        info!(
+            "task_call_end task_id={} kind=run_skill status=waiting skill={} resume_reason=resource_admission_wait retry_after_seconds={}",
+            task.task_id, skill_name, retry_after_seconds
+        );
+        state.clear_task_llm_call_count(&task.task_id);
+        return Ok(());
+    }
     journal.record_delivery_consistent(crate::task_journal::delivery_payload_consistent(
         err_text,
         &[],

@@ -535,6 +535,7 @@ fn runtime_resource_overrides_keep_one_default_policy_and_validate_ordering() {
 
     let configured = RuntimeResourcesConfig {
         safety_reserve_mib: Some(384),
+        serial_swap_headroom_mib: Some(512),
         constrained_available_ratio: Some(0.22),
         recovery_samples: Some(8),
         ..RuntimeResourcesConfig::default()
@@ -545,6 +546,15 @@ fn runtime_resource_overrides_keep_one_default_policy_and_validate_ordering() {
         0.22
     );
     assert_eq!(configured.pressure_policy().recovery_samples, 8);
+
+    assert_eq!(
+        RuntimeResourcesConfig {
+            serial_swap_headroom_mib: Some(32),
+            ..RuntimeResourcesConfig::default()
+        }
+        .validate(),
+        Err("runtime_resource_memory_threshold_invalid".to_string())
+    );
 
     assert_eq!(
         RuntimeResourcesConfig {

@@ -415,6 +415,63 @@ async fn direct_run_skill_async_start_publishes_waiting_checkpoint() {
 }
 
 #[tokio::test]
+async fn direct_run_skill_resource_pressure_requeues_without_terminal_failure() {
+    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = claimed_run_skill_task("task-direct-resource-wait");
+    insert_running_task(&state, &task);
+    let payload: Value = serde_json::from_str(&task.payload_json).expect("payload");
+    let verification = super::super::run_skill_permission::verify_direct_run_skill(
+        &state,
+        &task,
+        "run_cmd",
+        payload.get("args").cloned().unwrap_or_else(|| json!({})),
+    );
+    let error = crate::skills::structured_skill_error_from_parts(
+        "run_cmd",
+        "resource_admission_unavailable",
+        "resource_admission_unavailable",
+        Some(std::env::consts::OS),
+        Some(json!({
+            "message_key": "clawd.execution.resource_admission_unavailable",
+            "retryable": true,
+            "failure_phase": "pre_dispatch",
+            "side_effect_applied": false,
+            "wait_reason": "resource_pressure",
+            "resource_grant": {"admitted": false},
+        })),
+    );
+
+    super::finalize_run_skill_result(
+        &state,
+        &task,
+        &payload,
+        "run_cmd",
+        &verification,
+        Err(error),
+    )
+    .await
+    .expect("requeue resource wait");
+
+    let (status, result) = task_status_and_result(&state, &task.task_id);
+    assert_eq!(status, "queued");
+    assert_eq!(result["status_code"], "resource_admission_wait");
+    assert_eq!(result["task_lifecycle"]["state"], "waiting");
+    assert_eq!(
+        result["task_lifecycle"]["source"],
+        "direct_run_skill_resource_admission"
+    );
+    assert_eq!(
+        result["task_lifecycle"]["waiting_reason_code"],
+        "resource_pressure"
+    );
+    assert_eq!(result["task_lifecycle"]["retry_after_seconds"], 15);
+    assert_eq!(result["task_lifecycle"]["can_cancel"], true);
+    assert!(crate::repo::claim_next_task(&state)
+        .expect("poll before due")
+        .is_none());
+}
+
+#[tokio::test]
 async fn direct_run_skill_confirmation_persists_and_consumes_exact_grant() {
     let state = state_with_runtime_registry();
     let task_id = "task-direct-skill-confirmation";
@@ -586,6 +643,37 @@ fn direct_run_skill_failure_records_error_observation() {
     assert_eq!(
         observation.get("retryable").and_then(Value::as_bool),
         Some(false)
+    );
+}
+
+#[test]
+fn resource_admission_failure_remains_retryable_and_uses_bounded_backoff() {
+    let error = crate::skills::structured_skill_error_from_parts(
+        "media_discovery",
+        "resource_admission_unavailable",
+        "resource_admission_unavailable",
+        Some(std::env::consts::OS),
+        Some(json!({
+            "message_key": "clawd.execution.resource_admission_unavailable",
+            "retryable": true,
+            "failure_phase": "pre_dispatch",
+            "side_effect_applied": false,
+            "wait_reason": "resource_pressure",
+        })),
+    );
+    let machine_payload = super::run_skill_failure_machine_payload(&error);
+    assert_eq!(machine_payload["retryable"], true);
+    assert_eq!(
+        machine_payload["error_code"],
+        "resource_admission_unavailable"
+    );
+    assert_eq!(super::direct_run_skill_resource_retry_after_seconds(1), 15);
+    assert_eq!(super::direct_run_skill_resource_retry_after_seconds(2), 30);
+    assert_eq!(super::direct_run_skill_resource_retry_after_seconds(3), 60);
+    assert_eq!(super::direct_run_skill_resource_retry_after_seconds(4), 120);
+    assert_eq!(
+        super::direct_run_skill_resource_retry_after_seconds(i64::MAX),
+        120
     );
 }
 
