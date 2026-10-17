@@ -1045,6 +1045,12 @@ for manifest in sorted((root / "optional_skills").glob("*/skill.toml")):
         skill = package["name"]
         version = package["version"]
         adapter = build["adapter"]
+        # Only the canonical optional_skills/<package.name> directory is a
+        # release-owned package source. Local pre-upgrade copies may keep a
+        # valid manifest for rollback/debugging, but must never participate in
+        # admission convergence or downgrade the active immutable package.
+        if manifest.parent.name != skill:
+            continue
         current_path = package_root / skill / "current.json"
         if not current_path.is_file():
             continue

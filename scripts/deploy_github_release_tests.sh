@@ -216,6 +216,7 @@ mkdir -p \
   "$RUNTIME/data/skill-packages/store_fixture" \
   "$RUNTIME/data/skill-packages/local_optional" \
   "$RUNTIME/optional_skills/store_fixture" \
+  "$RUNTIME/optional_skills/store_fixture.pre-upgrade" \
   "$RUNTIME/prebuilt/toolchains/python/bin" \
   "$RUNTIME/prebuilt/toolchains/node/bin" \
   "$RUNTIME/services/wa-web-bridge" \
@@ -230,6 +231,14 @@ printf 'old readme\n' > "$RUNTIME/README.md"
 printf 'keep local optional\n' > "$RUNTIME/data/skill-packages/local_optional/current.json"
 printf '%s\n' '{"version":"1.0.0"}' > "$RUNTIME/data/skill-packages/store_fixture/current.json"
 printf 'stale runner source\n' > "$RUNTIME/optional_skills/store_fixture/stale.txt"
+cat > "$RUNTIME/optional_skills/store_fixture.pre-upgrade/skill.toml" <<'TOML'
+[package]
+name = "store_fixture"
+version = "8.0.0"
+
+[build]
+adapter = "cargo"
+TOML
 printf 'old bridge\n' > "$RUNTIME/services/wa-web-bridge/index.js"
 printf 'keep source test\n' > "$RUNTIME/services/wa-web-bridge/test.js"
 printf 'keep channel session\n' > "$RUNTIME/services/wa-web-bridge/session.json"
@@ -270,6 +279,7 @@ OUTPUT="$(
 )"
 grep -Fq 'release_checksum=verified' <<< "$OUTPUT"
 grep -Fq 'release_update_status=deployed' <<< "$OUTPUT"
+! grep -Fq 'release=8.0.0' <<< "$OUTPUT"
 grep -Fxq 'ubuntu-x86_64-newest' "$RUNTIME/.release-tag"
 
 SPLIT_DIR="$TMP_ROOT/split-release"
