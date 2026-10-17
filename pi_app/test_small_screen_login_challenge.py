@@ -9,9 +9,14 @@ from small_screen_login_challenge import (
     publish_login_companion_heartbeat,
     request_login_challenge_browser,
 )
+from small_screen_strings import STRINGS
 
 
 class SmallScreenLoginChallengeTest(unittest.TestCase):
+    def test_kuaishou_login_challenge_has_localized_platform_name(self):
+        self.assertEqual(STRINGS["CN"]["login_platform_kuaishou"], "快手")
+        self.assertEqual(STRINGS["EN"]["login_platform_kuaishou"], "Kuaishou")
+
     def test_publishes_companion_heartbeat_in_volatile_runtime_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             model_path = Path(directory) / "model"
