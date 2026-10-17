@@ -26,7 +26,11 @@ const AIPP_TASK_ACTIVITY_MATCH_SQL: &str = r#"
                     :needle IS NULL
                     OR INSTR(
                         LOWER(CASE WHEN json_valid(tasks.payload_json)
-                            THEN COALESCE(json_extract(tasks.payload_json, '$.text'), '')
+                            THEN COALESCE(
+                                json_extract(tasks.payload_json, '$.text'),
+                                json_extract(tasks.payload_json, '$.args.share'),
+                                ''
+                            )
                             ELSE '' END),
                         LOWER(:needle)
                     ) > 0
@@ -480,6 +484,27 @@ fn task_activity_artifacts(task_id: &str, result: &Value) -> Vec<Value> {
         .collect()
 }
 
+fn task_activity_input_text(payload: &Value) -> String {
+    let value = payload.get("text").filter(|value| {
+        value
+            .as_str()
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty())
+    });
+    let value = value.or_else(|| payload.pointer("/args/share"));
+    bounded_aipp_visible_text(value, AIPP_TASK_ACTIVITY_INPUT_MAX_CHARS)
+}
+
+fn bounded_aipp_visible_text(value: Option<&Value>, max_chars: usize) -> String {
+    let Some(raw) = value.and_then(Value::as_str) else {
+        return String::new();
+    };
+    crate::visible_text::sanitize_user_visible_text(raw)
+        .chars()
+        .take(max_chars)
+        .collect()
+}
+
 fn task_activity_item(
     sequence: u64,
     task_id: &str,
@@ -497,7 +522,24 @@ fn task_activity_item(
     let result = result_json
         .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
         .unwrap_or_else(|| json!({}));
-    let input_text = bounded_aipp_text(payload.get("text"), AIPP_TASK_ACTIVITY_INPUT_MAX_CHARS);
+    let input_text = task_activity_input_text(&payload);
+    let mut result_text = bounded_aipp_visible_text(
+        result.get("text"),
+        AIPP_TASK_ACTIVITY_RESULT_MAX_CHARS,
+    );
+    let projected_error = error_text.and_then(|value| {
+        let sanitized = crate::visible_text::sanitize_user_visible_text(value);
+        let sanitized = sanitized.trim();
+        (!sanitized.is_empty()).then(|| {
+            sanitized
+                .chars()
+                .take(AIPP_TASK_ACTIVITY_ERROR_MAX_CHARS)
+                .collect::<String>()
+        })
+    });
+    if projected_error.as_deref() == Some(result_text.as_str()) {
+        result_text.clear();
+    }
     let mut actions = action_refs
         .unwrap_or_default()
         .split(',')
@@ -514,12 +556,8 @@ fn task_activity_item(
         "status": status,
         "actions": actions,
         "input_text": input_text,
-        "result_text": bounded_aipp_text(
-            result.get("text"),
-            AIPP_TASK_ACTIVITY_RESULT_MAX_CHARS,
-        ),
-        "error_text": error_text
-            .map(|value| value.chars().take(AIPP_TASK_ACTIVITY_ERROR_MAX_CHARS).collect::<String>()),
+        "result_text": result_text,
+        "error_text": projected_error,
         "source_urls": task_activity_urls(&input_text),
         "artifacts": task_activity_artifacts(task_id, &result),
         "created_at": created_at,

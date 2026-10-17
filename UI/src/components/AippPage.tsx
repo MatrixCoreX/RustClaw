@@ -445,6 +445,20 @@ function activityStatusLabel(status: string, t: Translate): string {
   return label ? t(label[0], label[1]) : status;
 }
 
+function activityErrorLabel(item: AippTaskActivityItem, t: Translate): string | null {
+  const error = item.error_text?.trim();
+  if (!error) return null;
+  if (item.status === "canceled" && (error === "user_cancelled" || error === "task_cancelled")) return null;
+  const labels: Record<string, [string, string]> = {
+    resource_admission_unavailable: [
+      "设备当前资源紧张，任务尚未开始，请稍后重试。",
+      "The device is currently short on available resources. Try again shortly.",
+    ],
+  };
+  const label = labels[error];
+  return label ? t(label[0], label[1]) : error;
+}
+
 function ActivityArtifactIcon({ artifact }: { artifact: AippTaskActivityArtifact }) {
   if (artifact.kind === "image") return <ImageIcon className="h-4 w-4" />;
   if (artifact.kind === "video") return <Video className="h-4 w-4" />;
@@ -486,6 +500,7 @@ export function AippTaskActivityCard({
   const video = previewVideos[selectedVideoIndex];
   const hasVisualMedia = Boolean(preview || video);
   const viewerImages = previewImages.map((artifact) => activityViewerImage(artifact));
+  const visibleError = activityErrorLabel(item, t);
   const openImage = (artifact: AippTaskActivityArtifact, initialSource?: string | null) => {
     setViewerImage(activityViewerImage(artifact, initialSource));
   };
@@ -672,7 +687,7 @@ export function AippTaskActivityCard({
               </p>
             </section>
           ) : null}
-          {item.error_text ? <p className="mt-3 break-words text-sm text-red-200">{item.error_text}</p> : null}
+          {visibleError ? <p className="mt-3 break-words text-sm text-red-200">{visibleError}</p> : null}
           {longContent ? (
             <button type="button" className="theme-secondary-btn mt-3 px-3 py-1.5 text-xs" onClick={() => setExpanded((current) => !current)}>
               {expanded ? t("收起", "Collapse") : t("展开全文", "Show all")}

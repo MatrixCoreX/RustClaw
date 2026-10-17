@@ -242,6 +242,82 @@ fn generic_task_activity_projects_wechat_channels_media_and_login_failures() {
 }
 
 #[test]
+fn task_activity_projects_direct_skill_share_and_sanitizes_structured_failures() {
+    let structured_error = r#"__RC_SKILL_ERROR__:{"skill":"media_download","error_code":"resource_admission_unavailable","error_text":"resource_admission_unavailable","extra":{"schema_version":1,"source_skill":"media_download","status":"error","error_code":"resource_admission_unavailable","message_key":"clawd.execution.resource_admission_unavailable","retryable":true}}"#;
+    let item = task_activity_item(
+        3,
+        "direct-media-failure",
+        "ui",
+        "failed",
+        r#"{"skill_name":"media_download","args":{"action":"download","share":"下载 https://v.douyin.com/example/"},"user_key":"must-not-leak"}"#,
+        Some(&json!({ "text": structured_error }).to_string()),
+        Some(structured_error),
+        "104",
+        "105",
+        1_002,
+        Some("media_download.download"),
+    );
+
+    assert_eq!(item["input_text"], "下载 https://v.douyin.com/example/");
+    assert_eq!(item["source_urls"][0], "https://v.douyin.com/example/");
+    assert_eq!(item["result_text"], "");
+    assert_eq!(item["error_text"], "resource_admission_unavailable");
+    let encoded = serde_json::to_string(&item).expect("item JSON");
+    assert!(!encoded.contains("__RC_SKILL_ERROR__"));
+    assert!(!encoded.contains("must-not-leak"));
+}
+
+#[test]
+fn task_activity_search_matches_direct_skill_share() {
+    let db = task_activity_db();
+    let task_id = "direct-share-search";
+    let payload = json!({
+        "skill_name": "media_download",
+        "args": {
+            "action": "download",
+            "share": "下载 https://v.douyin.com/UniqueShare/",
+        },
+    });
+    db.execute(
+        "INSERT INTO tasks(task_id, channel, status, payload_json, result_json, error_text, created_at, updated_at)
+         VALUES (?1, 'ui', 'succeeded', ?2, '{\"text\":\"done\"}', NULL, '106', '107')",
+        rusqlite::params![task_id, payload.to_string()],
+    )
+    .expect("direct task row");
+    let event = json!({
+        "event_kind": "tool_finished",
+        "payload": {
+            "skill": "media_download",
+            "requested_action_ref": "media_download.download",
+        },
+    });
+    db.execute(
+        "INSERT INTO task_event_stream(task_id, event_json, created_at_ms) VALUES (?1, ?2, 1003)",
+        rusqlite::params![task_id, event.to_string()],
+    )
+    .expect("direct task event");
+
+    let page = read_aipp_task_activity_page(
+        &db,
+        "media_download",
+        "all",
+        0,
+        &[],
+        &AippMediaQuery {
+            query: Some("uniqueshare".to_string()),
+            ..AippMediaQuery::default()
+        },
+    )
+    .expect("direct share search page");
+    assert_eq!(page["page_item_count"], 1);
+    assert_eq!(page["items"][0]["task_id"], task_id);
+    assert_eq!(
+        page["items"][0]["source_urls"][0],
+        "https://v.douyin.com/UniqueShare/"
+    );
+}
+
+#[test]
 fn task_activity_page_filters_channels_search_and_uses_stable_cursors() {
     let db = task_activity_db();
     for (task_id, channel) in [

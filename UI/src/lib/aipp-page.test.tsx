@@ -422,6 +422,41 @@ test("renders cross-channel media task input, processed content, links, and safe
   assert.doesNotMatch(markup, /删除这条记录/);
 });
 
+test("renders resource pressure as readable copy and hides redundant cancellation errors", () => {
+  const base: AippTaskActivityItem = {
+    schema_version: 1,
+    sequence: 10,
+    task_id: "12345678-failed-task",
+    channel: "ui",
+    status: "failed",
+    actions: ["media_download.download"],
+    input_text: "https://v.douyin.com/example/",
+    result_text: "",
+    error_text: "resource_admission_unavailable",
+    source_urls: ["https://v.douyin.com/example/"],
+    artifacts: [],
+    created_at: "1788846460",
+    updated_at: "1788846461",
+    event_at_ms: 1788846461000,
+  };
+  const failedMarkup = renderToStaticMarkup(
+    <AippTaskActivityCard item={base} apiFetch={async () => new Response()} t={t} lang="zh" />,
+  );
+  assert.match(failedMarkup, /设备当前资源紧张，任务尚未开始，请稍后重试。/);
+  assert.doesNotMatch(failedMarkup, /resource_admission_unavailable|__RC_SKILL_ERROR__/);
+
+  const canceledMarkup = renderToStaticMarkup(
+    <AippTaskActivityCard
+      item={{ ...base, status: "canceled", error_text: "user_cancelled" }}
+      apiFetch={async () => new Response()}
+      t={t}
+      lang="zh"
+    />,
+  );
+  assert.match(canceledMarkup, /已取消/);
+  assert.doesNotMatch(canceledMarkup, /user_cancelled/);
+});
+
 test("lets the generic task activity renderer select and delete records without skill-specific branches", () => {
   const item: AippTaskActivityItem = {
     schema_version: 1,
