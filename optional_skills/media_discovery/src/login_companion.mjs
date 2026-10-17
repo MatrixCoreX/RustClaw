@@ -12,6 +12,17 @@ const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
 const PLATFORM_RE = /^[a-z][a-z0-9_]{0,47}$/u;
 const HANDOFF_RE = /^[a-f0-9-]{16,64}$/u;
 const FRAMEBUFFER_SIZE_FILE = "/sys/class/graphics/fb0/virtual_size";
+const COMPACT_VERTICAL_RESERVE = 56;
+const COMPACT_EDGE_PADDING = 16;
+const COMPACT_MINIMUM_SCALE = 0.6;
+const CHALLENGE_SELECTORS = [
+  'iframe[src*="/verifycenter/captcha/"]:visible',
+  '[class*="captcha" i]:visible',
+  '[id*="captcha" i]:visible',
+  '[class*="qrcode" i]:visible',
+  '[class*="qr-code" i]:visible',
+  '[id*="qrcode" i]:visible',
+];
 
 function runtimeDirectory(environment = process.env, explicitDirectory) {
   if (explicitDirectory) return explicitDirectory;
@@ -109,15 +120,7 @@ function validPng(image) {
 }
 
 async function elementScreenshot(page) {
-  const selectors = [
-    'iframe[src*="/verifycenter/captcha/"]:visible',
-    '[class*="captcha" i]:visible',
-    '[id*="captcha" i]:visible',
-    '[class*="qrcode" i]:visible',
-    '[class*="qr-code" i]:visible',
-    '[id*="qrcode" i]:visible',
-  ];
-  for (const selector of selectors) {
+  for (const selector of CHALLENGE_SELECTORS) {
     try {
       const locator = page.locator(selector).first();
       if (await locator.count() === 0) continue;
@@ -138,6 +141,56 @@ async function elementScreenshot(page) {
   return null;
 }
 
+export function compactVerificationScale(display, challengeBounds) {
+  if (!display || !challengeBounds) return 1;
+  const availableWidth = Math.max(1, display.width - COMPACT_EDGE_PADDING);
+  const availableHeight = Math.max(
+    1,
+    display.height - COMPACT_EDGE_PADDING - COMPACT_VERTICAL_RESERVE,
+  );
+  const scale = Math.min(
+    1,
+    availableWidth / challengeBounds.width,
+    availableHeight / challengeBounds.height,
+  );
+  return Math.max(COMPACT_MINIMUM_SCALE, Math.round(scale * 100) / 100);
+}
+
+async function fitCompactVerification(page, compactDisplay) {
+  if (!compactDisplay || typeof page?.evaluate !== "function") return null;
+  let bounds = null;
+  for (const selector of CHALLENGE_SELECTORS) {
+    try {
+      const locator = page.locator(selector).first();
+      if (await locator.count() === 0) continue;
+      const candidate = await locator.boundingBox();
+      if (!candidate || candidate.width < 72 || candidate.height < 72) continue;
+      bounds = candidate;
+      break;
+    } catch {
+      // The challenge can be replaced while its current bounds are measured.
+    }
+  }
+  const scale = compactVerificationScale(compactDisplay, bounds);
+  try {
+    return await page.evaluate(value => {
+      const root = document.documentElement;
+      const previous = root.style.zoom;
+      root.style.zoom = value < 1 ? String(value) : "";
+      return previous;
+    }, scale);
+  } catch {
+    return null;
+  }
+}
+
+async function restorePageZoom(page, previousZoom) {
+  if (previousZoom === null || typeof page?.evaluate !== "function") return;
+  await page.evaluate(value => {
+    document.documentElement.style.zoom = value;
+  }, previousZoom).catch(() => {});
+}
+
 async function browserWindowSession(page) {
   let session;
   try {
@@ -155,6 +208,7 @@ export async function showBrowserWindow(page, { compactDisplay = null } = {}) {
   if (compactDisplay && typeof page?.setViewportSize === "function") {
     await page.setViewportSize(compactDisplay).catch(() => {});
   }
+  const previousZoom = await fitCompactVerification(page, compactDisplay);
   const { session, windowId } = await browserWindowSession(page);
   try {
     if (Number.isInteger(windowId)) {
@@ -167,6 +221,7 @@ export async function showBrowserWindow(page, { compactDisplay = null } = {}) {
     await session?.detach?.().catch(() => {});
   }
   if (typeof page?.bringToFront === "function") await page.bringToFront().catch(() => {});
+  return previousZoom;
 }
 
 async function minimizeBrowserWindow(page) {
@@ -226,6 +281,7 @@ export async function createLoginCompanionHandoff({
   let lastRefresh = 0;
   let active = true;
   let browserRevealed = false;
+  let previousPageZoom = null;
   const originalViewport = typeof page.viewportSize === "function" ? page.viewportSize() : null;
 
   const clear = async () => {
@@ -233,6 +289,7 @@ export async function createLoginCompanionHandoff({
     active = false;
     if (browserRevealed) {
       await minimizeBrowserWindow(page);
+      await restorePageZoom(page, previousPageZoom);
       if (originalViewport && typeof page?.setViewportSize === "function") {
         await page.setViewportSize(originalViewport).catch(() => {});
       }
@@ -282,7 +339,7 @@ export async function createLoginCompanionHandoff({
     revealIfRequested: async () => {
       if (!active || !await readBrowserAction(actionPath, handoffId, companionOptions)) return false;
       browserRevealed = true;
-      await showBrowserWindow(page, { compactDisplay });
+      previousPageZoom = await showBrowserWindow(page, { compactDisplay });
       return true;
     },
   };

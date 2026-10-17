@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   createLoginCompanionHandoff,
+  compactVerificationScale,
   loginCompanionActive,
   loginCompanionBrowserArgs,
   raspberryPiDisplaySize,
@@ -34,6 +35,7 @@ async function runtimeFixture(t) {
 function browserPage() {
   const commands = [];
   const viewportChanges = [];
+  const zoomChanges = [];
   let broughtToFront = 0;
   const session = {
     send: async (method, params) => {
@@ -55,9 +57,25 @@ function browserPage() {
     bringToFront: async () => { broughtToFront += 1; },
     viewportSize: () => ({ width: 1280, height: 900 }),
     setViewportSize: async viewport => { viewportChanges.push(viewport); },
+    evaluate: async (_function, value) => {
+      zoomChanges.push(value);
+      return typeof value === "number" ? "" : null;
+    },
   };
-  return { page, commands, viewportChanges, broughtToFront: () => broughtToFront };
+  return { page, commands, viewportChanges, zoomChanges, broughtToFront: () => broughtToFront };
 }
+
+test("compact verification scale leaves room for Pi browser notices and touch targets", () => {
+  assert.equal(compactVerificationScale(
+    { width: 480, height: 320 },
+    { width: 380, height: 384 },
+  ), 0.65);
+  assert.equal(compactVerificationScale(
+    { width: 800, height: 480 },
+    { width: 380, height: 384 },
+  ), 1);
+  assert.equal(compactVerificationScale({ width: 480, height: 320 }, null), 1);
+});
 
 test("Raspberry Pi framebuffer size is validated before compact verification use", async t => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "media-discovery-display-"));
@@ -121,6 +139,7 @@ test("challenge screenshot stays private and a matching Pi action reveals Chromi
   assert.equal(await handoff.revealIfRequested(), true);
   assert.equal(browser.broughtToFront(), 1);
   assert.deepEqual(browser.viewportChanges, [{ width: 480, height: 320 }]);
+  assert.deepEqual(browser.zoomChanges, [0.65]);
   assert.deepEqual(browser.commands.map(({ method }) => method), [
     "Browser.getWindowForTarget",
     "Browser.setWindowBounds",
@@ -133,6 +152,7 @@ test("challenge screenshot stays private and a matching Pi action reveals Chromi
     { width: 480, height: 320 },
     { width: 1280, height: 900 },
   ]);
+  assert.deepEqual(browser.zoomChanges, [0.65, ""]);
   assert.deepEqual(browser.commands.slice(2).map(({ method }) => method), [
     "Browser.getWindowForTarget",
     "Browser.setWindowBounds",
