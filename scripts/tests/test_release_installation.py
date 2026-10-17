@@ -1,6 +1,7 @@
 """Release-only installation and native binary admission regressions."""
 
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ import re
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -19,6 +21,50 @@ spec.loader.exec_module(binary)
 
 
 class ReleaseInstallationTests(unittest.TestCase):
+    def test_release_asset_parts_round_trip_and_rejects_tampering(self):
+        tool = ROOT / "scripts/release_asset_parts.py"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            payload = bytes(range(251)) * 17
+            source = root / "fixture.tar.gz"
+            source.write_bytes(payload)
+            split = subprocess.run(
+                [sys.executable, str(tool), "split", str(root), "--max-bytes", "1024"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(split.returncode, 0, split.stdout + split.stderr)
+            self.assertFalse(source.exists())
+            manifest = root / "fixture.tar.gz.parts.json"
+            self.assertTrue(manifest.is_file())
+            assembled = subprocess.run(
+                [
+                    sys.executable,
+                    str(tool),
+                    "assemble",
+                    str(manifest),
+                    "--root",
+                    str(root),
+                    "--output",
+                    str(source),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(assembled.returncode, 0, assembled.stdout + assembled.stderr)
+            self.assertEqual(source.read_bytes(), payload)
+            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), hashlib.sha256(payload).hexdigest())
+
+            source.unlink()
+            first_part = root / "fixture.tar.gz.part000"
+            first_part.write_bytes(first_part.read_bytes() + b"tampered")
+            rejected = subprocess.run(
+                [sys.executable, str(tool), "assemble", str(manifest), "--root", str(root)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+
     def test_native_architectures_and_cross_target_rejection(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "program"
@@ -141,10 +187,16 @@ class ReleaseInstallationTests(unittest.TestCase):
         self.assertIn("APP_RELEASE_NODE_RUNTIME_ROOT", workflow)
         self.assertIn("APP_RELEASE_HOST_TOOLS_ROOT", workflow)
         self.assertIn("bundle_macos_skill_dependencies.py", workflow)
-        self.assertIn("brew install ffmpeg tesseract git whisper-cpp", workflow)
-        self.assertIn('brew --prefix whisper-cpp', workflow)
-        self.assertNotIn("brew install ffmpeg tesseract git whisper.cpp", workflow)
-        self.assertNotIn('brew --prefix whisper.cpp', workflow)
+        self.assertIn("WHISPER_SOURCE_COMMIT: 306c88f4d1286aec1bf96e544632897886af5501", workflow)
+        self.assertIn("brew install cmake ffmpeg tesseract git", workflow)
+        self.assertNotIn("brew install ffmpeg tesseract git whisper-cpp", workflow)
+        self.assertIn("-DBUILD_SHARED_LIBS=OFF", workflow)
+        self.assertIn("-DGGML_BACKEND_DL=OFF", workflow)
+        self.assertIn("-DGGML_BLAS=OFF", workflow)
+        self.assertIn("-DGGML_METAL=OFF", workflow)
+        self.assertIn("-DGGML_OPENMP=OFF", workflow)
+        self.assertIn("--whisper-cli \"${whisper_cli}\"", workflow)
+        self.assertIn("whisper-cli retained a Homebrew runtime dependency", workflow)
         bundler = (ROOT / "scripts/bundle_macos_skill_dependencies.py").read_text()
         self.assertNotIn('"codesign", "--force", "--deep"', bundler)
         self.assertIn('"chromium": run(str(root / "bin/chromium"), "--version")', bundler)
@@ -212,6 +264,8 @@ class ReleaseInstallationTests(unittest.TestCase):
         self.assertIn("actions/download-artifact@", workflow)
         self.assertIn("run-id: ${{ inputs.source_run_id }}", workflow)
         self.assertIn("sha256sum -c", workflow)
+        self.assertIn("release_asset_parts.py split", workflow)
+        self.assertIn("--max-bytes 1900000000", workflow)
         self.assertIn('gh release create "${RELEASE_TAG}"', workflow)
         self.assertIn('gh release upload "${RELEASE_TAG}"', workflow)
 

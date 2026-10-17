@@ -598,7 +598,7 @@ for release in releases:
     if requested_tag and tag != requested_tag:
         continue
     assets = release.get("assets") or []
-    archives = []
+    assets_by_name = {}
     for asset in assets:
         if not isinstance(asset, dict):
             continue
@@ -607,49 +607,72 @@ for release in releases:
             continue
         if not name or any(not (char.isalnum() or char in "._-") for char in name):
             continue
+        assets_by_name[name] = asset
+    direct_archives = {
+        name: asset
+        for name, asset in assets_by_name.items()
         if name.endswith(".tar.gz") and (
             name.startswith(asset_prefix)
             or name == f"{app_id}-{tag}.tar.gz"
-        ):
-            archives.append(asset)
-    if len(archives) != 1:
+        )
+    }
+    part_manifests = {
+        name[:-len(".parts.json")]: asset
+        for name, asset in assets_by_name.items()
+        if name.endswith(".tar.gz.parts.json")
+        and (
+            name.startswith(asset_prefix)
+            or name == f"{app_id}-{tag}.tar.gz.parts.json"
+        )
+    }
+    archive_names = set(direct_archives) | set(part_manifests)
+    if len(archive_names) != 1:
         continue
-    archive = archives[0]
-    archive_name = str(archive.get("name") or "")
+    archive_name = next(iter(archive_names))
+    archive = direct_archives.get(archive_name)
+    parts_manifest = part_manifests.get(archive_name)
+    if archive is not None and parts_manifest is not None:
+        continue
     checksum_name = f"{archive_name}.sha256"
-    checksum = next(
-        (
-            asset
-            for asset in assets
-            if isinstance(asset, dict) and str(asset.get("name") or "") == checksum_name
-        ),
-        None,
-    )
+    checksum = assets_by_name.get(checksum_name)
     if checksum is None:
         continue
     manifest_name = f"{archive_name}.manifest.json"
     signature_name = f"{manifest_name}.sig"
     sbom_name = f"{archive_name}.spdx.json"
-    manifest = next(
-        (asset for asset in assets if isinstance(asset, dict) and str(asset.get("name") or "") == manifest_name),
-        None,
-    )
-    signature = next(
-        (asset for asset in assets if isinstance(asset, dict) and str(asset.get("name") or "") == signature_name),
-        None,
-    )
-    sbom = next(
-        (asset for asset in assets if isinstance(asset, dict) and str(asset.get("name") or "") == sbom_name),
-        None,
-    )
+    manifest = assets_by_name.get(manifest_name)
+    signature = assets_by_name.get(signature_name)
+    sbom = assets_by_name.get(sbom_name)
     if manifest is None or signature is None or sbom is None:
         continue
+    part_assets = []
+    if parts_manifest is not None:
+        index = 0
+        while True:
+            part_name = f"{archive_name}.part{index:03d}"
+            part = assets_by_name.get(part_name)
+            if part is None:
+                break
+            part_assets.append({
+                "name": part_name,
+                "url": str(part.get("url") or part.get("browser_download_url") or ""),
+            })
+            index += 1
+        if len(part_assets) < 2 or any(not part["url"] for part in part_assets):
+            continue
     result = {
         "tag": tag,
         "archive_name": archive_name,
         "archive_url": str(
-            archive.get("url") or archive.get("browser_download_url") or ""
+            (archive or {}).get("url") or (archive or {}).get("browser_download_url") or ""
         ),
+        "archive_parts_manifest_name": f"{archive_name}.parts.json" if parts_manifest else "",
+        "archive_parts_manifest_url": str(
+            (parts_manifest or {}).get("url")
+            or (parts_manifest or {}).get("browser_download_url")
+            or ""
+        ),
+        "archive_parts_json": json.dumps(part_assets, separators=(",", ":")),
         "checksum_name": checksum_name,
         "checksum_url": str(
             checksum.get("url") or checksum.get("browser_download_url") or ""
@@ -661,7 +684,9 @@ for release in releases:
         "sbom_name": sbom_name,
         "sbom_url": str(sbom.get("url") or sbom.get("browser_download_url") or ""),
     }
-    if not all(result[key] for key in ("archive_url", "checksum_url", "manifest_url", "signature_url", "sbom_url")):
+    if not all(result[key] for key in ("checksum_url", "manifest_url", "signature_url", "sbom_url")):
+        continue
+    if not result["archive_url"] and not result["archive_parts_manifest_url"]:
         continue
     print(json.dumps(result))
     break
@@ -717,7 +742,36 @@ else
   MANIFEST_PATH="$WORK_DIR/$MANIFEST_NAME"
   SIGNATURE_PATH="$WORK_DIR/$SIGNATURE_NAME"
   SBOM_PATH="$WORK_DIR/$SBOM_NAME"
-  download_file "$ARCHIVE_URL" "$ARCHIVE_PATH"
+  if [[ -n "${ARCHIVE_URL:-}" ]]; then
+    download_file "$ARCHIVE_URL" "$ARCHIVE_PATH"
+  else
+    RELEASE_PARTS_TOOL="${APP_RELEASE_PARTS_TOOL:-$ROOT_DIR/scripts/release_asset_parts.py}"
+    [[ -f "$RELEASE_PARTS_TOOL" && ! -L "$RELEASE_PARTS_TOOL" ]] ||
+      die "release_parts_tool_missing"
+    PARTS_MANIFEST_PATH="$WORK_DIR/$ARCHIVE_PARTS_MANIFEST_NAME"
+    download_file "$ARCHIVE_PARTS_MANIFEST_URL" "$PARTS_MANIFEST_PATH"
+    PARTS_ROWS="$WORK_DIR/release-parts.tsv"
+    python3 -c '
+import json, os, re, sys
+parts = json.loads(sys.argv[1])
+allow_file = bool(os.environ.get("APP_RELEASES_JSON_FILE"))
+if not isinstance(parts, list) or len(parts) < 2:
+    raise SystemExit("release part metadata is incomplete")
+for index, part in enumerate(parts):
+    name = part.get("name", "") if isinstance(part, dict) else ""
+    url = part.get("url", "") if isinstance(part, dict) else ""
+    valid_url = url.startswith("https://") or (allow_file and url.startswith("file://"))
+    if not re.fullmatch(r"[A-Za-z0-9._-]+[.]part[0-9]{3}", name) or not valid_url:
+        raise SystemExit("release part metadata is invalid")
+    print(f"{name}\t{url}")
+' "$ARCHIVE_PARTS_JSON" > "$PARTS_ROWS"
+    while IFS=$'\t' read -r part_name part_url; do
+      [[ -n "$part_name" && -n "$part_url" ]] || die "release_part_metadata_invalid"
+      download_file "$part_url" "$WORK_DIR/$part_name"
+    done < "$PARTS_ROWS"
+    python3 "$RELEASE_PARTS_TOOL" assemble "$PARTS_MANIFEST_PATH" \
+      --root "$WORK_DIR" --output "$ARCHIVE_PATH" >/dev/null
+  fi
   download_file "$CHECKSUM_URL" "$CHECKSUM_PATH"
   download_file "$MANIFEST_URL" "$MANIFEST_PATH"
   download_file "$SIGNATURE_URL" "$SIGNATURE_PATH"

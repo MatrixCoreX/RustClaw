@@ -116,6 +116,12 @@ jobs:
             (cd dist-release && sha256sum -c "$(basename "${checksum}")")
           done
 
+      - name: Split assets above the GitHub Release limit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release_asset_parts.py split dist-release --max-bytes 1900000000
+
       - name: Publish GitHub Release
         shell: bash
         env:

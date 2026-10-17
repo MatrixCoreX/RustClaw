@@ -272,6 +272,57 @@ grep -Fq 'release_checksum=verified' <<< "$OUTPUT"
 grep -Fq 'release_update_status=deployed' <<< "$OUTPUT"
 grep -Fxq 'ubuntu-x86_64-newest' "$RUNTIME/.release-tag"
 
+SPLIT_DIR="$TMP_ROOT/split-release"
+mkdir -p "$SPLIT_DIR"
+for source in \
+  "$ARCHIVE" \
+  "$CHECKSUM" \
+  "$ARCHIVE.manifest.json" \
+  "$ARCHIVE.manifest.json.sig" \
+  "$ARCHIVE.spdx.json"; do
+  cp "$source" "$SPLIT_DIR/"
+done
+archive_size="$(wc -c < "$SPLIT_DIR/$(basename "$ARCHIVE")")"
+python3 "$ROOT_DIR/scripts/release_asset_parts.py" split "$SPLIT_DIR" \
+  --max-bytes "$((archive_size - 1))" >/dev/null
+SPLIT_RELEASES_JSON="$TMP_ROOT/split-releases.json"
+python3 - "$SPLIT_RELEASES_JSON" "$SPLIT_DIR" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+output = Path(sys.argv[1])
+root = Path(sys.argv[2]).resolve()
+assets = [
+    {"name": path.name, "url": path.as_uri()}
+    for path in sorted(root.iterdir())
+    if path.is_file()
+]
+output.write_text(json.dumps([{
+    "tag_name": "ubuntu-x86_64-split",
+    "draft": False,
+    "prerelease": False,
+    "published_at": "2026-03-01T00:00:00Z",
+    "assets": assets,
+}]), encoding="utf-8")
+PY
+SPLIT_RUNTIME="$TMP_ROOT/split-runtime"
+mkdir -p "$SPLIT_RUNTIME/configs"
+printf 'local-secret = "preserve-split"\n' > "$SPLIT_RUNTIME/configs/config.toml"
+SPLIT_OUTPUT="$(
+  APP_RELEASE_PARTS_TOOL="$ROOT_DIR/scripts/release_asset_parts.py" \
+  APP_RELEASES_JSON_FILE="$SPLIT_RELEASES_JSON" \
+    "$DEPLOY_SCRIPT" \
+      --root "$SPLIT_RUNTIME" \
+      --platform ubuntu-x86_64 \
+      --no-restart
+)"
+grep -Fq 'release_checksum=verified' <<< "$SPLIT_OUTPUT"
+grep -Fq 'release_update_status=deployed' <<< "$SPLIT_OUTPUT"
+grep -Fxq 'ubuntu-x86_64-split' "$SPLIT_RUNTIME/.release-tag"
+grep -Fxq 'local-secret = "preserve-split"' "$SPLIT_RUNTIME/configs/config.toml"
+cmp /bin/true "$SPLIT_RUNTIME/target/release/clawd"
+
 LOCAL_RUNTIME="$TMP_ROOT/local-runtime"
 mkdir -p "$LOCAL_RUNTIME/configs"
 printf 'local-secret = "preserve-local"\n' > "$LOCAL_RUNTIME/configs/config.toml"

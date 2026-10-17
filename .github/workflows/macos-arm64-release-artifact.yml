@@ -176,10 +176,37 @@ jobs:
         env:
           CHI_SIM_SHA256: a5fcb6f0db1e1d6d8522f39db4e848f05984669172e584e8d76b6b3141e1f730
           WHISPER_MODEL_SHA256: 60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe
+          WHISPER_SOURCE_COMMIT: 306c88f4d1286aec1bf96e544632897886af5501
         run: |
           set -euo pipefail
           export HOMEBREW_NO_AUTO_UPDATE=1
-          brew install ffmpeg tesseract git whisper-cpp
+          brew install cmake ffmpeg tesseract git
+
+          whisper_source="${RUNNER_TEMP}/whisper-cpp-source"
+          whisper_build="${RUNNER_TEMP}/whisper-cpp-build"
+          git init -q "${whisper_source}"
+          git -C "${whisper_source}" remote add origin https://github.com/ggml-org/whisper.cpp.git
+          git -C "${whisper_source}" fetch -q --depth=1 origin "${WHISPER_SOURCE_COMMIT}"
+          git -C "${whisper_source}" checkout -q --detach FETCH_HEAD
+          [[ "$(git -C "${whisper_source}" rev-parse HEAD)" == "${WHISPER_SOURCE_COMMIT}" ]]
+          cmake -S "${whisper_source}" -B "${whisper_build}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DGGML_BACKEND_DL=OFF \
+            -DGGML_BLAS=OFF \
+            -DGGML_CPU_ALL_VARIANTS=OFF \
+            -DGGML_METAL=OFF \
+            -DGGML_OPENMP=OFF \
+            -DWHISPER_BUILD_EXAMPLES=ON \
+            -DWHISPER_BUILD_SERVER=OFF \
+            -DWHISPER_BUILD_TESTS=OFF
+          cmake --build "${whisper_build}" --config Release --target whisper-cli --parallel 4
+          whisper_cli="${whisper_build}/bin/whisper-cli"
+          [[ -x "${whisper_cli}" ]]
+          if otool -L "${whisper_cli}" | grep -E '/(opt/homebrew|usr/local)/'; then
+            echo "whisper-cli retained a Homebrew runtime dependency" >&2
+            exit 1
+          fi
 
           npm ci --ignore-scripts --prefix optional_skills/media_discovery
           playwright_root="${RUNNER_TEMP}/playwright-browsers"
@@ -209,7 +236,7 @@ jobs:
             --tessdata "$(brew --prefix tesseract)/share/tessdata" \
             --chi-sim "${dependency_downloads}/chi_sim.traineddata" \
             --chromium "${chromium_executable}" \
-            --whisper-cli "$(brew --prefix whisper-cpp)/bin/whisper-cli" \
+            --whisper-cli "${whisper_cli}" \
             --whisper-model "${dependency_downloads}/ggml-base.bin"
 
       - name: Verify native skill receipts

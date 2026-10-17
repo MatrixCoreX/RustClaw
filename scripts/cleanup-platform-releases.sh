@@ -100,12 +100,31 @@ fi
 # A visible release can still be uploading. Never remove its predecessor until
 # the archive and all verification assets have finished uploading.
 gh release view "$keep_tag" --repo "$GH_REPO" --json assets | python3 -c '
-import json, sys
+import json, re, sys
 assets = {a["name"] for a in json.load(sys.stdin)["assets"] if a.get("size", 0) > 0}
-archives = [name for name in assets if name.endswith(".tar.gz")]
-if len(archives) != 1 or not all(archives[0] + suffix in assets for suffix in
+archives = {name for name in assets if name.endswith(".tar.gz")}
+split_archives = {
+    name[:-len(".parts.json")]
+    for name in assets
+    if name.endswith(".tar.gz.parts.json")
+}
+candidates = archives | split_archives
+if len(candidates) != 1:
+    raise SystemExit("Newest release archive is missing or ambiguous; refusing cleanup.")
+archive = next(iter(candidates))
+if archive in archives and archive in split_archives:
+    raise SystemExit("Newest release has ambiguous direct and split archives; refusing cleanup.")
+if not all(archive + suffix in assets for suffix in
     (".sha256", ".spdx.json", ".manifest.json", ".manifest.json.sig")):
     raise SystemExit("Newest release assets are incomplete; refusing cleanup.")
+if archive in split_archives:
+    parts = sorted(
+        name for name in assets
+        if re.fullmatch(re.escape(archive) + r"[.]part[0-9]{3}", name)
+    )
+    expected = [f"{archive}.part{index:03d}" for index in range(len(parts))]
+    if len(parts) < 2 or parts != expected:
+        raise SystemExit("Newest split release parts are incomplete; refusing cleanup.")
 '
 while IFS=$'\t' read -r _published_at release_id old_tag; do
   [[ -n "$release_id" && -n "$old_tag" ]] || continue

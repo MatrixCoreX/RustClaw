@@ -70,7 +70,8 @@ PY
 )"
 for relative in deploy-github-release.sh scripts/shell_compat.sh \
   scripts/product_identity.sh \
-  scripts/verify_release_binary.py scripts/security/release_manifest.py \
+  scripts/verify_release_binary.py scripts/release_asset_parts.py \
+  scripts/security/release_manifest.py \
   configs/product_identity.toml configs/release_allowed_signers; do
   mkdir -p "$BOOTSTRAP/$(dirname "$relative")"
   download "https://raw.githubusercontent.com/$REPOSITORY/$COMMIT/$relative" "$BOOTSTRAP/$relative"
@@ -83,6 +84,7 @@ else
   export APP_RELEASE_ALLOWED_SIGNERS_FILE="$BOOTSTRAP/configs/release_allowed_signers"
 fi
 export APP_RELEASE_MANIFEST_TOOL="$BOOTSTRAP/scripts/security/release_manifest.py"
+export APP_RELEASE_PARTS_TOOL="$BOOTSTRAP/scripts/release_asset_parts.py"
 export APP_PRODUCT_IDENTITY_CONFIG="$BOOTSTRAP/configs/product_identity.toml"
 source "$BOOTSTRAP/scripts/product_identity.sh"
 [[ "$APP_RELEASE_REPOSITORY" == "$REPOSITORY" ]] || { echo 'Repository does not match product identity.' >&2; exit 1; }

@@ -26,6 +26,7 @@ class ReleaseBootstrapTests(unittest.TestCase):
             "scripts/shell_compat.sh",
             "scripts/product_identity.sh",
             "scripts/verify_release_binary.py",
+            "scripts/release_asset_parts.py",
             "scripts/security/release_manifest.py",
             "configs/product_identity.toml",
             "configs/release_allowed_signers",
