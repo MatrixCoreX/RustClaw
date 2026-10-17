@@ -127,6 +127,13 @@ export function isRaspberryPiHost({
   return String(evidence || "").toLowerCase().includes("raspberry pi");
 }
 
+export function browserOperationTimeoutMs({ raspberryPi = isRaspberryPiHost() } = {}) {
+  // A 1 GB Raspberry Pi can spend most of the ordinary timeout compiling and
+  // painting a script-heavy page. Keep a bounded stage timeout, but do not
+  // mistake expected device latency for a broken browser session.
+  return raspberryPi ? 120_000 : 45_000;
+}
+
 export function nativeBrowserEnvironment(host = {
   platform: process.platform,
   arch: process.arch,

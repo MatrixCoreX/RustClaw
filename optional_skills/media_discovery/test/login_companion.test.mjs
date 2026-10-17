@@ -102,13 +102,15 @@ test("fresh Raspberry Pi companion heartbeat enables a minimized browser handoff
   assert.equal(loginCompanionActive({ ...options, hostPlatform: "darwin" }), false);
 });
 
-test("Kuaishou login QR stays private and a matching Pi action reveals Chromium", async t => {
+for (const platform of ["douyin", "kuaishou", "weibo"]) test(
+  `${platform} login QR stays private and a matching Pi action reveals Chromium`,
+  async t => {
   const fixture = await runtimeFixture(t);
   const browser = browserPage();
   const handoff = await createLoginCompanionHandoff({
     root: fixture.root,
     page: browser.page,
-    platform: "kuaishou",
+    platform,
     reasonCode: "login_required",
     environment: fixture.environment,
     compactDisplay: { width: 480, height: 320 },
@@ -117,7 +119,7 @@ test("Kuaishou login QR stays private and a matching Pi action reveals Chromium"
 
   const statePath = path.join(fixture.root, "login_challenge", "current.json");
   const state = JSON.parse(await fs.readFile(statePath, "utf8"));
-  assert.equal(state.platform, "kuaishou");
+  assert.equal(state.platform, platform);
   assert.equal(state.interaction, "browser_window");
   assert.equal(state.reason_code, "login_required");
   assert.equal(state.handoff_id, handoff.handoffId);

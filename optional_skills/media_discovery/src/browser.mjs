@@ -3,7 +3,12 @@ import { constants as fsConstants } from "node:fs";
 import path from "node:path";
 import { browserStageError, recordBrowserFailure } from "./browser_diagnostics.mjs";
 import { createManualConfirmation } from "./manual_handoff.mjs";
-import { closePlatformBrowser, desktopSessionEnvironment, launchPlatformBrowser } from "./browser_environment.mjs";
+import {
+  browserOperationTimeoutMs,
+  closePlatformBrowser,
+  desktopSessionEnvironment,
+  launchPlatformBrowser,
+} from "./browser_environment.mjs";
 import { capturePublication } from "./publication.mjs";
 import { assertNavigationResponse, boundedBrowserOperation, normalizeBrowserError, openKeywordSearch } from "./browser_search.mjs";
 import { assertBrowserFlow, observePlatformBackpressure, pacingDelayMs, stopsCollection } from "./browser_flow_control.mjs";
@@ -34,7 +39,7 @@ import {
   validatePlatformUrl,
 } from "./platforms.mjs";
 
-const NAVIGATION_TIMEOUT_MS = 45_000;
+const NAVIGATION_TIMEOUT_MS = browserOperationTimeoutMs();
 const SCREENSHOT_MIN_BYTES = 512;
 const SCREENSHOT_MIN_BYTES_PER_PIXEL = 0.03;
 
@@ -2187,6 +2192,7 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
       if (discoverySource.source_mode === "topics") {
         const opened = await openKeywordSearch(page, platform, discoverySource, {
           shouldStop,
+          timeoutMs: NAVIGATION_TIMEOUT_MS,
           checkAccess: candidate => accessErrorAfterExplicitVisibleWait(candidate, platform, config, shouldStop),
           settle: candidate => pacingWait(candidate, config),
           prepareHome: platform === "kuaishou"
@@ -2324,7 +2330,8 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
                 opened, root, runId, platform, candidate, config, discoverySource, null, {}, shouldStop,
               ),
               { shouldStop, checkAccess: opened => currentPlatformAccessError(opened, platform),
-                settle: opened => pacingWait(opened, config, 0.75) });
+                settle: opened => pacingWait(opened, config, 0.75),
+                timeoutMs: NAVIGATION_TIMEOUT_MS });
             await onPage(result);
           },
           scroll: () => pacedScroll(page, config),
@@ -2357,7 +2364,8 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
                 opened, root, runId, platform, candidate, config, discoverySource, null, {}, shouldStop,
               ),
               { shouldStop, checkAccess: opened => currentPlatformAccessError(opened, platform),
-                settle: opened => pacingWait(opened, config, 0.75) })
+                settle: opened => pacingWait(opened, config, 0.75),
+                timeoutMs: NAVIGATION_TIMEOUT_MS })
             : await collectPage(
               page, root, runId, platform, candidate, config, discoverySource, shouldStop,
             );

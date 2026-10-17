@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  browserOperationTimeoutMs,
   AUTOMATION_BLINK_FLAG,
   AUTOMATION_DEFAULT_ARG,
   closePlatformBrowser,
@@ -136,6 +137,8 @@ test("Raspberry Pi browser tuning is explicit and does not affect other hosts", 
   assert.equal(generic.args.includes("--disable-gpu"), false);
   assert.equal(pi.args.includes("--renderer-process-limit=1"), true);
   assert.equal(pi.args.includes("--disable-gpu"), true);
+  assert.equal(browserOperationTimeoutMs({ raspberryPi: false }), 45_000);
+  assert.equal(browserOperationTimeoutMs({ raspberryPi: true }), 120_000);
 });
 
 test("Pi companion launch flags are opt-in and never affect ordinary browsers", async t => {

@@ -13,9 +13,13 @@ from small_screen_strings import STRINGS
 
 
 class SmallScreenLoginChallengeTest(unittest.TestCase):
-    def test_kuaishou_login_challenge_has_localized_platform_name(self):
+    def test_discovery_login_challenges_have_localized_platform_names(self):
+        self.assertEqual(STRINGS["CN"]["login_platform_douyin"], "抖音")
+        self.assertEqual(STRINGS["EN"]["login_platform_douyin"], "Douyin")
         self.assertEqual(STRINGS["CN"]["login_platform_kuaishou"], "快手")
         self.assertEqual(STRINGS["EN"]["login_platform_kuaishou"], "Kuaishou")
+        self.assertEqual(STRINGS["CN"]["login_platform_weibo"], "微博")
+        self.assertEqual(STRINGS["EN"]["login_platform_weibo"], "Weibo")
 
     def test_publishes_companion_heartbeat_in_volatile_runtime_directory(self):
         with tempfile.TemporaryDirectory() as directory:
