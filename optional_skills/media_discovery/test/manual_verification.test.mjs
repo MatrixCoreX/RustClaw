@@ -13,8 +13,10 @@ function manualPage() {
   const page = {
     isClosed: () => false,
     url: () => "https://www.douyin.com/video/1234",
+    frames: () => challenge
+      ? [{ url: () => "https://rmc.bytedance.com/verifycenter/captcha/v2" }]
+      : [],
     locator: selector => ({
-      evaluateAll: async () => challenge ? ["https://www.douyin.com/verifycenter/captcha/v2"] : [],
       count: async () => selector.includes("input[") ? 0 : 1,
     }),
     waitForTimeout: async () => { challenge = false; },

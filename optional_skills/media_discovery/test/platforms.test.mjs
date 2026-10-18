@@ -349,20 +349,35 @@ test("network restrictions do not wait for a nonexistent manual captcha", async 
   }), "network_access_restricted");
 });
 
-test("platforms without iframe challenges skip expensive iframe inspection", async () => {
-  let iframeInspections = 0;
+test("platforms without iframe challenges skip frame-tree inspection", async () => {
+  let frameInspections = 0;
   const page = {
-    locator: selector => {
-      if (selector === "iframe[src]") {
-        iframeInspections += 1;
-        return { evaluateAll: async () => { throw new Error("must not inspect unrelated frames"); } };
-      }
-      return { count: async () => 0 };
-    },
+    frames: () => { frameInspections += 1; throw new Error("must not inspect unrelated frames"); },
+    locator: () => ({ count: async () => 0 }),
     url: () => "https://www.tiktok.com/search?q=finance",
   };
   assert.equal(await currentPlatformAccessError(page, "tiktok"), null);
-  assert.equal(iframeInspections, 0);
+  assert.equal(frameInspections, 0);
+});
+
+test("Douyin challenge detection reads the browser frame tree without entering the page DOM", async () => {
+  let frameInspections = 0;
+  const page = {
+    frames: () => {
+      frameInspections += 1;
+      return [
+        { url: () => "https://www.douyin.com/search/finance" },
+        { url: () => "https://rmc.bytedance.com/verifycenter/captcha/v2?scene_level=p2" },
+      ];
+    },
+    locator: selector => {
+      if (selector === "iframe[src]") throw new Error("must not enter the page DOM to inspect frames");
+      return { count: async () => 0 };
+    },
+    url: () => "https://www.douyin.com/search/finance",
+  };
+  assert.equal(await currentPlatformAccessError(page, "douyin"), "challenge_required");
+  assert.equal(frameInspections, 1);
 });
 
 test("only an explicitly visible run waits for a machine challenge to clear", async () => {
@@ -372,10 +387,8 @@ test("only an explicitly visible run waits for a machine challenge to clear", as
   const interactiveStates = [];
   const page = {
     isClosed: () => false,
-    locator: () => ({
-      evaluateAll: async () => (scans++ === 0 ? [captcha] : []),
-      count: async () => 0,
-    }),
+    frames: () => (scans++ === 0 ? [{ url: () => captcha }] : []),
+    locator: () => ({ count: async () => 0 }),
     url: () => "https://www.douyin.com/",
     waitForTimeout: async () => { waits += 1; },
   };
@@ -409,7 +422,8 @@ test("visible verification requires consecutive clear observations", async () =>
   let waits = 0;
   const page = {
     isClosed: () => false,
-    locator: () => ({ evaluateAll: async () => frames.shift() || [], count: async () => 0 }),
+    frames: () => (frames.shift() || []).map(url => ({ url: () => url })),
+    locator: () => ({ count: async () => 0 }),
     url: () => "https://www.douyin.com/",
     waitForTimeout: async () => { waits += 1; },
   };
