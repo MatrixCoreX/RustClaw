@@ -83,6 +83,11 @@ async function searchTargetPage(page, opened, platform, targetUrl) {
     .find(candidate => matchesVerificationTarget(platform, targetUrl, candidate.url())) || null;
 }
 
+async function navigateSearchUrlFallback(page, source, timeoutMs) {
+  await navigateDocument(page, source.url, "search_submit_fallback", timeoutMs, "commit");
+  return "platform_search_url_fallback";
+}
+
 async function submitKeywordSearch(page, opened, controls, platform, source, timeoutMs) {
   if (platform !== "douyin") {
     await controls.submit.click({ timeout: timeoutMs, noWaitAfter: true });
@@ -117,8 +122,7 @@ async function submitKeywordSearch(page, opened, controls, platform, source, tim
     // A low-powered browser may keep streaming the search shell long after the
     // response and DOM are usable. Commit proves that the first-party document
     // was accepted; the result loop below validates its type and content.
-    await navigateDocument(page, source.url, "search_submit_fallback", timeoutMs, "commit");
-    return "platform_search_url_fallback";
+    return navigateSearchUrlFallback(page, source, timeoutMs);
   }
 }
 
@@ -195,16 +199,22 @@ export async function openKeywordSearch(page, platform, source, {
     stage = "search_submit";
     await settle(page);
     await controls.input.fill(source.search_keyword, { timeout: timeoutMs });
-    if (await controls.input.inputValue({ timeout: timeoutMs }) !== source.search_keyword) {
+    const inputMatches = await controls.input.inputValue({ timeout: timeoutMs }) === source.search_keyword;
+    if (!inputMatches && platform !== "douyin") {
       throw browserStageError("search_input_mismatch", stage);
     }
-    // A textarea may insert a newline on Enter. Submit the site's search control.
-    await check(page);
-    await settle(page);
     responses.clear();
-    const submissionMethod = await submitKeywordSearch(
-      page, opened, controls, platform, source, timeoutMs,
-    );
+    let submissionMethod;
+    if (inputMatches) {
+      // A textarea may insert a newline on Enter. Submit the site's search control.
+      await check(page);
+      await settle(page);
+      submissionMethod = await submitKeywordSearch(
+        page, opened, controls, platform, source, timeoutMs,
+      );
+    } else {
+      submissionMethod = await navigateSearchUrlFallback(page, source, timeoutMs);
+    }
     stage = "search_results_ready";
     const resultDeadline = Date.now() + timeoutMs;
     let matched = false;

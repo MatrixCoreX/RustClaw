@@ -14,7 +14,8 @@ const controls = {
 };
 
 async function pageFixture(t, platform, { popup = false, noSubmit = false, obstructSubmit = false,
-  emptyResults = false, json = false, delay = 0, wrongKeyword = false, newKuaishou = false } = {}) {
+  emptyResults = false, json = false, delay = 0, wrongKeyword = false, newKuaishou = false,
+  replaceInputAfterFill = false } = {}) {
   const browser = await chromium.launch({ executablePath: (await browserCapability()).chromium_executable, headless: true });
   t.after(() => browser.close());
   const context = await browser.newContext();
@@ -33,6 +34,8 @@ async function pageFixture(t, platform, { popup = false, noSubmit = false, obstr
     if (url === platformSpec(platform).homeUrl) return route.fulfill({ contentType: "text/html", body: `${markup}
       ${obstructSubmit ? '<div style="position:fixed;inset:0;z-index:99"></div>' : ""}
       <a href="https://www.douyin.com/video/99999999">recommendation must not qualify</a>
+      ${replaceInputAfterFill ? `<script>{const input=document.querySelector('input');input.addEventListener('input',()=>{
+        const replacement=input.cloneNode(true);replacement.value='';input.replaceWith(replacement);},{once:true})}</script>` : ""}
       <script>document.querySelector('button,.search-text').onclick=async()=>{
         const input=document.querySelector('textarea')||document.querySelector('input');
         await window.recordSearch(input.value);
@@ -90,6 +93,15 @@ test("an unsubmitted search never qualifies on recommendation cards", { skip: !e
 
 test("an obstructed Douyin search control falls back to the official result URL", { skip: !enabled }, async t => {
   const f = await pageFixture(t, "douyin", { obstructSubmit: true });
+  const result = await openKeywordSearch(f.page, "douyin", f.source, { timeoutMs: 4_000 });
+  assert.equal(result.method, "platform_search_url_fallback");
+  assert.deepEqual(f.submitted, []);
+  assert.deepEqual(f.navigations, [platformSpec("douyin").homeUrl, f.target]);
+  assert.equal(result.page.url(), f.target);
+});
+
+test("a replaced Douyin search input falls back to the official result URL", { skip: !enabled }, async t => {
+  const f = await pageFixture(t, "douyin", { replaceInputAfterFill: true });
   const result = await openKeywordSearch(f.page, "douyin", f.source, { timeoutMs: 4_000 });
   assert.equal(result.method, "platform_search_url_fallback");
   assert.deepEqual(f.submitted, []);
