@@ -199,3 +199,21 @@ test("TikTok consent accepts the current custom-element banner", {
   assert.equal(await dismissTikTokConsent(page), true);
   assert.equal(await page.locator("body").getAttribute("data-choice"), "accept");
 });
+
+test("TikTok consent ignores an inert custom-element shell after consent is stored", {
+  skip: !enabled,
+}, async t => {
+  const browser = await chromium.launch({ executablePath: (await browserCapability()).chromium_executable,
+    headless: true });
+  t.after(() => browser.close());
+  const context = await browser.newContext();
+  await context.addCookies([{ name: "cookie-consent", value: "accepted",
+    domain: ".tiktok.com", path: "/" }]);
+  const page = await context.newPage();
+  await page.setContent(`<tiktok-cookie-banner></tiktok-cookie-banner><script>
+    customElements.define('tiktok-cookie-banner', class extends HTMLElement {
+      connectedCallback() { this.attachShadow({mode:'open'}).innerHTML = '<style>:host{}</style>'; }
+    });
+  </script>`);
+  assert.equal(await dismissTikTokConsent(page), true);
+});

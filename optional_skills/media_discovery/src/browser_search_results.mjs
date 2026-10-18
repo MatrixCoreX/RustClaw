@@ -66,6 +66,27 @@ export async function dismissTikTokConsent(page, timeoutMs = 5_000) {
     }).first();
     if (await namedAccept.count() && await namedAccept.isVisible()) action = namedAccept;
   }
+  if (!action && await surface.evaluate(element => element.localName === "tiktok-cookie-banner")) {
+    // TikTok can mount an inert custom-element shell after the persisted
+    // consent choice has already been applied. Its host and shadow root have
+    // no rendered controls, so treating the shell itself as an unresolved
+    // banner incorrectly blocks otherwise usable search results.
+    const consentAlreadyStored = (await page.context().cookies()).some(cookie => (
+      cookie.name === "cookie-consent"
+      && Boolean(cookie.value)
+      && /(?:^|\.)tiktok\.com$/u.test(cookie.domain)
+    ));
+    const renderedShadowControl = await surface.evaluate(element => {
+      const root = element.shadowRoot;
+      if (!root) return false;
+      return [...root.querySelectorAll("button, [role='button'], a, input")].some(node => {
+        const style = getComputedStyle(node);
+        return style.visibility !== "hidden" && style.display !== "none"
+          && node.getClientRects().length > 0;
+      });
+    });
+    if (consentAlreadyStored && !renderedShadowControl) return true;
+  }
   if (!action) return false;
   // TikTok's consent handler starts follow-up network work that can keep
   // Playwright's implicit navigation wait open even after the choice has been
