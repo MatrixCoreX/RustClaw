@@ -19,6 +19,21 @@ _IMAGE_RE = re.compile(r"^[a-zA-Z0-9_.-]{1,80}\.png$")
 _HANDOFF_RE = re.compile(r"^[a-f0-9-]{16,64}$")
 
 
+def fit_login_challenge_image_size(source_size, box_size, *, allow_upscale=False):
+    """Fit a challenge image into its box while preserving the aspect ratio."""
+    source_width, source_height = source_size
+    box_width, box_height = box_size
+    if min(source_width, source_height, box_width, box_height) <= 0:
+        raise ValueError("login challenge image dimensions must be positive")
+    scale = min(box_width / source_width, box_height / source_height)
+    if not allow_upscale:
+        scale = min(1.0, scale)
+    return (
+        max(1, round(source_width * scale)),
+        max(1, round(source_height * scale)),
+    )
+
+
 def _runtime_agent_directory(environment=None):
     env = os.environ if environment is None else environment
     runtime_dir = str(env.get("XDG_RUNTIME_DIR") or "").strip()

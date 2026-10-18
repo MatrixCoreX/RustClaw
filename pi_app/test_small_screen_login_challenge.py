@@ -4,6 +4,7 @@ import tempfile
 import unittest
 
 from small_screen_login_challenge import (
+    fit_login_challenge_image_size,
     is_raspberry_pi_device,
     load_login_challenge,
     publish_login_companion_heartbeat,
@@ -13,6 +14,26 @@ from small_screen_strings import STRINGS
 
 
 class SmallScreenLoginChallengeTest(unittest.TestCase):
+    def test_cropped_qr_is_enlarged_but_full_page_capture_is_not(self):
+        self.assertEqual(
+            fit_login_challenge_image_size(
+                (140, 140), (300, 214), allow_upscale=True
+            ),
+            (214, 214),
+        )
+        self.assertEqual(
+            fit_login_challenge_image_size(
+                (140, 140), (300, 214), allow_upscale=False
+            ),
+            (140, 140),
+        )
+        self.assertEqual(
+            fit_login_challenge_image_size(
+                (1280, 720), (300, 214), allow_upscale=False
+            ),
+            (300, 169),
+        )
+
     def test_discovery_login_challenges_have_localized_platform_names(self):
         self.assertEqual(STRINGS["CN"]["login_platform_douyin"], "抖音")
         self.assertEqual(STRINGS["EN"]["login_platform_douyin"], "Douyin")

@@ -59,6 +59,7 @@ from small_screen_config import (
 )
 from small_screen_login_challenge import (
     COMPANION_REFRESH_SECONDS,
+    fit_login_challenge_image_size,
     is_raspberry_pi_device,
     load_login_challenge,
     publish_login_companion_heartbeat,
@@ -2492,7 +2493,7 @@ class SmallScreenApp:
             bg=self._c("bg"),
             fg=self._c("fg"),
         ).pack(pady=(5, 2))
-        image_box = tk.Frame(frame, bg="#ffffff", width=250, height=230)
+        image_box = tk.Frame(frame, bg="#ffffff", width=300, height=230)
         image_box.pack()
         image_box.pack_propagate(False)
         self._login_challenge_image_box = image_box
@@ -2591,8 +2592,11 @@ class SmallScreenApp:
             )
         )
         self._login_challenge_active = challenge
-        image_height = 172 if browser_action else 230
-        self._login_challenge_image_box.configure(height=image_height)
+        image_width = 300
+        image_height = 214 if browser_action else 230
+        self._login_challenge_image_box.configure(
+            width=image_width, height=image_height
+        )
         if browser_action:
             if not self._login_challenge_open_button.winfo_manager():
                 self._login_challenge_open_button.pack(pady=(0, 4))
@@ -2604,6 +2608,9 @@ class SmallScreenApp:
             challenge.get("image_path"),
             challenge.get("image_mtime_ns"),
             challenge.get("image_size_bytes"),
+            challenge.get("cropped"),
+            image_width,
+            image_height,
         )
         if signature != self._login_challenge_signature:
             photo = None
@@ -2617,11 +2624,20 @@ class SmallScreenApp:
                         if challenge.get("cropped")
                         else Image.Resampling.LANCZOS
                     )
-                    image.thumbnail((250, image_height), resampling)
-                    canvas = Image.new("RGB", (250, image_height), "white")
+                    fitted_size = fit_login_challenge_image_size(
+                        image.size,
+                        (image_width, image_height),
+                        allow_upscale=bool(challenge.get("cropped")),
+                    )
+                    if image.size != fitted_size:
+                        image = image.resize(fitted_size, resampling)
+                    canvas = Image.new("RGB", (image_width, image_height), "white")
                     canvas.paste(
                         image,
-                        ((250 - image.width) // 2, (image_height - image.height) // 2),
+                        (
+                            (image_width - image.width) // 2,
+                            (image_height - image.height) // 2,
+                        ),
                     )
                     photo = ImageTk.PhotoImage(canvas)
             except Exception:

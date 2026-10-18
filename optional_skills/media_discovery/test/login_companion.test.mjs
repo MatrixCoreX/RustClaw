@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   createLoginCompanionHandoff,
   compactVerificationScale,
+  loginChallengeSelectors,
   loginCompanionActive,
   loginCompanionBrowserArgs,
   raspberryPiDisplaySize,
@@ -75,6 +76,16 @@ test("compact verification scale leaves room for Pi browser notices and touch ta
     { width: 380, height: 384 },
   ), 1);
   assert.equal(compactVerificationScale({ width: 480, height: 320 }, null), 1);
+});
+
+test("Weibo login capture prefers the first-party QR image", () => {
+  const selectors = loginChallengeSelectors("weibo");
+  assert.equal(selectors[0], 'img[src*="qr.weibo.cn" i]:visible');
+  assert.ok(selectors.includes('[class*="qrcode" i]:visible'));
+  assert.equal(
+    loginChallengeSelectors("douyin")[0],
+    'iframe[src*="/verifycenter/captcha/"]:visible',
+  );
 });
 
 test("Raspberry Pi framebuffer size is validated before compact verification use", async t => {

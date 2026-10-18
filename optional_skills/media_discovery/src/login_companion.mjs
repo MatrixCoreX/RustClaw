@@ -15,6 +15,13 @@ const FRAMEBUFFER_SIZE_FILE = "/sys/class/graphics/fb0/virtual_size";
 const COMPACT_VERTICAL_RESERVE = 56;
 const COMPACT_EDGE_PADDING = 16;
 const COMPACT_MINIMUM_SCALE = 0.6;
+const PLATFORM_CHALLENGE_SELECTORS = Object.freeze({
+  weibo: Object.freeze([
+    'img[src*="qr.weibo.cn" i]:visible',
+    'img[src*="qrcode" i]:visible',
+    'img[src*="/inf/gen" i]:visible',
+  ]),
+});
 const CHALLENGE_SELECTORS = [
   'iframe[src*="/verifycenter/captcha/"]:visible',
   '[class*="captcha" i]:visible',
@@ -23,6 +30,10 @@ const CHALLENGE_SELECTORS = [
   '[class*="qr-code" i]:visible',
   '[id*="qrcode" i]:visible',
 ];
+
+export function loginChallengeSelectors(platform = "") {
+  return [...(PLATFORM_CHALLENGE_SELECTORS[platform] || []), ...CHALLENGE_SELECTORS];
+}
 
 function runtimeDirectory(environment = process.env, explicitDirectory) {
   if (explicitDirectory) return explicitDirectory;
@@ -119,8 +130,8 @@ function validPng(image) {
     && image.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE);
 }
 
-async function elementScreenshot(page) {
-  for (const selector of CHALLENGE_SELECTORS) {
+async function elementScreenshot(page, platform) {
+  for (const selector of loginChallengeSelectors(platform)) {
     try {
       const locator = page.locator(selector).first();
       if (await locator.count() === 0) continue;
@@ -156,10 +167,10 @@ export function compactVerificationScale(display, challengeBounds) {
   return Math.max(COMPACT_MINIMUM_SCALE, Math.round(scale * 100) / 100);
 }
 
-async function fitCompactVerification(page, compactDisplay) {
+async function fitCompactVerification(page, compactDisplay, platform = "") {
   if (!compactDisplay || typeof page?.evaluate !== "function") return null;
   let bounds = null;
-  for (const selector of CHALLENGE_SELECTORS) {
+  for (const selector of loginChallengeSelectors(platform)) {
     try {
       const locator = page.locator(selector).first();
       if (await locator.count() === 0) continue;
@@ -204,11 +215,11 @@ async function browserWindowSession(page) {
   }
 }
 
-export async function showBrowserWindow(page, { compactDisplay = null } = {}) {
+export async function showBrowserWindow(page, { compactDisplay = null, platform = "" } = {}) {
   if (compactDisplay && typeof page?.setViewportSize === "function") {
     await page.setViewportSize(compactDisplay).catch(() => {});
   }
-  const previousZoom = await fitCompactVerification(page, compactDisplay);
+  const previousZoom = await fitCompactVerification(page, compactDisplay, platform);
   const { session, windowId } = await browserWindowSession(page);
   try {
     if (Number.isInteger(windowId)) {
@@ -309,7 +320,7 @@ export async function createLoginCompanionHandoff({
     }
     const current = now();
     if (!force && current - lastRefresh < REFRESH_INTERVAL_MS) return true;
-    const captured = await elementScreenshot(page);
+    const captured = await elementScreenshot(page, platform);
     if (!captured) return false;
     await atomicWrite(imagePath, captured.image);
     await atomicWrite(statePath, Buffer.from(JSON.stringify({
@@ -339,7 +350,7 @@ export async function createLoginCompanionHandoff({
     revealIfRequested: async () => {
       if (!active || !await readBrowserAction(actionPath, handoffId, companionOptions)) return false;
       browserRevealed = true;
-      previousPageZoom = await showBrowserWindow(page, { compactDisplay });
+      previousPageZoom = await showBrowserWindow(page, { compactDisplay, platform });
       return true;
     },
   };
