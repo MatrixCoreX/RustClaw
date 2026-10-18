@@ -221,6 +221,10 @@ export async function openKeywordSearch(page, platform, source, {
       try {
         validatePlatformUrl(platform, observedUrl);
         const onSearchTarget = matchesVerificationTarget(platform, source.url, observedUrl);
+        // Record verified navigation before later DOM/access observations. A
+        // late platform challenge or an empty hydrated shell must not be
+        // misclassified as an unsubmitted search.
+        if (onSearchTarget) matched = true;
         if (onSearchTarget) {
           assertNavigationResponse(responses.get(destination), stage);
           const contentType = await boundedBrowserOperation(destination.evaluate(() => document.contentType),
@@ -229,7 +233,6 @@ export async function openKeywordSearch(page, platform, source, {
         }
         await check(destination);
         if (onSearchTarget) {
-          matched = true;
           const count = await searchResultCount(destination, platform,
             resultDeadline - Date.now(), stage);
           if (count > 0) return {

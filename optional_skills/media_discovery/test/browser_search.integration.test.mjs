@@ -14,7 +14,7 @@ const controls = {
 };
 
 async function pageFixture(t, platform, { popup = false, noSubmit = false, obstructSubmit = false,
-  json = false, delay = 0, wrongKeyword = false, newKuaishou = false } = {}) {
+  emptyResults = false, json = false, delay = 0, wrongKeyword = false, newKuaishou = false } = {}) {
   const browser = await chromium.launch({ executablePath: (await browserCapability()).chromium_executable, headless: true });
   t.after(() => browser.close());
   const context = await browser.newContext();
@@ -40,6 +40,7 @@ async function pageFixture(t, platform, { popup = false, noSubmit = false, obstr
       }</script>` });
     assert.equal(url, resultTarget);
     if (json) return route.fulfill({ contentType: "application/json", body: '{"result":2}' });
+    if (emptyResults) return route.fulfill({ contentType: "text/html", body: "<main></main>" });
     const link = { douyin: "https://www.douyin.com/video/12345678", xiaohongshu: "https://www.xiaohongshu.com/explore/12345678", kuaishou: "https://www.kuaishou.com/short-video/12345678" }[platform];
     return route.fulfill({ contentType: "text/html", body: `<body><script>setTimeout(()=>{document.body.innerHTML='<a href="${link}">result</a>'},${delay})</script></body>` });
   });
@@ -94,6 +95,13 @@ test("an obstructed Douyin search control falls back to the official result URL"
   assert.deepEqual(f.submitted, []);
   assert.deepEqual(f.navigations, [platformSpec("douyin").homeUrl, f.target]);
   assert.equal(result.page.url(), f.target);
+});
+
+test("an empty matched Douyin result is not misclassified as an unsubmitted search", { skip: !enabled }, async t => {
+  const f = await pageFixture(t, "douyin", { obstructSubmit: true, emptyResults: true });
+  await assert.rejects(openKeywordSearch(f.page, "douyin", f.source, { timeoutMs: 2_000 }), {
+    message: "search_results_unavailable",
+  });
 });
 
 test("a new search tab returning JSON fails structurally", { skip: !enabled }, async t => {
