@@ -116,6 +116,18 @@ jobs:
             (cd dist-release && sha256sum -c "$(basename "${checksum}")")
           done
 
+      - name: Keep the PKG for the official website only
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          packages=(dist-release/*.pkg)
+          [[ "${#packages[@]}" -eq 1 ]]
+          package_checksum="${packages[0]}.sha256"
+          [[ -s "${package_checksum}" ]]
+          install -d dist-release/website-only
+          mv "${packages[0]}" "${package_checksum}" dist-release/website-only/
+
       - name: Split assets above the GitHub Release limit
         shell: bash
         run: |
