@@ -581,6 +581,38 @@ def check_primary_model_endpoint_source_alignment(findings: list[str]) -> None:
         check_primary_model_endpoint_source_text(findings, str(path.relative_to(ROOT)), text)
 
 
+def check_audio_transcribe_config(findings: list[str], stt: dict[str, Any]) -> None:
+    require(stt.get("default_vendor") == "minimax", findings, "audio_transcribe.default_vendor must be minimax")
+    require(stt.get("default_model") == "asr-1.0", findings, "audio_transcribe.default_model must be asr-1.0")
+    require(
+        "asr-1.0" in as_list(stt.get("minimax_models")),
+        findings,
+        "audio_transcribe.minimax_models must include asr-1.0",
+    )
+    require(
+        "local-whisper" in as_list(stt.get("custom_models")),
+        findings,
+        "audio_transcribe.custom_models must include local-whisper",
+    )
+    require(
+        "qwen3-asr-flash" in as_list(stt.get("qwen_models")),
+        findings,
+        "audio_transcribe.qwen_models must include qwen3-asr-flash",
+    )
+    require(
+        "qwen3-asr-flash" in as_list(stt.get("qwen_chat_models")),
+        findings,
+        "audio_transcribe.qwen_chat_models must include qwen3-asr-flash",
+    )
+    stt_providers = stt.get("providers") if isinstance(stt.get("providers"), dict) else {}
+    minimax_stt = stt_providers.get("minimax") if isinstance(stt_providers, dict) else None
+    require(
+        isinstance(minimax_stt, dict) and minimax_stt.get("model") == stt.get("default_model"),
+        findings,
+        "audio_transcribe.providers.minimax.model must match audio_transcribe.default_model",
+    )
+
+
 def check_media_config(findings: list[str], main: dict[str, Any]) -> None:
     image = load_toml(IMAGE_CONFIG, findings)
     audio = load_toml(AUDIO_CONFIG, findings)
@@ -651,18 +683,7 @@ def check_media_config(findings: list[str], main: dict[str, Any]) -> None:
         findings,
         "audio_synthesize.qwen_models must include qwen3-tts-flash",
     )
-    require(stt.get("default_vendor") == "custom", findings, "audio_transcribe.default_vendor must be custom")
-    require(stt.get("default_model") == "local-whisper", findings, "audio_transcribe.default_model must be local-whisper")
-    require(
-        "qwen3-asr-flash" in as_list(stt.get("qwen_models")),
-        findings,
-        "audio_transcribe.qwen_models must include qwen3-asr-flash",
-    )
-    require(
-        "qwen3-asr-flash" in as_list(stt.get("qwen_chat_models")),
-        findings,
-        "audio_transcribe.qwen_chat_models must include qwen3-asr-flash",
-    )
+    check_audio_transcribe_config(findings, stt)
 
     for section_name, cfg, expected_model in [
         ("video_generation", video.get("video_generation", {}), "MiniMax-Hailuo-2.3"),
@@ -903,6 +924,40 @@ def run_self_test() -> int:
             print(
                 "SELF_TEST_FAIL endpoint_stale:"
                 f"findings={endpoint_stale_findings}",
+                file=sys.stderr,
+            )
+            return 1
+
+        valid_stt = {
+            "default_vendor": "minimax",
+            "default_model": "asr-1.0",
+            "minimax_models": ["asr-1.0"],
+            "custom_models": ["local-whisper"],
+            "qwen_models": ["qwen3-asr-flash"],
+            "qwen_chat_models": ["qwen3-asr-flash"],
+            "providers": {"minimax": {"model": "asr-1.0"}},
+        }
+        valid_stt_findings: list[str] = []
+        check_audio_transcribe_config(valid_stt_findings, valid_stt)
+        if valid_stt_findings:
+            print(
+                f"SELF_TEST_FAIL valid_stt:findings={valid_stt_findings}",
+                file=sys.stderr,
+            )
+            return 1
+
+        stale_stt = dict(valid_stt)
+        stale_stt.update({"default_vendor": "custom", "default_model": "local-whisper"})
+        stale_stt_findings: list[str] = []
+        check_audio_transcribe_config(stale_stt_findings, stale_stt)
+        expected_stale_stt = {
+            "audio_transcribe.default_vendor must be minimax",
+            "audio_transcribe.default_model must be asr-1.0",
+            "audio_transcribe.providers.minimax.model must match audio_transcribe.default_model",
+        }
+        if not expected_stale_stt.issubset(stale_stt_findings):
+            print(
+                f"SELF_TEST_FAIL stale_stt:findings={stale_stt_findings}",
                 file=sys.stderr,
             )
             return 1

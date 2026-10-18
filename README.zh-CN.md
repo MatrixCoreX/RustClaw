@@ -187,7 +187,7 @@ flowchart TD
 - `Observed-output finalizer`：只有答案形状与证据契约满足后，才发布有观测依据的结果。
 - `Output-contract guard`：保存结果前规范最终文本、`messages` 数组、文件 token、标量/严格输出形状和通道交付一致性。
 - `Journal + session update`：任务状态、观测事实和活跃会话锚点在收尾后持久化；后台记忆任务是可选、非阻塞的。
-- `Task event stream`：journal trace 事件暴露机器可读进度，例如 `task_goal`、`context_budget`、`context_compaction`、`budget_decision`、`task_transition`、`checkpoint_created`、`assistant_output_started|delta|completed|aborted|replaced`、工具/coding/provider/hook/subagent 事件、`agent_team_started`、`subagent_finished`、`agent_team_aggregated` 和 `task_final`。原始 provider delta 始终留在私有边界；只有通过公开输出策略的 `respond/free_text` 字节才成为呈现事件。Provider/context 投影保留 `prompt_truncation_count`、`prompt_bytes_before_max` 等机器指标。CLI 与 UI 直接渲染预算、续跑、goal/checkpoint、验证、child graph、team 和安全的助手输出进度，不读取原始日志或本地化文本来判断状态。Coding 事件是不可变快照：续跑任务会追加更高版本投影，消费者选择最新投影，同时保留之前的红测证据作为历史。
+- `Task event stream`：journal trace 事件暴露机器可读进度，例如 `task_goal`、`context_budget`、`context_compaction`、`budget_decision`、`task_transition`、`checkpoint_created`、`assistant_output_started|delta|completed|aborted|replaced`、工具/coding/provider/hook/subagent 事件、`agent_team_started`、`subagent_finished`、`agent_team_aggregated`、`agent_execution_final` 和终态 `task_final`。单次 agent 执行结束只是内部生命周期事件，不会关闭仍可恢复的任务；只有数据库终态投影会关闭公开实时流。等待、checkpoint 等内部事件只进入活动/教学视图，不会物化成助手聊天消息。原始 provider delta 始终留在私有边界；只有通过公开输出策略的 `respond/free_text` 字节才成为呈现事件。Provider/context 投影保留 `prompt_truncation_count`、`prompt_bytes_before_max` 等机器指标。CLI 与 UI 直接渲染预算、续跑、goal/checkpoint、验证、child graph、team 和安全的助手输出进度，不读取原始日志或本地化文本来判断状态。Coding 事件是不可变快照：续跑任务会追加更高版本投影，消费者选择最新投影，同时保留之前的红测证据作为历史。
 
 ### Planner、LLM 与 Capability 流程
 
@@ -481,6 +481,8 @@ GitHub README 不支持真正的页内分页。详细流程图按顺序维护为
 13. [NNI 能力与心跳控制](docs/architecture/13-nni-capability.zh-CN.md)
 14. [AiPP 技能配套界面](docs/architecture/14-aipp-skill-companions.zh-CN.md)
 15. [AiAPP 开发手册](docs/architecture/15-aipp-development-guide.zh-CN.md)
+16. [运行期资源准入与恢复](docs/architecture/16-runtime-resource-recovery.zh-CN.md)
+17. [RAG 知识检索](docs/architecture/17-rag-knowledge-retrieval.zh-CN.md)
 
 可从[架构索引](docs/architecture/README.md)选择语言并使用上一页/下一页导航。
 完整的[文档索引](docs/README.md)提供全部工程文档的英文与简体中文入口。
@@ -569,8 +571,11 @@ flowchart LR
 ```
 
 `resource_waiting` 是可恢复的生命周期状态，不是任务失败。等待期间仍保留取消、连续修正、
-固定技能收据、已完成副作用和通信端投送收据。资源档位、管理员覆盖、可观测性和验收证据见
-[运行期资源准入与恢复](docs/architecture/16-runtime-resource-recovery.zh-CN.md)。
+固定技能收据、已完成副作用和通信端投送收据。直接 `run_skill` 暂时无法通过资源准入时，
+精确 claim 的任务会带机器字段 `next_check_after` 和有界递增等待重新回到 `queued`，避免 worker
+热循环，也不会把宿主临时资源不足误报成技能失败。低内存设备可以显式配置仅供重任务串行使用的
+swap 余量；该选项默认关闭，也不会允许多个重任务同时消耗这部分余量。资源档位、管理员覆盖、
+可观测性和验收证据见[运行期资源准入与恢复](docs/architecture/16-runtime-resource-recovery.zh-CN.md)。
 
 ## 身份与访问控制
 
@@ -988,19 +993,27 @@ Planner 的技能选择必须由 registry、capability metadata 与 interface/pr
 - 外部技能示例：`external_skills/example/README.md`
 - 技能配置和前置条件参考：`prompts/references/skill_setup_guide.zh-CN.md`
 
-### 本地 STT：whisper.cpp
+### 语音转写后端
+
+当前仓库 `configs/audio.toml` 默认使用 MiniMax `asr-1.0`。本地 whisper.cpp
+仍是离线选项：当 `default_vendor = "custom"` 且 `default_model = "local-whisper"`
+时，runtime 会随主程序启动配置的 loopback 模型服务，并在正常关闭时停止它。
+系统也支持通过 `/chat/completions` `input_audio` 调用 Qwen `qwen3-asr-flash`。
+Provider 与模型只由 `configs/audio.toml` 选择，不根据用户输入的语言猜测。
+
+#### 本地 whisper.cpp
 
 `audio_transcribe` 可以通过 `custom` OpenAI-compatible provider 接本地 whisper.cpp 服务。建议使用专用本地端口，例如 `8178`，避免和 `clawd`、UI 或其他组件端口冲突。
 
 先把多语言模型下载到被 git 忽略的本地模型目录。脚本会按设备内存自动选择 `tiny` / `base` / `small` / `medium`，只有显式传 `--model large-v3` 时才会下载大模型。
 
 ```bash
-MODEL_PATH="$(bash scripts/download-whisper-model.sh --print-path-only)"
-data/vendor/whisper.cpp/build/bin/whisper-server -m "$MODEL_PATH" \
-  --host 127.0.0.1 --port 8178 \
-  --request-path /v1 --inference-path /audio/transcriptions \
-  --convert --language auto
+bash scripts/download-whisper-model.sh
+component_start/start-whisper-server.sh --check
 ```
+
+检查命令只验证已配置的二进制和模型，不启动服务。正常的 `start-all-bin.sh` 和
+`component_start/start-clawd.sh` 启动流程负责实际拉起服务。
 
 中文语音要选多语言 Whisper 模型，例如 `ggml-small.bin`、`ggml-medium.bin` 或 `ggml-large-v3.bin`；不要用 `.en` 结尾的英文专用模型。
 
@@ -1048,6 +1061,9 @@ cd pi_app && ./open-small-screen.sh
 ```
 
 它会读取 `clawd` 的健康状态，所以需要先启动后端。
+树莓派小屏伴随程序运行时，技能遇到登录或人工验证可以从自己的私有存储发布一份短时、
+经过校验的挑战截图。小屏会按设备尺寸缩放显示，并在需要交互时唤起同一个浏览器窗口；
+该流程不会复制浏览器凭据，也不会创建第二套登录会话。
 
 ## 开发说明
 

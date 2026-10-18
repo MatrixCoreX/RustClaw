@@ -190,7 +190,7 @@ Operationally: use `kind=ask` when the user gave a natural-language request and 
 - `Observed-output finalizer`: publishes grounded results only after the answer shape and evidence contract are satisfied.
 - `Output-contract guard`: normalizes final text, message arrays, file tokens, scalar/strict shapes, and channel delivery consistency before the result is saved.
 - `Journal + session update`: task state, observed facts, and active-session anchors are persisted after finalization; background memory work is optional and non-blocking.
-- `Task event stream`: journal trace events expose machine-readable progress such as `task_goal`, `context_budget`, `context_compaction`, `budget_decision`, `task_transition`, `checkpoint_created`, `assistant_output_started|delta|completed|aborted|replaced`, tool/coding/provider/hook/subagent events, `agent_team_started`, `subagent_finished`, `agent_team_aggregated`, and `task_final`. Raw provider deltas remain private; only recognized `respond/free_text` bytes that pass public-output policy become presentation events. Provider/context projections retain machine metrics such as `prompt_truncation_count` and `prompt_bytes_before_max`. CLI and UI render these fields directly, including budget, continuation, goal/checkpoint, verification, child-graph, team, and safe assistant-output progress, instead of reading raw logs or localized text. Coding events are immutable snapshots: a resumed task appends a higher projection revision, and consumers select that latest projection while retaining earlier red-test evidence as history.
+- `Task event stream`: journal trace events expose machine-readable progress such as `task_goal`, `context_budget`, `context_compaction`, `budget_decision`, `task_transition`, `checkpoint_created`, `assistant_output_started|delta|completed|aborted|replaced`, tool/coding/provider/hook/subagent events, `agent_team_started`, `subagent_finished`, `agent_team_aggregated`, `agent_execution_final`, and terminal `task_final`. The end of one agent execution is an internal lifecycle event and does not close a resumable task; only the database-backed terminal task projection closes the public live stream. Waiting, checkpoint, and other internal events stay in the activity/teaching views and are never materialized as assistant chat messages. Raw provider deltas remain private; only recognized `respond/free_text` bytes that pass public-output policy become presentation events. Provider/context projections retain machine metrics such as `prompt_truncation_count` and `prompt_bytes_before_max`. CLI and UI render these fields directly, including budget, continuation, goal/checkpoint, verification, child-graph, team, and safe assistant-output progress, instead of reading raw logs or localized text. Coding events are immutable snapshots: a resumed task appends a higher projection revision, and consumers select that latest projection while retaining earlier red-test evidence as history.
 
 ### Planner, LLM, and Capability Flow
 
@@ -539,6 +539,8 @@ UI renders these same Markdown sources instead of maintaining a second copy:
 13. [NNI capability and heartbeat control](docs/architecture/13-nni-capability.md)
 14. [AiPP skill companion interfaces](docs/architecture/14-aipp-skill-companions.md)
 15. [AiAPP development guide](docs/architecture/15-aipp-development-guide.md)
+16. [Runtime resource admission and recovery](docs/architecture/16-runtime-resource-recovery.md)
+17. [RAG knowledge retrieval](docs/architecture/17-rag-knowledge-retrieval.md)
 
 Use the [architecture index](docs/architecture/README.md) for language selection and previous/next navigation.
 The [full documentation index](docs/README.md) links every engineering document in English and Simplified Chinese.
@@ -614,8 +616,12 @@ flowchart LR
 
 `resource_waiting` is a resumable lifecycle state, not a failed task. The runtime keeps cancellation,
 steering, pinned skill receipts, completed side effects, and channel delivery receipts intact while it
-waits. See [runtime resource admission and recovery](docs/architecture/16-runtime-resource-recovery.md)
-for resource tiers, administrator overrides, observability, and validation evidence.
+waits. A direct `run_skill` admission refusal returns the exact claimed task to `queued` with a machine
+`next_check_after` and bounded increasing delay, so workers neither hot-loop nor report a temporary host
+shortage as a skill failure. Low-memory hosts may explicitly configure serialized swap headroom, but it
+is disabled by default and never allows concurrent heavy work to consume that allowance. See
+[runtime resource admission and recovery](docs/architecture/16-runtime-resource-recovery.md) for
+resource tiers, administrator overrides, observability, and validation evidence.
 
 ## Identity and Access
 
@@ -1199,11 +1205,13 @@ Skill integration entry points:
 
 ### Speech-To-Text Backends
 
-The default `audio_transcribe` path uses local whisper.cpp. When its binary and
-multilingual model are present, Agent Runtime starts the loopback model server with
-the rest of the runtime and stops it during normal shutdown. Qwen
-`qwen3-asr-flash` is also supported through `/chat/completions` `input_audio`;
-select it in `configs/audio.toml` when a working Qwen account is preferred.
+The repository default in `configs/audio.toml` uses MiniMax `asr-1.0`.
+Local whisper.cpp remains an offline option: when `default_vendor = "custom"` and
+`default_model = "local-whisper"`, the runtime starts the configured loopback model
+server with the rest of the runtime and stops it during normal shutdown. Qwen
+`qwen3-asr-flash` is also supported through `/chat/completions` `input_audio`.
+Provider and model selection stays in `configs/audio.toml`; it is not inferred from
+the language of the request.
 
 #### Local whisper.cpp
 
@@ -1266,6 +1274,11 @@ cd pi_app && ./open-small-screen.sh
 ```
 
 It reads health status from `clawd`, so start the backend first.
+On a Raspberry Pi with the companion screen active, a skill that encounters a login
+or manual-verification challenge can publish a short-lived validated capture from its
+private storage. The screen scales that challenge for the device and can reveal the
+same browser window when interaction is required; it does not copy browser credentials
+or create a second login session.
 
 ## Developer Notes
 
