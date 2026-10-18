@@ -65,9 +65,9 @@ export function assertNavigationResponse(response, stage) {
   assertDocumentResponse(response, stage);
 }
 
-export async function navigateDocument(page, url, stage, timeoutMs = 45_000) {
+export async function navigateDocument(page, url, stage, timeoutMs = 45_000, waitUntil = "domcontentloaded") {
   const response = await boundedBrowserOperation(
-    page.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs }), timeoutMs, stage,
+    page.goto(url, { waitUntil, timeout: timeoutMs }), timeoutMs, stage,
   );
   assertNavigationResponse(response, stage);
   return response;
@@ -114,7 +114,10 @@ async function submitKeywordSearch(page, opened, controls, platform, source, tim
     return "platform_search_form";
   } catch (error) {
     if (!typedTimeout(error)) throw error;
-    await navigateDocument(page, source.url, "search_submit_fallback", timeoutMs);
+    // A low-powered browser may keep streaming the search shell long after the
+    // response and DOM are usable. Commit proves that the first-party document
+    // was accepted; the result loop below validates its type and content.
+    await navigateDocument(page, source.url, "search_submit_fallback", timeoutMs, "commit");
     return "platform_search_url_fallback";
   }
 }
@@ -220,13 +223,6 @@ export async function openKeywordSearch(page, platform, source, {
         const onSearchTarget = matchesVerificationTarget(platform, source.url, observedUrl);
         if (onSearchTarget) {
           assertNavigationResponse(responses.get(destination), stage);
-          const loaded = await destination.waitForLoadState("domcontentloaded", {
-            timeout: Math.max(1, Math.min(2000, resultDeadline - Date.now())),
-          }).then(() => true, error => {
-            if (error.name === "TimeoutError") return false;
-            throw error;
-          });
-          if (!loaded) continue;
           const contentType = await boundedBrowserOperation(destination.evaluate(() => document.contentType),
             resultDeadline - Date.now(), stage);
           assertDocumentResponse({ headers: () => ({ "content-type": contentType }) }, stage);

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { chromium } from "playwright";
 import { browserCapability } from "../src/browser.mjs";
-import { openKeywordSearch, normalizeBrowserError } from "../src/browser_search.mjs";
+import { navigateDocument, openKeywordSearch, normalizeBrowserError } from "../src/browser_search.mjs";
 import { platformSpec, sourceTargets } from "../src/platforms.mjs";
 
 const enabled = process.env.MEDIA_DISCOVERY_BROWSER_TEST === "1";
@@ -139,4 +139,20 @@ test("typed timeouts are normalized without inspecting message prose", () => {
   const error = Object.assign(new Error("任意错误文字"), { name: "TimeoutError" });
   assert.equal(normalizeBrowserError(error, "search_submit").message, "browser_timeout");
   assert.equal(normalizeBrowserError(new Error("TimeoutError in plain text"), "search_submit").message, "TimeoutError in plain text");
+});
+
+test("fallback navigation can stop at a committed first-party document", async () => {
+  const response = {
+    status: () => 200,
+    headers: () => ({ "content-type": "text/html; charset=utf-8" }),
+  };
+  const page = {
+    goto: async (url, options) => {
+      assert.equal(url, "https://www.douyin.com/search/finance");
+      assert.equal(options.waitUntil, "commit");
+      return response;
+    },
+  };
+  assert.equal(await navigateDocument(page, "https://www.douyin.com/search/finance",
+    "search_submit_fallback", 1_000, "commit"), response);
 });
