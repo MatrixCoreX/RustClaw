@@ -1,4 +1,5 @@
 import type { TaskEventEnvelope } from "../types/api";
+import { taskEventClosesLiveStream } from "./task-event-stream";
 
 export type ChatActivityStage =
   | "queued"
@@ -286,7 +287,10 @@ export function reduceChatActivity(
       progressTotal: null,
     };
   }
-  if (eventType === "assistant_output_started" || eventType === "task_final") {
+  if (
+    eventType === "assistant_output_started" ||
+    (eventType === "task_final" && taskEventClosesLiveStream(event))
+  ) {
     return {
       ...next,
       stage: "finalizing",

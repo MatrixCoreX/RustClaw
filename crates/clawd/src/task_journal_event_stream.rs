@@ -250,7 +250,7 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
     if journal.final_status.is_some() || journal.final_stop_signal.is_some() {
         events.push(task_event_json(
             &mut seq,
-            "task_final",
+            "agent_execution_final",
             json!({
                 "final_status": journal.final_status.map(TaskJournalFinalStatus::as_str),
                 "final_stop_signal": journal.final_stop_signal.as_deref(),

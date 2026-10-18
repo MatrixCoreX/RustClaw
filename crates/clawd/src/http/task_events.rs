@@ -351,13 +351,23 @@ fn event_is_terminal(value: &Value) -> bool {
         .or_else(|| value.get("event_type"))
         .and_then(Value::as_str)
         .unwrap_or_default();
+    let payload = value.get("payload").unwrap_or(&Value::Null);
     if event_kind == "task_final" {
-        return true;
+        let terminal_status = matches!(
+            payload.get("status").and_then(Value::as_str),
+            Some("succeeded" | "failed" | "canceled" | "timeout")
+        );
+        let terminal_payload_artifact = payload.get("payload_omitted").and_then(Value::as_bool)
+            == Some(true)
+            && payload
+                .pointer("/artifact_ref/event_kind")
+                .and_then(Value::as_str)
+                == Some("task_final");
+        return terminal_status || terminal_payload_artifact;
     }
     if event_kind != "task_state" {
         return false;
     }
-    let payload = value.get("payload").unwrap_or(&Value::Null);
     matches!(
         payload.get("execution_state").and_then(Value::as_str),
         Some("needs_confirmation" | "blocked")

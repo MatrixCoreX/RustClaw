@@ -7,7 +7,7 @@ const parser = new TaskSseParser((event) => events.push(event));
 parser.push(": heart");
 parser.push("beat\n\nid: 1\nevent: tool_started\ndata: {\"schema_version\":1,\"seq\":1,");
 parser.push("\"task_id\":\"task-a\",\"event_kind\":\"tool_started\"}\n\n");
-parser.push("data: {\"schema_version\":1,\"seq\":2,\"task_id\":\"task-a\",\"event_kind\":\"task_final\"}\n\n");
+parser.push("data: {\"schema_version\":1,\"seq\":2,\"task_id\":\"task-a\",\"event_kind\":\"task_final\",\"payload\":{\"status\":\"succeeded\"}}\n\n");
 parser.finish();
 
 if (events.length !== 2 || events[0]?.seq !== 1 || events[1]?.event_kind !== "task_final") {
@@ -47,7 +47,7 @@ const interruptedApiFetch = async (path: string): Promise<Response> => {
       [
         'id: 1\ndata: {"schema_version":1,"seq":1,"task_id":"task-reconnect","event_kind":"tool_started"}',
         "",
-        'id: 2\ndata: {"schema_version":1,"seq":2,"task_id":"task-reconnect","event_kind":"task_final"}',
+        'id: 2\ndata: {"schema_version":1,"seq":2,"task_id":"task-reconnect","event_kind":"task_final","payload":{"status":"succeeded"}}',
         "",
       ].join("\n"),
     ),
@@ -131,7 +131,7 @@ await followTaskEventStream(
         [
           'data: {"schema_version":1,"seq":1,"task_id":"task-ordered","event_kind":"tool_started"}',
           "",
-          'data: {"schema_version":1,"seq":2,"task_id":"task-ordered","event_kind":"task_final"}',
+          'data: {"schema_version":1,"seq":2,"task_id":"task-ordered","event_kind":"task_final","payload":{"status":"succeeded"}}',
           "",
         ].join("\n"),
       ),
@@ -146,6 +146,25 @@ await followTaskEventStream(
   },
 );
 assert.deepEqual(handlerOrder, ["1:tool_started", "2:task_final"]);
+
+assert.equal(
+  taskEventClosesLiveStream({
+    schema_version: 1,
+    task_id: "task-agent-execution-finished",
+    event_kind: "task_final",
+    payload: { final_status: "success" },
+  }),
+  false,
+);
+assert.equal(
+  taskEventClosesLiveStream({
+    schema_version: 1,
+    task_id: "task-terminal",
+    event_kind: "task_final",
+    payload: { status: "succeeded" },
+  }),
+  true,
+);
 
 assert.equal(
   taskEventClosesLiveStream({

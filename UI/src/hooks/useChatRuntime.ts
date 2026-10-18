@@ -25,7 +25,7 @@ import {
   emptyChatActivity,
   reduceChatActivity,
 } from "../lib/chat-activity";
-import { followTaskEventStream } from "../lib/task-event-stream";
+import { followTaskEventStream, taskEventClosesLiveStream } from "../lib/task-event-stream";
 import {
   CLIENT_ORIGIN_HEADER,
 } from "../lib/product-identity";
@@ -867,7 +867,7 @@ export function useChatRuntime({
           }
           const decoded = decodeAssistantPresentationEvent(event);
           if (!decoded) {
-            if (event.event_kind === "task_final") updateLiveThread(threadId, current => ({ ...current, working: false }));
+            if (taskEventClosesLiveStream(event)) updateLiveThread(threadId, current => ({ ...current, working: false }));
             return;
           }
           const stream = await presentation.apply(decoded);
@@ -1755,7 +1755,7 @@ export function useChatRuntime({
         }
         const decoded = decodeAssistantPresentationEvent(event);
         if (!decoded) {
-          if (event.event_kind === "task_final") updateLiveThread(submitThreadId, current => ({ ...current, working: false }));
+          if (taskEventClosesLiveStream(event)) updateLiveThread(submitThreadId, current => ({ ...current, working: false }));
           return;
         }
         const stream = await presentation.apply(decoded);
@@ -1786,8 +1786,9 @@ export function useChatRuntime({
       if (signal.aborted) return false;
       const finalResult = await fetchTaskById(submittedTaskId);
       if (signal.aborted) return false;
-      if (!terminalTaskStatus(finalResult.status)) suspendedChatTaskIdsRef.current.add(submittedTaskId);
-      const finalTaskText = extractTaskText(finalResult);
+      const terminal = terminalTaskStatus(finalResult.status);
+      if (!terminal) suspendedChatTaskIdsRef.current.add(submittedTaskId);
+      const finalTaskText = terminal ? extractTaskText(finalResult) : "";
       if (
         completedPresentationText !== null &&
         completedPresentationText !== finalTaskText
@@ -1814,26 +1815,28 @@ export function useChatRuntime({
         void queryChatTeachingLlmDebug(submittedTaskId);
       }
 
-      const assistantMsg: ChatMessage = {
-        id: streamedAssistantMessageId ?? `a-${Date.now()}`,
-        role: "assistant",
-        text: attachedImages.length > 0 ? formatVisionResultText(finalTaskText) : finalTaskText,
-        ts: Date.now(),
-        artifacts: extractTaskArtifacts(finalResult),
-        artifactDelivery: extractTaskArtifactDeliverySummary(finalResult),
-      };
-      updateChatThreadById(submitThreadId, (thread) => ({
-        ...thread,
-        messages: upsertThreadMessage(thread.messages, assistantMsg),
-        teachingRuns: updateTeachingRunsByTaskId(thread.teachingRuns, submittedTaskId, (run) => ({
-          ...run,
-          assistantMessageId: assistantMsg.id,
-          assistantText: assistantMsg.text,
-          completedAt: terminalTaskStatus(finalResult.status) ? run.completedAt ?? assistantMsg.ts : null,
-        })),
-        updatedAt: Date.now(),
-      }));
-      return terminalTaskStatus(finalResult.status) ? finalResult.status === "succeeded" : "waiting";
+      if (terminal) {
+        const assistantMsg: ChatMessage = {
+          id: streamedAssistantMessageId ?? `a-${Date.now()}`,
+          role: "assistant",
+          text: attachedImages.length > 0 ? formatVisionResultText(finalTaskText) : finalTaskText,
+          ts: Date.now(),
+          artifacts: extractTaskArtifacts(finalResult),
+          artifactDelivery: extractTaskArtifactDeliverySummary(finalResult),
+        };
+        updateChatThreadById(submitThreadId, (thread) => ({
+          ...thread,
+          messages: upsertThreadMessage(thread.messages, assistantMsg),
+          teachingRuns: updateTeachingRunsByTaskId(thread.teachingRuns, submittedTaskId, (run) => ({
+            ...run,
+            assistantMessageId: assistantMsg.id,
+            assistantText: assistantMsg.text,
+            completedAt: run.completedAt ?? assistantMsg.ts,
+          })),
+          updatedAt: Date.now(),
+        }));
+      }
+      return terminal ? finalResult.status === "succeeded" : "waiting";
     } catch (err) {
       if (signal.aborted) return false;
       if (submittedTaskId) suspendedChatTaskIdsRef.current.add(submittedTaskId);

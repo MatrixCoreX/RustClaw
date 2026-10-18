@@ -50,7 +50,7 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         '"coding_checkpoint"',
         '"coding_task_contract"',
         '"coding_evidence"',
-        '"task_final"',
+        '"agent_execution_final"',
         '"step_ref"',
         '"evidence_ref"',
         '"evidence_refs"',

@@ -13,7 +13,17 @@ export interface FollowTaskEventStreamOptions {
 }
 
 export function taskEventClosesLiveStream(event: TaskEventEnvelope): boolean {
-  if (event.event_kind === "task_final") return true;
+  if (event.event_kind === "task_final") {
+    const status = typeof event.payload?.status === "string" ? event.payload.status : "";
+    const artifactRef = event.payload?.artifact_ref;
+    const terminalPayloadArtifact =
+      event.payload?.payload_omitted === true &&
+      artifactRef !== null &&
+      typeof artifactRef === "object" &&
+      "event_kind" in artifactRef &&
+      artifactRef.event_kind === "task_final";
+    return ["succeeded", "failed", "canceled", "timeout"].includes(status) || terminalPayloadArtifact;
+  }
   if (event.event_kind !== "task_state") return false;
   const executionState = typeof event.payload?.execution_state === "string" ? event.payload.execution_state : "";
   const lifecycle = event.payload?.lifecycle;

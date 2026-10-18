@@ -487,6 +487,11 @@ fn publish_journal_snapshot_internal(
         let Some(kind) = event.get("event_type").and_then(Value::as_str) else {
             continue;
         };
+        // Historical journals used `task_final` for the end of one agent
+        // execution, including executions that handed an async job back to the
+        // task runtime. Public task streams reserve `task_final` for the
+        // database-backed terminal task projection below.
+        let kind = persisted_journal_public_event_kind(kind);
         let payload = event.get("payload").cloned().unwrap_or(Value::Null);
         let before = replay_events_after(state, task_id, 0)?
             .newest_seq
@@ -531,6 +536,14 @@ pub(crate) fn publish_loop_state_snapshot(
     }
 }
 
+fn persisted_journal_public_event_kind(kind: &str) -> &str {
+    if kind == "task_final" {
+        "agent_execution_final"
+    } else {
+        kind
+    }
+}
+
 pub(crate) fn publish_persisted_task_events(state: &AppState, task_id: &str) {
     let Ok(uuid) = uuid::Uuid::parse_str(task_id) else {
         return;
@@ -550,6 +563,7 @@ pub(crate) fn publish_persisted_task_events(state: &AppState, task_id: &str) {
         let Some(kind) = event.get("event_type").and_then(Value::as_str) else {
             continue;
         };
+        let kind = persisted_journal_public_event_kind(kind);
         let payload = event.get("payload").cloned().unwrap_or(Value::Null);
         if let Err(error) = publish_event(state, task_id, kind, payload) {
             tracing::warn!(

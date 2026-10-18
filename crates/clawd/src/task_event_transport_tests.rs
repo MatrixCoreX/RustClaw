@@ -52,6 +52,18 @@ fn generated_heartbeat_does_not_change_event_fingerprint_payload() {
 }
 
 #[test]
+fn persisted_journal_final_is_not_published_as_task_terminal() {
+    assert_eq!(
+        persisted_journal_public_event_kind("task_final"),
+        "agent_execution_final"
+    );
+    assert_eq!(
+        persisted_journal_public_event_kind("tool_finished"),
+        "tool_finished"
+    );
+}
+
+#[test]
 fn event_schema_installs_skill_activity_indexes_for_aipp_queries() {
     let state = state();
     publish_event(

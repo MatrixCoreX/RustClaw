@@ -63,7 +63,7 @@ fn trace_json_includes_pollable_machine_event_stream() {
             "tool_step",
             "tool_finished",
             "task_observation",
-            "task_final"
+            "agent_execution_final"
         ]
     );
     assert_eq!(events[0].get("seq").and_then(Value::as_u64), Some(1));
