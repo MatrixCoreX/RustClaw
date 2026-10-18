@@ -115,7 +115,10 @@ Finite and continuous starts emit one machine `media_discovery.collection.starte
   10 even with a time limit; pass `max_items_per_run=0` only when the user explicitly
   requests no count limit. Inspect `run.collection_outcome.stop_reason` and actual
   counts. Continuous batches replay visible results, skip saved posts, and rest
-  after exhausted or stalled pages.
+  after exhausted or stalled pages. A one-shot batch that inspected the source
+  successfully but found only saved posts, or exhausted the source without a
+  capture failure, returns `completed_batch` with zero new records; this is not
+  an execution failure and does not remove earlier results.
 - If the immediately previous assistant reply listed numbered mutually exclusive
   execution choices and the current user message is only that choice index,
   execute it with already-bound platform, topics, and count. Do not re-clarify
@@ -135,7 +138,8 @@ Finite and continuous starts emit one machine `media_discovery.collection.starte
   batch. A new explicitly requested one-shot is separate from continuous-worker
   pause/resume. Zero new records does not mean pre-existing CSV files are empty.
 - `run.searches` records each confirmed search with `platform`, `keyword`,
-  `result_url`, `method=platform_search_form`, and `result_ready=true`. This is
+  `result_url`, a typed `method` (`platform_search_form`, `platform_search_url`,
+  or `platform_search_url_fallback`), and `result_ready=true`. This is
   evidence of entering search results, not evidence of saved posts. Missing
   search controls, an unsubmitted search, missing results, and typed browser
   timeouts report `search_control_unavailable`, `search_not_submitted`,
@@ -153,9 +157,10 @@ Finite and continuous starts emit one machine `media_discovery.collection.starte
   `delivery_requested=false` means no artifact was sent, not that CSV is absent.
 - `waiting_for_network_access` / `network_access_restricted` (Xiaohongshu
   `300012`) rejects the current session only, not an IP-wide block. Do not
-  infer the cause or start probe batches. Zero saved records is not success
-  even when the control returned `status=ok`. No login window for a network
-  restriction. Continuous workers back off 30 minutes to 6 hours.
+  infer the cause or start probe batches. Zero saved records is successful only
+  for a failure-free `no_new_results` or `source_exhausted` receipt; all other
+  empty outcomes remain failures. No login window for a network restriction.
+  Continuous workers back off 30 minutes to 6 hours.
 - `disable` also requests a graceful drain of a matching active batch. Report
   the returned `lifecycle_state`, `drain_run_id`, and `stop_mode` rather than
   claiming an immediate process termination.

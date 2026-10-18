@@ -662,7 +662,7 @@ async function runPlatformBatch(request, args, runtime = {}) {
     progressReporter.stop();
   }
   if (status === "completed_batch" && counts.items === 0) {
-    if (!runtime.backgroundPlatform || counts.failures > 0
+    if (counts.failures > 0
       || !["no_new_results", "source_exhausted"].includes(run.collection_outcome?.stop_reason)) {
       status = "failed";
       errorCode = "no_items_collected";

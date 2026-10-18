@@ -13,7 +13,8 @@ const controls = {
   kuaishou: '<input class="search-input"><button class="search-button">search</button>',
 };
 
-async function pageFixture(t, platform, { popup = false, noSubmit = false, json = false, delay = 0, wrongKeyword = false, newKuaishou = false } = {}) {
+async function pageFixture(t, platform, { popup = false, noSubmit = false, obstructSubmit = false,
+  json = false, delay = 0, wrongKeyword = false, newKuaishou = false } = {}) {
   const browser = await chromium.launch({ executablePath: (await browserCapability()).chromium_executable, headless: true });
   t.after(() => browser.close());
   const context = await browser.newContext();
@@ -30,6 +31,7 @@ async function pageFixture(t, platform, { popup = false, noSubmit = false, json 
     navigations.push(url);
     const markup = newKuaishou ? '<div class="search-container"><div class="search"><input class="input"><input class="input-mini" hidden><div class="search-text">search</div></div></div>' : controls[platform];
     if (url === platformSpec(platform).homeUrl) return route.fulfill({ contentType: "text/html", body: `${markup}
+      ${obstructSubmit ? '<div style="position:fixed;inset:0;z-index:99"></div>' : ""}
       <a href="https://www.douyin.com/video/99999999">recommendation must not qualify</a>
       <script>document.querySelector('button,.search-text').onclick=async()=>{
         const input=document.querySelector('textarea')||document.querySelector('input');
@@ -83,6 +85,15 @@ test("an unsubmitted search never qualifies on recommendation cards", { skip: !e
   // Allow browser IPC under concurrent build load; this case tests rejection, not speed.
   await assert.rejects(openKeywordSearch(f.page, "douyin", f.source, { timeoutMs: 10_000 }), { message: "search_not_submitted" });
   assert.deepEqual(f.submitted, [keyword]);
+});
+
+test("an obstructed Douyin search control falls back to the official result URL", { skip: !enabled }, async t => {
+  const f = await pageFixture(t, "douyin", { obstructSubmit: true });
+  const result = await openKeywordSearch(f.page, "douyin", f.source, { timeoutMs: 4_000 });
+  assert.equal(result.method, "platform_search_url_fallback");
+  assert.deepEqual(f.submitted, []);
+  assert.deepEqual(f.navigations, [platformSpec("douyin").homeUrl, f.target]);
+  assert.equal(result.page.url(), f.target);
 });
 
 test("a new search tab returning JSON fails structurally", { skip: !enabled }, async t => {

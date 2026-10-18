@@ -20,6 +20,7 @@ import {
 } from "../src/platforms.mjs";
 import {
   accessErrorAfterExplicitVisibleWait,
+  currentPlatformAccessError,
   detailNavigationError,
   platformAccessError,
   renderedCardMediaKind,
@@ -346,6 +347,22 @@ test("network restrictions do not wait for a nonexistent manual captcha", async 
   assert.equal(await accessErrorAfterExplicitVisibleWait(page, "xiaohongshu", {
     browser_mode: "visible",
   }), "network_access_restricted");
+});
+
+test("platforms without iframe challenges skip expensive iframe inspection", async () => {
+  let iframeInspections = 0;
+  const page = {
+    locator: selector => {
+      if (selector === "iframe[src]") {
+        iframeInspections += 1;
+        return { evaluateAll: async () => { throw new Error("must not inspect unrelated frames"); } };
+      }
+      return { count: async () => 0 };
+    },
+    url: () => "https://www.tiktok.com/search?q=finance",
+  };
+  assert.equal(await currentPlatformAccessError(page, "tiktok"), null);
+  assert.equal(iframeInspections, 0);
 });
 
 test("only an explicitly visible run waits for a machine challenge to clear", async () => {

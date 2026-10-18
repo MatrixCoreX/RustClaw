@@ -495,17 +495,19 @@ export function platformAccessError(platform, currentUrl, captchaFrameUrls = [])
 
 export async function currentPlatformAccessError(page, platform) {
   assertBrowserFlow(page, "access_check");
-  let captchaFrameUrls;
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    try {
-      captchaFrameUrls = await boundedBrowserOperation(page.locator("iframe[src]").evaluateAll((frames) =>
-        frames.map((frame) => frame.src || ""),
-      ), 10_000, "access_check");
-      break;
-    } catch (error) {
-      if (!/Execution context was destroyed|navigation/iu.test(String(error?.message || ""))
-        || attempt === 7) throw error;
-      await page.waitForTimeout(150);
+  let captchaFrameUrls = [];
+  if (["douyin", "toutiao"].includes(platform)) {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      try {
+        captchaFrameUrls = await boundedBrowserOperation(page.locator("iframe[src]").evaluateAll((frames) =>
+          frames.map((frame) => frame.src || ""),
+        ), 10_000, "access_check");
+        break;
+      } catch (error) {
+        if (!/Execution context was destroyed|navigation/iu.test(String(error?.message || ""))
+          || attempt === 7) throw error;
+        await page.waitForTimeout(150);
+      }
     }
   }
   const accessError = platformAccessError(platform, page.url(), captchaFrameUrls);

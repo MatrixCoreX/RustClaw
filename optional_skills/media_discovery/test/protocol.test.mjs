@@ -117,6 +117,32 @@ test("a completed collection with no items returns a structured retryable error"
   assert.equal(result.extra.retryable, true);
 });
 
+for (const stopReason of ["no_new_results", "source_exhausted"]) {
+  test(`a one-shot collection with ${stopReason} is a successful empty batch`, async (t) => {
+    const context = await requestContext(t);
+    const result = await handleRequest({
+      request_id: `empty-${stopReason}`,
+      args: {
+        action: "run_once",
+        platform: "kuaishou",
+        source_mode: "topics",
+        topics: ["finance"],
+        browser_mode: "silent",
+      },
+      context,
+    }, {
+      collectPlatform: async () => ({ stop_reason: stopReason }),
+    });
+
+    assert.equal(result.status, "ok");
+    assert.equal(result.extra.state, "completed_batch");
+    assert.equal(result.extra.side_effect_applied, false);
+    assert.equal(result.extra.run.counts.items, 0);
+    assert.equal(result.extra.run.counts.failures, 0);
+    assert.equal(result.extra.run.collection_outcome.stop_reason, stopReason);
+  });
+}
+
 test("a silent challenge opens one manual verification session per batch", async (t) => {
   const context = await requestContext(t);
   await handleRequest({

@@ -73,6 +73,52 @@ export async function navigateDocument(page, url, stage, timeoutMs = 45_000) {
   return response;
 }
 
+function typedTimeout(error) {
+  return error?.name === "TimeoutError" || error?.message === "browser_timeout";
+}
+
+async function searchTargetPage(page, opened, platform, targetUrl) {
+  return [page, ...opened]
+    .filter(candidate => !candidate.isClosed())
+    .find(candidate => matchesVerificationTarget(platform, targetUrl, candidate.url())) || null;
+}
+
+async function submitKeywordSearch(page, opened, controls, platform, source, timeoutMs) {
+  if (platform !== "douyin") {
+    await controls.submit.click({ timeout: timeoutMs, noWaitAfter: true });
+    return "platform_search_form";
+  }
+
+  // Douyin frequently leaves a transparent recommendation layer over the
+  // search button on low-powered displays. Enter is the site's normal input
+  // action and avoids waiting for a permanently obstructed pointer target.
+  try {
+    await controls.input.press("Enter", {
+      timeout: Math.max(250, Math.min(2_500, Math.floor(timeoutMs / 4))),
+      noWaitAfter: true,
+    });
+  } catch (error) {
+    if (!typedTimeout(error)) throw error;
+  }
+  const enterDeadline = Date.now() + Math.max(250, Math.min(1_500, Math.floor(timeoutMs / 5)));
+  while (Date.now() < enterDeadline) {
+    if (await searchTargetPage(page, opened, platform, source.url)) return "platform_search_form";
+    await page.waitForTimeout(100);
+  }
+
+  try {
+    await controls.submit.click({
+      timeout: Math.max(250, Math.min(2_500, Math.floor(timeoutMs / 4))),
+      noWaitAfter: true,
+    });
+    return "platform_search_form";
+  } catch (error) {
+    if (!typedTimeout(error)) throw error;
+    await navigateDocument(page, source.url, "search_submit_fallback", timeoutMs);
+    return "platform_search_url_fallback";
+  }
+}
+
 export async function openKeywordSearch(page, platform, source, {
   shouldStop = async () => false, checkAccess = async () => null, timeoutMs = 45_000,
   settle = candidate => candidate.waitForTimeout(750),
@@ -153,7 +199,9 @@ export async function openKeywordSearch(page, platform, source, {
     await check(page);
     await settle(page);
     responses.clear();
-    await controls.submit.click({ timeout: timeoutMs, noWaitAfter: true });
+    const submissionMethod = await submitKeywordSearch(
+      page, opened, controls, platform, source, timeoutMs,
+    );
     stage = "search_results_ready";
     const resultDeadline = Date.now() + timeoutMs;
     let matched = false;
@@ -191,7 +239,7 @@ export async function openKeywordSearch(page, platform, source, {
           if (count > 0) return {
             page: destination,
             source: { ...source, url: validatePlatformUrl(platform, destination.url()) },
-            method: "platform_search_form",
+            method: submissionMethod,
           };
         }
       } catch (error) {
