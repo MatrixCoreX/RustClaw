@@ -1847,6 +1847,7 @@ def _capabilities_extra() -> dict[str, Any]:
         "interactive_login_platforms": [
             "douyin",
             "xiaohongshu",
+            "tiktok",
             "youtube",
             "wechat_channels",
         ],

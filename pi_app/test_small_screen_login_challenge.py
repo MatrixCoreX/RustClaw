@@ -39,6 +39,8 @@ class SmallScreenLoginChallengeTest(unittest.TestCase):
         self.assertEqual(STRINGS["EN"]["login_platform_douyin"], "Douyin")
         self.assertEqual(STRINGS["CN"]["login_platform_kuaishou"], "快手")
         self.assertEqual(STRINGS["EN"]["login_platform_kuaishou"], "Kuaishou")
+        self.assertEqual(STRINGS["CN"]["login_platform_tiktok"], "TikTok")
+        self.assertEqual(STRINGS["EN"]["login_platform_tiktok"], "TikTok")
         self.assertEqual(STRINGS["CN"]["login_platform_weibo"], "微博")
         self.assertEqual(STRINGS["EN"]["login_platform_weibo"], "Weibo")
 

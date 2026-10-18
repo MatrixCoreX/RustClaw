@@ -41,6 +41,7 @@ import media_audio
 import douyin_access
 import wechat_channels_access
 import xiaohongshu_access
+import tiktok_access
 import youtube_access
 from browser_devtools import DevToolsConnection, DevToolsError
 from task_cancellation import CancellationToken, OperationCancelled, terminate_process
@@ -3391,6 +3392,7 @@ def gather_browser_candidates(
     seen: set[str] = set()
     target_urls: list[str] = []
     http_login_barrier = False
+    http_content_unavailable = False
 
     for share_url in urls:
         try:
@@ -3398,7 +3400,7 @@ def gather_browser_candidates(
                 share_url,
                 cookie=cookie,
                 timeout=min(timeout, 20.0),
-                max_bytes=256 * 1024,
+                max_bytes=2 * 1024 * 1024 if platform == "tiktok" else 256 * 1024,
                 extra_headers={"Referer": platform_referer(platform)},
             )
             page_text = decode_text(resolved.content, resolved.headers)
@@ -3430,6 +3432,14 @@ def gather_browser_candidates(
                     )
                 if xhs_target.page_url not in target_urls:
                     target_urls.append(xhs_target.page_url)
+            elif platform == "tiktok":
+                access_state = tiktok_access.classify_page(page_text, resolved.url, item_id)
+                if access_state == tiktok_access.LOGIN_REQUIRED:
+                    http_login_barrier = True
+                    logs.append("tiktok: login_required")
+                elif access_state == tiktok_access.CONTENT_UNAVAILABLE:
+                    http_content_unavailable = True
+                    logs.append("tiktok: content_unavailable")
             elif platform == "toutiao":
                 payload = find_toutiao_item_payload_in_html(page_text, item_id)
                 if payload is not None:
@@ -3545,6 +3555,11 @@ def gather_browser_candidates(
         if platform == "xiaohongshu"
         else None
     )
+    tiktok_profile = (
+        tiktok_access.persistent_profile_dir(browser_profile_dir)
+        if platform == "tiktok"
+        else None
+    )
     pending_targets = list(target_urls)
     login_retry_used = False
     while pending_targets:
@@ -3554,7 +3569,8 @@ def gather_browser_candidates(
         with tempfile.TemporaryDirectory(prefix="media_downloader_chrome_", ignore_cleanup_errors=True) as tmpdir:
             netlog_path = Path(tmpdir) / "netlog.json"
             require_item_match = browser_target_requires_item_match(platform, target_url, item_id)
-            user_data_dir = str(xhs_profile) if xhs_profile is not None else tmpdir
+            persistent_profile = xhs_profile or tiktok_profile
+            user_data_dir = str(persistent_profile) if persistent_profile is not None else tmpdir
             command = [
                 chrome,
                 "--headless=new",
@@ -3831,6 +3847,49 @@ def gather_browser_candidates(
             if status == xiaohongshu_access.DISPLAY_UNAVAILABLE:
                 logs.append("xiaohongshu: display_unavailable")
                 print("xiaohongshu: display_unavailable", file=sys.stderr)
+            break
+
+        if platform == "tiktok" and http_content_unavailable:
+            logs.append("tiktok: unavailable content will not trigger interactive login")
+            break
+
+        if (
+            platform == "tiktok"
+            and tiktok_profile is not None
+            and not login_retry_used
+            and tiktok_access.needs_skill_owned_login(
+                page_text=dump_html,
+                url=target_url,
+                expected_item_id=item_id,
+                has_media=browser_candidates_are_sufficient(
+                    candidates,
+                    image_candidates,
+                    require_audio=require_audio,
+                ),
+                http_login_barrier=http_login_barrier
+                or "tiktok: login_required" in logs,
+                content_unavailable=http_content_unavailable,
+            )
+        ):
+            login_retry_used = True
+            logs.append("tiktok: login_required")
+            print("tiktok: login_required", file=sys.stderr)
+            login_opened, login_finished = parent_login_progress_session("tiktok")
+            login_status = tiktok_access.wait_for_skill_owned_login(
+                chrome=chrome,
+                profile_dir=tiktok_profile,
+                page_url=target_url,
+                on_tick=raise_if_task_cancelled,
+                on_opened=login_opened,
+            )
+            login_finished(login_status)
+            logs.append(f"tiktok: interactive_login={login_status}")
+            print(f"tiktok: interactive_login={login_status}", file=sys.stderr)
+            if login_status == "ok":
+                pending_targets.insert(0, target_url)
+                continue
+            if login_status == tiktok_access.DISPLAY_UNAVAILABLE:
+                logs.append("tiktok: display_unavailable")
             break
 
     if (
@@ -5258,6 +5317,12 @@ def gather_web_platform_candidates(
             resolved.url,
         ):
             logs.append("xiaohongshu: login_required")
+        if platform == "tiktok":
+            access_state = tiktok_access.classify_page(page_text, resolved.url, item_id)
+            if access_state == tiktok_access.LOGIN_REQUIRED:
+                logs.append("tiktok: login_required")
+            elif access_state == tiktok_access.CONTENT_UNAVAILABLE:
+                logs.append("tiktok: content_unavailable")
 
         if platform == "xiaohongshu":
             exact_payload = find_xiaohongshu_note_payload_in_html(page_text, item_id)
@@ -5425,7 +5490,16 @@ def gather_candidates_for_request(
             cookie=cookie,
             timeout=timeout,
         )
-        if not candidates and not image_candidates and browser_fallback:
+        definitely_unavailable = (
+            resolved_platform == "tiktok"
+            and "tiktok: content_unavailable" in platform_logs
+        )
+        if (
+            not candidates
+            and not image_candidates
+            and browser_fallback
+            and not definitely_unavailable
+        ):
             platform_logs.append(f"{resolved_platform}: direct extraction found no candidates, trying browser fallback")
             (
                 browser_item_id,
@@ -6998,6 +7072,8 @@ def gather_candidates_for_request_with_retries(
 
         last_result = result
         if xiaohongshu_access.xiaohongshu_login_outcome_is_terminal(_logs):
+            return result
+        if platform == "tiktok" and tiktok_access.access_outcome_is_terminal(_logs):
             return result
         if attempt < max_attempts:
             print(
@@ -9162,7 +9238,7 @@ def handle_resolved_media(
                 f"Image candidate {index}: priority={candidate.priority} source={candidate.source} {candidate.url}",
                 file=sys.stderr,
             )
-    elif platform == "xiaohongshu":
+    elif platform in {"xiaohongshu", "tiktok"}:
         for line in logs:
             if any(
                 token in line
@@ -9197,13 +9273,24 @@ def handle_resolved_media(
 
     if not candidates and not image_candidates:
         joined_logs = "\n".join(logs)
-        if "xiaohongshu: display_unavailable" in joined_logs:
+        if any(
+            marker in joined_logs
+            for marker in (
+                "xiaohongshu: display_unavailable",
+                "tiktok: display_unavailable",
+                f"tiktok: interactive_login={tiktok_access.DISPLAY_UNAVAILABLE}",
+            )
+        ):
             raise DouyinDownloadError("display_unavailable")
         if "interactive_verification_timeout" in joined_logs:
             raise DouyinDownloadError("interactive_verification_timeout")
         if "interactive_verification_cancelled" in joined_logs:
             raise DouyinDownloadError("interactive_verification_cancelled")
-        if "xiaohongshu: login_required" in joined_logs:
+        tiktok_login_unresolved = (
+            "tiktok: login_required" in joined_logs
+            and "tiktok: interactive_login=ok" not in joined_logs
+        )
+        if "xiaohongshu: login_required" in joined_logs or tiktok_login_unresolved:
             raise DouyinDownloadError("login_required")
         message = (
             "No downloadable video URL was found. The post may be private, unavailable, "

@@ -173,6 +173,55 @@ class ShareTextTest(unittest.TestCase):
                         expected_id,
                     )
 
+    def test_tiktok_explicitly_unavailable_post_skips_browser_login_fallback(self) -> None:
+        direct_result = (
+            "123",
+            [],
+            [],
+            None,
+            ["tiktok: content_unavailable"],
+        )
+        with (
+            mock.patch.object(
+                self.downloader,
+                "gather_web_platform_candidates",
+                return_value=direct_result,
+            ),
+            mock.patch.object(self.downloader, "gather_browser_candidates") as browser,
+        ):
+            result = self.downloader.gather_candidates_for_request(
+                "https://www.tiktok.com/@name/video/123",
+                platform="tiktok",
+                browser_fallback=True,
+            )
+
+        self.assertEqual(result[1], "123")
+        self.assertIn("tiktok: content_unavailable", result[-1])
+        browser.assert_not_called()
+
+    def test_tiktok_completed_login_is_not_reported_as_still_required(self) -> None:
+        args = SimpleNamespace(
+            verbose=False,
+            print_url=True,
+            browser_fallback=True,
+        )
+        with self.assertRaises(self.downloader.DouyinDownloadError) as captured:
+            self.downloader.handle_resolved_media(
+                args,
+                "https://www.tiktok.com/@name/video/123",
+                None,
+                "tiktok",
+                "123",
+                [],
+                [],
+                [
+                    "tiktok: login_required",
+                    "tiktok: interactive_login=ok",
+                ],
+            )
+
+        self.assertNotEqual(str(captured.exception), "login_required")
+
     def test_youtube_app_and_website_share_urls(self) -> None:
         cases = (
             ("https://youtu.be/dQw4w9WgXcQ?si=example", "dQw4w9WgXcQ"),
