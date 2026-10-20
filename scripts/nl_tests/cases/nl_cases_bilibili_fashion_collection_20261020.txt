@@ -1,0 +1,2 @@
+# One-shot Bilibili fashion collection through the normal natural-language planner path.
+bilibili_collection|bilibili_fashion_twenty_zh|optional_skill:media_discovery,provider_mode:live,execution_mode:real,capability:media_discovery.run_once,requires_tool_call:true,external_side_effect|请用媒体发现去哔哩哔哩搜索“穿搭”，静默采集20条内容，只执行这一批，不开启持续采集，也不要下载原视频。保存每条内容的标题、作者文案、发布日期、封面和可读取的互动数据，让我能在AiAPP中查看；最后明确告诉我实际处理、新增、重复和失败数量。我确认执行。|expect=contains:20;confirm:确认执行

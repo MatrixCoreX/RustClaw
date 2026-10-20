@@ -6,6 +6,7 @@ const DATE_SELECTORS = {
   weibo: ['article a[href*="weibo.com/"][class*="time"]', 'article time', 'article [class*="time"]'],
   tiktok: ['[data-e2e="browser-nickname"] span', '[data-e2e="video-author-uniqueid"] + span', "time"],
   youtube: ["#info-strings yt-formatted-string", '[itemprop="datePublished"]', "time"],
+  bilibili: [".pubdate-text", ".video-pubdate", '[itemprop="uploadDate"]', "time"],
 };
 
 export function normalizePublication(value, now = Date.now()) {
@@ -53,7 +54,7 @@ export async function capturePublication(scope, platform, itemId) {
         return { value: note.time, source: "post_state:noteDetailMap.note.time" };
       }
     }
-    const idKeys = { douyin: ["aweme_id", "awemeId"], xiaohongshu: ["noteId", "note_id"], kuaishou: ["photoId", "photo_id", "id"], toutiao: ["itemId", "item_id", "groupId", "group_id"], weibo: ["id", "idstr", "mid", "mblogid"], tiktok: ["id", "aweme_id", "awemeId"], youtube: ["videoId", "video_id", "id"] }[platform] || [];
+    const idKeys = { douyin: ["aweme_id", "awemeId"], xiaohongshu: ["noteId", "note_id"], kuaishou: ["photoId", "photo_id", "id"], toutiao: ["itemId", "item_id", "groupId", "group_id"], weibo: ["id", "idstr", "mid", "mblogid"], tiktok: ["id", "aweme_id", "awemeId"], youtube: ["videoId", "video_id", "id"], bilibili: ["bvid", "aid"] }[platform] || [];
     const timeKeys = platform === "xiaohongshu"
       ? ["publishTime", "publish_time", "createTime", "create_time"]
       : ["publishTime", "publish_time", "createTime", "create_time", "timestamp"];

@@ -5,8 +5,10 @@ use aes::Aes128;
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 use cipher::generic_array::GenericArray;
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::Path;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+const FILE_CRYPTO_CHUNK_BYTES: usize = 256 * 1024;
 
 /// Parse `CDNMedia.aes_key` (base64): raw 16 bytes or base64 of 32-char hex ASCII.
 pub fn parse_aes_key_base64(aes_key_base64: &str, label: &str) -> Result<[u8; 16], String> {
@@ -115,53 +117,70 @@ pub async fn encrypt_aes_128_ecb_file(
     output_path: &Path,
     key: &[u8; 16],
 ) -> Result<(u64, u64), String> {
-    let plaintext_size = tokio::fs::metadata(input_path)
-        .await
+    let input_path = input_path.to_path_buf();
+    let output_path = output_path.to_path_buf();
+    let key = *key;
+    tokio::task::spawn_blocking(move || {
+        encrypt_aes_128_ecb_file_blocking(&input_path, &output_path, &key)
+    })
+    .await
+    .map_err(|error| format!("aes encrypt worker: {error}"))?
+}
+
+fn encrypt_aes_128_ecb_file_blocking(
+    input_path: &Path,
+    output_path: &Path,
+    key: &[u8; 16],
+) -> Result<(u64, u64), String> {
+    let plaintext_size = std::fs::metadata(input_path)
         .map_err(|error| format!("aes input metadata: {error}"))?
         .len();
     let cipher = Aes128::new_from_slice(key).map_err(|_| "aes: bad key len")?;
-    let mut input = tokio::fs::File::open(input_path)
-        .await
-        .map_err(|error| format!("aes input open: {error}"))?;
-    let mut output = tokio::fs::OpenOptions::new()
+    let input =
+        std::fs::File::open(input_path).map_err(|error| format!("aes input open: {error}"))?;
+    let output = std::fs::OpenOptions::new()
         .create_new(true)
         .write(true)
         .open(output_path)
-        .await
         .map_err(|error| format!("aes output create: {error}"))?;
+    let mut input = BufReader::with_capacity(FILE_CRYPTO_CHUNK_BYTES, input);
+    let mut output = BufWriter::with_capacity(FILE_CRYPTO_CHUNK_BYTES, output);
     let full_blocks = plaintext_size / 16;
     let remainder = (plaintext_size % 16) as usize;
-    let mut block_bytes = [0_u8; 16];
-    for _ in 0..full_blocks {
+    let mut remaining_full_bytes = full_blocks.saturating_mul(16);
+    let mut buffer = vec![0_u8; FILE_CRYPTO_CHUNK_BYTES];
+    while remaining_full_bytes > 0 {
+        let read_len = usize::try_from(remaining_full_bytes.min(buffer.len() as u64))
+            .map_err(|_| "aes input chunk exceeds platform address space".to_string())?;
         input
-            .read_exact(&mut block_bytes)
-            .await
+            .read_exact(&mut buffer[..read_len])
             .map_err(|error| format!("aes input read: {error}"))?;
-        let mut block = GenericArray::clone_from_slice(&block_bytes);
-        cipher.encrypt_block(&mut block);
+        for chunk in buffer[..read_len].chunks_exact_mut(16) {
+            let mut block = GenericArray::clone_from_slice(chunk);
+            cipher.encrypt_block(&mut block);
+            chunk.copy_from_slice(&block);
+        }
         output
-            .write_all(&block)
-            .await
+            .write_all(&buffer[..read_len])
             .map_err(|error| format!("aes output write: {error}"))?;
+        remaining_full_bytes = remaining_full_bytes.saturating_sub(read_len as u64);
     }
+    let mut block_bytes = [0_u8; 16];
     let pad = 16 - remainder;
     block_bytes.fill(pad as u8);
     if remainder > 0 {
         input
             .read_exact(&mut block_bytes[..remainder])
-            .await
             .map_err(|error| format!("aes input tail read: {error}"))?;
     }
     let mut block = GenericArray::clone_from_slice(&block_bytes);
     cipher.encrypt_block(&mut block);
     output
         .write_all(&block)
-        .await
         .map_err(|error| format!("aes output tail write: {error}"))?;
     let mut unexpected = [0_u8; 1];
     if input
         .read(&mut unexpected)
-        .await
         .map_err(|error| format!("aes input final read: {error}"))?
         != 0
     {
@@ -169,7 +188,6 @@ pub async fn encrypt_aes_128_ecb_file(
     }
     output
         .flush()
-        .await
         .map_err(|error| format!("aes output flush: {error}"))?;
     let plaintext_size_usize = usize::try_from(plaintext_size)
         .map_err(|_| "aes input exceeds platform address space".to_string())?;
@@ -184,53 +202,77 @@ pub async fn decrypt_aes_128_ecb_file(
     output_path: &Path,
     key: &[u8; 16],
 ) -> Result<u64, String> {
-    let ciphertext_size = tokio::fs::metadata(input_path)
-        .await
+    let input_path = input_path.to_path_buf();
+    let output_path = output_path.to_path_buf();
+    let key = *key;
+    tokio::task::spawn_blocking(move || {
+        decrypt_aes_128_ecb_file_blocking(&input_path, &output_path, &key)
+    })
+    .await
+    .map_err(|error| format!("aes decrypt worker: {error}"))?
+}
+
+fn decrypt_aes_128_ecb_file_blocking(
+    input_path: &Path,
+    output_path: &Path,
+    key: &[u8; 16],
+) -> Result<u64, String> {
+    let ciphertext_size = std::fs::metadata(input_path)
         .map_err(|error| format!("aes ciphertext metadata: {error}"))?
         .len();
     if ciphertext_size == 0 || ciphertext_size % 16 != 0 {
         return Err("aes ecb decrypt: ciphertext not a non-empty multiple of 16".to_string());
     }
     let cipher = Aes128::new_from_slice(key).map_err(|_| "aes: bad key len")?;
-    let mut input = tokio::fs::File::open(input_path)
-        .await
-        .map_err(|error| format!("aes ciphertext open: {error}"))?;
-    let mut output = tokio::fs::OpenOptions::new()
+    let input =
+        std::fs::File::open(input_path).map_err(|error| format!("aes ciphertext open: {error}"))?;
+    let output = std::fs::OpenOptions::new()
         .create_new(true)
         .write(true)
         .open(output_path)
-        .await
         .map_err(|error| format!("aes plaintext create: {error}"))?;
-    let block_count = ciphertext_size / 16;
-    let mut plaintext_size = 0_u64;
-    let mut block_bytes = [0_u8; 16];
-    for index in 0..block_count {
+    let mut input = BufReader::with_capacity(FILE_CRYPTO_CHUNK_BYTES, input);
+    let mut output = BufWriter::with_capacity(FILE_CRYPTO_CHUNK_BYTES, output);
+    let mut remaining_body_bytes = ciphertext_size.saturating_sub(16);
+    let mut buffer = vec![0_u8; FILE_CRYPTO_CHUNK_BYTES];
+    while remaining_body_bytes > 0 {
+        let read_len = usize::try_from(remaining_body_bytes.min(buffer.len() as u64))
+            .map_err(|_| "aes ciphertext chunk exceeds platform address space".to_string())?;
         input
-            .read_exact(&mut block_bytes)
-            .await
+            .read_exact(&mut buffer[..read_len])
             .map_err(|error| format!("aes ciphertext read: {error}"))?;
-        let mut block = GenericArray::clone_from_slice(&block_bytes);
-        cipher.decrypt_block(&mut block);
-        let write_len = if index + 1 == block_count {
-            let pad = block[15] as usize;
-            if pad == 0 || pad > 16 || !block[16 - pad..].iter().all(|byte| *byte as usize == pad) {
-                return Err("pkcs7: inconsistent padding".to_string());
-            }
-            16 - pad
-        } else {
-            16
-        };
+        for chunk in buffer[..read_len].chunks_exact_mut(16) {
+            let mut block = GenericArray::clone_from_slice(chunk);
+            cipher.decrypt_block(&mut block);
+            chunk.copy_from_slice(&block);
+        }
         output
-            .write_all(&block[..write_len])
-            .await
+            .write_all(&buffer[..read_len])
             .map_err(|error| format!("aes plaintext write: {error}"))?;
-        plaintext_size = plaintext_size.saturating_add(write_len as u64);
+        remaining_body_bytes = remaining_body_bytes.saturating_sub(read_len as u64);
+    }
+    let mut final_block_bytes = [0_u8; 16];
+    input
+        .read_exact(&mut final_block_bytes)
+        .map_err(|error| format!("aes ciphertext read: {error}"))?;
+    let mut final_block = GenericArray::clone_from_slice(&final_block_bytes);
+    cipher.decrypt_block(&mut final_block);
+    let pad = final_block[15] as usize;
+    if pad == 0
+        || pad > 16
+        || !final_block[16 - pad..]
+            .iter()
+            .all(|byte| *byte as usize == pad)
+    {
+        return Err("pkcs7: inconsistent padding".to_string());
     }
     output
+        .write_all(&final_block[..16 - pad])
+        .map_err(|error| format!("aes plaintext write: {error}"))?;
+    output
         .flush()
-        .await
         .map_err(|error| format!("aes plaintext flush: {error}"))?;
-    Ok(plaintext_size)
+    Ok(ciphertext_size.saturating_sub(pad as u64))
 }
 
 #[cfg(test)]

@@ -85,6 +85,12 @@ class AdapterTest(unittest.TestCase):
             "local_asr.transcribe",
         )
 
+    def test_private_executables_stay_bound_to_the_launcher_environment(self) -> None:
+        self.assertEqual(
+            self.skill.interpreter_bin_directory("/tmp/example-venv/bin/python3"),
+            Path("/tmp/example-venv/bin"),
+        )
+
     def test_aipp_uses_the_generic_cross_channel_task_activity_contract(self) -> None:
         manifest = tomllib.loads(
             (SKILL_ROOT / "skill.toml").read_text(encoding="utf-8")
@@ -467,6 +473,56 @@ class AdapterTest(unittest.TestCase):
                 self.skill.respond(request)
 
         self.assertEqual(run.call_args.kwargs["timeout"], 3_000)
+
+    def test_resolve_projects_machine_metadata_without_leaking_it_to_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifacts = root / "artifacts"
+            request = {
+                "request_id": "resolve-metadata",
+                "args": {
+                    "action": "resolve",
+                    "share": "https://example.test/public-post",
+                },
+                "context": {
+                    "artifact_output_directory": str(artifacts),
+                    "workspace_root": str(root),
+                    "permissions": {"allow_path_outside_workspace": False},
+                },
+                "user_id": 1,
+                "chat_id": 1,
+            }
+            completed = subprocess.CompletedProcess(
+                ["tool"],
+                0,
+                stdout=(
+                    "https://example.test/video.m4s\n"
+                    "https://example.test/audio.m4s\n"
+                ),
+                stderr=(
+                    '__MEDIA_DOWNLOAD_RESOLVE_METADATA__:{"schema_version":1,'
+                    '"platform":"bilibili","title":"Example title",'
+                    '"video_url_count":1,"audio_url_count":1,"url_count":2,'
+                    '"source":"yt_dlp"}\n'
+                    "provider diagnostic\n"
+                ),
+            )
+            with mock.patch.object(self.skill.subprocess, "run", return_value=completed):
+                response = self.skill.respond(request)
+
+        self.assertEqual(
+            response["extra"]["resolve_metadata"],
+            {
+                "schema_version": 1,
+                "platform": "bilibili",
+                "title": "Example title",
+                "video_url_count": 1,
+                "audio_url_count": 1,
+                "url_count": 2,
+                "source": "yt_dlp",
+            },
+        )
+        self.assertEqual(response["extra"]["diagnostics"], "provider diagnostic")
 
     def test_media_operation_accepts_an_explicit_deadline_beyond_one_hour(self) -> None:
         self.assertEqual(

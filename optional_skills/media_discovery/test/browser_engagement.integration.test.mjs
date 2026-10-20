@@ -106,6 +106,37 @@ test("captures Kuaishou likes from the card's structural control", {
   assert.equal(engagement.metrics.shares, undefined);
 });
 
+test("Bilibili keeps rendered precision and exact structured engagement values", {
+  skip: !RUN_BROWSER_TEST,
+}, async (t) => {
+  const page = await withPage(t, `
+    <script>
+      globalThis.__INITIAL_STATE__ = { videoData: { stat: {
+        view: 610991, like: 54828, reply: 3049, favorite: 24352, share: 1646,
+      } } };
+    </script>
+    <main>
+      <div class="view item">61万</div>
+      <span class="video-like-info">5.5万</span>
+      <span class="video-fav-info">2.4万</span>
+      <span class="video-share-info">1646</span>
+    </main>
+  `);
+  const engagement = await captureEngagementMetrics(
+    page.locator("main"),
+    "bilibili",
+    "2026-10-20T00:00:00.000Z",
+  );
+
+  assert.deepEqual(engagement.metrics, {
+    views: { display: "61万", value: 610991 },
+    likes: { display: "5.5万", value: 54828 },
+    comments: { display: "3049", value: 3049 },
+    favorites: { display: "2.4万", value: 24352 },
+    shares: { display: "1646", value: 1646 },
+  });
+});
+
 test("Kuaishou counters omit hidden tooltips and SVG labels", { skip: !RUN_BROWSER_TEST }, async t => {
   const page = await withPage(t, `<main class="photo-btns">
     <div class="commentPanel"><svg><title>Comment X</title></svg><span style="display:none">tooltip 9999</span><span>4132</span></div>

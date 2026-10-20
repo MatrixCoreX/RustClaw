@@ -46,17 +46,18 @@ test("schema normalization accepts singular platform without natural-language pa
 });
 
 test("implicit all-platform allocation keeps every platform and exactly ten items", async (t) => {
-  const platforms = ["douyin", "xiaohongshu", "kuaishou", "toutiao", "weibo", "tiktok", "youtube"];
+  const platforms = ["douyin", "xiaohongshu", "kuaishou", "toutiao", "weibo", "tiktok", "youtube", "bilibili"];
   const samples = [0, 0.5, 0.999999];
   const allocation = randomPlatformItemAllocation(platforms, 10, () => samples.shift());
   assert.deepEqual(allocation, {
     douyin: 2,
     xiaohongshu: 1,
     kuaishou: 1,
-    toutiao: 2,
-    weibo: 1,
+    toutiao: 1,
+    weibo: 2,
     tiktok: 1,
-    youtube: 2,
+    youtube: 1,
+    bilibili: 1,
   });
   assert.equal(Object.values(allocation).reduce((sum, value) => sum + value, 0), 10);
   assert.throws(() => randomPlatformItemAllocation(platforms, 6), /platform_allocation_too_small/);

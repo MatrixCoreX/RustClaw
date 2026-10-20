@@ -7,6 +7,7 @@ import { handleRequest, normalizedConfig } from "../src/main.mjs";
 import { beginRun, configurePlatforms, readState, readRecords, heartbeat, requestStop,
   finishRun, commitPageRecords, beginBackgroundWorker, finishBackgroundWorker } from "../src/storage.mjs";
 import { grantedBrowserParallelLimit, parallelPlatformLimit } from "../src/run_leases.mjs";
+import { SUPPORTED_PLATFORMS } from "../src/platforms.mjs";
 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-discovery-parallel-"));
@@ -110,7 +111,7 @@ test("one-shot without a platform randomly divides the default ten-item total", 
   assert.deepEqual(observed, result.extra.collection_plan.platform_item_limits);
   assert.equal(result.extra.collection_plan.total_item_limit, 10);
   assert.equal(result.extra.counts.items, 10);
-  assert.equal(Object.keys(observed).length, 7);
+  assert.equal(Object.keys(observed).length, SUPPORTED_PLATFORMS.length);
   assert.ok(Object.values(observed).every(value => value >= 1));
 });
 

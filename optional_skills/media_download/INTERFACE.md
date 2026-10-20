@@ -2,7 +2,7 @@
 
 ## Capability Summary
 
-- Download publicly accessible media from Douyin, Kuaishou, Xiaohongshu, TikTok, YouTube, WeChat Channels, Toutiao, and Weibo share text or URLs. Douyin, Xiaohongshu, WeChat Channels, Toutiao, and Weibo image-article posts attempt every original image plus the platform article by default. Component delivery is best effort: every successfully retrieved image, video, audio, or article is delivered, while an unavailable sibling component does not suppress it. Up to nine images are delivered individually; ten or more are placed in one ordered ZIP so channel attachment limits cannot silently drop later images. When article text is available, normal delivery includes it inline and as a separate UTF-8 text artifact; a large image-set ZIP also contains the article file as a durable copy.
+- Download public media from Douyin, Kuaishou, Xiaohongshu, TikTok, YouTube, Bilibili, WeChat Channels, Toutiao, and Weibo shares. Bilibili BV, AV, and `b23.tv` links use `yt-dlp` with a first-party Referer. Douyin, Xiaohongshu, WeChat Channels, Toutiao, and Weibo image posts attempt every original image plus the platform article. Delivery is best effort: one unavailable component does not suppress successful media or text. Up to nine images are delivered individually; larger sets use one ordered ZIP. Available article text is delivered inline and as a UTF-8 artifact, also included in a large image ZIP.
 - Resolve direct media URLs without downloading.
 - Provide local image OCR and prepare local video for X. Local speech recognition is a separate optional `local_asr` process skill, so ordinary media download never installs or imports Torch, ModelScope, or FunASR. Local image OCR runs Tesseract first and then uses the skill's granted internal LLM gateway for layout and typo review; unavailable review falls back to raw OCR text.
 - Write user-deliverable files to the runtime-provided task artifact directory. For Douyin/Xiaohongshu profile collection, the host also provides this skill's private storage for resumable, content-addressed checkpoints; the skill never reads the runtime database or another skill's storage.
@@ -36,10 +36,10 @@ progress prose from it.
   supported social platform. Use `media_discovery` only for an explicitly
   requested feed, keyword, batch, scheduled, or continuous collection
   workflow.
-- “帮我下载这条抖音/快手/小红书/TikTok/YouTube/微信视频号/今日头条/微博内容” -> `download`
+- “帮我下载这条抖音/快手/小红书/TikTok/YouTube/Bilibili/微信视频号/今日头条/微博内容” -> `download`
 - A message consisting only of a supported public URL -> `download`; do not ask whether the user wants resolution or download.
 - A complete copied app-share message for any supported platform containing a supported URL -> pass the complete text as `share` and run `download` immediately.
-- A supported website share URL -> pass the complete URL as `share` and run `download`. Common website forms include Douyin `/video/<id>` or `/note/<id>`, Kuaishou `/short-video/<id>`, Xiaohongshu `/explore/<note-id>` or `/discovery/item/<note-id>`, TikTok `/@user/video/<id>`, YouTube `watch`, `shorts`, `live`, or `youtu.be` URLs, WeChat Channels `https://weixin.qq.com/sph/<short-code>` URLs, Toutiao `/article/<id>`, `/video/<id>`, `/w/<id>`, `group/<id>`, mobile video-group, or micro-post thread shares, and Weibo `/<uid>/<shortcode>`, mobile `/status/<mid>`/`detail/<mid>`, or `/tv/show/<scope>:<mid>` links. Preserve the original query string.
+- A supported website share URL -> pass the complete URL as `share` and run `download`. Common website forms include Douyin `/video/<id>` or `/note/<id>`, Kuaishou `/short-video/<id>`, Xiaohongshu `/explore/<note-id>` or `/discovery/item/<note-id>`, TikTok `/@user/video/<id>`, YouTube `watch`, `shorts`, `live`, or `youtu.be` URLs, Bilibili `/video/BV...`, `/video/av...`, or `b23.tv` share links, WeChat Channels `https://weixin.qq.com/sph/<short-code>` URLs, Toutiao `/article/<id>`, `/video/<id>`, `/w/<id>`, `group/<id>`, mobile video-group, or micro-post thread shares, and Weibo `/<uid>/<shortcode>`, mobile `/status/<mid>`/`detail/<mid>`, or `/tv/show/<scope>:<mid>` links. Preserve the original query string.
 - Xiaohongshu App and website shares are distinct valid inputs: App copy text commonly carries an `xhslink.cn` or `xhslink.com` short link, while website sharing commonly carries a full `xiaohongshu.com` note URL. Do not ask the user to convert one form into the other.
 - Input behavior is channel-neutral: the same App share text, short link, or website URL must select the same `download` action from the UI, WeChat, WhatsApp, Telegram, Feishu/Lark, or any other host channel.
 - Resource-heavy actions use an explicit host-enforced FIFO per user. A second media task from the same user waits before another runner process is spawned; completion, structured failure, timeout, cancellation, or abnormal process loss releases that user's lane so the next task continues. Different users may run in parallel up to the host's existing global skill concurrency limit. `capabilities` and skills without a `dispatch_queue` declaration keep their prior dispatch behavior.
@@ -87,7 +87,7 @@ After success, expose every generated user-facing delivery artifact through the 
 
 ### `resolve`
 
-Resolve downloadable media URLs from `share` without saving the media.
+Resolve downloadable media URLs from `share` without saving the media. `extra.urls` contains the deduplicated direct URLs. When the provider exposes stream metadata, `extra.resolve_metadata` contains `platform`, `title`, `video_url_count`, `audio_url_count`, `url_count`, and `source`; callers should use those machine fields instead of fetching the page again or inferring stream kinds from URL text.
 
 ### `ocr`
 
@@ -103,7 +103,7 @@ Check or transcode `input_path` for X compatibility. Directories are scanned rec
 |---|---|---:|---|---|---|
 | all | `action` | yes | string | - | One of `capabilities`, `download`, `resolve`, `ocr`, `prepare_x`. |
 | `download`, `resolve` | `share` | yes | string | - | A public URL or an unmodified copied share message containing the URL. |
-| `download`, `resolve` | `platform` | no | string | `auto` | `auto`, `douyin`, `kuaishou`, `xiaohongshu`, `tiktok`, `youtube`, `wechat_channels`, `toutiao`, or `weibo`. |
+| `download`, `resolve` | `platform` | no | string | `auto` | `auto`, `douyin`, `kuaishou`, `xiaohongshu`, `tiktok`, `youtube`, `bilibili`, `wechat_channels`, `toutiao`, or `weibo`. |
 | `download` | `text_conversion_scope` | no | string | omitted/conditional | Use `images_only` for visible/image text, `audio_only` for spoken/audio content, and `images_and_audio` only for an explicit request to process both visual and audio sources. Omit when conversion was not requested; use `none` for an explicit no-conversion request. This protected modifier requires an exact current-request quote in the runtime-only evidence envelope. |
 | `download` | `deliver_to_user` | no | boolean | `true` | Send generated media to the originating channel/UI. Set `false` only when the user explicitly asks not to receive the file; then report its saved path. |
 | `download` | `output_name` | no | string | timestamp | Plain filename only; directories are rejected. |
@@ -199,7 +199,7 @@ Request:
 
 Response:
 ```json
-{"request_id":"media-2","status":"ok","text":"resolve completed with 1 URL.","error_text":null,"extra":{"schema_version":1,"source_skill":"media_download","status":"ok","action":"resolve","count":1,"urls":["https://media.example/video"],"artifacts":[],"output_directory":"/workspace/.agent-runtime/artifacts/task-2","diagnostics":""}}
+{"request_id":"media-2","status":"ok","text":"resolve completed with 2 URLs.","error_text":null,"extra":{"schema_version":1,"source_skill":"media_download","status":"ok","action":"resolve","count":2,"urls":["https://media.example/video","https://media.example/audio"],"resolve_metadata":{"schema_version":1,"platform":"youtube","title":"Example title","video_url_count":1,"audio_url_count":1,"url_count":2,"source":"yt_dlp"},"artifacts":[],"output_directory":"/workspace/.agent-runtime/artifacts/task-2","diagnostics":""}}
 ```
 
 ### OCR local images

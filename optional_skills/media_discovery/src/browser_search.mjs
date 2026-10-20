@@ -23,6 +23,7 @@ const RESULT_SELECTORS = Object.freeze({
   xiaohongshu: 'section.note-item:visible, a[href*="/explore/"]:visible, a[href*="/search_result/"]:visible',
   kuaishou: '.video-card:visible, .video-list .photo-card:visible, a[href*="/short-video/"]:visible',
   toutiao: 'a[href*="/article/"]:visible, a[href*="/video/"]:visible, a[href*="/w/"]:visible, a[href*="/search/jump"]:visible',
+  bilibili: 'a[href*="/video/BV"]:visible, a[href*="/video/av"]:visible',
 });
 
 async function searchResultCount(page, platform, timeoutMs, stage) {

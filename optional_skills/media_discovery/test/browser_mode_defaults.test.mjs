@@ -6,7 +6,7 @@ import test from "node:test";
 import { handleRequest, normalizedConfig } from "../src/main.mjs";
 import { browserCapability } from "../src/browser.mjs";
 
-const defaults = { douyin: "visible", xiaohongshu: "visible", kuaishou: "visible", toutiao: "visible", weibo: "visible", tiktok: "visible", youtube: "visible" };
+const defaults = { douyin: "visible", xiaohongshu: "visible", kuaishou: "visible", toutiao: "visible", weibo: "visible", tiktok: "visible", youtube: "visible", bilibili: "visible" };
 
 async function contextFor(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "discovery-mode-"));

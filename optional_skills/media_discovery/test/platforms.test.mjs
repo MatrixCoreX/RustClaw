@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   canonicalCandidateUrls,
+  canonicalBilibiliResultUrl,
   canonicalTikTokResultUrl,
   canonicalToutiaoResultUrl,
   canonicalWeiboResultUrl,
@@ -30,7 +31,7 @@ import { searchResultLinkIndex } from "../src/browser_search_results.mjs";
 
 test("manual verification retains the selected keyword or blocked detail instead of the home feed", () => {
   const config = { source_mode: "topics", topics: ["财经"] };
-  for (const platform of ["douyin", "xiaohongshu", "kuaishou", "toutiao", "weibo", "tiktok", "youtube"]) {
+  for (const platform of ["douyin", "xiaohongshu", "kuaishou", "toutiao", "weibo", "tiktok", "youtube", "bilibili"]) {
     const target = sourceTargets(platform, config)[0].url;
     const home = sourceTargets(platform, { source_mode: "home_feed" })[0].url;
     assert.equal(manualVerificationTarget(platform, config), target);
@@ -122,6 +123,9 @@ test("candidate discovery uses URL contracts rather than page language", () => {
   assert.equal(isDetailUrl("youtube", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"), true);
   assert.equal(isDetailUrl("youtube", "https://www.youtube.com/shorts/dQw4w9WgXcQ"), true);
   assert.equal(platformItemId("youtube", "https://youtu.be/dQw4w9WgXcQ?t=12"), "youtube:dQw4w9WgXcQ");
+  assert.equal(isDetailUrl("bilibili", "https://www.bilibili.com/video/BV1xx411c7mD"), true);
+  assert.equal(platformItemId("bilibili", "https://www.bilibili.com/video/BV1xx411c7mD?p=2"), "bilibili:BV1xx411c7mD");
+  assert.equal(platformItemId("bilibili", "https://www.bilibili.com/video/av170001"), "bilibili:av170001");
 });
 
 test("TikTok and YouTube result routes normalize to stable post identities", () => {
@@ -149,6 +153,21 @@ test("TikTok and YouTube result routes normalize to stable post identities", () 
     "https://www.youtube.com/@channel",
     "https://www.youtube.com/shorts/dQw4w9WgXcQ",
   ], "https://youtu.be/dQw4w9WgXcQ"), 1);
+});
+
+test("Bilibili result routes normalize BV and av identities", () => {
+  for (const [input, expected] of [
+    ["https://www.bilibili.com/video/BV1xx411c7mD?p=2&vd_source=fixture", "https://www.bilibili.com/video/BV1xx411c7mD"],
+    ["https://m.bilibili.com/video/av170001?from=search", "https://www.bilibili.com/video/av170001"],
+    ["https://b23.tv/BV1xx411c7mD", "https://www.bilibili.com/video/BV1xx411c7mD"],
+  ]) {
+    assert.equal(canonicalBilibiliResultUrl(input), expected);
+  }
+  assert.deepEqual(canonicalCandidateUrls("bilibili", [
+    "https://www.bilibili.com/video/BV1xx411c7mD?p=1",
+    "https://m.bilibili.com/video/BV1xx411c7mD?p=2",
+  ]), ["https://www.bilibili.com/video/BV1xx411c7mD"]);
+  assert.equal(canonicalBilibiliResultUrl("https://outside.example/video/BV1xx411c7mD"), null);
 });
 
 test("Weibo result URLs retain exact post identities across desktop and mobile routes", () => {
@@ -252,6 +271,15 @@ test("home feed and topic sources are explicit schema modes", () => {
   assert.deepEqual(sourceUrls("youtube", { source_mode: "seed_urls", seed_urls: [
     "https://youtu.be/dQw4w9WgXcQ?t=12",
   ] }), ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"]);
+  assert.deepEqual(sourceUrls("bilibili", { source_mode: "home_feed" }), [
+    "https://www.bilibili.com/v/popular/all",
+  ]);
+  assert.deepEqual(sourceUrls("bilibili", { source_mode: "topics", topics: ["AI agent"] }), [
+    "https://search.bilibili.com/all?keyword=AI%20agent",
+  ]);
+  assert.deepEqual(sourceUrls("bilibili", { source_mode: "seed_urls", seed_urls: [
+    "https://www.bilibili.com/video/BV1xx411c7mD?p=2",
+  ] }), ["https://www.bilibili.com/video/BV1xx411c7mD"]);
 });
 
 test("keyword search targets preserve structured keyword order and platform search provenance", () => {

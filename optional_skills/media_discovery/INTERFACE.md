@@ -2,12 +2,10 @@
 
 ## Capability Summary
 
-Run explicitly requested batch, feed, keyword, or continuous background browser collection for Douyin, Xiaohongshu, Kuaishou, Toutiao, Weibo, TikTok, and YouTube. A lone copied share payload or URL whose content should be downloaded and returned now belongs to `media_download.download`, even when it is used as a `seed_urls` input shape; this skill does not provide immediate single-post media delivery. All platforms default to `browser_mode=visible`; pass `silent` only when the user explicitly requests silent or windowless collection. The full macOS release uses its bundled Chromium and source/development installs may use an installed Chrome/Chromium. Collection uses conservative platform-specific pacing/rest; it does not spoof UA/proxy or bypass challenges. A visible run keeps the platform window available for login or human verification. An explicitly silent run may open one temporary manual-verification browser; `/` or `/jingxuan` plus the local confirm tab resumes that batch visibly without solving the slider automatically.
+Run explicitly requested batch, feed, keyword, or continuous background browser collection for Douyin, Xiaohongshu, Kuaishou, Toutiao, Weibo, TikTok, YouTube, and Bilibili. A lone copied share payload or URL whose content should be downloaded and returned now belongs to `media_download.download`, even when it is used as a `seed_urls` input shape; this skill does not provide immediate single-post media delivery. All platforms default to `browser_mode=visible`; pass `silent` only when the user explicitly requests silent or windowless collection. The full macOS release uses its bundled Chromium and source/development installs may use an installed Chrome/Chromium. Collection uses conservative platform-specific pacing/rest; it does not spoof UA/proxy or bypass challenges. A visible run keeps the platform window available for login or human verification. An explicitly silent run may open one temporary manual-verification browser; `/` or `/jingxuan` plus the local confirm tab resumes that batch visibly without solving the slider automatically.
 Rendered media screenshots, author titles (`title`), and captions (`platform_text`, empty without a distinct caption) are stored in `videos.csv` / `images.csv`, without OCR, model review, original-image or video downloads.
-Available views/likes/comments/favorites/shares retain platform display precision;
-plain integer counters also receive exact numeric values. Unavailable fields remain absent.
-Video covers use an unobscured rendered frame, platform poster, or a Douyin/Kuaishou search tile under `video_covers/`;
-blank overlay player shots are discarded. Whole-page and login-dialog screenshots never substitute for missing media.
+Available views/likes/comments/favorites/shares retain platform display precision; plain integer counters also receive exact numeric values. Unavailable fields remain absent.
+Video covers use an unobscured rendered frame, platform poster, or a Douyin/Kuaishou search tile under `video_covers/`; blank overlay player shots are discarded. Whole-page and login-dialog screenshots never substitute for missing media.
 When no count is supplied, a bounded batch targets 10 posts. When no platform is supplied, all supported platforms are selected and those 10 posts are randomly split into positive per-platform limits; the exact allocation is returned in `extra.collection_plan`.
 
 Keyword discovery uses `source_mode=topics` with non-empty `topics[]` in input order.
@@ -22,12 +20,12 @@ Toutiao keyword collection opens its first-party `so.toutiao.com/search?keyword=
 Detail extraction is bound to the requested item ID in `RENDER_DATA`; unrelated recommendations are excluded, while article and micro-post rows preserve the complete body, ordered images, and an exact-content preview when no original image exists.
 Weibo home-feed collection uses its public hot feed, while topic collection uses the first-party search page. Desktop `/<uid>/<shortcode>`, mobile `/status/<mid>` or `/detail/<mid>`, and `/tv/show/<scope>:<mid>` routes share one stable item identity. When Weibo redirects search to its sign-in service, the skill reports `login_required` and, in visible mode, continues after the user signs in through the skill-owned browser profile; it does not request or export cookies. Public seed links remain collectable without login, and extraction is scoped to the primary post rather than sidebar recommendations.
 TikTok topic collection uses its first-party `/search?q=...` page and accepts only exact `@author/video/<id>` or `@author/photo/<id>` results. YouTube topic collection uses `/results?search_query=...`; `/watch?v=<id>`, `/shorts/<id>`, `/live/<id>`, and `youtu.be/<id>` are normalized to one stable video identity. Both platforms preserve the rendered author title/description and a media-only preview. TikTok's explicit cookie banner is accepted in the skill-owned persistent profile before capture. Login and unrecognized consent barriers are reported structurally; visible mode can hand the same profile to the user, without importing or exporting cookies.
+Bilibili topic collection uses the first-party `search.bilibili.com/all?keyword=...` page. `/video/BV...`, `/video/av...`, mobile routes, and direct BV-form `b23.tv` links normalize to one stable post identity. The collector stores the rendered video frame or player poster, title, author caption, publication date, and available interaction counters without downloading the original video.
 Rendered covers must uniquely match public post IDs in the page's loaded state; capture is scoped to the active slide and returns to the same results. A blank player uses the rendered search tile as cover. Douyin jingxuan `.search-result-card` `.videoImage` tiles open `modal_id`
 overlays, not `/video/{id}` hrefs; title, cover, and `/video/{id}` source bind to that overlay, then close. A blank overlay player is not stored as the cover; the visible search tile is. QR-only login modals are barriers; a sidebar sign-in offer alone is not. A Kuaishou search load-more login control is a login barrier when no remaining identifiable cards exist; collection clicks it to open the QR modal, then waits or hands off to the silent manual window. Incidental JSON on the still-unmatched homepage is not the search document. Visible candidates retain DOM order; every committed record keeps its keyword and actual search URL.
 HTTP 404/410 and platform `/404` pages are unavailable posts, not CAPTCHAs. JSON in place of HTML on the matched search document is `unexpected_page_response`, not an empty result. Diagnostics have independent deadlines.
 No localized search phrase is parsed by runtime or skill code.
-Explicit detail `seed_urls` are collected as the exact requested set and do not
-expand into unrelated recommendation links from those pages.
+Explicit detail `seed_urls` are collected as the exact requested set and do not expand into unrelated recommendation links from those pages.
 
 Douyin `home_feed` collection opens the first visible recommendation as one
 detail video through its HTTPS URL before collecting anything. Card-owned
@@ -203,7 +201,7 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 | Param | Required | Description |
 |---|---:|---|
 | `action` | yes | One action listed below. |
-| `platform` or `platforms` | no | `douyin`, `xiaohongshu`, `kuaishou`, `toutiao`, `weibo`, `tiktok`, and/or `youtube`; omission selects all supported platforms. |
+| `platform` or `platforms` | no | `douyin`, `xiaohongshu`, `kuaishou`, `toutiao`, `weibo`, `tiktok`, `youtube`, and/or `bilibili`; omission selects all supported platforms. |
 | `source_mode` | no | `home_feed` (default), `topics`, or `seed_urls`. |
 | `topics` | for topics | One or more exact search keywords, browsed in input order. |
 | `seed_urls` | for seed_urls | HTTPS URLs on the selected platform only. |

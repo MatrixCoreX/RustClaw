@@ -24,7 +24,12 @@ TOOL_DIR = Path(__file__).resolve().parent / "tool"
 sys.path.insert(0, str(TOOL_DIR))
 from video_inputs import prepare_video_inputs, promote_video_audio_delivery
 
-PRIVATE_BIN_DIR = Path(sys.executable).resolve().parent
+def interpreter_bin_directory(executable: str) -> Path:
+    """Preserve a virtual environment's bin path instead of resolving its Python symlink."""
+    return Path(executable).parent
+
+
+PRIVATE_BIN_DIR = interpreter_bin_directory(sys.executable)
 os.environ["PATH"] = os.pathsep.join(
     [str(PRIVATE_BIN_DIR), os.environ.get("PATH", "")]
 ).rstrip(os.pathsep)
@@ -42,6 +47,7 @@ SUPPORTED_PLATFORMS = (
     "xiaohongshu",
     "tiktok",
     "youtube",
+    "bilibili",
     "wechat_channels",
     "toutiao",
     "weibo",
@@ -51,6 +57,7 @@ IMAGE_ARCHIVE_THRESHOLD = 9
 SUBPROCESS_TIMEOUT_SLICE_SECONDS = 24 * 60 * 60
 CHILD_PROGRESS_PREFIX = "__MEDIA_DOWNLOAD_PROGRESS__:"
 CHILD_RESULT_PREFIX = "__MEDIA_DOWNLOAD_RESULT__:"
+RESOLVE_METADATA_PREFIX = "__MEDIA_DOWNLOAD_RESOLVE_METADATA__:"
 PROGRESS_STEP_IDS = {
     "precheck": "media_precheck",
     "download": "download_media",
@@ -1369,7 +1376,9 @@ def _diagnostics(stderr: str) -> str:
     value = "\n".join(
         line
         for line in stderr.splitlines()
-        if not line.strip().startswith((CHILD_PROGRESS_PREFIX, CHILD_RESULT_PREFIX))
+        if not line.strip().startswith(
+            (CHILD_PROGRESS_PREFIX, CHILD_RESULT_PREFIX, RESOLVE_METADATA_PREFIX)
+        )
     ).strip()
     if len(value) <= MAX_DIAGNOSTIC_CHARS:
         return value
@@ -1392,6 +1401,40 @@ def _child_result_metadata(stderr: str) -> dict[str, Any] | None:
         if not isinstance(payload.get("platform"), str):
             continue
         return payload
+    return None
+
+
+def _resolve_metadata(stderr: str) -> dict[str, Any] | None:
+    for line in reversed(stderr.splitlines()):
+        stripped = line.strip()
+        if not stripped.startswith(RESOLVE_METADATA_PREFIX):
+            continue
+        try:
+            payload = json.loads(stripped[len(RESOLVE_METADATA_PREFIX) :])
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+            continue
+        if not isinstance(payload.get("platform"), str):
+            continue
+        title = payload.get("title")
+        if not isinstance(title, str):
+            continue
+        counts = ("video_url_count", "audio_url_count", "url_count")
+        if any(
+            not isinstance(payload.get(name), int) or payload[name] < 0
+            for name in counts
+        ):
+            continue
+        return {
+            "schema_version": 1,
+            "platform": payload["platform"],
+            "title": title[:2_000],
+            "video_url_count": payload["video_url_count"],
+            "audio_url_count": payload["audio_url_count"],
+            "url_count": payload["url_count"],
+            "source": str(payload.get("source") or "")[:64],
+        }
     return None
 
 
@@ -1863,7 +1906,7 @@ def _capabilities_extra() -> dict[str, Any]:
             "ocr_is_separate": True,
         },
         "installed_dependencies": {
-            "youtube": ["yt-dlp"],
+            "yt_dlp_platforms": ["youtube", "bilibili"],
             "media_processing": ["ffmpeg", "ffprobe"],
             "ocr": ["tesseract", "tesseract_language_data"],
             "browser_fallback": ["chromium_or_chrome"],
@@ -2004,6 +2047,7 @@ def respond(
     if action == "download":
         artifacts, diagnostic_files = _partition_download_artifacts(artifacts)
     urls = _urls(stdout) if action == "resolve" else []
+    resolve_metadata = _resolve_metadata(stderr) if action == "resolve" else None
     if action == "resolve" and not urls:
         raise SkillFailure(
             "media resolver completed without returning a downloadable URL",
@@ -2073,6 +2117,8 @@ def respond(
         "output_directory": str(output_dir),
         "diagnostics": _diagnostics(stderr),
     }
+    if resolve_metadata is not None:
+        extra["resolve_metadata"] = resolve_metadata
     if action == "download":
         if source_media is not None:
             extra["source_media"] = source_media

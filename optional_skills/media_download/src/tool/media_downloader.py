@@ -66,6 +66,13 @@ DEFAULT_HEADERS = {
     "Referer": "https://www.douyin.com/",
 }
 
+RESOLVE_METADATA_PREFIX = "__MEDIA_DOWNLOAD_RESOLVE_METADATA__:"
+YTDLP_RESOLVE_METADATA_TEMPLATE = (
+    RESOLVE_METADATA_PREFIX
+    + '{"title":%(title)j,"requested_formats":%(requested_formats)j,'
+    + '"vcodec":%(vcodec)j,"acodec":%(acodec)j}'
+)
+
 SHARE_URL_RE = re.compile(r"https?://[^\s\"'<>，。；：！？）】》、]+")
 SCRIPT_RENDER_DATA_RE = re.compile(
     r'<script[^>]+id=["\']RENDER_DATA["\'][^>]*>(.*?)</script>',
@@ -105,6 +112,12 @@ YOUTUBE_ID_PATTERNS = (
     re.compile(r"[?&]v=([0-9A-Za-z_-]{11})"),
     re.compile(r'"(?:videoId|video_id)"\s*:\s*"([0-9A-Za-z_-]{11})"'),
 )
+BILIBILI_ID_PATTERNS = (
+    re.compile(r"/(?:video/)?(BV[0-9A-Za-z]{10})(?:[/?#]|$)", re.IGNORECASE),
+    re.compile(r"/video/(av\d+)(?:[/?#]|$)", re.IGNORECASE),
+    re.compile(r'"(?:bvid|bvid_str)"\s*:\s*"(BV[0-9A-Za-z]{10})"', re.IGNORECASE),
+    re.compile(r'"(?:aid|avid)"\s*:\s*"?(\d+)"?', re.IGNORECASE),
+)
 TOUTIAO_ID_PATTERNS = (
     re.compile(r"/(?:article|video|w)/(\d{10,})(?:[/?#]|$)"),
     re.compile(r"/(?:group|thread)/(\d{10,})(?:[/?#]|$)"),
@@ -137,6 +150,7 @@ XIAOHONGSHU_DOMAINS = (
 )
 TIKTOK_DOMAINS = ("tiktok.com", "tiktokv.com", "tiktokcdn.com", "vm.tiktok.com", "vt.tiktok.com")
 YOUTUBE_DOMAINS = ("youtube.com", "youtu.be", "youtube-nocookie.com")
+BILIBILI_DOMAINS = ("bilibili.com", "b23.tv")
 TOUTIAO_DOMAINS = ("toutiao.com", "toutiaoimg.cn", "weitoutiao.zjurl.cn")
 WEIBO_DOMAINS = ("weibo.com", "weibo.cn")
 PLATFORMS = (
@@ -146,11 +160,12 @@ PLATFORMS = (
     "xiaohongshu",
     "tiktok",
     "youtube",
+    "bilibili",
     "wechat_channels",
     "toutiao",
     "weibo",
 )
-PLATFORM_ALIASES = {"titok": "tiktok", "yt": "youtube"}
+PLATFORM_ALIASES = {"titok": "tiktok", "yt": "youtube", "bili": "bilibili"}
 PLATFORM_CHOICES = PLATFORMS + tuple(PLATFORM_ALIASES)
 DEFAULT_YOUTUBE_FORMAT = "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b"
 OUTPUT_TIME_FORMAT = "%Y%m%d_%H%M%S"
@@ -443,6 +458,24 @@ def extract_youtube_id(*parts: str) -> str | None:
     return None
 
 
+def extract_bilibili_id(*parts: str) -> str | None:
+    for part in parts:
+        if not part:
+            continue
+        decoded = urllib.parse.unquote(html.unescape(part))
+        for pattern in BILIBILI_ID_PATTERNS:
+            match = pattern.search(decoded)
+            if not match:
+                continue
+            value = match.group(1)
+            if value.lower().startswith("bv"):
+                return f"BV{value[2:]}"
+            if value.lower().startswith("av"):
+                return f"av{value[2:]}"
+            return f"av{value}"
+    return None
+
+
 def extract_toutiao_id(*parts: str) -> str | None:
     for part in parts:
         if not part:
@@ -547,6 +580,8 @@ def detect_platform(text: str) -> str | None:
         return "toutiao"
     if any(domain in lowered for domain in YOUTUBE_DOMAINS):
         return "youtube"
+    if any(domain in lowered for domain in BILIBILI_DOMAINS):
+        return "bilibili"
     if any(domain in lowered for domain in KUAISHOU_DOMAINS):
         return "kuaishou"
     if any(domain in lowered for domain in XIAOHONGSHU_DOMAINS):
@@ -5153,6 +5188,7 @@ def platform_referer(platform: str) -> str:
         "xiaohongshu": "https://www.xiaohongshu.com/",
         "tiktok": "https://www.tiktok.com/",
         "youtube": "https://www.youtube.com/",
+        "bilibili": "https://www.bilibili.com/",
         "wechat_channels": "https://weixin.qq.com/",
         "toutiao": "https://www.toutiao.com/",
         "weibo": "https://weibo.com/",
@@ -5169,6 +5205,8 @@ def extract_platform_id(platform: str, *parts: str) -> str | None:
         return extract_tiktok_id(*parts)
     if platform == "youtube":
         return extract_youtube_id(*parts)
+    if platform == "bilibili":
+        return extract_bilibili_id(*parts)
     if platform == "toutiao":
         return extract_toutiao_id(*parts)
     if platform == "weibo":
@@ -5193,6 +5231,26 @@ def gather_youtube_candidates(
         [],
         None,
         [f"youtube: using yt-dlp for {url}"],
+    )
+
+
+def gather_bilibili_candidates(
+    share_text: str,
+) -> tuple[str | None, list[Candidate], list[ImageCandidate], ArticleContent | None, list[str]]:
+    urls = extract_urls(share_text)
+    if not urls:
+        if share_text.strip().startswith(("http://", "https://")):
+            urls = [share_text.strip()]
+        else:
+            raise DouyinDownloadError("No URL found in the share text.")
+
+    url = urls[0]
+    return (
+        extract_bilibili_id(share_text, url),
+        [Candidate(url, "bilibili.yt-dlp", 1, referer=platform_referer("bilibili"))],
+        [],
+        None,
+        [f"bilibili: using yt-dlp for {url}"],
     )
 
 
@@ -5420,11 +5478,15 @@ def gather_candidates_for_request(
             "Cannot detect platform from the share text. Pass --platform douyin, "
             "--platform kuaishou, --platform xiaohongshu, --platform tiktok, "
             "--platform youtube, --platform wechat_channels, --platform toutiao, "
-            "or --platform weibo."
+            "--platform weibo, or --platform bilibili."
         )
 
     if resolved_platform == "youtube":
         item_id, candidates, image_candidates, article, logs = gather_youtube_candidates(share_text)
+        return resolved_platform, item_id, candidates, image_candidates, article, logs
+
+    if resolved_platform == "bilibili":
+        item_id, candidates, image_candidates, article, logs = gather_bilibili_candidates(share_text)
         return resolved_platform, item_id, candidates, image_candidates, article, logs
 
     if resolved_platform == "wechat_channels":
@@ -6152,7 +6214,7 @@ def find_yt_dlp_binary(yt_dlp_bin: str | None = None) -> str:
 
     found = shutil.which("yt-dlp")
     if not found:
-        raise DouyinDownloadError("yt-dlp is required for YouTube downloads but was not found in PATH.")
+        raise DouyinDownloadError("yt-dlp is required for this platform but was not found in PATH.")
     return found
 
 
@@ -6209,6 +6271,8 @@ def build_youtube_command(
     timeout: float = 20.0,
     overwrite: bool = False,
     print_url: bool = False,
+    referer: str | None = None,
+    browser_headers: bool = False,
 ) -> list[str]:
     command = [
         yt_dlp_bin,
@@ -6224,11 +6288,22 @@ def build_youtube_command(
         command.extend(["--cookies-from-browser", cookies_from_browser])
     if js_runtime:
         command.extend(["--js-runtimes", js_runtime])
+    if referer:
+        command.extend(["--referer", referer])
+    if browser_headers:
+        command.extend(
+            [
+                "--user-agent",
+                DEFAULT_HEADERS["User-Agent"],
+                "--add-header",
+                f"Accept-Language: {DEFAULT_HEADERS['Accept-Language']}",
+            ]
+        )
     if print_url:
-        command.append("--get-url")
+        command.extend(["--get-url", "--print", YTDLP_RESOLVE_METADATA_TEMPLATE])
     else:
         if output_template is None:
-            raise DouyinDownloadError("YouTube output template is required for download.")
+            raise DouyinDownloadError("yt-dlp output template is required for download.")
         command.extend(
             [
                 "--merge-output-format",
@@ -6289,11 +6364,22 @@ def download_youtube_video(
     timeout: float = 20.0,
     overwrite: bool = False,
     verbose: bool = False,
+    platform: str = "youtube",
 ) -> Path:
+    if platform not in {"youtube", "bilibili"}:
+        raise DouyinDownloadError(f"Unsupported yt-dlp platform: {platform}")
     executable = find_yt_dlp_binary(yt_dlp_bin)
     output_template = youtube_output_template(output_dir, output_name, overwrite=overwrite)
-    chrome = find_chrome_executable(chrome_path) if browser_fallback else None
-    profile = youtube_access.persistent_profile_dir(browser_profile_dir)
+    chrome = (
+        find_chrome_executable(chrome_path)
+        if browser_fallback and platform == "youtube"
+        else None
+    )
+    profile = (
+        youtube_access.persistent_profile_dir(browser_profile_dir)
+        if platform == "youtube"
+        else None
+    )
     js_runtime = find_ytdlp_js_runtime()
 
     def run_download(cookies_from_browser: str | None = None) -> subprocess.CompletedProcess[str]:
@@ -6307,6 +6393,8 @@ def download_youtube_video(
             js_runtime=js_runtime,
             timeout=timeout,
             overwrite=overwrite,
+            referer=candidate.referer or platform_referer(platform),
+            browser_headers=platform == "bilibili",
         )
         if verbose:
             print(" ".join(command), file=sys.stderr)
@@ -6314,7 +6402,11 @@ def download_youtube_video(
 
     completed = run_download()
     diagnostic = f"{completed.stderr}\n{completed.stdout}"
-    if completed.returncode != 0 and youtube_access.requires_login_diagnostic(diagnostic):
+    if (
+        platform == "youtube"
+        and completed.returncode != 0
+        and youtube_access.requires_login_diagnostic(diagnostic)
+    ):
         browser_spec = None
         if chrome and profile is not None and youtube_access.profile_has_cookies(profile):
             browser_spec = youtube_access.ytdlp_browser_spec(chrome, profile)
@@ -6363,6 +6455,8 @@ def print_youtube_media_urls(
     cookies_from_browser: str | None = None,
     timeout: float = 20.0,
     verbose: bool = False,
+    referer: str | None = None,
+    platform: str = "youtube",
 ) -> None:
     executable = find_yt_dlp_binary(yt_dlp_bin)
     js_runtime = find_ytdlp_js_runtime()
@@ -6375,13 +6469,55 @@ def print_youtube_media_urls(
         js_runtime=js_runtime,
         timeout=timeout,
         print_url=True,
+        referer=referer or candidate.referer,
+        browser_headers=platform == "bilibili",
     )
     if verbose:
         print(" ".join(command), file=sys.stderr)
     completed = run_task_subprocess(command, check=False, capture_output=True, text=True)
     if completed.returncode != 0:
         raise DouyinDownloadError(ytdlp_error_message(completed))
-    print(completed.stdout.rstrip())
+    metadata: dict[str, Any] | None = None
+    urls: list[str] = []
+    for line in completed.stdout.splitlines():
+        value = line.strip()
+        if value.startswith(RESOLVE_METADATA_PREFIX):
+            try:
+                parsed = json.loads(value[len(RESOLVE_METADATA_PREFIX) :])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                metadata = parsed
+            continue
+        if value:
+            urls.append(value)
+
+    if metadata is not None:
+        requested_formats = metadata.get("requested_formats")
+        formats = (
+            [value for value in requested_formats if isinstance(value, dict)]
+            if isinstance(requested_formats, list)
+            else [metadata]
+        )
+        compact = {
+            "schema_version": 1,
+            "platform": platform,
+            "title": str(metadata.get("title") or "").strip(),
+            "video_url_count": sum(
+                1 for value in formats if value.get("vcodec") not in {None, "none"}
+            ),
+            "audio_url_count": sum(
+                1 for value in formats if value.get("acodec") not in {None, "none"}
+            ),
+            "url_count": len(urls),
+            "source": "yt_dlp",
+        }
+        print(
+            RESOLVE_METADATA_PREFIX
+            + json.dumps(compact, ensure_ascii=False, separators=(",", ":")),
+            file=sys.stderr,
+        )
+    print("\n".join(urls))
 
 
 def download_image_candidate(
@@ -7113,7 +7249,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Download accessible Douyin, Kuaishou, Xiaohongshu, TikTok, YouTube, "
-            "WeChat Channels, Toutiao, or Weibo media "
+            "Bilibili, WeChat Channels, Toutiao, or Weibo media "
             "from copied share text."
         ),
     )
@@ -7237,12 +7373,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--yt-dlp-bin",
-        help="Path or executable name for yt-dlp used by YouTube downloads.",
+        help="Path or executable name for yt-dlp used by YouTube and Bilibili downloads.",
     )
     parser.add_argument(
         "--youtube-format",
         default=DEFAULT_YOUTUBE_FORMAT,
-        help=f"yt-dlp format selector for YouTube downloads. Default: {DEFAULT_YOUTUBE_FORMAT}",
+        help=f"yt-dlp format selector for YouTube and Bilibili downloads. Default: {DEFAULT_YOUTUBE_FORMAT}",
     )
     parser.add_argument(
         "--print-url",
@@ -7542,7 +7678,8 @@ INTERACTIVE_COMMAND_OPTIONS = tuple(
 INTERACTIVE_OPTION_NAMES = tuple(sorted(set(INTERACTIVE_BOOL_OPTIONS) | set(INTERACTIVE_VALUE_OPTIONS)))
 INTERACTIVE_BOOL_VALUES = ("on", "off", "toggle")
 INTERACTIVE_PLATFORM_VALUES = (
-    "auto", "douyin", "kuaishou", "xiaohongshu", "tiktok", "youtube", "wechat_channels", "toutiao", "weibo",
+    "auto", "douyin", "kuaishou", "xiaohongshu", "tiktok", "youtube", "bilibili",
+    "wechat_channels", "toutiao", "weibo",
 )
 
 
@@ -7767,7 +7904,7 @@ def set_interactive_option(
         if value not in PLATFORMS:
             raise DouyinDownloadError(
                 "Invalid platform. Use auto, douyin, kuaishou, xiaohongshu, tiktok, "
-                "youtube, wechat_channels, toutiao, or weibo."
+                "youtube, bilibili, wechat_channels, toutiao, or weibo."
             )
     if normalized == "profile-interval" and float(value) < 0:
         raise DouyinDownloadError("profile-interval must be zero or greater.")
@@ -9307,22 +9444,24 @@ def handle_resolved_media(
     print(media_type_message(platform, candidates, image_candidates, article), file=sys.stderr)
 
     if args.print_url:
-        if platform == "youtube" and candidates:
-            youtube_profile = youtube_access.persistent_profile_dir(
-                getattr(args, "browser_profile_dir", None)
-            )
-            youtube_chrome = (
-                find_chrome_executable(getattr(args, "chrome_path", None))
-                if args.browser_fallback
-                else None
-            )
-            youtube_browser_spec = (
-                youtube_access.ytdlp_browser_spec(youtube_chrome, youtube_profile)
-                if youtube_chrome
-                and youtube_profile is not None
-                and youtube_access.profile_has_cookies(youtube_profile)
-                else None
-            )
+        if platform in {"youtube", "bilibili"} and candidates:
+            youtube_browser_spec = None
+            if platform == "youtube":
+                youtube_profile = youtube_access.persistent_profile_dir(
+                    getattr(args, "browser_profile_dir", None)
+                )
+                youtube_chrome = (
+                    find_chrome_executable(getattr(args, "chrome_path", None))
+                    if args.browser_fallback
+                    else None
+                )
+                youtube_browser_spec = (
+                    youtube_access.ytdlp_browser_spec(youtube_chrome, youtube_profile)
+                    if youtube_chrome
+                    and youtube_profile is not None
+                    and youtube_access.profile_has_cookies(youtube_profile)
+                    else None
+                )
             print_youtube_media_urls(
                 candidates[0],
                 yt_dlp_bin=args.yt_dlp_bin,
@@ -9331,6 +9470,8 @@ def handle_resolved_media(
                 cookies_from_browser=youtube_browser_spec,
                 timeout=args.timeout,
                 verbose=args.verbose,
+                referer=platform_referer(platform),
+                platform=platform,
             )
             return 0
         if candidates:
@@ -9428,7 +9569,7 @@ def handle_resolved_media(
         ocr_images_if_needed(image_paths, Path(image_output_name).stem, args)
         return 0
 
-    if platform == "youtube":
+    if platform in {"youtube", "bilibili"}:
         saved_path = download_youtube_video(
             candidates[0],
             Path(args.output_dir).expanduser(),
@@ -9442,6 +9583,7 @@ def handle_resolved_media(
             timeout=args.timeout,
             overwrite=args.overwrite,
             verbose=args.verbose,
+            platform=platform,
         )
         if args.save_meta:
             save_metadata(saved_path.with_suffix(".json"), platform, item_id, candidates, image_candidates, logs)

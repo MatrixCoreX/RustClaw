@@ -1,4 +1,6 @@
 import importlib.util
+import io
+import json
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -6,6 +8,7 @@ import sys
 import tempfile
 import time
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
 
@@ -153,6 +156,110 @@ class YoutubeDownloadTest(unittest.TestCase):
         )
 
         self.assertNotIn("--js-runtimes", command)
+
+    def test_bilibili_command_includes_first_party_referer(self) -> None:
+        command = self.tool.build_youtube_command(
+            "/venv/yt-dlp",
+            "https://www.bilibili.com/video/BV1xx411c7mD",
+            output_template=Path("/tmp/video.%(ext)s"),
+            referer="https://www.bilibili.com/",
+            browser_headers=True,
+        )
+
+        self.assertEqual(
+            command[command.index("--referer") + 1],
+            "https://www.bilibili.com/",
+        )
+        self.assertEqual(
+            command[command.index("--user-agent") + 1],
+            self.tool.DEFAULT_HEADERS["User-Agent"],
+        )
+        self.assertIn(
+            f"Accept-Language: {self.tool.DEFAULT_HEADERS['Accept-Language']}",
+            command,
+        )
+
+    def test_resolve_emits_compact_metadata_and_keeps_stdout_url_only(self) -> None:
+        provider_payload = {
+            "title": "Example title",
+            "requested_formats": [
+                {"vcodec": "avc1", "acodec": "none"},
+                {"vcodec": "none", "acodec": "mp4a"},
+            ],
+            "vcodec": "none",
+            "acodec": "none",
+        }
+        completed = subprocess.CompletedProcess(
+            ["yt-dlp"],
+            0,
+            "\n".join(
+                [
+                    self.tool.RESOLVE_METADATA_PREFIX + json.dumps(provider_payload),
+                    "https://example.test/video.m4s",
+                    "https://example.test/audio.m4s",
+                ]
+            ),
+            "",
+        )
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(self.tool, "find_yt_dlp_binary", return_value="/venv/yt-dlp"),
+            mock.patch.object(self.tool, "find_ytdlp_js_runtime", return_value=None),
+            mock.patch.object(self.tool, "run_task_subprocess", return_value=completed) as runner,
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+        ):
+            self.tool.print_youtube_media_urls(
+                self.tool.Candidate("https://www.bilibili.com/video/BV1xx411c7mD", "test", 1),
+                platform="bilibili",
+            )
+
+        command = runner.call_args.args[0]
+        self.assertIn(self.tool.YTDLP_RESOLVE_METADATA_TEMPLATE, command)
+        self.assertEqual(
+            stdout.getvalue().splitlines(),
+            ["https://example.test/video.m4s", "https://example.test/audio.m4s"],
+        )
+        metadata_line = stderr.getvalue().strip()
+        self.assertTrue(metadata_line.startswith(self.tool.RESOLVE_METADATA_PREFIX))
+        metadata = json.loads(
+            metadata_line[len(self.tool.RESOLVE_METADATA_PREFIX) :]
+        )
+        self.assertEqual(metadata["title"], "Example title")
+        self.assertEqual(metadata["video_url_count"], 1)
+        self.assertEqual(metadata["audio_url_count"], 1)
+        self.assertEqual(metadata["url_count"], 2)
+
+    def test_bilibili_download_does_not_enter_youtube_login_flow(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+            saved = output / "video.mp4"
+            success = subprocess.CompletedProcess(["yt-dlp"], 0, f"{saved}\n", "")
+            with (
+                mock.patch.object(self.tool, "find_yt_dlp_binary", return_value="/venv/yt-dlp"),
+                mock.patch.object(self.tool, "find_ytdlp_js_runtime", return_value=None),
+                mock.patch.object(self.tool, "find_chrome_executable") as chrome,
+                mock.patch.object(self.tool, "run_task_subprocess", return_value=success) as runner,
+                mock.patch.object(self.tool.youtube_access, "wait_for_skill_owned_login") as login,
+            ):
+                result = self.tool.download_youtube_video(
+                    self.tool.Candidate(
+                        "https://www.bilibili.com/video/BV1xx411c7mD",
+                        "test",
+                        1,
+                        referer="https://www.bilibili.com/",
+                    ),
+                    output,
+                    platform="bilibili",
+                )
+
+        self.assertEqual(result, saved)
+        chrome.assert_not_called()
+        login.assert_not_called()
+        command = runner.call_args.args[0]
+        self.assertEqual(command[command.index("--referer") + 1], "https://www.bilibili.com/")
+        self.assertIn("--user-agent", command)
 
 
 if __name__ == "__main__":

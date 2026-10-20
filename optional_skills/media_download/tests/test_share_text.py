@@ -240,6 +240,39 @@ class ShareTextTest(unittest.TestCase):
                         expected_id,
                     )
 
+    def test_bilibili_app_short_and_website_share_urls(self) -> None:
+        cases = (
+            ("https://www.bilibili.com/video/BV1xx411c7mD?p=2", "BV1xx411c7mD"),
+            ("https://m.bilibili.com/video/av170001", "av170001"),
+            ("https://b23.tv/BV1xx411c7mD", "BV1xx411c7mD"),
+        )
+        for url, expected_id in cases:
+            with self.subTest(url=url):
+                self.assert_share_text(f"Public Bilibili post {url}", url, "bilibili")
+                self.assertEqual(
+                    self.downloader.extract_bilibili_id(url),
+                    expected_id,
+                )
+
+    def test_bilibili_uses_structured_ytdlp_candidate(self) -> None:
+        url = "https://www.bilibili.com/video/BV1xx411c7mD"
+
+        platform, item_id, candidates, images, article, logs = (
+            self.downloader.gather_candidates_for_request(
+                url,
+                platform="auto",
+            )
+        )
+
+        self.assertEqual(platform, "bilibili")
+        self.assertEqual(item_id, "BV1xx411c7mD")
+        self.assertEqual([candidate.url for candidate in candidates], [url])
+        self.assertEqual(candidates[0].source, "bilibili.yt-dlp")
+        self.assertEqual(candidates[0].referer, "https://www.bilibili.com/")
+        self.assertEqual(images, [])
+        self.assertIsNone(article)
+        self.assertIn("bilibili: using yt-dlp", logs[0])
+
     def test_wechat_channels_share_url(self) -> None:
         url = "https://weixin.qq.com/sph/A88dF8Ju34"
         self.assert_share_text(

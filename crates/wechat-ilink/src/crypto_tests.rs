@@ -16,6 +16,9 @@ async fn file_stream_round_trip_matches_in_memory_contract() {
         b"short".to_vec(),
         vec![3_u8; 16],
         vec![9_u8; 16 * 1024 + 7],
+        (0..FILE_CRYPTO_CHUNK_BYTES + 31)
+            .map(|index| (index % 251) as u8)
+            .collect(),
     ] {
         let input = temporary_path("input");
         let encrypted = temporary_path("encrypted");

@@ -57,6 +57,14 @@ const PLATFORM_SPECS = Object.freeze({
     topicNavigation: "direct",
     topicUrl: (topic) => `https://www.youtube.com/results?search_query=${encodeURIComponent(topic)}`,
   },
+  bilibili: {
+    defaultBrowserMode: "visible",
+    homeUrl: "https://www.bilibili.com/v/popular/all",
+    hosts: ["bilibili.com", "b23.tv"],
+    detailPath: /^\/video\/(?:BV[0-9A-Za-z]{10}|av\d+)(?:\/|$)/u,
+    topicNavigation: "direct",
+    topicUrl: (topic) => `https://search.bilibili.com/all?keyword=${encodeURIComponent(topic)}`,
+  },
 });
 
 export const SUPPORTED_PLATFORMS = Object.freeze(Object.keys(PLATFORM_SPECS));
@@ -201,11 +209,25 @@ export function canonicalYouTubeResultUrl(rawUrl) {
   return videoId ? `https://www.youtube.com/watch?v=${videoId}` : null;
 }
 
+function bilibiliVideoId(rawUrl) {
+  let parsed;
+  try { parsed = new URL(String(rawUrl || ""), "https://www.bilibili.com/"); } catch { return null; }
+  if (!hostAllowed(parsed.hostname.toLowerCase(), ["bilibili.com", "b23.tv"])) return null;
+  const match = parsed.pathname.match(/^\/(?:video\/)?(BV[0-9A-Za-z]{10}|av\d+)(?:\/|$)/u);
+  return match?.[1] || null;
+}
+
+export function canonicalBilibiliResultUrl(rawUrl) {
+  const videoId = bilibiliVideoId(rawUrl);
+  return videoId ? `https://www.bilibili.com/video/${videoId}` : null;
+}
+
 export function canonicalPlatformResultUrl(platform, rawUrl) {
   if (platform === "toutiao") return canonicalToutiaoResultUrl(rawUrl);
   if (platform === "weibo") return canonicalWeiboResultUrl(rawUrl);
   if (platform === "tiktok") return canonicalTikTokResultUrl(rawUrl);
   if (platform === "youtube") return canonicalYouTubeResultUrl(rawUrl);
+  if (platform === "bilibili") return canonicalBilibiliResultUrl(rawUrl);
   return rawUrl;
 }
 
@@ -341,6 +363,7 @@ export function isDetailUrl(platform, rawUrl) {
     const normalized = validatePlatformUrl(platform, rawUrl);
     if (platform === "douyin" && douyinModalItemId(normalized)) return true;
     if (platform === "youtube") return canonicalYouTubeResultUrl(normalized) !== null;
+    if (platform === "bilibili") return canonicalBilibiliResultUrl(normalized) !== null;
     return platformSpec(platform).detailPath.test(new URL(normalized).pathname);
   } catch {
     return false;
@@ -384,6 +407,11 @@ export function platformItemId(platform, rawUrl) {
     const videoId = youtubeVideoId(normalized);
     if (!videoId) throw new Error("source_url_invalid");
     return `youtube:${videoId}`;
+  }
+  if (platform === "bilibili") {
+    const videoId = bilibiliVideoId(normalized);
+    if (!videoId) throw new Error("source_url_invalid");
+    return `bilibili:${videoId}`;
   }
   const segments = new URL(normalized).pathname.split("/").filter(Boolean);
   if (platform === "weibo") {

@@ -113,6 +113,7 @@ const PLATFORM_AUTH_COOKIE_NAMES = Object.freeze({
   weibo: new Set(["SUB", "SUBP", "SSOLoginState", "ALF"]),
   tiktok: new Set(["sessionid", "sessionid_ss", "sid_tt", "uid_tt", "uid_tt_ss"]),
   youtube: new Set(["SID", "HSID", "SSID", "APISID", "SAPISID", "__Secure-3PSID"]),
+  bilibili: new Set(["SESSDATA", "DedeUserID", "bili_jct"]),
 });
 
 const ENGAGEMENT_SELECTORS = Object.freeze({
@@ -185,6 +186,13 @@ const ENGAGEMENT_SELECTORS = Object.freeze({
     likes: Object.freeze(['#segmented-like-button button', 'like-button-view-model button']),
     comments: Object.freeze(['ytd-comments-header-renderer #count']),
   }),
+  bilibili: Object.freeze({
+    views: Object.freeze(['.view.item', '.view-text', '.video-data .view']),
+    likes: Object.freeze(['.video-like-info', '.like .info-text']),
+    comments: Object.freeze(['.reply-header .nav-title-text', '.comment-container .reply-header']),
+    favorites: Object.freeze(['.video-fav-info', '.collect .info-text']),
+    shares: Object.freeze(['.video-share-info', '.share .info-text']),
+  }),
 });
 
 const PLATFORM_CAPTION_SELECTOR_GROUPS = Object.freeze({
@@ -253,6 +261,17 @@ const PLATFORM_CAPTION_SELECTOR_GROUPS = Object.freeze({
       "#description-inline-expander #description",
       "ytd-text-inline-expander#description-inline-expander",
       "#description",
+    ]),
+  ]),
+  bilibili: Object.freeze([
+    Object.freeze([
+      'h1.video-title',
+      '.video-info-title-inner h1',
+    ]),
+    Object.freeze([
+      '#v_desc .desc-info-text',
+      '.video-desc-container .basic-desc-info',
+      '.video-desc',
     ]),
   ]),
 });
@@ -371,6 +390,24 @@ export async function captureEngagementMetrics(scope, platform, capturedAt) {
     const value = exactMetricValue(display);
     metrics[name] = value == null ? { display } : { display, value };
   }
+  if (platform === "bilibili") {
+    const stat = await scope.evaluate((root) => {
+      const view = root?.ownerDocument?.defaultView || globalThis;
+      return view.__INITIAL_STATE__?.videoData?.stat || null;
+    }).catch(() => null);
+    const fields = {
+      views: "view",
+      likes: "like",
+      comments: "reply",
+      favorites: "favorite",
+      shares: "share",
+    };
+    for (const [name, field] of Object.entries(fields)) {
+      const value = Number(stat?.[field]);
+      if (!Number.isSafeInteger(value) || value < 0) continue;
+      metrics[name] = { ...(metrics[name] || { display: String(value) }), value };
+    }
+  }
   return {
     schema_version: 1,
     platform,
@@ -488,6 +525,9 @@ export function platformAccessError(platform, currentUrl, captchaFrameUrls = [])
     return "login_required";
   }
   if (platform === "youtube" && current.hostname === "accounts.google.com") {
+    return "login_required";
+  }
+  if (platform === "bilibili" && current.hostname === "passport.bilibili.com") {
     return "login_required";
   }
   return null;
@@ -689,6 +729,7 @@ export async function waitForManualAccess({ page, context, platform, errorCode, 
         weibo: 'article, a[href^="https://weibo.com/"][href*="/"], .card-wrap[action-type="feed_list_item"]',
         tiktok: 'a[href*="/video/"], a[href*="/photo/"], video, [data-e2e="browse-video-desc"]',
         youtube: 'a[href*="/watch?v="], a[href*="/shorts/"], ytd-watch-flexy, video.html5-main-video',
+        bilibili: 'a[href*="/video/BV"], a[href*="/video/av"], .video-container-v1, .bpx-player-video-area video',
       }[platform];
       const visibleSelector = selector.split(",").map(part => `${part.trim()}:visible`).join(",");
       ready = action === "continue" && !accessError && await page.locator(visibleSelector).count() > 0
@@ -1538,6 +1579,17 @@ const VIDEO_COVER_SELECTORS = Object.freeze({
       "video.html5-main-video:visible",
     ]),
   }),
+  bilibili: Object.freeze({
+    rendered_video_frame: Object.freeze([
+      ".bpx-player-video-area video:visible",
+      ".bpx-player-video-wrap video:visible",
+      "video:visible",
+    ]),
+    rendered_poster_image: Object.freeze([
+      ".bpx-player-video-poster:visible",
+      ".bpx-player-video-poster img:visible",
+    ]),
+  }),
 });
 
 async function locatorHasCaptureArea(locator, minimumWidth) {
@@ -1588,7 +1640,7 @@ export async function renderedVideoCover(scope, platform) {
       for (let index = 0; index < count; index += 1) {
         const locator = candidates.nth(index);
         const minimumWidth = platform === "kuaishou" ? 140 : 180;
-        const usable = ["weibo", "tiktok", "youtube"].includes(platform)
+        const usable = ["weibo", "tiktok", "youtube", "bilibili"].includes(platform)
           ? await locatorHasCaptureArea(locator, minimumWidth)
           : await locatorIsUsableCover(locator, minimumWidth, platform);
         if (usable) return { locator, source };
@@ -1614,7 +1666,7 @@ async function capturePaintedCover({
     if (isVideo) await freezeVideoIfPresent(locator);
     try {
       await screenshotLocator(locator, screenshotPath, platform, 10_000, {
-        allowObscured: ["douyin", "weibo", "tiktok", "youtube"].includes(platform),
+        allowObscured: ["douyin", "weibo", "tiktok", "youtube", "bilibili"].includes(platform),
       });
     } catch {
       return null;
@@ -1656,7 +1708,9 @@ async function waitForHydratedDetailCopy(page, platform) {
     ? '[data-e2e="video-desc"]:visible, [data-e2e="browse-video-desc"]:visible'
     : platform === "youtube"
       ? "h1.ytd-watch-metadata yt-formatted-string:visible, #title h1 yt-formatted-string:visible"
-      : null;
+      : platform === "bilibili"
+        ? "h1.video-title:visible, .video-info-title-inner h1:visible"
+        : null;
   if (!selector) return;
   // Both sites commit a lightweight document before hydrating the author
   // copy. Keep the wait bounded and let metadata remain an optional fallback.
@@ -1717,6 +1771,7 @@ async function collectOpenedPage(
         '#main-content-video_detail:visible, article[data-e2e="recommend-list-item-container"]:visible',
       ).first()
         : platform === "youtube" ? page.locator("ytd-watch-flexy:visible, #primary:visible").first()
+          : platform === "bilibili" ? page.locator(".video-container-v1:visible, #app:visible").first()
           : null);
   if (detail && await detail.count() === 0) detail = null;
   if (detail) await detail.waitFor({ state: "visible", timeout: NAVIGATION_TIMEOUT_MS });
