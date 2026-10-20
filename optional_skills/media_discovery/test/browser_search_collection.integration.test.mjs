@@ -84,7 +84,10 @@ for (const [platform, prefix] of [
       assert.equal(record.search_keyword, "财经");
       assert.equal(record.discovery_source_url, source);
       assert.equal(record.published_at, "2026-09-09");
-      assert.ok(record.platform_text.startsWith("Caption"));
+      if (platform === "douyin") {
+        assert.equal(record.platform_text, "");
+        assert.ok(record.title.startsWith("Caption"));
+      } else assert.ok(record.platform_text.startsWith("Caption"));
       assert.equal(record.kind, "image");
       assert.equal(record.engagement.metrics.likes, undefined);
       assert.ok((await fs.stat(path.join(root, "exports", record.image_screenshot_path))).size > 512);

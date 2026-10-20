@@ -1,0 +1,9 @@
+{
+  "extends": "media_discovery_metrics_live_regression_20261020.json",
+  "forbid_filesystem_steps": true,
+  "cases": {
+    "weibo_missing_is_not_zero": { "run_counts": { "items": 0, "examined": 0, "filtered": 0, "filter_unavailable": 0, "failures": 0 }, "expected_filter_status": { "metric": "favorites", "status": "adapter_unsupported" } },
+    "read_saved_toutiao_values_without_browser": { "action": "get_run_results", "platforms": {}, "source_case": "toutiao_collect_matching_and_store_metrics", "verify_reply_values": true },
+    "read_saved_weibo_values_without_browser": { "action": "get_run_results", "platforms": {}, "source_case": "weibo_collect_matching_and_store_metrics", "verify_reply_values": true }
+  }
+}

@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { ENGAGEMENT_METRICS } from "./engagement.mjs";
 
 export const VIDEO_COLUMNS = [
   "sequence",
@@ -25,6 +26,10 @@ export const VIDEO_COLUMNS = [
   "comments",
   "favorites",
   "shares",
+  "reads",
+  "reposts",
+  "coins",
+  "danmaku",
 ];
 
 export const IMAGE_COLUMNS = [
@@ -52,9 +57,13 @@ export const IMAGE_COLUMNS = [
   "comments",
   "favorites",
   "shares",
+  "reads",
+  "reposts",
+  "coins",
+  "danmaku",
 ];
 
-const ENGAGEMENT_COLUMNS = new Set(["views", "likes", "comments", "favorites", "shares"]);
+const ENGAGEMENT_COLUMNS = new Set(ENGAGEMENT_METRICS);
 
 function spreadsheetSafe(value) {
   const text = value == null ? "" : String(value);

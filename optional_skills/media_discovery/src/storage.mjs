@@ -282,6 +282,7 @@ export async function beginRun(root, requestedPlatforms, options = {}) {
       run_id: `run_${randomUUID()}`,
       platforms,
       worker_id: options.worker_id || null,
+      owner_user_id: options.owner_user_id ?? null,
       run_mode: directOneShot ? "one_shot" : options.mode || "enabled_manual",
       platform_configs: platformConfigs,
       browser_modes: Object.fromEntries(

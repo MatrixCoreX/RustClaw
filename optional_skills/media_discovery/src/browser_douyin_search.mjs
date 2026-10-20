@@ -1,7 +1,7 @@
 import { browserStageError } from "./browser_diagnostics.mjs";
 import { stopsCollection } from "./browser_flow_control.mjs";
 import { boundedBrowserOperation } from "./browser_search.mjs";
-import { collectOrderedPages } from "./collection_progress.mjs";
+import { collectOrderedPages, publishCollectionPage } from "./collection_progress.mjs";
 import { douyinModalItemId } from "./platforms.mjs";
 
 const CARD_SELECTOR = ".search-result-card";
@@ -159,8 +159,7 @@ export async function collectDouyinSearchResults({ page, config, limit, shouldSt
         await page.locator("video:visible").first().waitFor({ state: "visible", timeout: 15_000 }).catch(() => {});
         const overlay = await waitForDouyinSearchOverlay(page);
         const result = await collect(page, `https://www.douyin.com/video/${itemId}`, overlay, { fallbackCoverPng });
-        await onPage(result);
-        return undefined;
+        return publishCollectionPage(onPage, result);
       } catch (error) {
         lastError = error;
         throw error;

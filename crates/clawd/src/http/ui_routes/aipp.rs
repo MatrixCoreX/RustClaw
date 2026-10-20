@@ -359,45 +359,6 @@ fn aipp_media_item(record: &Value) -> Option<Value> {
     }))
 }
 
-fn aipp_engagement(record: &Value) -> Option<Value> {
-    let engagement = record.get("engagement")?;
-    if engagement.get("schema_version").and_then(Value::as_u64) != Some(1)
-        || engagement.get("platform").and_then(Value::as_str)
-            != record.get("platform").and_then(Value::as_str)
-    {
-        return None;
-    }
-    let mut metrics = BTreeMap::new();
-    for name in ["views", "likes", "comments", "favorites", "shares"] {
-        let Some(metric) = engagement.pointer(&format!("/metrics/{name}")) else {
-            continue;
-        };
-        let Some(display) = metric
-            .get("display")
-            .and_then(Value::as_str)
-            .filter(|value| {
-                !value.is_empty()
-                    && value.chars().count() <= 32
-                    && !value.chars().any(char::is_control)
-            })
-        else {
-            continue;
-        };
-        metrics.insert(
-            name.to_string(),
-            json!({
-                "display": display,
-                "value": metric.get("value").and_then(Value::as_u64),
-            }),
-        );
-    }
-    Some(json!({
-        "schema_version": 1,
-        "platform": engagement.get("platform").and_then(Value::as_str),
-        "captured_at": bounded_aipp_optional_text(engagement.get("captured_at"), 64),
-        "metrics": metrics,
-    }))
-}
 
 fn bounded_aipp_text(value: Option<&Value>, max_chars: usize) -> String {
     value

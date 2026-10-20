@@ -2247,8 +2247,8 @@ export interface AippMediaItem {
     platform: string;
     captured_at: string | null;
     metrics: Partial<Record<
-      "views" | "likes" | "comments" | "favorites" | "shares",
-      { display: string; value: number | null }
+      "views" | "reads" | "likes" | "comments" | "favorites" | "shares" | "reposts" | "coins" | "danmaku",
+      { display: string; value: number | null; source?: string | null }
     >>;
   } | null;
 }

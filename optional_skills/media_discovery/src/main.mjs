@@ -17,6 +17,11 @@ import {
 } from "./progress.mjs";
 import { activeRuns, grantedBrowserParallelLimit, mapBounded, parallelPlatformLimit } from "./run_leases.mjs";
 import { completedDiscoveryPosts, optionalLimit, rememberCompletedPost } from "./collection_progress.mjs";
+import { evaluateEngagementFilters, hasEngagementFilters, normalizeEngagementFilters } from "./engagement.mjs";
+import { recordFilterDiagnostics, requestedMetricSupport } from "./engagement_availability.mjs";
+import { supportedEngagementMetrics } from "./browser_engagement.mjs";
+import { capturedRunResults, getRunResults, resultOwner } from "./results.mjs";
+import { parseSkillRequest } from "./request.mjs";
 import {
   beginBackgroundWorker,
   backgroundWorkerIsFresh,
@@ -98,6 +103,9 @@ const ERROR_CODES = new Set([
   "source_unavailable",
   "unexpected_page_response",
   "storage_lock_timeout",
+  "result_actor_required",
+  "result_run_not_found",
+  "engagement_filter_unavailable",
 ]);
 const ACTIONS = new Set([
   "capabilities",
@@ -111,6 +119,7 @@ const ACTIONS = new Set([
   "resume",
   "stop_current",
   "list_runs",
+  "get_run_results",
   "export_results",
   "clear_results",
 ]);
@@ -138,6 +147,7 @@ const RETRY_BACKOFF_MS = Object.freeze({
   rate_limited: Object.freeze({ base: 10 * 60 * 1000, maximum: 2 * 60 * 60 * 1000 }),
 });
 const RUN_CONFIG_FIELDS = Object.freeze([
+  "engagement_filters",
   "source_mode",
   "topics",
   "seed_urls",
@@ -181,6 +191,7 @@ export function normalizedConfig(args, platform = args.platform) {
   const pacingMaxDelayMs = integer(args.pacing_max_delay_ms, pacing.interaction_max_ms, 200, 8000);
   if (pacingMaxDelayMs < pacingMinDelayMs) throw new Error("invalid_args");
   const config = {
+    engagement_filters: normalizeEngagementFilters(args.engagement_filters),
     source_mode: sourceMode,
     topics: Array.isArray(args.topics) ? args.topics.map(String).map((value) => value.trim()).filter(Boolean) : [],
     seed_urls: Array.isArray(args.seed_urls) ? args.seed_urls.map(String) : [],
@@ -358,10 +369,19 @@ function backgroundStartSpec() {
 async function preview(args, runtime = {}) {
   const { platforms, collection_plan: collectionPlanResult } = collectionPlan(args, runtime.random);
   const configs = platformConfigs(args, platforms, collectionPlanResult?.platform_item_limits);
+  const metricSupport = Object.fromEntries(platforms.map(platform => [platform,
+    requestedMetricSupport(configs[platform].engagement_filters, platform, supportedEngagementMetrics(platform))]));
   return success("preview_enable", {
     platforms,
     ...(platforms.length === 1 ? { config: configs[platforms[0]] } : {}),
     platform_configs: configs,
+    metric_support: metricSupport,
+    model_observation: {
+      action: "preview_enable", platforms, platform_configs: configs,
+      metric_support: metricSupport,
+      ...(collectionPlanResult ? { collection_plan: collectionPlanResult } : {}),
+      side_effect_applied: false,
+    },
     ...(collectionPlanResult ? { collection_plan: collectionPlanResult } : {}),
     browser: await browserCapability(),
     background_start_spec: backgroundStartSpec(),
@@ -444,9 +464,21 @@ async function runOnce(request, args, runtime = {}) {
     platforms,
     runs,
     counts,
+    results: results.flatMap(result => result.value?.extra?.results || result.error?.extra?.results || []).slice(0, 20),
+    result_queries: results.flatMap(result => {
+      const query = result.value?.extra?.result_query || result.error?.extra?.result_query;
+      return query ? [query] : [];
+    }),
+    filter_report: runs.flatMap(run => run.filter_report || []),
     ...(collectionPlanResult ? { collection_plan: collectionPlanResult } : {}),
     side_effect_applied: counts.videos + counts.images > 0,
   };
+  extra.result_page = { total: results.reduce((sum, result) => sum + (result.value?.extra?.result_page?.total
+    || result.error?.extra?.result_page?.total || 0), 0), returned: extra.results.length };
+  extra.result_page.has_more = extra.result_page.total > extra.result_page.returned;
+  extra.model_observation = { action: "run_once", state: "completed_batch", platforms, counts,
+    results: extra.results, result_page: extra.result_page, result_queries: extra.result_queries,
+    filter_report: extra.filter_report, side_effect_applied: extra.side_effect_applied };
   if (runs.some(run => run.error_code)) {
     throw Object.assign(new Error("partial_collection_failed"), { extra });
   }
@@ -466,12 +498,17 @@ async function runPlatformBatch(request, args, runtime = {}) {
     config_explicit: configExplicit,
     worker_id: runtime.workerId,
     parallel_limit: runtime.parallelLimit,
+    owner_user_id: resultOwner(request),
   });
   if (!run) return success("run_once", { state: "disabled_or_paused", side_effect_applied: false });
   runtime.notifyStart?.(run);
   run.searches = [];
   const counts = { items: 0, videos: 0, images: 0, duplicates: 0, failures: 0 };
+  if (run.platforms.some(platform => hasEngagementFilters(run.platform_configs[platform], platform))) {
+    Object.assign(counts, { examined: 0, filtered: 0, filter_unavailable: 0, filter_uncertain: 0 });
+  }
   const captureSummary = { records_saved: 0, captions_saved: 0, covers_saved: 0, engagement_metrics: [] };
+  run.filter_report = [];
   const progressReporter = { emitIfDue: () => false, stop: () => {} };
   let status = "completed_batch";
   let errorCode = null;
@@ -487,6 +524,14 @@ async function runPlatformBatch(request, args, runtime = {}) {
     ) * 60 * 1000;
     for (const platform of run.platforms) {
       const config = run.platform_configs[platform];
+      const support = requestedMetricSupport(config.engagement_filters, platform, supportedEngagementMetrics(platform));
+      if (!support.evaluable) {
+        run.filter_report.push(...support.unsupported_metrics.map(metric => ({ platform, metric,
+          status: "adapter_unsupported", posts: 0, blocks_match: true, retryable: false })));
+        run.collection_outcome = { stop_reason: "filter_not_evaluable", handled: 0 };
+        if (runtime.backgroundPlatform) throw new Error("engagement_filter_unavailable");
+        continue;
+      }
       const completedPosts = completedDiscoveryPosts(
         runtime.backgroundPlatform ? await readRecords(root) : [], platform, config,
       );
@@ -502,9 +547,22 @@ async function runPlatformBatch(request, args, runtime = {}) {
         limit: remaining,
         shouldStop: async () => Boolean(runtime.shouldShutdown?.()) || Date.now() >= deadline || (await heartbeat(root, run.run_id, counts)),
         onSearch: async evidence => { run.searches.push(evidence); },
-        onPage: async ({ records, temporaryPaths }) => {
+        onPage: async ({ records, temporaryPaths = [], skipped, filter_decision: filterDecision }) => {
+          const filtering = hasEngagementFilters(config, platform);
+          if (filtering) counts.examined = (counts.examined || 0) + 1;
+          const decision = filterDecision || (filtering
+            ? evaluateEngagementFilters(records[0]?.engagement, config.engagement_filters, platform) : null);
+          if (decision) recordFilterDiagnostics(run.filter_report, platform, decision);
           try {
-            const result = await commitPageRecords(root, records, run.run_id);
+            if (skipped || decision && !decision.matched) {
+              counts.filtered = (counts.filtered || 0) + 1;
+              if (decision?.reason === "metric_unavailable") counts.filter_unavailable = (counts.filter_unavailable || 0) + 1;
+              if (decision?.reason === "metric_precision_insufficient") counts.filter_uncertain = (counts.filter_uncertain || 0) + 1;
+              await heartbeat(root, run.run_id, counts);
+              return { skipped: true };
+            }
+            const result = await commitPageRecords(root, records.map(record => ({ ...record,
+              run_id: run.run_id, owner_user_id: run.owner_user_id })), run.run_id);
             rememberCompletedPost(completedPosts, records);
             counts.items += 1;
             for (const record of result.committed) counts[record.kind === "video" ? "videos" : "images"] += 1;
@@ -663,7 +721,7 @@ async function runPlatformBatch(request, args, runtime = {}) {
   }
   if (status === "completed_batch" && counts.items === 0) {
     if (counts.failures > 0
-      || !["no_new_results", "source_exhausted"].includes(run.collection_outcome?.stop_reason)) {
+      || !counts.filtered && !["no_new_results", "source_exhausted", "filter_not_evaluable"].includes(run.collection_outcome?.stop_reason)) {
       status = "failed";
       errorCode = "no_items_collected";
       if (counts.failures === 0) counts.failures = 1;
@@ -684,18 +742,26 @@ async function runPlatformBatch(request, args, runtime = {}) {
   run.browser_session_open = false;
   if (failureDiagnostic) run.failure_diagnostic = failureDiagnostic;
   const completed = await finishRun(root, run, status, errorCode);
+  const resultPayload = await capturedRunResults(root, completed, request);
+  const modelObservation = { action: "run_once", state: status, run_id: run.run_id,
+    counts, capture_summary: captureSummary, collection_outcome: run.collection_outcome,
+    filter_report: run.filter_report, ...resultPayload,
+    side_effect_applied: counts.videos + counts.images > 0 };
   if (status !== "failed") {
     await fs.rm(path.join(root, "tmp", run.run_id), { recursive: true, force: true }).catch(() => {});
   }
   if (status === "failed" || isOneShotManualVerificationBarrier(runtime, errorCode)) {
     throw Object.assign(new Error(errorCode), {
-      extra: { run_id: run.run_id, run: completed, state: status,
+      extra: { run_id: run.run_id, run: completed, state: status, ...resultPayload,
+        model_observation: { ...modelObservation, error_code: errorCode },
         ...(failureDiagnostic ? { failure_diagnostic: failureDiagnostic } : {}) },
     });
   }
   return success("run_once", {
     state: status,
     run: completed,
+    ...resultPayload,
+    model_observation: modelObservation,
     exports: {
       storage: "local_persistent_csv",
       delivery_requested: false,
@@ -707,8 +773,8 @@ async function runPlatformBatch(request, args, runtime = {}) {
 }
 
 function addCounts(target, source = {}) {
-  for (const key of ["items", "videos", "images", "duplicates", "failures"]) {
-    target[key] += Number(source[key]) || 0;
+  for (const key of ["items", "videos", "images", "duplicates", "failures", "examined", "filtered", "filter_unavailable", "filter_uncertain"]) {
+    if (source[key] !== undefined) target[key] = (target[key] || 0) + (Number(source[key]) || 0);
   }
 }
 
@@ -946,6 +1012,8 @@ export async function handleRequest(request, runtime = {}) {
     if (action === "capabilities") {
       return success(action, {
         supported_platforms: SUPPORTED_PLATFORMS,
+        metric_support: Object.fromEntries(SUPPORTED_PLATFORMS.map(platform => [platform,
+          requestedMetricSupport({}, platform, supportedEngagementMetrics(platform))])),
         browser: await browserCapability(),
         capture_mode: "browser_element_screenshot",
         output_files: ["videos.csv", "images.csv"],
@@ -973,6 +1041,10 @@ export async function handleRequest(request, runtime = {}) {
       });
     }
     if (action === "list_runs") return await listRuns(request, args);
+    if (action === "get_run_results") {
+      const result = await getRunResults(request, args);
+      return success(action, { ...result, model_observation: { action, ...result } });
+    }
     if (action === "export_results") return await exportResults(request);
     if (action === "clear_results") return await clearResults(request, args);
     throw new Error("action_unsupported");
@@ -992,7 +1064,7 @@ if (isEntrypoint) {
     let request = null;
     let response;
     try {
-      request = JSON.parse(line);
+      request = parseSkillRequest(line);
       response = protocolResponse(request, await handleRequest(request, {
         writeProgress: (frame) => process.stdout.write(`${JSON.stringify(frame)}\n`),
       }));

@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "seed_urls": {
+    "toutiao": ["https://www.toutiao.com/article/7694668301435257382/", "https://www.toutiao.com/article/7694651415867802150/"],
+    "weibo": ["https://weibo.com/2258727970/RlCaI0mMv", "https://weibo.com/1044980795/RlSLgiAkK"]
+  },
+  "cases": {
+    "share_semantics_and_units": {
+      "action": "preview_enable", "max_items_per_run": 2,
+      "platforms": {
+        "douyin": {"all": [{"metric": "shares", "operator": "gt", "value": 200}]},
+        "kuaishou": {"all": [{"metric": "likes", "operator": "gte", "value": 100}]},
+        "tiktok": {"all": [{"metric": "views", "operator": "gte", "value": 12500}, {"metric": "shares", "operator": "gte", "value": 20}]}
+      }
+    },
+    "zero_equal_and_upper_bounds": {
+      "action": "preview_enable",
+      "platforms": {"weibo": {"all": [{"metric": "reposts", "operator": "gte", "value": 0}, {"metric": "likes", "operator": "lte", "value": 1000}, {"metric": "comments", "operator": "lt", "value": 100}, {"metric": "reads", "operator": "eq", "value": 12000}]}}
+    },
+    "global_and_platform_boolean": {
+      "action": "preview_enable", "max_items_per_run": 2,
+      "platforms": {
+        "toutiao": {"all": [{"metric": "comments", "operator": "gte", "value": 5}, {"metric": "reads", "operator": "gte", "value": 10000}, {"metric": "shares", "operator": "gt", "value": 100}]},
+        "weibo": {"all": [{"metric": "comments", "operator": "gte", "value": 5}, {"metric": "reposts", "operator": "gte", "value": 20}], "any": [{"metric": "likes", "operator": "gt", "value": 1000}, {"metric": "reads", "operator": "gte", "value": 20000}]}
+      }
+    },
+    "toutiao_reject_high_threshold": {
+      "action": "run_once", "max_items_per_run": 1,
+      "platforms": {"toutiao": {"all": [{"metric": "likes", "operator": "gte", "value": 1000000000000}]}},
+      "run_counts": {"items": 0, "examined": 2, "filtered": 2, "failures": 0},
+      "new_records": 0
+    },
+    "weibo_missing_is_not_zero": {
+      "action": "run_once", "max_items_per_run": 1,
+      "platforms": {"weibo": {"all": [{"metric": "favorites", "operator": "gte", "value": 0}]}},
+      "run_counts": {"items": 0, "examined": 2, "filtered": 2, "filter_unavailable": 2, "failures": 0},
+      "new_records": 0
+    },
+    "toutiao_collect_matching_and_store_metrics": {
+      "action": "run_once", "max_items_per_run": 1,
+      "platforms": {"toutiao": {"all": [{"metric": "reads", "operator": "gte", "value": 1}, {"metric": "shares", "operator": "gte", "value": 1}]}},
+      "run_counts": {"items": 1, "failures": 0},
+      "minimum_new_records": 1,
+      "verify_reply_values": true,
+      "required_metrics": ["reads", "likes", "comments", "favorites", "shares", "reposts"],
+      "absent_metrics": ["views"]
+    },
+    "weibo_collect_matching_and_store_metrics": {
+      "action": "run_once", "max_items_per_run": 1,
+      "platforms": {"weibo": {"all": [{"metric": "reposts", "operator": "gte", "value": 1}, {"metric": "comments", "operator": "gte", "value": 1}]}},
+      "run_counts": {"items": 1, "failures": 0},
+      "minimum_new_records": 1,
+      "verify_reply_values": true,
+      "required_metrics": ["views", "likes", "comments", "reposts"],
+      "absent_metrics": ["favorites"]
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "extends": "media_discovery_metrics_live_regression_20261020.json",
+  "forbid_filesystem_steps": true,
+  "selected_cases": ["weibo_collect_matching_and_store_metrics", "read_saved_weibo_values_without_browser", "weibo_adapter_unsupported_preflight_counts"],
+  "cases": {
+    "read_saved_weibo_values_without_browser": { "action": "get_run_results", "platforms": {}, "source_case": "weibo_collect_matching_and_store_metrics", "verify_reply_values": true },
+    "weibo_adapter_unsupported_preflight_counts": {
+      "action": "run_once", "max_items_per_run": 1,
+      "allowed_actions": ["preview_enable"],
+      "platforms": { "weibo": { "all": [{ "metric": "coins", "operator": "gte", "value": 10 }] } },
+      "run_counts": { "items": 0, "examined": 0, "filtered": 0, "filter_unavailable": 0, "failures": 0 },
+      "new_records": 0, "expected_filter_status": { "metric": "coins", "status": "adapter_unsupported" }
+    }
+  }
+}

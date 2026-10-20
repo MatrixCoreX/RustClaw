@@ -33,6 +33,8 @@ try {
       captured_at: "2026-09-09T00:00:00Z", metrics: i < 3 ? {
         likes: { display: "1.2万", value: null }, comments: { display: "318", value: 318 },
         favorites: { display: "0", value: 0 }, shares: { display: "24", value: 24 },
+        reads: { display: "1178453", value: 1178453 }, reposts: { display: "62", value: 62 },
+        coins: { display: "0", value: 0 }, danmaku: { display: "345", value: 345 },
       } : {} },
   }));
   await page.goto("about:blank");
@@ -83,6 +85,10 @@ try {
     const text = await page.locator("article").first().innerText();
     assert.ok(text.includes("2026-09-01"));
     assert.ok(text.includes(lang === "zh" ? "采集：" : "Collected:"));
+    assert.ok(text.includes(lang === "zh" ? "阅读 1178453" : "Reads 1178453"));
+    assert.ok(text.includes(lang === "zh" ? "转发 62" : "Reposts 62"));
+    assert.ok(text.includes(lang === "zh" ? "投币 0" : "Coins 0"));
+    assert.ok(text.includes(lang === "zh" ? "弹幕 345" : "Danmaku 345"));
     assert.ok((await page.locator("article").nth(1).innerText()).includes("2 days ago"));
     assert.ok((await page.locator("article").nth(2).innerText()).includes(lang === "zh" ? "未提供" : "Unavailable"));
     assert.equal(await page.locator('article').nth(3).locator('[aria-label="Engagement at capture"], [aria-label="采集时互动数据"]').count(), 0);
@@ -134,8 +140,9 @@ try {
     await dialog.getByText("4 / 5", { exact: true }).waitFor();
     await dialog.getByRole("button", { name: lang === "zh" ? "上一张图片" : "Previous image" }).click();
     await dialog.getByText("3 / 5", { exact: true }).waitFor();
-    await dialog.locator("img").evaluate((element) => {
-      const surface = element.parentElement;
+    // Image blobs are replaced asynchronously after navigation. Dispatch on the
+    // stable gesture surface, not an image handle that may already be detached.
+    await dialog.locator("div.relative").evaluate((surface) => {
       const touch = (clientX, clientY) => new Touch({ identifier: 1, target: surface, clientX, clientY });
       surface.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, touches: [touch(250, 100)] }));
       surface.dispatchEvent(new TouchEvent("touchend", { bubbles: true, changedTouches: [touch(120, 105)] }));

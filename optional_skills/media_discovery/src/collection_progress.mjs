@@ -1,5 +1,10 @@
 import { recordPostIdentity } from "./media_identity.mjs";
 
+export async function publishCollectionPage(onPage, result) {
+  const disposition = await onPage(result);
+  return result?.skipped || disposition?.skipped ? { skipped: true } : undefined;
+}
+
 // Zero/omitted means no user-requested ceiling, not a very large hidden quota.
 export function optionalLimit(value) {
   return value > 0 ? value : Infinity;

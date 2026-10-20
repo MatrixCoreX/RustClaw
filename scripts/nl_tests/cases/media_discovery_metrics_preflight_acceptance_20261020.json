@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "forbid_filesystem_steps": true,
+  "cases": {
+    "weibo_unsupported_preview_stops_without_collection": {
+      "action": "preview_enable", "max_items_per_run": 1, "no_collection_state": true,
+      "platforms": { "weibo": { "all": [{ "metric": "coins", "operator": "gte", "value": 10 }] } }
+    }
+  }
+}

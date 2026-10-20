@@ -1,0 +1,3 @@
+# Pure observation. Fine-grained support values use the complete skill protocol
+# tests; the host's bounded attested summary is not a complete JSON response.
+media_metrics_recovery|weibo_unsupported_preview_stops_without_collection|optional_skill:media_discovery,provider_mode:live,execution_mode:real,capability:media_discovery.preview_enable,requires_tool_call=true,local_readonly|请用媒体发现先预览这两个微博链接的采集配置：最多保存1条，必须投币至少10，不得改成点赞或放宽门槛。只要当前采集器不支持就直接停止，并告诉我不能继续的原因，区分采集器能力与平台是否提供该指标。不要启动浏览器、不要创建采集批次，不下载、不做OCR、不导出文件：https://weibo.com/2258727970/RlCaI0mMv https://weibo.com/1044980795/RlSLgiAkK|expect=step_contract_json:{"skill":"media_discovery","status":"ok","fields":{"extra.action":"preview_enable"}}

@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  Coins,
   Download,
   Eye,
   ExternalLink,
@@ -21,6 +22,7 @@ import {
   PanelsTopLeft,
   PackagePlus,
   RefreshCw,
+  Repeat2,
   Search,
   Share2,
   Trash2,
@@ -903,13 +905,17 @@ export function AippMediaItemCard({
   const hasPreview = gallery.length > 1 || selectedImage.preview_available || (selectedImage.kind === "image" && Boolean(selectedImage.image_url));
   const metricPresentation = [
     { key: "views" as const, icon: Eye, label: t("播放", "Views") },
+    { key: "reads" as const, icon: FileText, label: t("阅读", "Reads") },
     { key: "likes" as const, icon: Heart, label: t("点赞", "Likes") },
     { key: "comments" as const, icon: MessageCircle, label: t("评论", "Comments") },
     { key: "favorites" as const, icon: Bookmark, label: t("收藏", "Favorites") },
     { key: "shares" as const, icon: Share2, label: t("分享", "Shares") },
+    { key: "reposts" as const, icon: Repeat2, label: t("转发", "Reposts") },
+    { key: "coins" as const, icon: Coins, label: t("投币", "Coins") },
+    { key: "danmaku" as const, icon: MessageCircle, label: t("弹幕", "Danmaku") },
   ].flatMap(({ key, icon: Icon, label }) => {
     const metric = item.engagement?.metrics[key];
-    return metric ? [{ key, Icon, label, display: metric.display }] : [];
+    return metric ? [{ key, Icon, label, display: metric.display, value: metric.value }] : [];
   });
   return (
     <article className="theme-panel min-w-0 overflow-hidden">
@@ -952,10 +958,10 @@ export function AippMediaItemCard({
           </div>
           {metricPresentation.length > 0 ? (
             <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs text-white/58 sm:grid-cols-3" aria-label={t("采集时互动数据", "Engagement at capture")}>
-              {metricPresentation.map(({ key, Icon, label, display }) => (
-                <span key={key} className="inline-flex min-w-0 items-center gap-1" title={`${label}: ${display} · ${t("采集：", "Captured: ")}${formatCollectedAt(item.engagement?.captured_at || item.discovered_at, lang)}`}>
+              {metricPresentation.map(({ key, Icon, label, display, value }) => (
+                <span key={key} className="inline-flex min-w-0 items-center gap-1" title={`${label}: ${display}${value != null && String(value) !== display ? ` (${value})` : ""} · ${t("采集：", "Captured: ")}${formatCollectedAt(item.engagement?.captured_at || item.discovered_at, lang)}`}>
                   <Icon className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">{display}</span>
+                  <span className="truncate">{label} {display}</span>
                 </span>
               ))}
             </div>

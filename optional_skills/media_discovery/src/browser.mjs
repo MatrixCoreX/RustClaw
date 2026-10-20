@@ -10,6 +10,9 @@ import {
   launchPlatformBrowser,
 } from "./browser_environment.mjs";
 import { capturePublication } from "./publication.mjs";
+import { captureEngagementMetrics, observeEngagementResponses } from "./browser_engagement.mjs";
+export { captureEngagementMetrics } from "./browser_engagement.mjs";
+import { hasEngagementFilters, rejectedEngagementResult } from "./engagement.mjs";
 import { assertNavigationResponse, boundedBrowserOperation, normalizeBrowserError, openKeywordSearch } from "./browser_search.mjs";
 import { assertBrowserFlow, observePlatformBackpressure, pacingDelayMs, stopsCollection } from "./browser_flow_control.mjs";
 export { pacingDelayMs } from "./browser_flow_control.mjs";
@@ -24,7 +27,7 @@ import {
 import { collectDouyinSearchResults } from "./browser_douyin_search.mjs";
 import { createLoginCompanionHandoff, showBrowserWindow } from "./login_companion.mjs";
 import { imageSourceIdentity, identityDigest } from "./media_identity.mjs";
-import { collectOrderedPages, optionalLimit, pageProgress } from "./collection_progress.mjs";
+import { collectOrderedPages, optionalLimit, pageProgress, publishCollectionPage } from "./collection_progress.mjs";
 
 import {
   canonicalCandidateUrls,
@@ -116,84 +119,6 @@ const PLATFORM_AUTH_COOKIE_NAMES = Object.freeze({
   bilibili: new Set(["SESSDATA", "DedeUserID", "bili_jct"]),
 });
 
-const ENGAGEMENT_SELECTORS = Object.freeze({
-  douyin: Object.freeze({
-    views: Object.freeze([
-      '[data-e2e="video-views"]',
-      '[data-e2e="video-play-count"]',
-      '[data-e2e="play-count"]',
-    ]),
-    likes: Object.freeze([
-      '[data-e2e="video-player-digg"]',
-      '[data-e2e="video-like-count"]',
-      '[data-e2e="like-count"]',
-      '[data-e2e="digg-count"]',
-    ]),
-    comments: Object.freeze([
-      '[data-e2e="feed-comment-icon"]',
-      '[data-e2e="video-comment-count"]',
-      '[data-e2e="comment-count"]',
-    ]),
-    favorites: Object.freeze([
-      '[data-e2e="video-player-collect"]',
-      '[data-e2e="video-collect-count"]',
-      '[data-e2e="collect-count"]',
-    ]),
-    shares: Object.freeze([
-      '[data-e2e="video-player-share"]',
-      '[data-e2e="video-share-icon-container"]',
-      '[data-e2e="video-share-count"]',
-      '[data-e2e="share-count"]',
-    ]),
-  }),
-  xiaohongshu: Object.freeze({
-    likes: Object.freeze([
-      '[data-testid="like-count"]',
-      '.like-wrapper .count',
-    ]),
-    comments: Object.freeze([
-      '[data-testid="comment-count"]',
-      '.comment-wrapper .count',
-    ]),
-    favorites: Object.freeze([
-      '[data-testid="collect-count"]',
-      '.collect-wrapper .count',
-    ]),
-    shares: Object.freeze([
-      '[data-testid="share-count"]',
-      '.share-wrapper .count',
-    ]),
-  }),
-  kuaishou: Object.freeze({
-    likes: Object.freeze([
-      '.interactive-item.like-item .item-count',
-      '.video-info-content:has(.like-icon) .info-text',
-      '.photo-btns .like-btn',
-    ]),
-    comments: Object.freeze(['.interactive-item.comment-item .item-count', '[data-testid="comment-count"]', '.photo-btns .commentPanel']),
-    favorites: Object.freeze(['.interactive-item.collect-item .item-count', '[data-testid="collect-count"]', '.photo-btns .favorite']),
-    shares: Object.freeze(['.interactive-item.share-item .item-count', '[data-testid="share-count"]']),
-    views: Object.freeze(['.video-info-content:has(.play-icon) .info-text', '[data-testid="play-count"]']),
-  }),
-  tiktok: Object.freeze({
-    likes: Object.freeze(['[data-e2e="like-count"]', '[data-e2e="browse-like-count"]']),
-    comments: Object.freeze(['[data-e2e="comment-count"]', '[data-e2e="browse-comment-count"]']),
-    favorites: Object.freeze(['[data-e2e="undefined-count"]', '[data-e2e="browse-bookmark-count"]']),
-    shares: Object.freeze(['[data-e2e="share-count"]', '[data-e2e="browse-share-count"]']),
-  }),
-  youtube: Object.freeze({
-    views: Object.freeze(['#info span.view-count', '#info-container #info', 'yt-formatted-string#info']),
-    likes: Object.freeze(['#segmented-like-button button', 'like-button-view-model button']),
-    comments: Object.freeze(['ytd-comments-header-renderer #count']),
-  }),
-  bilibili: Object.freeze({
-    views: Object.freeze(['.view.item', '.view-text', '.video-data .view']),
-    likes: Object.freeze(['.video-like-info', '.like .info-text']),
-    comments: Object.freeze(['.reply-header .nav-title-text', '.comment-container .reply-header']),
-    favorites: Object.freeze(['.video-fav-info', '.collect .info-text']),
-    shares: Object.freeze(['.video-share-info', '.share .info-text']),
-  }),
-});
 
 const PLATFORM_CAPTION_SELECTOR_GROUPS = Object.freeze({
   douyin: Object.freeze([
@@ -345,76 +270,6 @@ export async function capturePlatformCaption(scope, platform, fallback = "") {
   return parts.join("\n");
 }
 
-function normalizedMetricDisplay(value) {
-  const display = String(value || "").replaceAll(/\s+/gu, " ").trim();
-  if (
-    !display
-    || display.length > 32
-    || !/\p{Nd}/u.test(display)
-    || [...display].some((character) => /\p{Cc}/u.test(character))
-  ) {
-    return null;
-  }
-  return display;
-}
-
-function exactMetricValue(display) {
-  if (!/^(?:0|[1-9]\d*|[1-9]\d{0,2}(?:,\d{3})+)$/u.test(display)) return null;
-  const value = Number(display.replaceAll(",", ""));
-  return Number.isSafeInteger(value) ? value : null;
-}
-
-export async function captureEngagementMetrics(scope, platform, capturedAt) {
-  const metrics = {};
-  for (const [name, selectors] of Object.entries(ENGAGEMENT_SELECTORS[platform] || {})) {
-    let display = null;
-    for (const selector of selectors) {
-      const candidates = await scope.locator(selector).evaluateAll((nodes, platformName) => nodes.filter(node => {
-        const rect = node.getBoundingClientRect();
-        const style = getComputedStyle(node);
-        return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"
-          && !node.closest('[data-comment-id], .comments-container')
-          && !(platformName === "douyin" && node.closest(".search-result-card"));
-      }).map((node) => ({
-        machineValue: node.getAttribute("data-count") || node.getAttribute("data-value") || "",
-        renderedValue: node instanceof HTMLElement ? node.innerText : node.textContent || "",
-      })), platform);
-      for (const candidate of candidates) {
-        display = normalizedMetricDisplay(candidate.machineValue)
-          || normalizedMetricDisplay(candidate.renderedValue);
-        if (display) break;
-      }
-      if (display) break;
-    }
-    if (!display) continue;
-    const value = exactMetricValue(display);
-    metrics[name] = value == null ? { display } : { display, value };
-  }
-  if (platform === "bilibili") {
-    const stat = await scope.evaluate((root) => {
-      const view = root?.ownerDocument?.defaultView || globalThis;
-      return view.__INITIAL_STATE__?.videoData?.stat || null;
-    }).catch(() => null);
-    const fields = {
-      views: "view",
-      likes: "like",
-      comments: "reply",
-      favorites: "favorite",
-      shares: "share",
-    };
-    for (const [name, field] of Object.entries(fields)) {
-      const value = Number(stat?.[field]);
-      if (!Number.isSafeInteger(value) || value < 0) continue;
-      metrics[name] = { ...(metrics[name] || { display: String(value) }), value };
-    }
-  }
-  return {
-    schema_version: 1,
-    platform,
-    captured_at: capturedAt,
-    metrics,
-  };
-}
 
 export function guiAvailable(environment = process.env, platform = process.platform) {
   if (platform === "darwin") return true;
@@ -1247,7 +1102,9 @@ async function collectToutiaoOpenedPage(page, root, runId, itemUrl, config, disc
   const sourceUrl = validatePlatformUrl("toutiao", itemUrl);
   const itemId = `toutiao:${data.itemId}`;
   const discoveredAt = new Date().toISOString();
-  const engagement = await captureEngagementMetrics(page, "toutiao", discoveredAt);
+  const engagement = await captureEngagementMetrics(page, "toutiao", discoveredAt, itemId);
+  const rejected = rejectedEngagementResult(engagement, config, "toutiao");
+  if (rejected) return rejected;
   const publication = await capturePublication(page, "toutiao", itemId);
   const common = {
     platform: "toutiao",
@@ -1780,7 +1637,9 @@ async function collectOpenedPage(
   const sourceUrl = scopeOverride ? itemUrl : metadata.canonical;
   const itemId = platformItemId(platform, sourceUrl);
   const discoveredAt = new Date().toISOString();
-  const engagement = await captureEngagementMetrics(scope, platform, discoveredAt);
+  const engagement = await captureEngagementMetrics(scope, platform, discoveredAt, itemId, { config });
+  const rejected = rejectedEngagementResult(engagement, config, platform);
+  if (rejected) return rejected;
   const publication = await capturePublication(scope, platform, itemId);
   const temporaryRoot = path.join(root, "tmp", runId);
   const screenshotPath = path.join(temporaryRoot, `${itemId.replaceAll(":", "_")}-video.png`);
@@ -1843,7 +1702,9 @@ async function collectDouyinFeedCard(page, root, runId, locator, itemId, config,
   }));
   const platformText = await capturePlatformCaption(locator, "douyin", card.title);
   const discoveredAt = new Date().toISOString();
-  const engagement = await captureEngagementMetrics(locator, "douyin", discoveredAt);
+  const engagement = await captureEngagementMetrics(locator, "douyin", discoveredAt, itemId, { config });
+  const rejected = rejectedEngagementResult(engagement, config, "douyin");
+  if (rejected) return rejected;
   const publication = await capturePublication(locator, "douyin", itemId);
   const pageUrl = `https://www.douyin.com/video/${itemId}`;
   const visibleVideoCount = await locator.locator("video:visible").count();
@@ -1917,6 +1778,7 @@ async function collectDouyinRecommendationFeed(
   let lastError = null;
   const maxScrolls = optionalLimit(config.max_scrolls_per_source);
   const opened = await openDouyinRecommendationDetail(page, config, shouldStop);
+  let filtered = 0;
   const detailPage = opened.page;
   let current = opened.entry;
   for (let scroll = 0; scroll <= maxScrolls && handled < limit && current; scroll += 1) {
@@ -1938,8 +1800,8 @@ async function collectDouyinRecommendationFeed(
           config,
           discoverySource,
         );
-        await onPage(result);
-        handled += 1;
+        if (await publishCollectionPage(onPage, result)) filtered += 1;
+        else handled += 1;
       } catch (error) {
         lastError = error;
         await onFailure?.(error);
@@ -1949,7 +1811,7 @@ async function collectDouyinRecommendationFeed(
     if (handled >= limit || scroll === maxScrolls || (await shouldStop())) break;
     current = await advanceDouyinDetailFeed(detailPage, current.itemId, config, shouldStop);
   }
-  if (handled === 0 && !(await shouldStop()) && (lastError || completed.size === 0)) {
+  if (handled === 0 && filtered === 0 && !(await shouldStop()) && (lastError || completed.size === 0)) {
     throw lastError || new Error("selector_drift");
   }
   return handled;
@@ -1972,7 +1834,9 @@ async function collectKuaishouFeedCard(
   const itemId = platformItemId("kuaishou", itemUrl);
   const platformText = await capturePlatformCaption(locator, "kuaishou", card.title);
   const discoveredAt = new Date().toISOString();
-  const engagement = await captureEngagementMetrics(locator, "kuaishou", discoveredAt);
+  const engagement = await captureEngagementMetrics(locator, "kuaishou", discoveredAt, itemId, { config });
+  const rejected = rejectedEngagementResult(engagement, config, "kuaishou");
+  if (rejected) return rejected;
   const publication = await capturePublication(locator, "kuaishou", itemId);
   const screenshotPath = path.join(
     root,
@@ -2026,7 +1890,9 @@ async function collectXiaohongshuFeedCard(
   const title = normalizedPlatformText(card.title);
   const platformText = await capturePlatformCaption(locator, "xiaohongshu", title);
   const discoveredAt = new Date().toISOString();
-  const engagement = await captureEngagementMetrics(locator, "xiaohongshu", discoveredAt);
+  const engagement = await captureEngagementMetrics(locator, "xiaohongshu", discoveredAt, canonicalItemId, { config });
+  const rejected = rejectedEngagementResult(engagement, config, "xiaohongshu");
+  if (rejected) return rejected;
   const publication = await capturePublication(locator, "xiaohongshu", itemId);
   if (xiaohongshuFeedCardMediaKind(card.hasPlayControl) === "image") {
     return collectRenderedImages({
@@ -2129,8 +1995,7 @@ export async function collectXiaohongshuHomeFeed(
           config,
           discoverySource,
         ));
-        await onPage(result);
-        handled += 1;
+        if (!await publishCollectionPage(onPage, result)) handled += 1;
       } catch (error) {
         lastError = error;
         await onFailure?.(error);
@@ -2191,8 +2056,7 @@ async function collectKuaishouHomeFeed(
           config,
           discoverySource,
         );
-        await onPage(result);
-        handled += 1;
+        if (!await publishCollectionPage(onPage, result)) handled += 1;
       } catch (error) {
         lastError = error;
         await onFailure?.(error);
@@ -2221,6 +2085,13 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
   const context = await launchPlatformBrowser({ chromium, root, platform, executablePath,
     headless: browserMode === "silent" });
   const stopObserving = observePlatformBackpressure(context, platform);
+  const stopEngagement = observeEngagementResponses(context, platform);
+  let filtered = 0;
+  const publishPage = async result => {
+    const disposition = await publishCollectionPage(onPage, result);
+    if (disposition?.skipped) filtered += 1;
+    return disposition;
+  };
   let page = context.pages()[0] || (await context.newPage());
   page.setDefaultTimeout(NAVIGATION_TIMEOUT_MS);
   let handled = 0;
@@ -2283,7 +2154,7 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
       if (platform === "douyin" && discoverySource.source_mode === "topics"
         && await page.locator(".search-result-card:visible .videoImage").count()) {
         const outcome = await collectDouyinSearchResults({ page, config,
-          limit: limit - handled, shouldStop, onPage, onFailure,
+          limit: limit - handled, shouldStop, onPage: publishPage, onFailure,
           completed: completedPosts, detailed: true,
           checkAccess: candidate => accessErrorAfterExplicitVisibleWait(candidate, platform, config, shouldStop),
           settle: candidate => pacingWait(candidate, config),
@@ -2300,7 +2171,7 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
         && (await page.locator(".video-list .photo-card").count()
           || await kuaishouLoadMoreLoginVisible(page))) {
         const outcome = await collectKuaishouSearchResults({ page, config,
-          limit: limit - handled, shouldStop, onPage, onFailure,
+          limit: limit - handled, shouldStop, onPage: publishPage, onFailure,
           completed: completedPosts, detailed: true,
           checkAccess: candidate => accessErrorAfterExplicitVisibleWait(candidate, platform, config, shouldStop),
           settle: candidate => pacingWait(candidate, config),
@@ -2322,13 +2193,14 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
           discoverySource,
           limit - handled,
           shouldStop,
-          onPage,
+          publishPage,
           onFailure,
           completedPosts,
         );
         continue;
       }
-      if (platform === "kuaishou" && (config.source_mode || "home_feed") === "home_feed") {
+      if (platform === "kuaishou" && (config.source_mode || "home_feed") === "home_feed"
+        && !hasEngagementFilters(config, platform)) {
         handled += await collectKuaishouHomeFeed(
           page,
           root,
@@ -2337,13 +2209,14 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
           discoverySource,
           limit - handled,
           shouldStop,
-          onPage,
+          publishPage,
           onFailure,
           completedPosts,
         );
         continue;
       }
-      if (platform === "xiaohongshu" && (config.source_mode || "home_feed") === "home_feed") {
+      if (platform === "xiaohongshu" && (config.source_mode || "home_feed") === "home_feed"
+        && !hasEngagementFilters(config, platform)) {
         handled += await collectXiaohongshuHomeFeed(
           page,
           root,
@@ -2352,13 +2225,17 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
           discoverySource,
           limit - handled,
           shouldStop,
-          onPage,
+          publishPage,
           onFailure,
           completedPosts,
         );
         continue;
       }
-      if (discoverySource.source_mode === "topics") {
+      if (discoverySource.source_mode === "topics"
+        || hasEngagementFilters(config, platform) && !isDetailUrl(platform, sourceUrl)) {
+        if (["kuaishou", "xiaohongshu"].includes(platform) && discoverySource.source_mode === "home_feed") {
+          await waitForPlatformFeed(page, platform, config, shouldStop);
+        }
         const outcome = await collectOrderedPages({
           readCandidates: async () => {
             const access = await accessErrorAfterExplicitVisibleWait(page, platform, config, shouldStop);
@@ -2377,7 +2254,7 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
               { shouldStop, checkAccess: opened => currentPlatformAccessError(opened, platform),
                 settle: opened => pacingWait(opened, config, 0.75),
                 timeoutMs: NAVIGATION_TIMEOUT_MS });
-            await onPage(result);
+            return publishPage(result);
           },
           scroll: () => pacedScroll(page, config),
           shouldStop, limit: limit - handled, maxScrolls: config.max_scrolls_per_source,
@@ -2414,8 +2291,7 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
             : await collectPage(
               page, root, runId, platform, candidate, config, discoverySource, shouldStop,
             );
-          await onPage(result);
-          handled += 1;
+          if (!await publishPage(result)) handled += 1;
         } catch (error) {
           lastError = error;
           await onFailure?.(error);
@@ -2425,7 +2301,7 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
     }
     if (
       handled === 0 &&
-      !(await shouldStop()) && outcomes.length === 0 && completedPosts.size === 0
+      !(await shouldStop()) && outcomes.length === 0 && completedPosts.size === 0 && filtered === 0
     ) {
       throw lastError || new Error("selector_drift");
     }
@@ -2441,6 +2317,7 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
     }
     throw error;
   } finally {
+    stopEngagement();
     stopObserving();
     await closePlatformBrowser({ context, root, platform });
   }

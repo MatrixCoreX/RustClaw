@@ -221,6 +221,10 @@ test("renders a media collection record from the current no-OCR contract", () =>
         comments: { display: "318", value: 318 },
         favorites: { display: "0", value: 0 },
         shares: { display: "12", value: 12 },
+        reads: { display: "1178453", value: 1178453 },
+        reposts: { display: "62", value: 62 },
+        coins: { display: "0", value: 0 },
+        danmaku: { display: "345", value: 345 },
       },
     },
   };
@@ -245,6 +249,10 @@ test("renders a media collection record from the current no-OCR contract", () =>
   assert.match(markup, /评论: 318/);
   assert.match(markup, /收藏: 0/);
   assert.match(markup, /分享: 12/);
+  assert.match(markup, /阅读: 1178453/);
+  assert.match(markup, /转发: 62/);
+  assert.match(markup, /投币: 0/);
+  assert.match(markup, /弹幕: 345/);
   assert.doesNotMatch(markup, /播放:/);
   assert.match(markup, /href="https:\/\/example\.test\/source"/);
   // Pre-render must not bypass the authenticated local-preview fetch with a CDN URL.

@@ -1,7 +1,7 @@
 import { browserStageError } from "./browser_diagnostics.mjs";
 import { stopsCollection } from "./browser_flow_control.mjs";
 import { boundedBrowserOperation } from "./browser_search.mjs";
-import { collectOrderedPages } from "./collection_progress.mjs";
+import { collectOrderedPages, publishCollectionPage } from "./collection_progress.mjs";
 import { isDetailUrl } from "./platforms.mjs";
 
 export const KUAISHOU_LOGIN_MODAL = [
@@ -198,7 +198,7 @@ export async function collectKuaishouSearchResults({ page, config, limit, should
         if (access) throw browserStageError(access, "search_detail_access");
         const url = `https://www.kuaishou.com/short-video/${candidate.itemId}`;
         const result = await collect(page, url, scope, { fallbackCoverPng });
-        await onPage(result);
+        return publishCollectionPage(onPage, result);
       } catch (error) {
         lastError = error;
         throw error;

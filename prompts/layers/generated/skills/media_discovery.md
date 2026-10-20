@@ -10,18 +10,12 @@
 ## Capability Summary (from interface)
 Run explicitly requested batch, feed, keyword, or continuous background browser collection for Douyin, Xiaohongshu, Kuaishou, Toutiao, Weibo, TikTok, YouTube, and Bilibili. A lone copied share payload or URL whose content should be downloaded and returned now belongs to `media_download.download`, even when it is used as a `seed_urls` input shape; this skill does not provide immediate single-post media delivery. All platforms default to `browser_mode=visible`; pass `silent` only when the user explicitly requests silent or windowless collection. The full macOS release uses its bundled Chromium and source/development installs may use an installed Chrome/Chromium. Collection uses conservative platform-specific pacing/rest; it does not spoof UA/proxy or bypass challenges. A visible run keeps the platform window available for login or human verification. An explicitly silent run may open one temporary manual-verification browser; `/` or `/jingxuan` plus the local confirm tab resumes that batch visibly without solving the slider automatically.
 Rendered media screenshots, author titles (`title`), and captions (`platform_text`, empty without a distinct caption) are stored in `videos.csv` / `images.csv`, without OCR, model review, original-image or video downloads.
-Available views/likes/comments/favorites/shares retain platform display precision; plain integer counters also receive exact numeric values. Unavailable fields remain absent.
+Available views, reads, likes, comments, favorites, shares, reposts, coins and danmaku retain platform display precision; verified integer counters also receive exact numeric values. Unavailable fields remain absent. Saved records, CSV and AiAPP retain the same capture-time metrics.
 Video covers use an unobscured rendered frame, platform poster, or a Douyin/Kuaishou search tile under `video_covers/`; blank overlay player shots are discarded. Whole-page and login-dialog screenshots never substitute for missing media.
 When no count is supplied, a bounded batch targets 10 posts. When no platform is supplied, all supported platforms are selected and those 10 posts are randomly split into positive per-platform limits; the exact allocation is returned in `extra.collection_plan`.
 
-Keyword discovery uses `source_mode=topics` with non-empty `topics[]` in input order.
-From the homepage, fill the visible search field and click the platform search control;
-search URLs are validation targets, not navigation shortcuts. Accept only matching-query
-rendered results, in the same tab or a popup, never unrelated homepage recommendations.
-Xiaohongshu supports its visible textarea, search icon, and encoded `search_result_ai` query;
-visible `/search_result/<id>` links retain the page's query parameters.
-Kuaishou supports new `.search-container` and older search controls and the `/search/` route.
-Its new result cards open an in-page player by clicking the visible cover or cover image.
+Keyword discovery uses `source_mode=topics` with non-empty `topics[]` in input order. Fill the homepage's visible search field and click its search control; search URLs validate the query rather than bypassing the form. Accept only matching-query rendered results in the same tab or popup, not unrelated homepage recommendations.
+Xiaohongshu supports its textarea, search icon and encoded `search_result_ai` query; visible `/search_result/<id>` links retain their query parameters. Kuaishou supports new `.search-container` and older controls with the `/search/` route; clicking a result's visible cover opens its in-page player.
 Toutiao keyword collection opens its first-party `so.toutiao.com/search?keyword=...` result page directly. It unwraps only trusted search-result jump links into exact `/article/<id>`, `/video/<id>`, or `/w/<id>` identities; external cards and unrelated numeric analytics fields are rejected. Homepage and `seed_urls` collection also normalize first-party `group/<id>`, mobile video-group, and micro-post thread shares to the same exact identities.
 Detail extraction is bound to the requested item ID in `RENDER_DATA`; unrelated recommendations are excluded, while article and micro-post rows preserve the complete body, ordered images, and an exact-content preview when no original image exists.
 Weibo home-feed collection uses its public hot feed, while topic collection uses the first-party search page. Desktop `/<uid>/<shortcode>`, mobile `/status/<mid>` or `/detail/<mid>`, and `/tv/show/<scope>:<mid>` routes share one stable item identity. When Weibo redirects search to its sign-in service, the skill reports `login_required` and, in visible mode, continues after the user signs in through the skill-owned browser profile; it does not request or export cookies. Public seed links remain collectable without login, and extraction is scoped to the primary post rather than sidebar recommendations.
@@ -33,13 +27,7 @@ HTTP 404/410 and platform `/404` pages are unavailable posts, not CAPTCHAs. JSON
 No localized search phrase is parsed by runtime or skill code.
 Explicit detail `seed_urls` are collected as the exact requested set and do not expand into unrelated recommendation links from those pages.
 
-Douyin `home_feed` collection opens the first visible recommendation as one
-detail video through its HTTPS URL before collecting anything. Card-owned
-desktop-app launch handlers are never clicked. It captures the current detail
-item, uses the player's next-item control (or scrolls a rendered feed), waits for
-the active item identity to change, and repeats one item at a time. It does not scrape a batch of cards
-directly from the recommendation landing page. Image-carousel posts encountered
-in the detail feed are completed before advancing to the next item.
+Douyin `home_feed` opens the first visible recommendation through its HTTPS detail URL, never the card's desktop-app launcher. Capture that detail, advance using the player's next control or rendered feed, and wait for its identity to change before repeating. Complete an image carousel before advancing; never scrape a card batch from the landing page.
 
 Continuous collection calls `enable`, then its no-argument `run_enabled_once` companion:
 a runtime-owned durable job, not a schedule, with bounded batches and randomized rests.
@@ -147,12 +135,14 @@ Finite and continuous starts emit one machine `media_discovery.collection.starte
   note container. Failed open/restore reports `search_detail_unavailable` or
   `search_results_restore_failed`. Clipped off-slide images are excluded;
   refreshed link parameters do not change post identity.
-- Report `run.capture_summary` fields: `records_saved`, `captions_saved`,
-  `covers_saved`, and exact `engagement_metrics` names. Missing metrics are
-  unavailable, not zero. Never claim comments, shares, favorites, or views when
-  only likes were recorded. Home-feed cards expose only rendered caption/media.
-  `exports.storage=local_persistent_csv` is persistent local files;
-  `delivery_requested=false` means no artifact was sent, not that CSV is absent.
+- Read capture-time metric values from `extra.model_observation.results[].engagement.metrics`, not just `run.capture_summary.engagement_metrics` names. Report the actual values when requested. The same snapshot is stored in CSV and AiAPP. `result_page.has_more` means use `get_run_results(run_id,offset,limit)` for remaining posts; pagination has no total-result ceiling. This query reads only the calling user's run, without browsing or exporting. Never read private/sandbox CSV paths through filesystem tools, use configuration preview to retrieve results, or recollect to recover already saved values. Gallery images share one result item with `record_count`.
+- Explain requested missing metrics using `engagement.availability`, preview `metric_support`, and aggregate `filter_report`: `adapter_unsupported` means the current extractor lacks support, not that the platform has no such metric; `not_applicable` concerns this content type; `not_provided` means the observed source explicitly supplied no value; `not_observed` means this capture could not read it. Do not infer platform-wide absence, authentication restrictions, or zero without evidence. `precision_insufficient` means an abbreviated number cannot establish the requested boundary. Let the model explain the limitation in the user's language; never silently remove or replace the condition. An OR alternative may still qualify. Unsupported mandatory background filters pause that platform instead of opening browsers repeatedly; other platforms continue.
+- Report `run.capture_summary.records_saved/captions_saved/covers_saved` and requested `run.counts` from the receipt. Home-feed cards expose only rendered caption/media. `exports.storage=local_persistent_csv` is persistent local files; `delivery_requested=false` means no artifact was sent, not that CSV is absent.
+- Keep the reply within the user's requested report scope. `target_reached` ends collection: remaining seed URLs are unvisited, not nonmatches. Only observed `examined/filtered` counts support rejection claims. Do not add unsupported-metric lists or implementation details unless requested; `adapter_unsupported` never proves the platform does not expose a metric.
+- Translate requested numeric thresholds into `engagement_filters`; never put threshold wording inside search keywords. Each condition is `{metric,operator,value}`; `gt` means strictly more than, `gte` at least, `lt` less than, `lte` at most, and `eq` exactly. Convert numerical units such as 万/K to integer thresholds. `all` requires every condition; `any` requires at least one. Global conditions and `platforms.<platform>` conditions both apply. Preserve platform-specific differences rather than applying one platform's threshold to all platforms. Omitted thresholds add no filter.
+- Preview returns full normalized per-platform configuration in `extra.model_observation.platform_configs` for model verification; a successful preview requires no duplicate calls to reconstruct nested filters.
+- Choose metrics by platform meaning: `views` is video plays/views and `reads` article/post reads. For Douyin/TikTok, requests for 转发/分享/forward/share map to `shares`, NOT `reposts`; that public forward/share counter is supported and must not be reported unavailable because the wrong metric token was selected. Weibo 转发 maps to `reposts`; Toutiao keeps 分享=`shares` and 转发=`reposts` distinct. Xiaohongshu commonly exposes likes/comments/favorites; Bilibili also exposes coins/danmaku. Never substitute likes for plays, a creator's followers for post metrics, or another post's data. If a preview reveals a wrong metric token, correct that token according to these platform meanings and preview again, without weakening the user's numeric condition.
+- Only matching posts count toward `max_items_per_run`. Nonmatches are inspected but neither stored nor preview-captured; continue browsing until enough matches, source exhaustion, cancellation or the user's own limit. Missing metrics and ambiguous abbreviated boundaries cannot qualify. Report `run.counts.examined/filtered/filter_unavailable/filter_uncertain` when present; zero matches is a valid outcome, not permission to weaken filters or invent metrics.
 - `waiting_for_network_access` / `network_access_restricted` (Xiaohongshu
   `300012`) rejects the current session only, not an IP-wide block. Do not
   infer the cause or start probe batches. Zero saved records is successful only
@@ -200,6 +190,8 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 - `Collect a small Kuaishou recommendation batch` -> one bounded Kuaishou
   `home_feed` `run_once`.
 - `搜索露营装备并采集小红书内容` -> Xiaohongshu `topics=["露营装备"]`.
+- `抖音点赞超过1万，小红书收藏至少500，微博转发超过200，每个平台收集10条财经内容` -> `platforms=["douyin","xiaohongshu","weibo"]`, `topics=["财经"]`, `max_items_per_run=10`, `engagement_filters={"platforms":{"douyin":{"all":[{"metric":"likes","operator":"gt","value":10000}]},"xiaohongshu":{"all":[{"metric":"favorites","operator":"gte","value":500}]},"weibo":{"all":[{"metric":"reposts","operator":"gt","value":200}]}}}`.
+- `只要点赞超过1000或评论至少100的微博，且转发至少20` -> `engagement_filters={"all":[{"metric":"reposts","operator":"gte","value":20}],"any":[{"metric":"likes","operator":"gt","value":1000},{"metric":"comments","operator":"gte","value":100}]}`.
 
 
 ## Config Entry Points (from interface)
@@ -229,6 +221,8 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 - `stop_current`: request a graceful stop after the current complete post,
   optionally restricted to a platform, without disabling the background worker.
 - `list_runs`: return paginated recent batch records.
+- `get_run_results`: read one calling-user-owned run's stored metric snapshots, with required `run_id` and optional positive integer `limit` (default 20), nonnegative `offset` (default 0). Returns `results`, `result_page.{total,returned,has_more,next_offset}`, counts and filtering diagnostics, without browser/network/export side effects. Unknown/other-user runs return `result_run_not_found`; missing or unsafe actor IDs return `result_actor_required`. It does not expose private paths or other users' records.
+- If mandatory thresholds cannot be evaluated by the current adapter, a one-shot run returns `collection_outcome.stop_reason=filter_not_evaluable` with `filter_report`, no browser launch and no examined/filtered posts. Tell the user the actual unsupported metric; do not claim it checked the seed URLs or that the platform itself lacks the metric. Unsupported OR alternatives do not block a supported alternative. Background collection pauses only the affected platform.
 - `export_results`: deliver rebuilt `videos.csv` and `images.csv` artifacts.
   Persisted browser video-cover screenshots are copied beside them under
   `video_covers/` and returned as image artifacts.
@@ -245,6 +239,7 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 | `source_mode` | no | `home_feed` (default), `topics`, or `seed_urls`. |
 | `topics` | for topics | One or more exact search keywords, browsed in input order. |
 | `seed_urls` | for seed_urls | HTTPS URLs on the selected platform only. |
+| `engagement_filters` | no | `{all?: condition[], any?: condition[], platforms?: {<platform>: {all?: condition[], any?: condition[]}}}`; condition = `{metric: views\|reads\|likes\|comments\|favorites\|shares\|reposts\|coins\|danmaku, operator: gt\|gte\|lt\|lte\|eq, value: nonnegative integer}`. All global and matching-platform groups apply before saving. Missing/uncertain counters do not satisfy thresholds. |
 | `max_items_per_run` | no | Nonnegative safe integer; 0 means no count limit. Default batch size is 10, including a time-bounded request that omits a count. When platform selection is omitted, this is a total randomly allocated across all supported platforms; a positive total must be at least the platform count so every platform receives work. No fixed business maximum; use the requested count directly. |
 | `max_images_per_post` | no | Optional user limit; omitted/0 captures the full gallery, stopping at its actual end or repeated unchanged slides. |
 | `max_run_minutes` | no | Optional user deadline in minutes; omitted/0 means no whole-batch deadline. |

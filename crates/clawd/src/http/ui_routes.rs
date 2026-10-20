@@ -498,6 +498,10 @@ struct NniDeviceActionRequest {
     challenge: Option<String>,
 }
 
+#[path = "ui_routes/aipp_engagement.rs"]
+mod aipp_engagement;
+use self::aipp_engagement::aipp_engagement;
+
 include!("ui_routes/config_helpers.rs");
 include!("ui_routes/agent_config.rs");
 include!("ui_routes/git_remote_config.rs");
