@@ -401,7 +401,10 @@ pub(in crate::agent_engine) use loop_control_plan_verifier_recovery::plan_verifi
 use loop_control_plan_verifier_recovery::*;
 use loop_control_post_write_evidence_guard::*;
 use loop_control_structured_clarify::*;
-use loop_control_verifier_retry_commit::verifier_retry_answer_has_required_machine_evidence;
+use loop_control_verifier_retry_commit::{
+    retry_verifier_introduced_execution_gap_after_synthesis_only_retry,
+    verifier_retry_answer_has_required_machine_evidence,
+};
 
 fn has_authoritative_delivery(loop_state: &LoopState) -> bool {
     !loop_state.delivery_messages.is_empty()
@@ -528,11 +531,25 @@ async fn try_bounded_answer_verifier_synthesis_retry(
         return false;
     }
     if let Some(retry_verifier) = retry_verifier {
-        if !retry_verifier_accepts_rewritten_answer(&retry_verifier, &retried_answer) {
+        let execution_gap_drift =
+            retry_verifier_introduced_execution_gap_after_synthesis_only_retry(
+                verifier,
+                &retry_verifier,
+            );
+        if !retry_verifier_accepts_rewritten_answer(&retry_verifier, &retried_answer)
+            && !execution_gap_drift
+        {
             if let Some(journal) = reply.task_journal.as_mut() {
                 journal.record_answer_verifier_summary(retry_verifier);
             }
             return false;
+        }
+        if execution_gap_drift {
+            info!(
+                task_id = %task.task_id,
+                missing_evidence_fields = ?retry_verifier.missing_evidence_fields,
+                "answer_verifier_retry_suppressed_new_execution_gap"
+            );
         }
     } else if !retry_rewritten_answer_is_publishable(&retried_answer) {
         return false;

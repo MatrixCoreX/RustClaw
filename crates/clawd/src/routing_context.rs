@@ -35,11 +35,19 @@ fn query_recent_execution_rows(
     limit: usize,
 ) -> anyhow::Result<Vec<(String, String, String, String, String)>> {
     let mut stmt = db.prepare(
-        "SELECT task_id, kind, payload_json, result_json, updated_at
+        "SELECT task_id, kind, payload_json,
+                CASE
+                    WHEN status = 'succeeded' THEN COALESCE(result_json, '{}')
+                    ELSE json_object(
+                        'status', status,
+                        'text', '[prior_task_' || status || ']'
+                    )
+                END,
+                updated_at
          FROM tasks
          WHERE user_id = ?1
            AND chat_id = ?2
-           AND status = 'succeeded'
+           AND status IN ('succeeded', 'failed', 'canceled', 'timeout')
            AND (
              (?3 IS NOT NULL AND user_key = ?3)
              OR (?3 IS NULL AND (user_key IS NULL OR TRIM(user_key) = ''))
@@ -52,7 +60,7 @@ fn query_recent_execution_rows(
                AND json_extract(payload_json, '$.conversation_id') = ?4
              )
            )
-         ORDER BY CAST(updated_at AS INTEGER) DESC
+         ORDER BY CAST(updated_at AS INTEGER) DESC, rowid DESC
          LIMIT ?5",
     )?;
     let rows = stmt.query_map(
@@ -301,11 +309,18 @@ fn capability_anchor_from_result(result: &Value) -> Option<CapabilityAnchorProje
         .find_map(capability_anchor_from_envelope)
 }
 
+fn capability_is_runtime_control(capability: &str) -> bool {
+    capability.starts_with("task.plan_")
+}
+
 fn capability_anchor_from_envelope(value: &Value) -> Option<CapabilityAnchorProjection> {
     if value.get("status").and_then(Value::as_str) != Some("ok") {
         return None;
     }
     let capability = machine_ref(value.get("capability")?.as_str()?)?.to_string();
+    if capability_is_runtime_control(&capability) {
+        return None;
+    }
     let action = value
         .get("action")
         .and_then(Value::as_str)

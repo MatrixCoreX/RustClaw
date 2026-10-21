@@ -190,6 +190,9 @@ test("warns that Ai APP removal also uninstalls its skill while retaining user d
   assert.match(source, /removeAippAndSkill/);
   assert.match(source, /卸载应用和技能/);
   assert.match(source, /配置和已采集数据会保留/);
+  assert.match(source, /最后确认/);
+  assert.match(source, /再次确认卸载/);
+  assert.match(source, /if \(!finalAccepted\) return/);
   assert.doesNotMatch(source, /method:.*"DELETE"/);
   assert.match(source, /安装 Ai APP/);
 });
@@ -254,9 +257,58 @@ test("renders a media collection record from the current no-OCR contract", () =>
   assert.match(markup, /投币: 0/);
   assert.match(markup, /弹幕: 345/);
   assert.doesNotMatch(markup, /播放:/);
+  assert.doesNotMatch(markup, /class="truncate"/);
   assert.match(markup, /href="https:\/\/example\.test\/source"/);
   // Pre-render must not bypass the authenticated local-preview fetch with a CDN URL.
   assert.doesNotMatch(markup, /<img/);
+});
+
+test("keeps compact Bilibili engagement values fully visible without ellipsis", () => {
+  const item: AippMediaItem = {
+    schema_version: 1,
+    global_sequence: 43,
+    sequence: 8,
+    post_sequence: 4,
+    image_sequence: null,
+    kind: "video",
+    platform: "bilibili",
+    source_mode: "topics",
+    search_keyword: "人工智能",
+    title: "Bilibili engagement fixture",
+    platform_text: "",
+    source_url: "https://www.bilibili.com/video/BV1fixture",
+    image_url: null,
+    preview_available: false,
+    discovered_at: "2026-10-21T00:00:00Z",
+    engagement: {
+      schema_version: 1,
+      platform: "bilibili",
+      captured_at: "2026-10-21T00:00:00Z",
+      metrics: {
+        views: { display: "33.1万", value: 331000 },
+        likes: { display: "3.4万", value: 34000 },
+        comments: { display: "1834", value: 1834 },
+        favorites: { display: "1.4万", value: 14000 },
+        shares: { display: "1046", value: 1046 },
+      },
+    },
+  };
+
+  const markup = renderToStaticMarkup(
+    <AippMediaItemCard
+      item={item}
+      skillName="media_discovery"
+      apiFetch={async () => new Response()}
+      t={t}
+      lang="zh"
+    />,
+  );
+
+  for (const value of ["播放 33.1万", "点赞 3.4万", "评论 1834", "收藏 1.4万", "分享 1046"]) {
+    assert.match(markup, new RegExp(value));
+  }
+  assert.match(markup, /flex-wrap/);
+  assert.doesNotMatch(markup, /class="truncate"/);
 });
 
 test("collection cards expose the same select and delete controls as task activity", () => {

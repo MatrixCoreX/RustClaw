@@ -209,6 +209,53 @@ fn recent_turn_context_keeps_latest_clarification_target_and_scopes_conversation
     assert!(!last_turn.contains("target-gamma"));
 }
 
+#[test]
+fn recent_turn_context_uses_insertion_order_when_terminal_timestamps_match() {
+    let state = test_state();
+    let db = state.core.db.get().expect("db");
+    create_tasks_table(&db);
+    for (task_id, user_text, assistant_text) in [
+        ("task-first", "first-target", "first-result"),
+        ("task-second", "second-target", "second-result"),
+    ] {
+        db.execute(
+            "INSERT INTO tasks (task_id, user_id, chat_id, user_key, kind, payload_json, result_json, error_text, status, created_at, updated_at)
+             VALUES (?1, 1, 2, 'test-user', 'ask', ?2, ?3, NULL, 'succeeded', '100', '100')",
+            params![
+                task_id,
+                serde_json::json!({
+                    "conversation_id": "conversation-selected",
+                    "text": user_text,
+                })
+                .to_string(),
+                serde_json::json!({ "text": assistant_text }).to_string(),
+            ],
+        )
+        .expect("insert same-timestamp turn");
+    }
+    drop(db);
+
+    let (recent, sources) = build_recent_turns_full_context_with_sources(
+        &state,
+        Some("test-user"),
+        1,
+        2,
+        Some("conversation-selected"),
+        8,
+        400,
+        2400,
+    );
+    assert!(recent.contains("[TURN -1 source_task_id=task-second"));
+    assert!(
+        recent.find("second-target").expect("second target")
+            < recent.find("first-target").expect("first target")
+    );
+    assert_eq!(
+        sources,
+        vec!["task-first".to_string(), "task-second".to_string()]
+    );
+}
+
 fn create_memories_table(db: &Connection) {
     db.execute_batch(
         "CREATE TABLE memories (

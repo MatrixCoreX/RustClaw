@@ -554,7 +554,8 @@ fn query_recent_terminal_ask_turn_for_chat(
            )
            AND kind = 'ask'
            AND status IN ('succeeded', 'failed')
-         ORDER BY CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) DESC
+         ORDER BY CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) DESC,
+                  rowid DESC
          LIMIT 8",
     )?;
     let rows = stmt.query_map(
@@ -624,7 +625,8 @@ fn query_recent_terminal_ask_turns_for_chat(
            )
            AND kind = 'ask'
            AND status IN ('succeeded', 'failed')
-         ORDER BY CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) DESC
+         ORDER BY CAST(COALESCE(NULLIF(updated_at, ''), created_at) AS INTEGER) DESC,
+                  rowid DESC
          LIMIT ?5",
     )?;
     let rows = stmt.query_map(

@@ -9,7 +9,8 @@ use super::{
     answer_contract, answer_verifier_retry_summary, commit_answer_verifier_retry_answer, ok_step,
     post_write_content_evidence_recovery_policy,
     prefer_terminal_model_answer_for_verifier_candidate, retry_verifier_accepts_rewritten_answer,
-    route_result, suppress_answer_verifier_retry_if_structurally_satisfied, test_policy,
+    retry_verifier_introduced_execution_gap_after_synthesis_only_retry, route_result,
+    suppress_answer_verifier_retry_if_structurally_satisfied, test_policy,
 };
 use crate::{
     agent_engine::LoopState, executor::StepExecutionStatus, AskReply, OutputDeliveryIntent,
@@ -705,6 +706,84 @@ fn verifier_retry_commit_replaces_stale_visible_reply() {
         journal.final_stop_signal.as_deref(),
         Some(crate::task_journal::ANSWER_VERIFIER_RECOVERED_TERMINAL_STOP_SIGNAL)
     );
+}
+
+#[test]
+fn synthesis_retry_does_not_accept_a_new_verifier_execution_requirement() {
+    let previous = crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["unsupported_claims".to_string()],
+        answer_incomplete_reason: "unsupported_comparison".to_string(),
+        should_retry: true,
+        retry_instruction: "rewrite from the existing observation".to_string(),
+        confidence: 0.98,
+    };
+    let retry = crate::answer_verifier::AnswerVerifierOut {
+        pass: false,
+        missing_evidence_fields: vec![
+            "requested_result".to_string(),
+            "required_dispatch:call_capability:fixture.run_once".to_string(),
+        ],
+        answer_incomplete_reason: "requested_operation_not_observed".to_string(),
+        should_retry: true,
+        retry_instruction: "run another operation".to_string(),
+        confidence: 0.97,
+    };
+
+    assert!(retry_verifier_introduced_execution_gap_after_synthesis_only_retry(&previous, &retry));
+}
+
+#[test]
+fn existing_execution_gap_is_not_suppressed_during_synthesis_retry() {
+    let previous = crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec![
+            "requested_result".to_string(),
+            "required_dispatch:call_capability:fixture.inspect".to_string(),
+        ],
+        answer_incomplete_reason: "requested_operation_not_observed".to_string(),
+        should_retry: true,
+        retry_instruction: "collect the missing observation".to_string(),
+        confidence: 0.98,
+    };
+    let retry = crate::answer_verifier::AnswerVerifierOut {
+        pass: false,
+        missing_evidence_fields: vec![
+            "requested_result".to_string(),
+            "required_dispatch:call_capability:fixture.inspect".to_string(),
+        ],
+        answer_incomplete_reason: "requested_operation_not_observed".to_string(),
+        should_retry: true,
+        retry_instruction: "collect the missing observation".to_string(),
+        confidence: 0.97,
+    };
+
+    assert!(!retry_verifier_introduced_execution_gap_after_synthesis_only_retry(&previous, &retry));
+}
+
+#[test]
+fn evidence_collection_gap_is_not_treated_as_a_synthesis_only_retry() {
+    let previous = crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["content_excerpt".to_string()],
+        answer_incomplete_reason: "content_not_observed".to_string(),
+        should_retry: true,
+        retry_instruction: "collect bounded content evidence".to_string(),
+        confidence: 0.98,
+    };
+    let retry = crate::answer_verifier::AnswerVerifierOut {
+        pass: false,
+        missing_evidence_fields: vec![
+            "requested_result".to_string(),
+            "required_dispatch:call_capability:fixture.read".to_string(),
+        ],
+        answer_incomplete_reason: "requested_operation_not_observed".to_string(),
+        should_retry: true,
+        retry_instruction: "collect the missing observation".to_string(),
+        confidence: 0.97,
+    };
+
+    assert!(!retry_verifier_introduced_execution_gap_after_synthesis_only_retry(&previous, &retry));
 }
 
 #[test]

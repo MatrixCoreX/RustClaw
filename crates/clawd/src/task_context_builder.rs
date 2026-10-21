@@ -402,10 +402,17 @@ fn truncate_context_snippet(text: &str, max_chars: usize) -> String {
 
 fn build_active_task_context(
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+    latest_recent_task_id: Option<&str>,
 ) -> String {
     let Some(conversation_state) = session_snapshot.conversation_state.as_ref() else {
         return "<none>".to_string();
     };
+    if latest_recent_task_id.is_some_and(|latest_task_id| {
+        !latest_task_id.trim().is_empty()
+            && conversation_state.last_task_id.trim() != latest_task_id.trim()
+    }) {
+        return "<none>".to_string();
+    }
     let last_prompt = conversation_state
         .last_primary_task_prompt
         .as_deref()
@@ -712,12 +719,13 @@ pub(crate) fn build_agent_loop_task_context_bundle(
     } else {
         "<none>".to_string()
     };
+    let latest_recent_task_id = context_source_task_ids.last().map(String::as_str);
     let execution_view = ExecutionContextView {
         budget_tier,
         memory_ctx,
         runtime_context: build_runtime_context(state),
         goal_context: build_task_goal_context(task),
-        active_task_context: build_active_task_context(&session_snapshot),
+        active_task_context: build_active_task_context(&session_snapshot, latest_recent_task_id),
         active_execution_anchor_context: build_active_execution_anchor_context(
             &session_snapshot,
             &task.task_id,

@@ -44,7 +44,7 @@ fn empty_prompt_memory_context() -> crate::memory::service::PromptMemoryContext 
 
 #[test]
 fn active_task_context_is_empty_without_primary_task_state() {
-    assert_eq!(build_active_task_context(&empty_snapshot()), "<none>");
+    assert_eq!(build_active_task_context(&empty_snapshot(), None), "<none>");
 }
 
 #[test]
@@ -53,16 +53,130 @@ fn active_task_context_includes_and_bounds_primary_turn() {
         conversation_state: Some(crate::conversation_state::ConversationState {
             last_primary_task_prompt: Some("prepare a deployment note".to_string()),
             last_primary_task_output: Some("x".repeat(1100)),
+            last_task_id: "task-latest".to_string(),
             ..Default::default()
         }),
         ..empty_snapshot()
     };
 
-    let context = build_active_task_context(&snapshot);
+    let context = build_active_task_context(&snapshot, Some("task-latest"));
     assert!(context.contains("### ACTIVE_TASK_CONTEXT"));
     assert!(context.contains("prepare a deployment note"));
     assert!(context.contains("...(truncated)"));
     assert!(context.len() < 1500);
+}
+
+#[test]
+fn stale_active_task_context_is_suppressed_after_a_newer_terminal_turn() {
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: Some(crate::conversation_state::ConversationState {
+            last_primary_task_prompt: Some("older completed collection".to_string()),
+            last_primary_task_output: Some("older result".to_string()),
+            last_task_id: "task-older-success".to_string(),
+            ..Default::default()
+        }),
+        ..empty_snapshot()
+    };
+
+    assert_eq!(
+        build_active_task_context(&snapshot, Some("task-newer-failure")),
+        "<none>"
+    );
+}
+
+#[test]
+fn failed_followup_suppresses_stale_primary_and_execution_anchors_in_full_bundle() {
+    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let db = state.core.db.get().expect("db");
+    db.execute(
+        "INSERT OR IGNORE INTO auth_keys(user_key, role, enabled, created_at)
+         VALUES ('context-key', 'user', 1, '1')",
+        [],
+    )
+    .expect("auth key");
+    crate::repo::auth::ensure_principal_identity_schema(&db).expect("principal schema");
+    let principal_id = crate::repo::auth::principal_id_for_user_key(&db, "context-key")
+        .expect("principal query")
+        .expect("principal id");
+    let conversation_id = "conversation-context-regression";
+    let old_payload = serde_json::json!({
+        "conversation_id": conversation_id,
+        "text": "older-target",
+    })
+    .to_string();
+    let failed_payload = serde_json::json!({
+        "conversation_id": conversation_id,
+        "text": "newer-target",
+    })
+    .to_string();
+    let current_payload = serde_json::json!({
+        "conversation_id": conversation_id,
+        "text": "continue-current-target",
+    })
+    .to_string();
+    db.execute(
+        "INSERT INTO tasks(task_id,user_id,chat_id,user_key,principal_id,channel,kind,payload_json,status,result_json,created_at,updated_at)
+         VALUES ('task-old-success',7,8,'context-key',?1,'ui','ask',?2,'succeeded',?3,'100','100')",
+        rusqlite::params![
+            principal_id,
+            old_payload,
+            r#"{"text":"older-result","task_journal":{"trace":{"capability_results":[{"schema_version":1,"status":"ok","capability":"catalog.lookup","action":"lookup","data":{"item_id":"older-target"}}]}}}"#,
+        ],
+    )
+    .expect("old task");
+    db.execute(
+        "INSERT INTO tasks(task_id,user_id,chat_id,user_key,principal_id,channel,kind,payload_json,status,error_text,created_at,updated_at)
+         VALUES ('task-new-failure',7,8,'context-key',?1,'ui','ask',?2,'failed','execution_failed','200','200')",
+        rusqlite::params![principal_id, failed_payload],
+    )
+    .expect("failed task");
+    let conversation_state = crate::conversation_state::ConversationState {
+        last_primary_task_prompt: Some("older completed collection".to_string()),
+        last_primary_task_output: Some("older result".to_string()),
+        last_task_id: "task-old-success".to_string(),
+        updated_at_ts: 100,
+        ..Default::default()
+    };
+    db.execute(
+        "INSERT INTO conversation_states(user_id,chat_id,user_key,state_json,last_task_id,updated_at_ts,principal_id)
+         VALUES (7,8,'context-key',?1,'task-old-success',100,?2)",
+        rusqlite::params![
+            serde_json::to_string(&conversation_state).expect("state json"),
+            principal_id,
+        ],
+    )
+    .expect("conversation state");
+    drop(db);
+
+    let task = crate::ClaimedTask {
+        claim_attempt: 1,
+        task_id: "task-current".to_string(),
+        user_id: 7,
+        chat_id: 8,
+        user_key: Some("context-key".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: Some(conversation_id.to_string()),
+        kind: "ask".to_string(),
+        payload_json: current_payload,
+    };
+    let bundle = super::build_agent_loop_task_context_bundle(
+        &state,
+        &task,
+        "continue-current-target",
+        8_000,
+    );
+    let execution = bundle.execution_view.expect("execution view");
+
+    assert_eq!(execution.active_task_context, "<none>");
+    assert_eq!(execution.recent_execution_anchor, "<none>");
+    assert!(execution.recent_turns_full.contains("newer-target"));
+    assert!(execution
+        .recent_execution_context
+        .contains("[prior_task_failed]"));
+    assert!(!execution
+        .recent_execution_context
+        .contains("latest_capability="));
 }
 
 #[test]

@@ -957,11 +957,11 @@ export function AippMediaItemCard({
             <p>{t("采集：", "Collected: ")}{formatCollectedAt(item.discovered_at, lang)}</p>
           </div>
           {metricPresentation.length > 0 ? (
-            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs text-white/58 sm:grid-cols-3" aria-label={t("采集时互动数据", "Engagement at capture")}>
+            <div className="mt-2 flex min-w-0 flex-wrap gap-x-3 gap-y-1.5 text-xs text-white/58" aria-label={t("采集时互动数据", "Engagement at capture")}>
               {metricPresentation.map(({ key, Icon, label, display, value }) => (
-                <span key={key} className="inline-flex min-w-0 items-center gap-1" title={`${label}: ${display}${value != null && String(value) !== display ? ` (${value})` : ""} · ${t("采集：", "Captured: ")}${formatCollectedAt(item.engagement?.captured_at || item.discovered_at, lang)}`}>
+                <span key={key} className="inline-flex max-w-full items-center gap-1" title={`${label}: ${display}${value != null && String(value) !== display ? ` (${value})` : ""} · ${t("采集：", "Captured: ")}${formatCollectedAt(item.engagement?.captured_at || item.discovered_at, lang)}`}>
                   <Icon className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">{label} {display}</span>
+                  <span className="break-all">{label} {display}</span>
                 </span>
               ))}
             </div>
@@ -1103,6 +1103,17 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
         tone: "danger",
       });
       if (!accepted) return;
+      const finalAccepted = await confirm({
+        title: t("最后确认", "Final confirmation"),
+        message: t(
+          `确定继续卸载“${localizedAippCopy(app.titles, lang, app.default_locale)}”吗？再次确认后会立即提交卸载任务，对应技能将停止提供服务。`,
+          `Continue uninstalling "${localizedAippCopy(app.titles, lang, app.default_locale)}"? Confirming again immediately submits the removal job and stops the associated skill from providing service.`,
+        ),
+        confirmLabel: t("再次确认卸载", "Confirm uninstall again"),
+        cancelLabel: t("返回", "Go back"),
+        tone: "danger",
+      });
+      if (!finalAccepted) return;
     }
     setInstallActionSkill(app.skill_name);
     const controller = new AbortController();

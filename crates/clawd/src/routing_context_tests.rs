@@ -97,6 +97,77 @@ fn newer_non_execution_turn_invalidates_older_execution_anchor() {
 }
 
 #[test]
+fn runtime_plan_capabilities_do_not_replace_the_domain_execution_anchor() {
+    let anchor = extract_execution_anchor(
+        "task-domain",
+        "ask",
+        r#"{"text":"inspect the selected item"}"#,
+        r#"{"text":"done","task_journal":{"trace":{"capability_results":[{"schema_version":1,"status":"ok","capability":"catalog.lookup","action":"lookup","data":{"item_id":"item-42"}},{"schema_version":1,"status":"ok","capability":"task.plan_update","action":"update_steps","data":{"plan_revision":2}}]}}}"#,
+        "200",
+    )
+    .expect("domain anchor");
+
+    assert_eq!(anchor.capability, "catalog.lookup");
+    assert_eq!(anchor.action.as_deref(), Some("lookup"));
+    assert_eq!(
+        anchor.data.as_ref().and_then(|data| data.get("item_id")),
+        Some(&serde_json::json!("item-42"))
+    );
+}
+
+#[test]
+fn failed_turn_is_a_recency_barrier_for_older_execution_anchors() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let db = state.core.db.get().expect("db");
+    db.execute_batch(
+        "CREATE TABLE tasks (
+            task_id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            chat_id INTEGER NOT NULL,
+            user_key TEXT,
+            kind TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            result_json TEXT,
+            status TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );",
+    )
+    .expect("create tasks");
+    db.execute(
+        "INSERT INTO tasks (task_id, user_id, chat_id, user_key, kind, payload_json, result_json, status, updated_at)
+         VALUES ('task-older-success', 1, 2, 'test-user', 'ask', ?1, ?2, 'succeeded', '200')",
+        params![
+            r#"{"conversation_id":"conversation-selected","text":"target-alpha"}"#,
+            r#"{"text":"done","task_journal":{"trace":{"capability_results":[{"schema_version":1,"status":"ok","capability":"catalog.lookup","action":"lookup","data":{"item_id":"target-alpha"}}]}}}"#,
+        ],
+    )
+    .expect("insert successful anchor");
+    db.execute(
+        "INSERT INTO tasks (task_id, user_id, chat_id, user_key, kind, payload_json, result_json, status, updated_at)
+         VALUES ('task-newer-failure', 1, 2, 'test-user', 'ask', ?1, NULL, 'failed', '200')",
+        params![r#"{"conversation_id":"conversation-selected","text":"target-beta"}"#],
+    )
+    .expect("insert failed barrier");
+
+    let rows = query_recent_execution_rows(
+        &state,
+        &db,
+        1,
+        2,
+        Some("test-user"),
+        Some("conversation-selected"),
+        8,
+    )
+    .expect("query recent rows");
+    assert_eq!(rows[0].0, "task-newer-failure");
+    assert_eq!(render_recent_execution_anchor_context(&rows), "<none>");
+    let context = render_recent_execution_context(&rows, 8);
+    assert!(context.contains("target-beta"));
+    assert!(context.contains("[prior_task_failed]"));
+    assert!(!context.contains("latest_capability="));
+}
+
+#[test]
 fn recent_execution_rows_are_scoped_to_current_conversation() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let db = state.core.db.get().expect("db");

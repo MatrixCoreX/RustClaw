@@ -113,6 +113,27 @@ fn insert_task_activity(
     .expect("activity event");
 }
 
+fn insert_task_activity_event(
+    db: &rusqlite::Connection,
+    task_id: &str,
+    skill: &str,
+    action_ref: &str,
+    created_at_ms: i64,
+) {
+    let event = json!({
+        "event_kind": "tool_finished",
+        "payload": {
+            "skill": skill,
+            "requested_action_ref": action_ref,
+        }
+    });
+    db.execute(
+        "INSERT INTO task_event_stream(task_id, event_json, created_at_ms) VALUES (?1, ?2, ?3)",
+        rusqlite::params![task_id, event.to_string(), created_at_ms],
+    )
+    .expect("additional activity event");
+}
+
 #[test]
 fn task_activity_page_projects_current_and_archived_skill_tasks_without_secrets() {
     let db = task_activity_db();
@@ -124,6 +145,13 @@ fn task_activity_page_projects_current_and_archived_skill_tasks_without_secrets(
         "media_download",
         "media_download.download",
         false,
+    );
+    insert_task_activity_event(
+        &db,
+        "task-current",
+        "media_download",
+        "media_download.capabilities",
+        1001,
     );
     insert_task_activity(
         &db,
@@ -186,6 +214,46 @@ fn task_activity_page_projects_current_and_archived_skill_tasks_without_secrets(
     assert!(!encoded.contains("must-not-leak"));
     assert!(!encoded.contains("local_path"));
     assert!(!encoded.contains("/private/result.txt"));
+}
+
+#[test]
+fn task_activity_page_ignores_capability_probe_without_business_execution() {
+    let db = task_activity_db();
+    insert_task_activity(
+        &db,
+        "task-discovery-preview",
+        "ui",
+        "succeeded",
+        "media_download",
+        "media_download.capabilities",
+        false,
+    );
+    insert_task_activity_event(
+        &db,
+        "task-discovery-preview",
+        "media_discovery",
+        "media_discovery.preview_enable",
+        1001,
+    );
+
+    let download_page = read_aipp_task_activity_page(
+        &db,
+        "media_download",
+        "all",
+        0,
+        &[],
+        &AippMediaQuery::default(),
+    )
+    .expect("media download activity page");
+    assert_eq!(download_page["page_item_count"], 0);
+    assert_eq!(download_page["total_item_count"], 0);
+    assert!(owned_aipp_task_activity_ids(
+        &db,
+        "media_download",
+        &["task-discovery-preview".to_string()]
+    )
+    .expect("owned activity ids")
+    .is_empty());
 }
 
 #[test]
@@ -405,7 +473,7 @@ fn task_activity_clear_event_time_hides_only_older_view_records() {
         "ui",
         "succeeded",
         "media_download",
-        "media_download.capabilities",
+        "media_download.download",
         false,
     );
     db.execute(
