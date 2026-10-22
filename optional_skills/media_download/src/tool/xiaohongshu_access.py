@@ -33,6 +33,7 @@ VIDEO_CDN_PATH_MARKERS = (".mp4", "stream", "video")
 LOGIN_WAIT_SECONDS = 600.0
 LOGIN_POLL_SECONDS = 1.0
 LOGIN_READY_POLLS = 2
+BACKGROUND_ACCESS_PROBE_SECONDS = 15.0
 LOGIN_REQUIRED = "login_required"
 DISPLAY_UNAVAILABLE = "display_unavailable"
 INTERACTIVE_TIMEOUT = "interactive_verification_timeout"
@@ -494,25 +495,34 @@ DOCUMENT_HTML_SCRIPT = "document.documentElement ? document.documentElement.oute
 NOTE_STATE_SCRIPT = "JSON.stringify((window.__INITIAL_STATE__ && window.__INITIAL_STATE__.note) || {})"
 
 
-def wait_for_skill_owned_access(
+def _access_browser_args(desktop_environment: dict[str, str], *, visible: bool) -> list[str]:
+    if visible:
+        return [
+            *visible_chrome_args(desktop_environment),
+            *login_challenge.companion_browser_args(desktop_environment),
+        ]
+    return ["--headless=new", "--window-size=1280,900"]
+
+
+def _wait_for_skill_owned_access_once(
     *,
     chrome: str,
     profile_dir: Path,
     page_url: str,
     note_id: str | None,
     timeout: float = LOGIN_WAIT_SECONDS,
+    visible: bool,
     on_tick: Callable[[], None] | None = None,
     on_opened: Callable[[], None] | None = None,
 ) -> SkillOwnedAccessResult:
-    """Open the private profile and return only after the requested media is readable."""
+    """Probe one browser mode and return after the requested media is readable."""
     desktop_environment = desktop_session_environment()
-    if not desktop_display_available(desktop_environment):
+    if visible and not desktop_display_available(desktop_environment):
         return SkillOwnedAccessResult(DISPLAY_UNAVAILABLE)
     port, debug_args = _devtools_port()
     command = [
         chrome,
-        *visible_chrome_args(desktop_environment),
-        *login_challenge.companion_browser_args(desktop_environment),
+        *_access_browser_args(desktop_environment, visible=visible),
         "--disable-gpu",
         "--no-sandbox",
         "--disable-dev-shm-usage",
@@ -544,7 +554,7 @@ def wait_for_skill_owned_access(
         )
         client = DevToolsConnection(websocket_url, timeout=min(max(timeout, 1.0), 10.0))
         client.send("Runtime.enable")
-        if on_opened is not None:
+        if visible and on_opened is not None:
             on_opened()
         deadline = time.monotonic() + scan_timeout
         while time.monotonic() < deadline:
@@ -553,13 +563,13 @@ def wait_for_skill_owned_access(
             if process.poll() is not None:
                 return SkillOwnedAccessResult(INTERACTIVE_CANCELLED)
             now = time.monotonic()
-            if login_challenge.challenge_has_expired(
+            if visible and login_challenge.challenge_has_expired(
                 client,
                 lambda command_id, wait: _wait_devtools_result(client, command_id, wait),
                 desktop_environment,
             ):
                 return SkillOwnedAccessResult(INTERACTIVE_TIMEOUT)
-            if now - last_challenge_at >= login_challenge.REFRESH_SECONDS:
+            if visible and now - last_challenge_at >= login_challenge.REFRESH_SECONDS:
                 login_challenge.publish_login_challenge(
                     client,
                     lambda command_id, wait: _wait_devtools_result(client, command_id, wait),
@@ -573,6 +583,8 @@ def wait_for_skill_owned_access(
             )
             event = _wait_devtools_result(client, command_id, timeout=5.0)
             snapshot = _evaluate_result(event)
+            if not visible and snapshot.get("login") is True:
+                return SkillOwnedAccessResult(LOGIN_REQUIRED)
             if note_access_ready(snapshot, note_id):
                 ready_polls += 1
                 if ready_polls >= LOGIN_READY_POLLS:
@@ -598,7 +610,8 @@ def wait_for_skill_owned_access(
     except DevToolsError:
         return SkillOwnedAccessResult(INTERACTIVE_CANCELLED)
     finally:
-        login_challenge.clear_login_challenge(profile_dir, "xiaohongshu")
+        if visible:
+            login_challenge.clear_login_challenge(profile_dir, "xiaohongshu")
         if client is not None:
             client.close()
         if process.poll() is None:
@@ -608,6 +621,40 @@ def wait_for_skill_owned_access(
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=5)
+
+
+def wait_for_skill_owned_access(
+    *,
+    chrome: str,
+    profile_dir: Path,
+    page_url: str,
+    note_id: str | None,
+    timeout: float = LOGIN_WAIT_SECONDS,
+    on_tick: Callable[[], None] | None = None,
+    on_opened: Callable[[], None] | None = None,
+) -> SkillOwnedAccessResult:
+    """Reuse a stored session headlessly before opening an interactive login window."""
+    background_result = _wait_for_skill_owned_access_once(
+        chrome=chrome,
+        profile_dir=profile_dir,
+        page_url=page_url,
+        note_id=note_id,
+        timeout=min(max(5.0, timeout), BACKGROUND_ACCESS_PROBE_SECONDS),
+        visible=False,
+        on_tick=on_tick,
+    )
+    if background_result.status == "ok":
+        return background_result
+    return _wait_for_skill_owned_access_once(
+        chrome=chrome,
+        profile_dir=profile_dir,
+        page_url=page_url,
+        note_id=note_id,
+        timeout=timeout,
+        visible=True,
+        on_tick=on_tick,
+        on_opened=on_opened,
+    )
 
 
 def wait_for_skill_owned_login(

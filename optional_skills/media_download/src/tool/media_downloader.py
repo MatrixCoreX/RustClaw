@@ -2410,6 +2410,21 @@ def extract_kuaishou_candidates_from_json(value: Any) -> list[Candidate]:
     return sorted(candidates, key=lambda candidate: candidate.priority)
 
 
+def numeric_metadata_value(value: dict[str, Any], *keys: str) -> int:
+    for key in keys:
+        raw = value.get(key)
+        if isinstance(raw, bool):
+            continue
+        if isinstance(raw, (int, float)):
+            return max(0, int(raw))
+        if isinstance(raw, str):
+            try:
+                return max(0, int(float(raw.strip())))
+            except ValueError:
+                continue
+    return 0
+
+
 def extract_xiaohongshu_candidates_from_json(value: Any) -> list[Candidate]:
     candidates: list[Candidate] = []
     seen: set[str] = set()
@@ -2418,12 +2433,28 @@ def extract_xiaohongshu_candidates_from_json(value: Any) -> list[Candidate]:
         stream = item.get("stream")
         if isinstance(stream, dict):
             for codec, stream_index, stream_item in xiaohongshu_access.iter_xiaohongshu_stream_groups(stream):
+                if not isinstance(stream_item, dict):
+                    continue
+                width = numeric_metadata_value(stream_item, "width")
+                height = numeric_metadata_value(stream_item, "height")
+                bitrate = max(
+                    numeric_metadata_value(stream_item, "avgBitrate", "avg_bitrate"),
+                    numeric_metadata_value(stream_item, "videoBitrate", "video_bitrate"),
+                )
+                pixel_count = width * height
+                # EF5 is the platform's high-efficiency rendition family. On
+                # notes that expose both EF4 and EF5, EF4 can be the branded
+                # playback rendition while EF5 retains the clean source frame.
+                # Prefer that family, then the largest frame and bitrate.
+                codec_bonus = 1_000_000_000_000 if codec.upper() == "EF5" else 0
+                quality_score = codec_bonus + pixel_count * 1_000 + bitrate
+                priority = -quality_score + stream_index
                 add_urls_from_value(
                     candidates,
                     seen,
                     stream_item,
                     f"xiaohongshu.stream.{codec}[{stream_index}]",
-                    5 + stream_index,
+                    priority,
                     "xiaohongshu",
                 )
 
@@ -3674,6 +3705,8 @@ def gather_browser_candidates(
                         article,
                         article_from_xiaohongshu_payload(payload, source="xiaohongshu.browser-dom"),
                     )
+                    for candidate in extract_xiaohongshu_candidates_from_json(payload):
+                        merge_platform_candidate(candidates, seen, candidate, platform)
             elif platform == "toutiao":
                 payload = find_toutiao_item_payload_in_html(completed.stdout, item_id)
                 if payload is not None:
@@ -3725,7 +3758,7 @@ def gather_browser_candidates(
                     seen_image_urls.add(candidate.url)
                     image_candidates.append(candidate)
 
-            if platform not in {"toutiao", "weibo"}:
+            if platform not in {"toutiao", "weibo", "xiaohongshu"}:
                 for index, candidate in enumerate(extract_platform_candidates_from_html(completed.stdout, platform)):
                     item_match = browser_candidate_matches_item(candidate.url, item_id)
                     if require_item_match and not item_match:
@@ -5392,6 +5425,13 @@ def gather_web_platform_candidates(
                         source="xiaohongshu.page-item",
                     ),
                 )
+                for candidate in extract_xiaohongshu_candidates_from_json(exact_payload):
+                    merge_platform_candidate(
+                        all_candidates,
+                        seen_candidates,
+                        candidate,
+                        "xiaohongshu",
+                    )
                 exact_images = extract_xiaohongshu_item_image_candidates(
                     exact_payload,
                     source="xiaohongshu.page-item.image",
@@ -5430,7 +5470,7 @@ def gather_web_platform_candidates(
 
         # Toutiao and Weibo pages contain recommendation payloads beside the requested item.
         # Their exact-item collectors are intentionally the only accepted sources.
-        if platform not in {"toutiao", "weibo"}:
+        if platform not in {"toutiao", "weibo", "xiaohongshu"}:
             for candidate in extract_platform_candidates_from_html(page_text, platform):
                 add_platform_candidate(
                     all_candidates,

@@ -1163,6 +1163,85 @@ class ShareTextTest(unittest.TestCase):
             ["https://sns-webpic-qc.xhscdn.com/target.jpg"],
         )
 
+    def test_xiaohongshu_direct_page_ignores_recommendation_video(self) -> None:
+        requested_id = "66a1b2c3d4e5f60718293abc"
+        requested_url = "https://sns-video-v3.xhscdn.com/target/clean.mp4"
+        recommendation_url = "https://sns-video-v3.xhscdn.com/recommendation/branded.mp4"
+        state = {
+            "note": {
+                "noteDetailMap": {
+                    requested_id: {
+                        "note": {
+                            "noteId": requested_id,
+                            "video": {
+                                "media": {
+                                    "stream": {
+                                        "EF5": [
+                                            {
+                                                "masterUrl": requested_url,
+                                                "width": 1080,
+                                                "height": 1920,
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                        }
+                    },
+                    "recommendation": {
+                        "note": {
+                            "noteId": "ffffffffffffffffffffffff",
+                            "video": {
+                                "media": {
+                                    "stream": {
+                                        "EF4": [
+                                            {
+                                                "masterUrl": recommendation_url,
+                                                "width": 720,
+                                                "height": 1280,
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                        }
+                    },
+                }
+            }
+        }
+        page = (
+            "<script>window.__INITIAL_STATE__="
+            + json.dumps(state, ensure_ascii=False)
+            + "</script>"
+        )
+        target = SimpleNamespace(
+            page_url=f"https://www.xiaohongshu.com/explore/{requested_id}",
+            note_id=requested_id,
+            login_barrier=False,
+        )
+        with (
+            mock.patch.object(
+                self.downloader.xiaohongshu_access,
+                "resolve_xiaohongshu_share_url",
+                return_value=target,
+            ),
+            mock.patch.object(
+                self.downloader,
+                "http_get",
+                return_value=SimpleNamespace(
+                    url=target.page_url,
+                    content=page.encode("utf-8"),
+                    headers={"content-type": "text/html; charset=utf-8"},
+                ),
+            ),
+        ):
+            _, candidates, _, _, _ = self.downloader.gather_web_platform_candidates(
+                target.page_url,
+                platform="xiaohongshu",
+            )
+
+        self.assertEqual([candidate.url for candidate in candidates], [requested_url])
+
     def test_xiaohongshu_initial_state_allows_javascript_undefined(self) -> None:
         requested_id = "6a6a1797000000000100fd40"
         page = (

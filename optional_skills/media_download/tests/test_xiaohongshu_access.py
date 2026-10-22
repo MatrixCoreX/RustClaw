@@ -4,6 +4,7 @@ import socket
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 TOOL_DIR = Path(__file__).parents[1] / "src" / "tool"
@@ -63,7 +64,24 @@ class XiaohongshuAccessTest(unittest.TestCase):
                             {
                                 "masterUrl": "https://sns-video-v3.xhscdn.com/note/ef4/master",
                                 "backupUrls": ["https://sns-bak-v1.xhscdn.com/note/ef4/backup"],
+                                "width": 720,
+                                "height": 1280,
+                                "avgBitrate": 3340768,
                             }
+                        ],
+                        "EF5": [
+                            {
+                                "masterUrl": "https://sns-video-v3.xhscdn.com/note/ef5/720",
+                                "width": 720,
+                                "height": 1280,
+                                "avgBitrate": 1855009,
+                            },
+                            {
+                                "masterUrl": "https://sns-video-v3.xhscdn.com/note/ef5/1080",
+                                "width": 1080,
+                                "height": 1920,
+                                "avgBitrate": 2383271,
+                            },
                         ],
                         "h264": [],
                     }
@@ -75,6 +93,21 @@ class XiaohongshuAccessTest(unittest.TestCase):
         urls = {candidate.url for candidate in candidates}
         self.assertIn("https://sns-video-v3.xhscdn.com/note/ef4/master", urls)
         self.assertIn("https://sns-bak-v1.xhscdn.com/note/ef4/backup", urls)
+        self.assertEqual(
+            candidates[0].url,
+            "https://sns-video-v3.xhscdn.com/note/ef5/1080",
+        )
+        self.assertTrue(candidates[0].source.startswith("xiaohongshu.stream.EF5"))
+
+    def test_xiaohongshu_numeric_stream_metadata_accepts_snake_case(self) -> None:
+        self.assertEqual(
+            self.downloader.numeric_metadata_value(
+                {"avg_bitrate": "2383271.0"},
+                "avgBitrate",
+                "avg_bitrate",
+            ),
+            2383271,
+        )
 
     def test_network_player_stream_does_not_skip_private_profile_lookup(self) -> None:
         player_candidate = self.downloader.Candidate(
@@ -239,6 +272,70 @@ class XiaohongshuAccessTest(unittest.TestCase):
         manifest = (Path(__file__).parents[1] / "skill.toml").read_text(encoding="utf-8")
         for key in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR"):
             self.assertIn(f'"{key}"', manifest)
+
+    def test_reuses_authenticated_profile_without_opening_visible_window(self) -> None:
+        observed = self.access.SkillOwnedAccessResult("ok", "<html></html>", "{}")
+        with mock.patch.object(
+            self.access,
+            "_wait_for_skill_owned_access_once",
+            return_value=observed,
+        ) as access_once:
+            result = self.access.wait_for_skill_owned_access(
+                chrome="chromium",
+                profile_dir=Path("/tmp/profile"),
+                page_url="https://www.xiaohongshu.com/explore/example",
+                note_id="example",
+            )
+
+        self.assertIs(result, observed)
+        self.assertEqual(access_once.call_count, 1)
+        self.assertFalse(access_once.call_args.kwargs["visible"])
+
+    def test_opens_visible_window_only_after_background_profile_needs_login(self) -> None:
+        opened = mock.Mock()
+        interactive = self.access.SkillOwnedAccessResult("ok", "<html></html>", "{}")
+        with mock.patch.object(
+            self.access,
+            "_wait_for_skill_owned_access_once",
+            side_effect=[
+                self.access.SkillOwnedAccessResult(self.access.LOGIN_REQUIRED),
+                interactive,
+            ],
+        ) as access_once:
+            result = self.access.wait_for_skill_owned_access(
+                chrome="chromium",
+                profile_dir=Path("/tmp/profile"),
+                page_url="https://www.xiaohongshu.com/explore/example",
+                note_id="example",
+                on_opened=opened,
+            )
+
+        self.assertIs(result, interactive)
+        self.assertEqual(access_once.call_count, 2)
+        self.assertFalse(access_once.call_args_list[0].kwargs["visible"])
+        self.assertIsNone(access_once.call_args_list[0].kwargs.get("on_opened"))
+        self.assertTrue(access_once.call_args_list[1].kwargs["visible"])
+        self.assertIs(access_once.call_args_list[1].kwargs["on_opened"], opened)
+
+    def test_background_browser_mode_does_not_require_desktop_arguments(self) -> None:
+        environment = {"DISPLAY": ":0", "WAYLAND_DISPLAY": "wayland-0"}
+        self.assertEqual(
+            self.access._access_browser_args(environment, visible=False),
+            ["--headless=new", "--window-size=1280,900"],
+        )
+        with mock.patch.object(
+            self.access.login_challenge,
+            "companion_browser_args",
+            return_value=["--start-minimized"],
+        ):
+            self.assertEqual(
+                self.access._access_browser_args(environment, visible=True),
+                [
+                    "--password-store=basic",
+                    "--ozone-platform=wayland",
+                    "--start-minimized",
+                ],
+            )
 
 
 if __name__ == "__main__":
