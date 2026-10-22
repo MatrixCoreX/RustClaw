@@ -99,6 +99,22 @@ class XiaohongshuAccessTest(unittest.TestCase):
         )
         self.assertTrue(candidates[0].source.startswith("xiaohongshu.stream.EF5"))
 
+        profile_candidates = self.downloader.extract_xiaohongshu_candidates_from_json(
+            payload,
+            stream_source_prefix="xiaohongshu.background-profile-stream",
+        )
+        self.assertTrue(
+            profile_candidates[0].source.startswith(
+                "xiaohongshu.background-profile-stream.EF5"
+            )
+        )
+        self.assertTrue(
+            self.downloader.xiaohongshu_has_verified_item_media(
+                profile_candidates,
+                [],
+            )
+        )
+
     def test_xiaohongshu_numeric_stream_metadata_accepts_snake_case(self) -> None:
         self.assertEqual(
             self.downloader.numeric_metadata_value(
@@ -145,9 +161,27 @@ class XiaohongshuAccessTest(unittest.TestCase):
                 "candidate_source": "xiaohongshu.stream.EF4[0].masterUrl",
                 "provenance": "structured_item_payload",
                 "exact_item_structured": True,
+                "skill_profile_reused": False,
+                "skill_profile_access_mode": None,
                 "rendered_player_fallback": False,
             },
         )
+
+        profile_candidate = self.downloader.Candidate(
+            structured_candidate.url,
+            "xiaohongshu.visible-profile-stream.h264[0].masterUrl",
+            5,
+        )
+        profile_contract = self.downloader.selected_video_source_contract(
+            "xiaohongshu",
+            profile_candidate,
+        )
+        self.assertEqual(
+            profile_contract["provenance"],
+            "skill_profile_structured_item_payload",
+        )
+        self.assertTrue(profile_contract["skill_profile_reused"])
+        self.assertEqual(profile_contract["skill_profile_access_mode"], "visible")
 
     def test_login_html_without_note_state_is_a_barrier(self) -> None:
         html = '<html><script>window.__INITIAL_STATE__={"user":{"loggedIn":false}}</script></html>'
@@ -228,6 +262,31 @@ class XiaohongshuAccessTest(unittest.TestCase):
                 None,
             )
         )
+
+    def test_ready_snapshot_retains_note_state_without_a_second_page_read(self) -> None:
+        note_state = '{"noteDetailMap":{"abc":{"note":{"noteId":"abc"}}}}'
+        self.assertEqual(
+            self.access.note_state_json_from_snapshot(
+                {
+                    "login": False,
+                    "media_note_ids": ["abc"],
+                    "note_state_json": note_state,
+                }
+            ),
+            note_state,
+        )
+        self.assertEqual(
+            self.access.note_state_json_from_snapshot(
+                {"login": False, "media_note_ids": ["abc"]}
+            ),
+            "",
+        )
+
+    def test_access_script_uses_structured_auth_state_not_visible_language(self) -> None:
+        self.assertIn("userState.loggedIn === true", self.access.NOTE_ACCESS_SCRIPT)
+        self.assertIn("note_state_json", self.access.NOTE_ACCESS_SCRIPT)
+        self.assertNotIn("innerText", self.access.NOTE_ACCESS_SCRIPT)
+        self.assertNotIn("textContent", self.access.NOTE_ACCESS_SCRIPT)
 
     def test_desktop_display_detection(self) -> None:
         self.assertTrue(self.access.desktop_display_available({"DISPLAY": ":0"}, "linux"))

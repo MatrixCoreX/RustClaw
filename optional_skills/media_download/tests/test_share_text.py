@@ -1242,6 +1242,76 @@ class ShareTextTest(unittest.TestCase):
 
         self.assertEqual([candidate.url for candidate in candidates], [requested_url])
 
+    def test_xiaohongshu_persistent_profile_replaces_direct_video_candidate(self) -> None:
+        direct = self.downloader.Candidate(
+            "https://sns-video-v3.xhscdn.com/direct/playback.mp4",
+            "xiaohongshu.stream.EF4[0].masterUrl",
+            1,
+        )
+        profile = self.downloader.Candidate(
+            "https://sns-video-v3.xhscdn.com/profile/source.mp4",
+            "xiaohongshu.stream.EF5[0].masterUrl",
+            1,
+        )
+        with (
+            mock.patch.object(
+                self.downloader,
+                "gather_web_platform_candidates",
+                return_value=("abc", [direct], [], None, []),
+            ),
+            mock.patch.object(
+                self.downloader,
+                "gather_browser_candidates",
+                return_value=(
+                    "abc",
+                    [profile],
+                    [],
+                    None,
+                    ["xiaohongshu: profile_access=background"],
+                ),
+            ) as browser,
+        ):
+            result = self.downloader.gather_candidates_for_request(
+                "https://www.xiaohongshu.com/explore/abc",
+                platform="xiaohongshu",
+                browser_fallback=True,
+                browser_profile_dir="/tmp/media-download-profile",
+            )
+
+        browser.assert_called_once()
+        self.assertEqual([candidate.url for candidate in result[2]], [profile.url])
+        self.assertIn("xiaohongshu: profile_access=background", result[-1])
+
+    def test_xiaohongshu_keeps_direct_candidate_if_profile_has_no_media(self) -> None:
+        direct = self.downloader.Candidate(
+            "https://sns-video-v3.xhscdn.com/direct/playback.mp4",
+            "xiaohongshu.stream.EF4[0].masterUrl",
+            1,
+        )
+        with (
+            mock.patch.object(
+                self.downloader,
+                "gather_web_platform_candidates",
+                return_value=("abc", [direct], [], None, []),
+            ),
+            mock.patch.object(
+                self.downloader,
+                "gather_browser_candidates",
+                return_value=("abc", [], [], None, ["profile unavailable"]),
+            ),
+        ):
+            result = self.downloader.gather_candidates_for_request(
+                "https://www.xiaohongshu.com/explore/abc",
+                platform="xiaohongshu",
+                browser_fallback=True,
+                browser_profile_dir="/tmp/media-download-profile",
+            )
+
+        self.assertEqual([candidate.url for candidate in result[2]], [direct.url])
+        self.assertTrue(
+            any("retaining the exact direct candidates" in line for line in result[-1])
+        )
+
     def test_xiaohongshu_initial_state_allows_javascript_undefined(self) -> None:
         requested_id = "6a6a1797000000000100fd40"
         page = (

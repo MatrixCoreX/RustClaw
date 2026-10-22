@@ -54,6 +54,7 @@ class SkillOwnedAccessResult:
     status: str
     page_html: str = ""
     page_state_json: str = ""
+    access_mode: str = ""
 
 
 def extract_xiaohongshu_note_id(*parts: str) -> str | None:
@@ -275,8 +276,8 @@ def xiaohongshu_login_outcome_is_terminal(logs: Iterable[str]) -> bool:
         token in joined
         for token in (
             "xiaohongshu: display_unavailable",
-            f"interactive_login={INTERACTIVE_TIMEOUT}",
-            f"interactive_login={INTERACTIVE_CANCELLED}",
+            f"interactive_verification={INTERACTIVE_TIMEOUT}",
+            f"interactive_verification={INTERACTIVE_CANCELLED}",
             "xiaohongshu: login_required",
         )
     )
@@ -464,18 +465,24 @@ def _wait_for_devtools(
     raise RuntimeError(f"{INTERACTIVE_TIMEOUT}:{last_error}" if last_error else INTERACTIVE_TIMEOUT)
 
 
-NOTE_ACCESS_SCRIPT = """
+NOTE_ACCESS_SCRIPT_TEMPLATE = """
 (() => {
+  const requestedId = __REQUESTED_NOTE_ID__;
   const path = location.pathname || "";
   const login = /\\/login/i.test(path);
-  const authenticated = !login && Array.from(
-    document.querySelectorAll('a[href*="/user/profile/"]')
-  ).some((node) => {
-    const label = (node.innerText || node.textContent || '').trim();
-    return label === '我' && node.getBoundingClientRect().width > 0;
-  });
-  const map = (window.__INITIAL_STATE__ && window.__INITIAL_STATE__.note
-    && window.__INITIAL_STATE__.note.noteDetailMap) || {};
+  const initialState = window.__INITIAL_STATE__ || {};
+  const noteState = initialState.note || {};
+  const userState = initialState.user || {};
+  const currentUser = userState.userInfo || userState.currentUser || userState.user || {};
+  const authenticated = !login && Boolean(
+    userState.loggedIn === true
+    || userState.isLoggedIn === true
+    || userState.isLogin === true
+    || currentUser.userId
+    || currentUser.user_id
+    || currentUser.id
+  );
+  const map = noteState.noteDetailMap || {};
   const ids = Object.keys(map);
   const mediaNoteIds = Object.entries(map).flatMap(([id, entry]) => {
     const note = entry && entry.note;
@@ -486,9 +493,45 @@ NOTE_ACCESS_SCRIPT = """
     const hasVideo = Boolean(video && typeof video === 'object' && Object.keys(video).length > 0);
     return hasImages || hasVideo ? [id] : [];
   });
-  return { login, authenticated, note_ids: ids, media_note_ids: mediaNoteIds };
+  const requestedEntry = requestedId ? map[requestedId] : null;
+  let noteStateJson = "";
+  if (requestedEntry) {
+    const seen = new WeakSet();
+    try {
+      noteStateJson = JSON.stringify(
+        { noteDetailMap: { [requestedId]: requestedEntry } },
+        (_key, value) => {
+          if (typeof value === 'bigint') return String(value);
+          if (value && typeof value === 'object') {
+            if (seen.has(value)) return undefined;
+            seen.add(value);
+          }
+          return value;
+        },
+      );
+    } catch (_error) {
+      noteStateJson = "";
+    }
+  }
+  return {
+    login,
+    authenticated,
+    note_ids: ids,
+    media_note_ids: mediaNoteIds,
+    note_state_json: noteStateJson,
+  };
 })()
 """
+
+
+def note_access_script(note_id: str | None) -> str:
+    return NOTE_ACCESS_SCRIPT_TEMPLATE.replace(
+        "__REQUESTED_NOTE_ID__",
+        json.dumps(note_id or "", ensure_ascii=True),
+    )
+
+
+NOTE_ACCESS_SCRIPT = note_access_script(None)
 
 
 DOCUMENT_HTML_SCRIPT = "document.documentElement ? document.documentElement.outerHTML : ''"
@@ -502,6 +545,11 @@ def _access_browser_args(desktop_environment: dict[str, str], *, visible: bool) 
             *login_challenge.companion_browser_args(desktop_environment),
         ]
     return ["--headless=new", "--window-size=1280,900"]
+
+
+def note_state_json_from_snapshot(snapshot: dict[str, Any]) -> str:
+    value = snapshot.get("note_state_json")
+    return value if isinstance(value, str) and value.strip() else ""
 
 
 def _wait_for_skill_owned_access_once(
@@ -518,7 +566,7 @@ def _wait_for_skill_owned_access_once(
     """Probe one browser mode and return after the requested media is readable."""
     desktop_environment = desktop_session_environment()
     if visible and not desktop_display_available(desktop_environment):
-        return SkillOwnedAccessResult(DISPLAY_UNAVAILABLE)
+        return SkillOwnedAccessResult(DISPLAY_UNAVAILABLE, access_mode="visible_profile")
     port, debug_args = _devtools_port()
     command = [
         chrome,
@@ -543,6 +591,7 @@ def _wait_for_skill_owned_access_once(
     )
     ready_polls = 0
     last_challenge_at = 0.0
+    user_interaction_reported = False
     client: DevToolsConnection | None = None
     scan_timeout = login_challenge.effective_scan_timeout(timeout, desktop_environment)
     try:
@@ -554,21 +603,25 @@ def _wait_for_skill_owned_access_once(
         )
         client = DevToolsConnection(websocket_url, timeout=min(max(timeout, 1.0), 10.0))
         client.send("Runtime.enable")
-        if visible and on_opened is not None:
-            on_opened()
         deadline = time.monotonic() + scan_timeout
         while time.monotonic() < deadline:
             if on_tick is not None:
                 on_tick()
             if process.poll() is not None:
-                return SkillOwnedAccessResult(INTERACTIVE_CANCELLED)
+                return SkillOwnedAccessResult(
+                    INTERACTIVE_CANCELLED,
+                    access_mode="visible_profile" if visible else "background_profile",
+                )
             now = time.monotonic()
             if visible and login_challenge.challenge_has_expired(
                 client,
                 lambda command_id, wait: _wait_devtools_result(client, command_id, wait),
                 desktop_environment,
             ):
-                return SkillOwnedAccessResult(INTERACTIVE_TIMEOUT)
+                return SkillOwnedAccessResult(
+                    INTERACTIVE_TIMEOUT,
+                    access_mode="visible_profile",
+                )
             if visible and now - last_challenge_at >= login_challenge.REFRESH_SECONDS:
                 login_challenge.publish_login_challenge(
                     client,
@@ -579,12 +632,20 @@ def _wait_for_skill_owned_access_once(
                 last_challenge_at = now
             command_id = client.send(
                 "Runtime.evaluate",
-                {"expression": NOTE_ACCESS_SCRIPT, "returnByValue": True},
+                {"expression": note_access_script(note_id), "returnByValue": True},
             )
             event = _wait_devtools_result(client, command_id, timeout=5.0)
             snapshot = _evaluate_result(event)
+            if (
+                visible
+                and snapshot.get("login") is True
+                and not user_interaction_reported
+                and on_opened is not None
+            ):
+                on_opened()
+                user_interaction_reported = True
             if not visible and snapshot.get("login") is True:
-                return SkillOwnedAccessResult(LOGIN_REQUIRED)
+                return SkillOwnedAccessResult(LOGIN_REQUIRED, access_mode="background_profile")
             if note_access_ready(snapshot, note_id):
                 ready_polls += 1
                 if ready_polls >= LOGIN_READY_POLLS:
@@ -593,22 +654,32 @@ def _wait_for_skill_owned_access_once(
                         {"expression": DOCUMENT_HTML_SCRIPT, "returnByValue": True},
                     )
                     html_event = _wait_devtools_result(client, html_command_id, timeout=5.0)
-                    state_command_id = client.send(
-                        "Runtime.evaluate",
-                        {"expression": NOTE_STATE_SCRIPT, "returnByValue": True},
-                    )
-                    state_event = _wait_devtools_result(client, state_command_id, timeout=5.0)
+                    captured_state_json = note_state_json_from_snapshot(snapshot)
+                    if not captured_state_json:
+                        state_command_id = client.send(
+                            "Runtime.evaluate",
+                            {"expression": NOTE_STATE_SCRIPT, "returnByValue": True},
+                        )
+                        state_event = _wait_devtools_result(client, state_command_id, timeout=5.0)
+                        captured_state_json = _evaluate_string_result(state_event)
                     return SkillOwnedAccessResult(
                         "ok",
                         _evaluate_string_result(html_event),
-                        _evaluate_string_result(state_event),
+                        captured_state_json,
+                        "visible_profile" if visible else "background_profile",
                     )
             else:
                 ready_polls = 0
             time.sleep(LOGIN_POLL_SECONDS)
-        return SkillOwnedAccessResult(INTERACTIVE_TIMEOUT)
+        return SkillOwnedAccessResult(
+            INTERACTIVE_TIMEOUT,
+            access_mode="visible_profile" if visible else "background_profile",
+        )
     except DevToolsError:
-        return SkillOwnedAccessResult(INTERACTIVE_CANCELLED)
+        return SkillOwnedAccessResult(
+            INTERACTIVE_CANCELLED,
+            access_mode="visible_profile" if visible else "background_profile",
+        )
     finally:
         if visible:
             login_challenge.clear_login_challenge(profile_dir, "xiaohongshu")

@@ -2425,7 +2425,11 @@ def numeric_metadata_value(value: dict[str, Any], *keys: str) -> int:
     return 0
 
 
-def extract_xiaohongshu_candidates_from_json(value: Any) -> list[Candidate]:
+def extract_xiaohongshu_candidates_from_json(
+    value: Any,
+    *,
+    stream_source_prefix: str = "xiaohongshu.stream",
+) -> list[Candidate]:
     candidates: list[Candidate] = []
     seen: set[str] = set()
 
@@ -2453,7 +2457,7 @@ def extract_xiaohongshu_candidates_from_json(value: Any) -> list[Candidate]:
                     candidates,
                     seen,
                     stream_item,
-                    f"xiaohongshu.stream.{codec}[{stream_index}]",
+                    f"{stream_source_prefix}.{codec}[{stream_index}]",
                     priority,
                     "xiaohongshu",
                 )
@@ -3004,6 +3008,8 @@ def xiaohongshu_has_verified_item_media(
     """
     structured_video_sources = (
         "xiaohongshu.stream.",
+        "xiaohongshu.background-profile-stream.",
+        "xiaohongshu.visible-profile-stream.",
         "xiaohongshu.masterUrl",
         "xiaohongshu.backupUrls",
         "xiaohongshu.videoUrl",
@@ -3017,6 +3023,47 @@ def xiaohongshu_has_verified_item_media(
         "xiaohongshu.interactive-page.image",
     )
     return any(candidate.source.startswith(exact_image_sources) for candidate in image_candidates)
+
+
+def xiaohongshu_payload_from_access_result(
+    access_result: xiaohongshu_access.SkillOwnedAccessResult,
+    item_id: str | None,
+) -> dict[str, Any] | None:
+    if access_result.page_state_json:
+        try:
+            captured_state = json.loads(access_result.page_state_json)
+        except json.JSONDecodeError:
+            captured_state = None
+        if captured_state is not None:
+            payload = find_xiaohongshu_note_payload(captured_state, item_id)
+            if payload is not None:
+                return payload
+    if access_result.page_html:
+        return find_xiaohongshu_note_payload_in_html(access_result.page_html, item_id)
+    return None
+
+
+def xiaohongshu_profile_stream_source(access_mode: str) -> str:
+    if access_mode == "background_profile":
+        return "xiaohongshu.background-profile-stream"
+    return "xiaohongshu.visible-profile-stream"
+
+
+def record_xiaohongshu_profile_access(
+    logs: list[str],
+    access_result: xiaohongshu_access.SkillOwnedAccessResult,
+) -> None:
+    if access_result.status == "ok":
+        mode = (
+            "background"
+            if access_result.access_mode == "background_profile"
+            else "visible"
+        )
+        message = f"xiaohongshu: profile_access={mode}"
+    else:
+        message = f"xiaohongshu: interactive_verification={access_result.status}"
+    logs.append(message)
+    print(message, file=sys.stderr)
 
 
 def douyin_exact_browser_result_is_complete(
@@ -3529,6 +3576,64 @@ def gather_browser_candidates(
         logs.append(f"{platform}: browser fallback added the platform-specific item route")
     target_urls = prioritized_target_urls
 
+    xhs_profile = (
+        xiaohongshu_access.persistent_profile_dir(browser_profile_dir)
+        if platform == "xiaohongshu"
+        else None
+    )
+    login_retry_used = False
+    if xhs_profile is not None and item_id and target_urls:
+        login_retry_used = True
+        login_opened, login_finished = parent_login_progress_session("xiaohongshu")
+        access_result = xiaohongshu_access.wait_for_skill_owned_access(
+            chrome=chrome,
+            profile_dir=xhs_profile,
+            page_url=target_urls[0],
+            note_id=item_id,
+            timeout=timeout,
+            on_tick=raise_if_task_cancelled,
+            on_opened=login_opened,
+        )
+        login_finished(access_result.status)
+        record_xiaohongshu_profile_access(logs, access_result)
+        if access_result.status == "ok":
+            captured_payload = xiaohongshu_payload_from_access_result(
+                access_result,
+                item_id,
+            )
+            if captured_payload is not None:
+                profile_candidates = extract_xiaohongshu_candidates_from_json(
+                    captured_payload,
+                    stream_source_prefix=xiaohongshu_profile_stream_source(
+                        access_result.access_mode
+                    ),
+                )
+                profile_images = extract_xiaohongshu_item_image_candidates(
+                    captured_payload,
+                    source="xiaohongshu.profile-item.image",
+                )
+                article = richer_article(
+                    article,
+                    article_from_xiaohongshu_payload(
+                        captured_payload,
+                        source="xiaohongshu.profile-item",
+                    ),
+                )
+                logs.append(
+                    "xiaohongshu: persistent profile matched the requested item; "
+                    f"videos={len(profile_candidates)} images={len(profile_images)}"
+                )
+                if browser_candidates_are_sufficient(
+                    profile_candidates,
+                    profile_images,
+                    require_audio=require_audio,
+                ):
+                    return item_id, profile_candidates, profile_images, article, logs
+            else:
+                logs.append(
+                    "xiaohongshu: persistent profile exposed no exact structured item payload"
+                )
+
     if platform == "douyin" and item_id:
         douyin_profile = douyin_access.persistent_profile_dir(browser_profile_dir)
         (
@@ -3616,18 +3721,12 @@ def gather_browser_candidates(
         if exact_candidates or exact_images or article_has_platform_text(article):
             return item_id, exact_candidates, exact_images, article, logs
 
-    xhs_profile = (
-        xiaohongshu_access.persistent_profile_dir(browser_profile_dir)
-        if platform == "xiaohongshu"
-        else None
-    )
     tiktok_profile = (
         tiktok_access.persistent_profile_dir(browser_profile_dir)
         if platform == "tiktok"
         else None
     )
     pending_targets = list(target_urls)
-    login_retry_used = False
     while pending_targets:
         target_url = pending_targets.pop(0)
         dump_timed_out = False
@@ -3865,22 +3964,12 @@ def gather_browser_candidates(
             )
             status = access_result.status
             login_finished(status)
-            logs.append(f"xiaohongshu: interactive_login={status}")
-            print(f"xiaohongshu: interactive_login={status}", file=sys.stderr)
+            record_xiaohongshu_profile_access(logs, access_result)
             if status == "ok":
-                captured_payload: dict[str, Any] | None = None
-                if access_result.page_state_json:
-                    try:
-                        captured_state = json.loads(access_result.page_state_json)
-                    except json.JSONDecodeError as exc:
-                        logs.append(f"xiaohongshu: interactive page state was invalid JSON: {exc}")
-                    else:
-                        captured_payload = find_xiaohongshu_note_payload(captured_state, item_id)
-                if captured_payload is None and access_result.page_html:
-                    captured_payload = find_xiaohongshu_note_payload_in_html(
-                        access_result.page_html,
-                        item_id,
-                    )
+                captured_payload = xiaohongshu_payload_from_access_result(
+                    access_result,
+                    item_id,
+                )
                 if captured_payload is not None:
                     article = richer_article(
                         article,
@@ -3889,7 +3978,12 @@ def gather_browser_candidates(
                             source="xiaohongshu.interactive-page",
                         ),
                     )
-                    for candidate in extract_xiaohongshu_candidates_from_json(captured_payload):
+                    for candidate in extract_xiaohongshu_candidates_from_json(
+                        captured_payload,
+                        stream_source_prefix=xiaohongshu_profile_stream_source(
+                            access_result.access_mode
+                        ),
+                    ):
                         merge_platform_candidate(candidates, seen, candidate, platform)
                     for candidate in extract_xiaohongshu_item_image_candidates(
                         captured_payload,
@@ -5596,13 +5690,21 @@ def gather_candidates_for_request(
             resolved_platform == "tiktok"
             and "tiktok: content_unavailable" in platform_logs
         )
-        if (
-            not candidates
-            and not image_candidates
-            and browser_fallback
-            and not definitely_unavailable
-        ):
-            platform_logs.append(f"{resolved_platform}: direct extraction found no candidates, trying browser fallback")
+        should_use_browser = (
+            not candidates and not image_candidates
+        ) or (
+            resolved_platform == "xiaohongshu"
+            and browser_profile_dir is not None
+        )
+        if browser_fallback and should_use_browser and not definitely_unavailable:
+            if candidates or image_candidates:
+                platform_logs.append(
+                    "xiaohongshu: validating direct media through the persistent skill profile"
+                )
+            else:
+                platform_logs.append(
+                    f"{resolved_platform}: direct extraction found no candidates, trying browser fallback"
+                )
             (
                 browser_item_id,
                 browser_candidates,
@@ -5622,8 +5724,14 @@ def gather_candidates_for_request(
             platform_logs.extend(browser_logs)
             item_id = item_id or browser_item_id
             article = richer_article(article, browser_article)
-            candidates = browser_candidates
-            image_candidates = browser_image_candidates
+            if browser_candidates or browser_image_candidates:
+                candidates = browser_candidates
+                image_candidates = browser_image_candidates
+            elif resolved_platform == "xiaohongshu" and (candidates or image_candidates):
+                platform_logs.append(
+                    "xiaohongshu: persistent profile produced no replacement media; "
+                    "retaining the exact direct candidates"
+                )
         return resolved_platform, item_id, candidates, image_candidates, article, platform_logs
 
     raise DouyinDownloadError(f"Unsupported platform: {resolved_platform}")
@@ -5732,14 +5840,31 @@ def selected_video_source_contract(platform: str, candidate: Candidate) -> dict[
     }
     if normalized_platform == "xiaohongshu":
         exact_item_structured = xiaohongshu_has_verified_item_media([candidate], [])
+        background_profile = candidate.source.startswith(
+            "xiaohongshu.background-profile-stream."
+        )
+        visible_profile = candidate.source.startswith(
+            "xiaohongshu.visible-profile-stream."
+        )
+        profile_structured = background_profile or visible_profile
         contract.update(
             {
                 "provenance": (
-                    "structured_item_payload"
-                    if exact_item_structured
-                    else "rendered_player_network_fallback"
+                    "skill_profile_structured_item_payload"
+                    if profile_structured
+                    else (
+                        "structured_item_payload"
+                        if exact_item_structured
+                        else "rendered_player_network_fallback"
+                    )
                 ),
                 "exact_item_structured": exact_item_structured,
+                "skill_profile_reused": profile_structured,
+                "skill_profile_access_mode": (
+                    "background"
+                    if background_profile
+                    else ("visible" if visible_profile else None)
+                ),
                 "rendered_player_fallback": not exact_item_structured,
             }
         )
@@ -9423,6 +9548,7 @@ def handle_resolved_media(
                     "login_required",
                     "display_unavailable",
                     "interactive_login=",
+                    "interactive_verification=",
                     "browser fallback timed out",
                 )
             ):
