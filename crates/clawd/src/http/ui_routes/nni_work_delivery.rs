@@ -129,6 +129,7 @@ fn nni_artifact_upload_kind(kind: &str, mime: &str) -> Option<&'static str> {
     match (kind, mime) {
         ("video", mime) if mime.starts_with("video/") => Some("video"),
         ("audio", mime) if mime.starts_with("audio/") => Some("audio"),
+        ("image", "image/jpeg" | "image/png" | "image/webp" | "image/gif" | "image/avif") => Some("image"),
         ("archive" | "file", "application/zip") => Some("file"),
         ("file" | "text", "text/plain") => Some("text"),
         _ => None,
@@ -138,7 +139,7 @@ fn nni_artifact_upload_kind(kind: &str, mime: &str) -> Option<&'static str> {
 fn nni_delivery_kind_matches(required: &str, kind: &str, mime: &str) -> bool {
     let upload_kind = nni_artifact_upload_kind(kind, mime);
     if required == "media" {
-        return matches!(upload_kind, Some("video" | "file"));
+        return matches!(upload_kind, Some("video" | "image" | "file"));
     }
     upload_kind == Some(required)
 }

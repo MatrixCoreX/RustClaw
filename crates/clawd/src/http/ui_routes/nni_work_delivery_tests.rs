@@ -48,39 +48,48 @@ fn host_artifact_kinds_project_only_supported_mime_pairs() {
     assert_eq!(nni_artifact_upload_kind("archive", "application/zip"), Some("file"));
     assert_eq!(nni_artifact_upload_kind("file", "text/plain"), Some("text"));
     assert_eq!(nni_artifact_upload_kind("file", "text/plain; charset=utf-8"), Some("text"));
+    for mime in ["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"] {
+        assert_eq!(nni_artifact_upload_kind("image", mime), Some("image"));
+        assert!(nni_delivery_kind_matches("media", "image", mime));
+    }
     for (kind, mime) in [("archive", "application/gzip"), ("file", "application/json"),
-        ("file", "text/html"), ("video", "text/plain")] {
+        ("file", "text/html"), ("image", "image/svg+xml"), ("image", "text/html"),
+        ("video", "text/plain")] {
         assert_eq!(nni_artifact_upload_kind(kind, mime), None);
         assert!(!nni_delivery_kind_matches("media", kind, mime));
     }
 }
 
 #[tokio::test]
-async fn materialized_image_archive_and_articles_use_receiver_wire_kinds() {
+async fn materialized_single_image_archive_and_articles_use_receiver_wire_kinds() {
     let workspace = std::env::temp_dir().join(format!("agent-runtime-work-artifacts-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&workspace).unwrap();
     let zip = workspace.join("image_bundle.zip");
     let article = workspace.join("post_article.txt");
     let fallback_article = workspace.join("fallback_article.txt");
+    let image = workspace.join("original.webp");
     std::fs::write(&zip, b"PK\x03\x04image-archive").unwrap();
     std::fs::write(&article, b"Original platform article").unwrap();
     std::fs::write(&fallback_article, b"Article with inferred UTF-8 MIME").unwrap();
+    std::fs::write(&image, b"RIFF-original-raster-image").unwrap();
     let local_task_id = "task-original-image-article";
     let raw = json!({"artifacts": [
         {"path": zip, "mime_type": "application/zip"},
         {"path": article, "mime_type": "text/plain"},
-        {"path": fallback_article}
+        {"path": fallback_article},
+        {"path": image, "mime_type": "image/webp"}
     ]});
     let materialized = crate::task_artifacts::materialize_task_result_artifacts(
         &workspace, local_task_id, &raw.to_string(),
     ).unwrap();
     let result: Value = serde_json::from_str(&materialized).unwrap();
     let manifests = crate::task_artifacts::manifests_from_result(Some(&result));
-    assert_eq!(manifests.len(), 3);
+    assert_eq!(manifests.len(), 4);
     assert_eq!((&*manifests[0].kind, &*manifests[0].mime_type), ("archive", "application/zip"));
     assert_eq!((&*manifests[1].kind, &*manifests[1].mime_type), ("file", "text/plain"));
     assert_eq!((&*manifests[2].kind, &*manifests[2].mime_type), ("file", "text/plain; charset=utf-8"));
-    assert_eq!(manifests.iter().filter(|m| nni_delivery_kind_matches("media", &m.kind, &m.mime_type)).count(), 1);
+    assert_eq!((&*manifests[3].kind, &*manifests[3].mime_type), ("image", "image/webp"));
+    assert_eq!(manifests.iter().filter(|m| nni_delivery_kind_matches("media", &m.kind, &m.mime_type)).count(), 2);
     assert_eq!(manifests.iter().filter(|m| nni_artifact_upload_kind(&m.kind, &m.mime_type) == Some("text")).count(), 2);
 
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
@@ -105,7 +114,7 @@ async fn materialized_image_archive_and_articles_use_receiver_wire_kinds() {
         payload_sha256: "c".repeat(64), issued_at_unix: 0,
     };
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
-    for (manifest, wire_kind) in manifests.iter().zip(["file", "text", "text"]) {
+    for (manifest, wire_kind) in manifests.iter().zip(["file", "text", "text", "image"]) {
         let original = manifest.clone();
         let path = crate::task_artifacts::validated_delivery_artifact_path(&workspace, local_task_id, manifest).unwrap();
         nni_upload_artifact_chunks(&client, &assignment, &grant, manifest, &path).await.unwrap();
