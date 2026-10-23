@@ -187,7 +187,19 @@ jobs:
         run: |
           set -euo pipefail
           if ! bash scripts/macos-system-browser.sh --resolve-executable; then
-            HOMEBREW_NO_AUTO_UPDATE=1 brew install --cask google-chrome
+            app="/Applications/Google Chrome.app"
+            if [[ -d "$app" ]]; then
+              for key in CFBundleIdentifier CFBundleExecutable CFBundleShortVersionString; do
+                /usr/libexec/PlistBuddy -c "Print :$key" "$app/Contents/Info.plist" || true
+              done
+              /usr/bin/codesign -dv --verbose=2 "$app" 2>&1 || true
+              /usr/bin/codesign --verify --strict --verbose=2 "$app" 2>&1 || true
+            fi
+            if brew list --cask google-chrome >/dev/null 2>&1; then
+              HOMEBREW_NO_AUTO_UPDATE=1 brew reinstall --cask google-chrome
+            else
+              HOMEBREW_NO_AUTO_UPDATE=1 brew install --cask google-chrome
+            fi
           fi
           executable="$(bash scripts/macos-system-browser.sh --resolve-executable)"
           app="${executable%/Contents/MacOS/*}"
