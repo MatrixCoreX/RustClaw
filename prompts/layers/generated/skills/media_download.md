@@ -98,6 +98,7 @@ Check or transcode `input_path` for X compatibility. Directories are scanned rec
 | all | `action` | yes | string | - | One of `capabilities`, `download`, `resolve`, `ocr`, `prepare_x`. |
 | `download`, `resolve` | `share` | yes | string | - | A public URL or an unmodified copied share message containing the URL. |
 | `download`, `resolve` | `platform` | no | string | `auto` | `auto`, `douyin`, `kuaishou`, `xiaohongshu`, `tiktok`, `youtube`, `bilibili`, `wechat_channels`, `toutiao`, or `weibo`. |
+| `download` | `image_archive_threshold` | no | integer >=0 | `9` | ZIP above threshold; 0 always ZIP. |
 | `download` | `text_conversion_scope` | no | string | omitted/conditional | Use `images_only` for visible/image text, `audio_only` for spoken/audio content, and `images_and_audio` only for an explicit request to process both visual and audio sources. Omit when conversion was not requested; use `none` for an explicit no-conversion request. This protected modifier requires an exact current-request quote in the runtime-only evidence envelope. |
 | `download` | `deliver_to_user` | no | boolean | `true` | Send generated media to the originating channel/UI. Set `false` only when the user explicitly asks not to receive the file; then report its saved path. |
 | `download` | `output_name` | no | string | timestamp | Plain filename only; directories are rejected. |
@@ -141,7 +142,7 @@ Check or transcode `input_path` for X compatibility. Directories are scanned rec
 
 Request:
 ```json
-{"request_id":"media-1","args":{"action":"download","share":"复制打开抖音，看看这个图文作品 https://v.douyin.com/example/","platform":"auto"},"context":{"artifact_output_directory":"/workspace/.agent-runtime/artifacts/task-1","workspace_root":"/workspace","permissions":{"allow_path_outside_workspace":false}},"user_id":1,"chat_id":1}
+{"request_id":"media-1","args":{"action":"download","image_archive_threshold":9,"share":"复制打开抖音，看看这个图文作品 https://v.douyin.com/example/","platform":"auto"},"context":{"artifact_output_directory":"/workspace/.agent-runtime/artifacts/task-1","workspace_root":"/workspace","permissions":{"allow_path_outside_workspace":false}},"user_id":1,"chat_id":1}
 ```
 
 Response:
@@ -177,7 +178,7 @@ Response:
 
 ### Explicit downloadable components
 
-`output_mode=media`: video/image ZIP + original TXT; `media_audio` adds audio, never OCR/ASR/models. Omit for legacy output. `public_only=true` isolates anonymous sessions.
+`media`: originals+TXT; `media_audio`: add audio; no models.
 
 ## Output Contract
 - Use only actions and params declared in the interface spec.

@@ -682,22 +682,33 @@ def _available_archive_path(output_dir: Path) -> Path:
     )
 
 
+def _image_archive_threshold(args: dict[str, Any]) -> int:
+    value = args.get("image_archive_threshold", IMAGE_ARCHIVE_THRESHOLD)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise SkillFailure(
+            "image_archive_threshold must be a non-negative integer",
+            error_code="invalid_args",
+            message_key="media_download.error.invalid_image_archive_threshold",
+        )
+    return value
+
+
 def _package_large_image_delivery(
     artifacts: list[dict[str, Any]],
     output_dir: Path,
     *,
-    force_archive: bool = False,
+    image_archive_threshold: int = IMAGE_ARCHIVE_THRESHOLD,
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None]:
     images = [item for item in artifacts if item.get("artifact_role") == "original_image"]
     if not images:
         return artifacts, None, None
 
-    if len(images) <= IMAGE_ARCHIVE_THRESHOLD and not force_archive:
+    if len(images) <= image_archive_threshold:
         return artifacts, None, None
 
     delivery = {
         "mode": "archive",
-        "threshold": IMAGE_ARCHIVE_THRESHOLD,
+        "threshold": image_archive_threshold,
         "image_count": len(images),
     }
 
@@ -2011,6 +2022,7 @@ def respond(
                                message_key=f"media_download.error.{error.error_code}") from error
         storage_directory = _skill_storage_directory(request)
         if action == "download":
+            image_archive_threshold = _image_archive_threshold(args)
             command = _build_download_command(
                 args,
                 output_dir,
@@ -2080,7 +2092,7 @@ def respond(
         artifacts, image_delivery, processing_inputs = _package_large_image_delivery(
             artifacts,
             output_dir,
-            force_archive=args.get("output_mode") in {"media", "media_audio"},
+            image_archive_threshold=image_archive_threshold,
         )
         inline_article = _article_text_delivery(artifacts)
     elif action == "ocr" and deliver_to_user:

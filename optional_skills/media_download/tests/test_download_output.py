@@ -68,7 +68,7 @@ class OriginalMediaOutputTests(unittest.TestCase):
         self.assertEqual(m.select_download_output([archive, audio, article], "media_audio", None), [archive, audio, article])
         self.assertEqual(m.select_download_output([article], "media", None), [article])
 
-    def test_website_can_archive_a_small_image_set_without_changing_legacy_threshold(self):
+    def test_explicit_zero_can_archive_a_single_image_without_changing_legacy_threshold(self):
         import zipfile
         main_spec = importlib.util.spec_from_file_location("download_archive_fixture", MODULE.parent.parent / "main.py")
         main = importlib.util.module_from_spec(main_spec)
@@ -81,7 +81,7 @@ class OriginalMediaOutputTests(unittest.TestCase):
             legacy, delivery, inputs = main._package_large_image_delivery(artifacts, root)
             self.assertEqual(legacy, artifacts)
             self.assertIsNone(delivery)
-            packed, delivery, inputs = main._package_large_image_delivery(artifacts, root, force_archive=True)
+            packed, delivery, inputs = main._package_large_image_delivery(artifacts, root, image_archive_threshold=0)
             self.assertTrue(image.exists())
             self.assertEqual(inputs["image_count"], 1)
             self.assertEqual(delivery["image_count"], 1)
