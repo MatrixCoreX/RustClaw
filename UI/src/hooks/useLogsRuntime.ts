@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 
 import { formatUiError } from "../lib/ui-error";
+import { PageRequestLifecycle } from "../lib/page-request-lifecycle";
 import type { ApiResponse, LogFilesResponse, LogLatestResponse } from "../types/api";
 
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
@@ -34,18 +35,38 @@ export function useLogsRuntime({
   const logFilesCursorRef = useRef<string | null>(null);
   const [logFilesLoading, setLogFilesLoading] = useState(false);
   const [logFilesError, setLogFilesError] = useState<string | null>(null);
-  const [logTailLines, setLogTailLines] = useState(200);
+  const [logTailLines, setLogTailLinesState] = useState(200);
+  const logTailLinesRef = useRef(200);
   const [logLoading, setLogLoading] = useState(false);
   const [logError, setLogError] = useState<string | null>(null);
   const [logText, setLogText] = useState("");
   const [logLastUpdated, setLogLastUpdated] = useState<number | null>(null);
   const [logFollowTail, setLogFollowTail] = useState(true);
-  const logFilesRequestRef = useRef<{ key: string; request: Promise<string> } | null>(null);
-  const logContentRequestRef = useRef<{ key: string; request: Promise<void> } | null>(null);
+  const logFilesLifecycle = useRef(new PageRequestLifecycle());
+  const logContentLifecycle = useRef(new PageRequestLifecycle());
+  const logFilesRequestRef = useRef<{ key: string; request: Promise<string>; controller: AbortController } | null>(null);
+  const logContentRequestRef = useRef<{ key: string; request: Promise<void>; controller: AbortController } | null>(null);
+
+  const invalidateContent = () => {
+    logContentLifecycle.current.invalidate();
+    logContentRequestRef.current?.controller.abort();
+    logContentRequestRef.current = null;
+    setLogLoading(false);
+    setLogError(null);
+    setLogText("");
+    setLogLastUpdated(null);
+  };
 
   const setSelectedLogFile = (value: string) => {
+    if (value !== selectedLogFileRef.current) invalidateContent();
     selectedLogFileRef.current = value;
     setSelectedLogFileState(value);
+  };
+
+  const setLogTailLines = (value: number) => {
+    if (value !== logTailLinesRef.current) invalidateContent();
+    logTailLinesRef.current = value;
+    setLogTailLinesState(value);
   };
 
   const fetchLogFiles = (
@@ -53,19 +74,29 @@ export function useLogsRuntime({
     signal?: AbortSignal,
   ): Promise<string> => {
     const key = cursor || "first";
-    if (logFilesRequestRef.current?.key === key) return logFilesRequestRef.current.request;
+    if (signal?.aborted) return Promise.resolve("");
+    if (logFilesRequestRef.current?.key === key && !logFilesRequestRef.current.controller.signal.aborted) {
+      return logFilesRequestRef.current.request;
+    }
+    logFilesRequestRef.current?.controller.abort();
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    const requestId = logFilesLifecycle.current.begin(false)!;
+    const isCurrent = () => !controller.signal.aborted && logFilesLifecycle.current.isCurrent(requestId);
     const request = (async () => {
       setLogFilesLoading(true);
       setLogFilesError(null);
+      await Promise.resolve();
       try {
         const params = new URLSearchParams({ limit: "100" });
         if (cursor) params.set("cursor", cursor);
-        const res = await apiFetch(`/v1/logs/files?${params.toString()}`, { signal });
+        const res = await apiFetch(`/v1/logs/files?${params.toString()}`, { signal: controller.signal });
         const body = (await res.json()) as ApiResponse<LogFilesResponse>;
         if (!res.ok || !body.ok || !body.data) {
           throw new Error(body.error || `log_files_http_${res.status}`);
         }
-        if (signal?.aborted) return selectedLogFileRef.current;
+        if (!isCurrent()) return "";
         const files = Array.isArray(body.data.files)
           ? body.data.files.filter((file): file is string => typeof file === "string" && file.length > 0)
           : [];
@@ -85,18 +116,19 @@ export function useLogsRuntime({
         }
         return next;
       } catch (err) {
-        if (!signal?.aborted) {
+        if (isCurrent()) {
           setLogFilesError(formatUiError(err, t, "无法读取日志列表。", "Could not load the log list."));
         }
-        return selectedLogFileRef.current;
+        return "";
       } finally {
-        if (logFilesRequestRef.current?.request === request) {
+        signal?.removeEventListener("abort", abort);
+        if (logFilesRequestRef.current?.controller === controller) {
           logFilesRequestRef.current = null;
           setLogFilesLoading(false);
         }
       }
     })();
-    logFilesRequestRef.current = { key, request };
+    logFilesRequestRef.current = { key, request, controller };
     return request;
   };
 
@@ -119,37 +151,49 @@ export function useLogsRuntime({
     fileName = selectedLogFileRef.current,
     signal?: AbortSignal,
   ): Promise<void> => {
-    if (!fileName) return Promise.resolve();
-    const key = `${fileName}\n${logTailLines}`;
-    if (logContentRequestRef.current?.key === key) return logContentRequestRef.current.request;
+    if (!fileName || signal?.aborted) return Promise.resolve();
+    const lines = logTailLinesRef.current;
+    const key = `${fileName}\n${lines}`;
+    if (logContentRequestRef.current?.key === key && !logContentRequestRef.current.controller.signal.aborted) {
+      return logContentRequestRef.current.request;
+    }
+    logContentRequestRef.current?.controller.abort();
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    const requestId = logContentLifecycle.current.begin(false)!;
+    const isCurrent = () => !controller.signal.aborted && logContentLifecycle.current.isCurrent(requestId)
+      && fileName === selectedLogFileRef.current && lines === logTailLinesRef.current;
     const request = (async () => {
       setLogLoading(true);
       setLogError(null);
+      await Promise.resolve();
       try {
         const params = new URLSearchParams({
           file: fileName,
-          lines: String(logTailLines),
+          lines: String(lines),
         });
-        const res = await apiFetch(`/v1/logs/latest?${params.toString()}`, { signal });
+        const res = await apiFetch(`/v1/logs/latest?${params.toString()}`, { signal: controller.signal });
         const body = (await res.json()) as ApiResponse<LogLatestResponse>;
         if (!res.ok || !body.ok || !body.data) {
           throw new Error(body.error || `log_latest_http_${res.status}`);
         }
-        if (signal?.aborted) return;
+        if (!isCurrent()) return;
         setLogText(body.data.text || "");
         setLogLastUpdated(Date.now());
       } catch (err) {
-        if (!signal?.aborted) {
+        if (isCurrent()) {
           setLogError(formatUiError(err, t, "无法读取日志内容。", "Could not load the log content."));
         }
       } finally {
-        if (logContentRequestRef.current?.request === request) {
+        signal?.removeEventListener("abort", abort);
+        if (logContentRequestRef.current?.controller === controller) {
           logContentRequestRef.current = null;
           setLogLoading(false);
         }
       }
     })();
-    logContentRequestRef.current = { key, request };
+    logContentRequestRef.current = { key, request, controller };
     return request;
   };
 
@@ -157,6 +201,31 @@ export function useLogsRuntime({
     const fileName = await fetchLogFiles();
     if (fileName) await fetchLatestLog(fileName);
   };
+
+  useEffect(() => {
+    setLogLoading(false);
+    setLogFilesLoading(false);
+    return () => {
+      logFilesLifecycle.current.invalidate();
+      logContentLifecycle.current.invalidate();
+      logFilesRequestRef.current?.controller.abort();
+      logContentRequestRef.current?.controller.abort();
+      logFilesRequestRef.current = null;
+      logContentRequestRef.current = null;
+    };
+  }, [currentPage, apiBase, uiAuthReady]);
+
+  useEffect(() => {
+    setLogText("");
+    setLogLastUpdated(null);
+    setLogError(null);
+    setLogFiles([]);
+    setLogFilesError(null);
+    setLogFilesTotal(0);
+    setLogFilesNextCursor(null);
+    setLogFilesCursorHistory([]);
+    logFilesCursorRef.current = null;
+  }, [apiBase, uiAuthReady]);
 
   useEffect(() => {
     if (!uiAuthReady) return;

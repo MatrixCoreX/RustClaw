@@ -182,39 +182,8 @@ fn store_installation_never_builds_compiled_adapters() {
     }
 }
 
-#[test]
-fn source_checkout_uses_target_scoped_precompiled_skill_store() {
-    let workspace = std::env::temp_dir().join(format!(
-        "agent-runtime-precompiled-root-{}",
-        uuid::Uuid::new_v4()
-    ));
-    let target_root = workspace.join("target/prebuilt-skill-packages/test-target");
-    std::fs::create_dir_all(&target_root).expect("create target precompile root");
-
-    assert_eq!(
-        precompiled_skill_package_root_for(&workspace, Some("test-target")),
-        target_root
-    );
-    let _ = std::fs::remove_dir_all(workspace);
-}
-
-#[test]
-fn packaged_precompiled_skill_store_takes_priority() {
-    let workspace = std::env::temp_dir().join(format!(
-        "agent-runtime-precompiled-root-{}",
-        uuid::Uuid::new_v4()
-    ));
-    let packaged = workspace.join("prebuilt/skill-packages");
-    let target_root = workspace.join("target/prebuilt-skill-packages/test-target");
-    std::fs::create_dir_all(&packaged).expect("create packaged precompile root");
-    std::fs::create_dir_all(target_root).expect("create target precompile root");
-
-    assert_eq!(
-        precompiled_skill_package_root_for(&workspace, Some("test-target")),
-        packaged
-    );
-    let _ = std::fs::remove_dir_all(workspace);
-}
+#[path = "skill_store_precompiled_tests.rs"]
+mod precompiled_tests;
 
 fn isolated_skill_store_state() -> (AppState, PathBuf) {
     let workspace =

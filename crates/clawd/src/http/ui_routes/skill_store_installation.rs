@@ -277,25 +277,72 @@ fn skill_package_root(state: &AppState) -> PathBuf {
     state.skill_rt.workspace_root.join("data/skill-packages")
 }
 
-fn precompiled_skill_package_root_for(workspace_root: &Path, target: Option<&str>) -> PathBuf {
+fn precompiled_skill_package_root_for(
+    workspace_root: &Path,
+    platform: &skill_sdk::HostPlatform,
+    manifest: &skill_sdk::PackageManifest,
+) -> skill_sdk::SkillSdkResult<Option<PathBuf>> {
     let packaged = workspace_root.join("prebuilt/skill-packages");
-    if packaged.is_dir() {
-        return packaged;
-    }
-    target
-        .map(|target| {
+    let mut roots = vec![packaged];
+    if let Some(target) = platform.target.as_deref() {
+        roots.push(
             workspace_root
                 .join("target/prebuilt-skill-packages")
-                .join(target)
-        })
-        .filter(|path| path.is_dir())
-        .unwrap_or(packaged)
-}
-
-#[cfg(not(test))]
-fn precompiled_skill_package_root(state: &AppState) -> PathBuf {
-    let platform = skill_sdk::HostPlatform::current();
-    precompiled_skill_package_root_for(&state.skill_rt.workspace_root, platform.target.as_deref())
+                .join(target),
+        );
+    }
+    let mut rejected = None;
+    for root in roots {
+        if !root
+            .join(&manifest.package.name)
+            .join("current.json")
+            .exists()
+        {
+            continue;
+        }
+        // Metadata only selects a candidate. The installer still verifies the
+        // receipt, pinned manifest and every artifact before publishing it.
+        let matches = (|| -> skill_sdk::SkillSdkResult<()> {
+            let install = skill_sdk::InstallReceiptStore::new(&root)
+                .verified_current_metadata(&manifest.package.name)?;
+            let expected =
+                if install.receipt.schema_version == skill_sdk::INSTALL_RECEIPT_SCHEMA_VERSION {
+                    manifest.clone().into_current()?
+                } else {
+                    manifest.clone()
+                };
+            install.receipt.verifies_manifest(&expected)?;
+            let actual = &install.receipt.platform;
+            if actual.os != platform.os
+                || actual.arch != platform.arch
+                || actual
+                    .target
+                    .as_ref()
+                    .is_some_and(|target| platform.target.as_ref() != Some(target))
+            {
+                return Err(skill_sdk::SkillSdkError::new(
+                    "precompiled_platform_mismatch",
+                    format!("skill={}", manifest.package.name),
+                ));
+            }
+            Ok(())
+        })();
+        match matches {
+            Ok(()) => return Ok(Some(root)),
+            Err(error) => rejected = Some(error),
+        }
+    }
+    match rejected {
+        Some(error) => Err(skill_sdk::SkillSdkError::new(
+            "precompiled_package_unavailable",
+            format!(
+                "skill={} code={} detail={}",
+                manifest.package.name, error.code, error.detail
+            ),
+        )
+        .phase("precompiled_verify")),
+        None => Ok(None),
+    }
 }
 
 fn skill_store_manifest_metadata(
@@ -459,20 +506,18 @@ async fn install_skill_store_package(
     let manifest_path = spec.manifest_path.clone();
     let workspace_root = state.skill_rt.workspace_root.clone();
     let package_root = skill_package_root(state);
-    let precompiled_root = precompiled_skill_package_root(state);
-    let packaged_precompiled = precompiled_root
-        .join(&spec.skill_name)
-        .join("current.json")
-        .is_file();
-    let requires_precompiled =
-        packaged_precompiled || skill_store_requires_precompiled(spec.adapter);
+    let requires_precompiled = skill_store_requires_precompiled(spec.adapter);
     tokio::task::spawn_blocking(move || {
-        if requires_precompiled {
+        let manifest = skill_sdk::PackageManifest::load(&manifest_path)?;
+        let platform = skill_sdk::HostPlatform::current();
+        let candidate = precompiled_skill_package_root_for(&workspace_root, &platform, &manifest)?;
+        if requires_precompiled || candidate.is_some() {
             let precompiled = skill_sdk::PrecompiledInstallRequest {
                 manifest_path: manifest_path.clone(),
                 workspace_root: workspace_root.clone(),
                 package_root: package_root.clone(),
-                precompiled_root,
+                precompiled_root: candidate
+                    .unwrap_or_else(|| workspace_root.join("prebuilt/skill-packages")),
                 target: None,
                 control: Some(control.clone()),
             };
@@ -502,7 +547,10 @@ async fn install_skill_store_package(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 SkillStoreErrorCode::ResourceInsufficient,
             )
-        } else if requires_precompiled || error.code == "source_build_disabled" {
+        } else if requires_precompiled
+            || error.code.starts_with("precompiled_")
+            || error.code == "source_build_disabled"
+        {
             (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 SkillStoreErrorCode::PrecompiledRequired,

@@ -1,24 +1,3 @@
-fn normalize_run_cmd_command_for_fingerprint(command: &str) -> String {
-    let tokens = command
-        .split_whitespace()
-        .map(normalize_command_token_for_fingerprint)
-        .collect::<Vec<_>>();
-    tokens.join(" ")
-}
-
-fn normalize_command_token_for_fingerprint(token: &str) -> String {
-    if token.is_empty() {
-        return String::new();
-    }
-    if token.starts_with('-') || token.contains('$') || token.contains('*') {
-        return token.to_string();
-    }
-    if token.starts_with("./") || token.contains("/./") || token.contains("//") {
-        return normalize_path_string_for_fingerprint(token);
-    }
-    token.to_string()
-}
-
 fn normalize_path_string_for_fingerprint(raw: &str) -> String {
     let mut s = raw.trim().to_string();
     let mut quote_prefix = String::new();
@@ -66,34 +45,25 @@ fn normalize_args_for_fingerprint(state: &AppState, action_name: &str, args: &Va
     {
         return normalize_inline_subagent_args_for_fingerprint(state, args);
     }
-    let mut out = args.clone();
-    if action_name == "run_cmd" {
-        if let Some(obj) = out.as_object_mut() {
-            if let Some(cmd) = obj.get("command").and_then(|v| v.as_str()) {
-                obj.insert(
-                    "command".to_string(),
-                    Value::String(normalize_run_cmd_command_for_fingerprint(cmd)),
-                );
-            }
-            if let Some(cwd) = obj.get("cwd").and_then(|v| v.as_str()) {
-                obj.insert(
-                    "cwd".to_string(),
-                    Value::String(normalize_path_string_for_fingerprint(cwd)),
-                );
-            }
-        }
-    }
-    out
+    // Command strings are opaque: whitespace, quoting, newlines and URL paths
+    // can change their effects. Only canonicalize the surrounding JSON.
+    args.clone()
 }
 
 fn normalize_inline_subagent_args_for_fingerprint(state: &AppState, args: &Value) -> Value {
+    let Some(mut normalized) = args.as_object().cloned() else {
+        return args.clone();
+    };
     let config = super::subagent_runtime::load_subagent_runtime_config(state);
-    let role_family = args
+    if let Some(Value::Object(mut role_contract)) = args
         .get("role")
         .and_then(Value::as_str)
         .and_then(|token| config.resolve_role(token))
-        .map(|role| role.family.as_str())
-        .unwrap_or("unresolved");
+        .and_then(|role| serde_json::to_value(role).ok())
+    {
+        role_contract.remove("token");
+        normalized.insert("role".to_string(), Value::Object(role_contract));
+    }
     let mut context_refs = args
         .get("context_refs")
         .and_then(Value::as_array)
@@ -105,11 +75,8 @@ fn normalize_inline_subagent_args_for_fingerprint(state: &AppState, args: &Value
         .collect::<Vec<_>>();
     context_refs.sort();
     context_refs.dedup();
-    json!({
-        "action": "inline_readonly",
-        "role_family": role_family,
-        "context_refs": context_refs,
-    })
+    normalized.insert("context_refs".to_string(), json!(context_refs));
+    Value::Object(normalized)
 }
 
 fn canonicalize_json_value(value: &Value) -> Value {
