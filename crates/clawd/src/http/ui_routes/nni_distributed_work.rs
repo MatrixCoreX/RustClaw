@@ -928,10 +928,13 @@ async fn nni_wait_for_capability_task(
             claw_core::types::TaskStatus::Failed
             | claw_core::types::TaskStatus::Timeout
             | claw_core::types::TaskStatus::Canceled => {
+                let structured_code = task.error_text.as_deref()
+                    .and_then(crate::skills::parse_structured_skill_error)
+                    .map(|error| error.error_code);
                 let error_code = match task.status {
                     claw_core::types::TaskStatus::Timeout => "local_task_timeout",
                     claw_core::types::TaskStatus::Canceled => "local_task_cancelled",
-                    _ => "capability_execution_failed",
+                    _ => structured_code.as_deref().unwrap_or("capability_execution_failed"),
                 };
                 let detail = task
                     .error_text
