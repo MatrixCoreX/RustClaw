@@ -81,7 +81,8 @@ test("macOS launches keep real keychain encryption rather than Playwright's mock
     executablePath: "/fixture/chrome", headless: true,
     environment: nativeBrowserEnvironment(host), hostEnv: {}, hostPlatform: "darwin",
   });
-  assert.deepEqual(options.ignoreDefaultArgs, [AUTOMATION_DEFAULT_ARG, "--use-mock-keychain"]);
+  assert.deepEqual(options.ignoreDefaultArgs,
+    [AUTOMATION_DEFAULT_ARG, "--use-mock-keychain", "--password-store=basic"]);
   assert.equal(options.args.includes("--use-mock-keychain"), false);
   assert.equal(options.args.includes("--password-store=basic"), false);
 });

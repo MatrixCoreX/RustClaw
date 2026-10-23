@@ -228,7 +228,7 @@ export function persistentContextLaunchOptions({
     // Drop Chromium's default automation switch. Stored profile data still cannot
     // add a user-agent, proxy, or extra flags.
     ignoreDefaultArgs: [AUTOMATION_DEFAULT_ARG,
-      ...(hostPlatform === "darwin" ? ["--use-mock-keychain"] : [])],
+      ...(hostPlatform === "darwin" ? ["--use-mock-keychain", "--password-store=basic"] : [])],
     args,
   };
 }

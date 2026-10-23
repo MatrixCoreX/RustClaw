@@ -21,7 +21,7 @@ const {
 } = require('./browser_web.js');
 
 test('macOS removes the mock keychain default without weakening Linux sandbox options', () => {
-    assert.deepEqual(browserDefaultArgExclusions('darwin'), ['--use-mock-keychain']);
+    assert.deepEqual(browserDefaultArgExclusions('darwin'), ['--use-mock-keychain', '--password-store=basic']);
     assert.deepEqual(browserDefaultArgExclusions('linux'), []);
 });
 

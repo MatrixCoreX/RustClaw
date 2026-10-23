@@ -801,7 +801,7 @@ async function navigateWithFallback(page, url, preferredWaitUntil, deadlineAt) {
 }
 
 function browserDefaultArgExclusions(platform = process.platform) {
-    return platform === 'darwin' ? ['--use-mock-keychain'] : [];
+    return platform === 'darwin' ? ['--use-mock-keychain', '--password-store=basic'] : [];
 }
 
 async function createBrowserContext(networkPolicy = {}, contextOptions = {}) {
