@@ -75,11 +75,13 @@ async fn nni_upload_artifact_chunks(
 ) -> anyhow::Result<()> {
     use tokio::io::AsyncSeekExt;
     use sha2::Digest;
+    let upload_kind = nni_artifact_upload_kind(&manifest.kind, &manifest.mime_type)
+        .ok_or(NniDeliveryError("artifact_kind_invalid"))?;
     let url = format!("{}/api/media/v1/worker/jobs/{}/artifacts/{}", delivery.origin,
         delivery.job_id, manifest.id);
     let start = nni_upload_request_json(|| {
         nni_upload_headers(client.post(format!("{url}/start")), assignment, delivery)
-            .header("x-artifact-kind", &manifest.kind)
+            .header("x-artifact-kind", upload_kind)
             .header("x-artifact-filename", percent_encode_filename(&manifest.filename))
             .header("x-artifact-sha256", &manifest.sha256)
             .header("x-artifact-size", manifest.size_bytes)

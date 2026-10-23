@@ -93,7 +93,7 @@ async fn nni_upload_task_artifacts(
     // Platform article text is an optional original component. Its presence
     // does not require a separate model operation or make missing prose fatal.
     if delivery.required_kinds.iter().any(|kind| kind == "media") {
-        if let Some(article) = manifests.iter().find(|item| item.kind == "text" && item.mime_type == "text/plain") {
+        if let Some(article) = manifests.iter().find(|item| nni_artifact_upload_kind(&item.kind, &item.mime_type) == Some("text")) {
             nni_upload_delivery_manifest(state, &client, assignment, delivery, local_task_id, article)
                 .await.map_err(|_| NniDeliveryError("article_upload_failed"))?;
         }
@@ -122,11 +122,25 @@ async fn nni_upload_delivery_manifest(
 
 include!("nni_work_upload_chunks.rs");
 
-fn nni_delivery_kind_matches(required: &str, kind: &str, mime: &str) -> bool {
-    if required == "media" {
-        return kind == "video" || (kind == "file" && mime == "application/zip");
+// Host artifact kinds stay unchanged in storage and path validation. The
+// receiver has its own wire kinds for ZIP archives and original text files.
+fn nni_artifact_upload_kind(kind: &str, mime: &str) -> Option<&'static str> {
+    let mime = mime.split(';').next().unwrap_or_default().trim();
+    match (kind, mime) {
+        ("video", mime) if mime.starts_with("video/") => Some("video"),
+        ("audio", mime) if mime.starts_with("audio/") => Some("audio"),
+        ("archive" | "file", "application/zip") => Some("file"),
+        ("file" | "text", "text/plain") => Some("text"),
+        _ => None,
     }
-    required == kind
+}
+
+fn nni_delivery_kind_matches(required: &str, kind: &str, mime: &str) -> bool {
+    let upload_kind = nni_artifact_upload_kind(kind, mime);
+    if required == "media" {
+        return matches!(upload_kind, Some("video" | "file"));
+    }
+    upload_kind == Some(required)
 }
 
 fn percent_encode_filename(value: &str) -> String {
