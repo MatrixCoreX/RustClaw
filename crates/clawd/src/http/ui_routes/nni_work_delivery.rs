@@ -32,7 +32,7 @@ fn nni_read_work_policy(state: &AppState) -> anyhow::Result<NniWorkPolicy> {
     let policy: NniWorkPolicy = serde_json::from_slice(&bytes)?;
     anyhow::ensure!(policy.schema_version == 1 && !policy.principal_id.is_empty()
         && policy.capabilities.len() <= 64 && policy.artifact_origins.len() <= 16
-        && policy.max_file_bytes <= 90 * 1024 * 1024, "work_policy_invalid");
+        && policy.max_file_bytes <= 512 * 1024 * 1024, "work_policy_invalid");
     Ok(policy)
 }
 
@@ -47,7 +47,7 @@ fn nni_validate_artifact_delivery(delivery: &NniArtifactDelivery) -> bool {
         && !delivery.required_kinds.is_empty() && delivery.required_kinds.len() <= 2
         && delivery.required_kinds.iter().all(|k| matches!(k.as_str(), "video" | "audio"))
         && delivery.required_kinds.iter().collect::<std::collections::BTreeSet<_>>().len() == delivery.required_kinds.len()
-        && delivery.max_file_bytes > 0 && delivery.max_file_bytes <= 90 * 1024 * 1024
+        && delivery.max_file_bytes > 0 && delivery.max_file_bytes <= 512 * 1024 * 1024
 }
 
 fn nni_capability_policy(state: &AppState, payload: &NniWorkCapabilityPayload) -> anyhow::Result<NniWorkPolicy> {
@@ -88,42 +88,20 @@ async fn nni_upload_task_artifacts(
             missing = true;
             continue;
         };
-        anyhow::ensure!(manifest.size_bytes > 0 && manifest.size_bytes <= delivery.max_file_bytes,
-            "work_artifact_size_invalid");
+        if manifest.size_bytes > delivery.max_file_bytes {
+            return Err(NniDeliveryError("artifact_too_large").into());
+        }
+        anyhow::ensure!(manifest.size_bytes > 0, NniDeliveryError("artifact_size_invalid"));
         let path = crate::task_artifacts::validated_delivery_artifact_path(
             &state.skill_rt.workspace_root, local_task_id, manifest,
-        ).ok_or_else(|| anyhow::anyhow!("work_artifact_path_invalid"))?;
-        let url = format!("{}/api/media/v1/worker/jobs/{}/artifacts/{}", delivery.origin,
-            delivery.job_id, manifest.id);
-        let mut sent = false;
-        for retry in 0..3 {
-            // Reopening is safe: the delivery path belongs to this local task;
-            // the receiver checks its exact size and manifest digest before commit.
-            let file = tokio::fs::File::open(&path).await?;
-            let response = client.post(&url)
-                .bearer_auth(&delivery.upload_token)
-                .header("x-work-task-id", &assignment.task_id)
-                .header("x-work-attempt", assignment.attempt)
-                .header("x-artifact-kind", &manifest.kind)
-                .header("x-artifact-filename", percent_encode_filename(&manifest.filename))
-                .header("x-artifact-sha256", &manifest.sha256)
-                .header(reqwest::header::CONTENT_TYPE, &manifest.mime_type)
-                .header(reqwest::header::CONTENT_LENGTH, manifest.size_bytes)
-                .body(reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file)))
-                .send().await;
-            match response {
-                Ok(response) if response.status().is_success() => { sent = true; break; }
-                Ok(response) if response.status().is_client_error()
-                    && response.status() != reqwest::StatusCode::TOO_MANY_REQUESTS => break,
-                _ => {}
-            }
-            tokio::time::sleep(Duration::from_secs(1 << retry)).await;
-        }
-        anyhow::ensure!(sent, "work_artifact_upload_failed");
+        ).ok_or(NniDeliveryError("artifact_path_invalid"))?;
+        nni_upload_artifact_chunks(&client, assignment, delivery, manifest, &path).await?;
     }
-    anyhow::ensure!(!missing, "work_required_artifact_missing");
+    anyhow::ensure!(!missing, NniDeliveryError("required_artifact_missing"));
     Ok(())
 }
+
+include!("nni_work_upload_chunks.rs");
 
 fn percent_encode_filename(value: &str) -> String {
     value.as_bytes().iter().map(|byte| {

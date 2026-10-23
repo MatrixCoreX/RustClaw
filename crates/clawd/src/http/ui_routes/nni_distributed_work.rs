@@ -796,15 +796,27 @@ fn nni_local_work_identity(state: &AppState, policy: &NniWorkPolicy) -> anyhow::
 }
 
 fn nni_capability_task_payload(
+    state: &AppState,
     identity: &AuthIdentity,
     payload: &NniWorkCapabilityPayload,
 ) -> anyhow::Result<Value> {
+    let (action, resolution) = crate::capability_resolver::resolve_capability_action_with_record_for_state(
+        state, &payload.capability, payload.args.clone(),
+    );
+    // Signed structured work is execution-only. Registry-backed skills/tools use
+    // the existing verified run_skill path, without planner or answer synthesis.
+    anyhow::ensure!(resolution.required_companions.is_empty(), "work_companion_required");
+    let (skill, args) = match action {
+        Some(crate::AgentAction::CallSkill { skill, args }) => (skill, args),
+        Some(crate::AgentAction::CallTool { tool, args }) if resolution.source == "registry" => (tool, args),
+        _ => anyhow::bail!("work_capability_unavailable"),
+    };
     let mut direct = json!({
-        "entrypoint": "run_capability",
-        "capability": payload.capability,
-        "args": payload.args,
+        "skill_name": skill,
+        "args": args,
+        "_requested_capability": payload.capability,
+        "_execution_only": true,
     });
-    crate::worker::run_capability::parse_direct_capability_request(&direct)?;
     crate::task_execution_policy::stamp_authenticated_submission_policy(
         &mut direct,
         Some(identity),
@@ -822,7 +834,7 @@ fn nni_enqueue_capability_task(
 ) -> anyhow::Result<String> {
     let policy = nni_capability_policy(state, payload)?;
     let identity = nni_local_work_identity(state, &policy)?;
-    let direct = nni_capability_task_payload(&identity, payload)?;
+    let direct = nni_capability_task_payload(state, &identity, payload)?;
     let task_id = uuid::Uuid::new_v4();
     let idempotency_key = format!(
         "nni-capability:{}:{}",
@@ -839,7 +851,7 @@ fn nni_enqueue_capability_task(
         None,
         None,
         Some(&idempotency_key),
-        "ask",
+        "run_skill",
         &direct.to_string(),
     )?;
     Ok(persisted_task_id.to_string())
@@ -897,8 +909,10 @@ async fn nni_wait_for_capability_task(
         };
         match task.status {
             claw_core::types::TaskStatus::Succeeded => {
-                if nni_upload_task_artifacts(state, assignment, local_task_id, task.result_json.as_ref()).await.is_err() {
-                    return nni_failed_work_result("work_artifact_delivery_failed", "work_artifact_delivery_failed");
+                if let Err(error) = nni_upload_task_artifacts(state, assignment, local_task_id, task.result_json.as_ref()).await {
+                    let code = error.downcast_ref::<NniDeliveryError>()
+                        .map(|error| error.0).unwrap_or("artifact_upload_failed");
+                    return nni_failed_work_result(code, code);
                 }
                 return NniWorkResult {
                     status: "success".to_string(),

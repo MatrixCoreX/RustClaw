@@ -230,3 +230,13 @@ self-test/检查、旧 agent-mode payload 检查和用户可见硬编码语言�
 - 验证证据：/tmp/media-nni-rust-final2.log（105 pass）、/tmp/media-node-telemetry-final-tests.log（24 pass）、/tmp/media-share-policy-final-tests.log（61 pass）、/tmp/media-live-flow-test.log、/tmp/media-live-flow-result.json、/tmp/media-live-cache-audit.jsonl。签名子进程、FFmpeg 真实音频提取、跨品牌 UI、registry/policy/storage/MCP/static 跨平台检查已验证。
 - 原仓库已有的长文件/技能耦合 ratchet 债务未在本轮重构；未改动用户其他未提交工作。Apple target 检查受 aws-lc-sys Linux C 编译器不支持 -arch 等参数阻塞，没有声称通过 macOS 现场构建。
 - 真实测试亦确认 YouTube 样例存在失效或需要登录的情况；公开网站不复用个人授权 profile，因此不能保证所有平台的所有链接都可匿名下载。当前限制仍为单文件 90 MiB、用户入口保留 24 小时、1 GiB 缓存 LRU。
+
+## 大文件交付升级（2026-10-23，实施中）
+- 用户反馈任务 a862be41-be1c-41af-a79c-b3f40fbeae66 已在节点完成下载，但视频 228,341,807 bytes 超过旧版 90 MiB 回传上限，导致网页交付失败；原文件保留，不将本地成功误认为网页交付成功。
+- 新合同：单文件 512 MiB，8 MiB 分片，节点与服务端流式读取，持久化已收分片，重启后续传；逐片和全文件 SHA-256 校验、接收前后租约校验、空间和并发上限；不提高单个代理请求到 512 MiB。
+- 错误通过稳定 error_code 返回，前端中英翻译，不向匿名用户透出文件路径、grant 或 provider 原始响应。
+- 失败任务最多原地重试三次，保留浏览器所有权，旋转上传 grant，使用新的 Core 幂等键，留存旧任务关联。
+- 分布式结构化请求经现有 capability resolver 解析，再进入 verified run_skill 队列；无普通 ask、planner 或 answer synthesis。需要 companion 的任务拒绝执行，不绕过宿主权限或 runner receipt/policy pin。
+- 统计增加 queued 和 average_queue，平均排队数=排队任务/在线节点，零在线时显示未知；单节点保持最多一个活动租约，空闲节点即时领取下一任务。
+- 前端已完成同仓库 React/TypeScript/Vite/Tailwind 双 HTML 入口，仍独立部署 media 域名，用户已放弃主站 SPA /media 路由。
+- 本地验收：91 MiB 多分片传输、服务重启续传、重复确认、错误摘要/篡改/失效租约不发布，后端11项通过；Core28项通过；节点105项通过。正式编译及生产大视频复测仍待完成。

@@ -196,6 +196,13 @@ fn capability_assignment_uses_the_existing_direct_capability_contract() {
 fn capability_assignment_enters_the_authenticated_local_task_queue() {
     let root = std::env::temp_dir().join(format!("work-policy-test-{}", uuid::Uuid::new_v4()));
     let mut state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let registry_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");
+    let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(&registry_path).unwrap();
+    let enabled = registry.all_names().into_iter().collect();
+    *state.core.skill_views_snapshot.write().unwrap() = std::sync::Arc::new(crate::SkillViewsSnapshot {
+        binding: Default::default(), registry: Some(std::sync::Arc::new(registry)),
+        skills_list: std::sync::Arc::new(enabled),
+    });
     state.skill_rt.workspace_root = root.clone();
     state.seed_test_auth_identity("rk-nni-capability-admin", "admin");
     let identity = resolve_auth_identity_by_key(&state, "rk-nni-capability-admin").unwrap().unwrap();
@@ -236,8 +243,14 @@ fn capability_assignment_enters_the_authenticated_local_task_queue() {
     assert_eq!(status, "queued");
     assert_eq!(user_key, "rk-nni-capability-admin");
     assert!(!principal_id.is_empty());
-    assert_eq!(queued["entrypoint"], "run_capability");
-    assert_eq!(queued["capability"], "web.search");
+    assert!(queued.get("entrypoint").is_none());
+    assert_eq!(queued["skill_name"], "web_search_extract");
+    assert_eq!(queued["args"]["action"], "search");
+    assert_eq!(queued["_requested_capability"], "web.search");
+    assert_eq!(queued["_execution_only"], true);
+    let kind: String = state.core.db.get().unwrap().query_row(
+        "SELECT kind FROM tasks WHERE task_id=?1", [&local_task_id], |row| row.get(0)).unwrap();
+    assert_eq!(kind, "run_skill");
     assert_eq!(queued["args"]["query"], "distributed inference");
     assert_eq!(queued["_agent_execution_policy"]["mode"], "yolo");
     assert_eq!(

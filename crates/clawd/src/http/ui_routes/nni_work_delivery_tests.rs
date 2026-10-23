@@ -16,7 +16,9 @@ fn artifact_delivery_rejects_credentials_paths_and_unbounded_requests() {
     }
     grant = delivery(); grant.required_kinds.push("video".to_string());
     assert!(!nni_validate_artifact_delivery(&grant));
-    grant = delivery(); grant.max_file_bytes = 91 * 1024 * 1024;
+    grant = delivery(); grant.max_file_bytes = 512 * 1024 * 1024;
+    assert!(nni_validate_artifact_delivery(&grant));
+    grant.max_file_bytes = 513 * 1024 * 1024;
     assert!(!nni_validate_artifact_delivery(&grant));
     grant = delivery(); grant.job_id = "../../secret".to_string();
     assert!(!nni_validate_artifact_delivery(&grant));
