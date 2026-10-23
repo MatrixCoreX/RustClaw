@@ -308,7 +308,7 @@ async fn install_declared_host_dependencies(
                 return Err(DeclaredHostDependencyError {
                     dependency_id: String::new(),
                     code: "dependency_install_queue_closed",
-            detail: "state=unavailable component=host_dependency_installer".to_string(),
+                    detail: "state=unavailable component=host_dependency_installer".to_string(),
                 });
             }
         }
@@ -354,7 +354,7 @@ async fn install_declared_host_dependencies(
                 return Err(DeclaredHostDependencyError {
                     dependency_id: dependency_id.clone(),
                     code: "dependency_install_cancelled",
-                detail: "state=cancelled phase=package_manager_launch".to_string(),
+                    detail: "state=cancelled phase=package_manager_launch".to_string(),
                 });
             }
             let mut process = Command::new(&command.program);
@@ -583,11 +583,8 @@ fn collect_host_dependencies(
                 )
                 .is_some()
             };
-            let (runtime_state, runtime_reason_code) = dependency_runtime_availability(
-                &definition,
-                installed,
-                runtime_context,
-            );
+            let (runtime_state, runtime_reason_code) =
+                dependency_runtime_availability(&definition, installed, runtime_context);
             HostDependencyStatus {
                 id: definition.id.to_string(),
                 category: definition.category.to_string(),
@@ -756,6 +753,9 @@ fn detect_dependency(
     definition: &HostDependencyDefinition,
     workspace_root: &Path,
 ) -> Option<(String, String)> {
+    if definition.id == "chromium" && cfg!(target_os = "macos") {
+        return detect_macos_system_browser(workspace_root);
+    }
     if definition.id == "tesseract_chi_sim" {
         let executable = dependency_command_candidates("tesseract")
             .into_iter()
@@ -809,7 +809,12 @@ fn detect_dependency(
 fn detect_browser_playwright(workspace_root: &Path) -> Option<(String, String)> {
     let package_dir = workspace_root.join("crates/skills/browser_web");
     let version = detect_browser_playwright_manifest(&package_dir)?;
-    if !playwright_managed_browser_available(&package_dir) && detect_system_chromium().is_none() {
+    let browser_available = if cfg!(target_os = "macos") {
+        detect_macos_system_browser(workspace_root).is_some()
+    } else {
+        playwright_managed_browser_available(&package_dir) || detect_system_chromium().is_some()
+    };
+    if !browser_available {
         return None;
     }
     Some((
@@ -821,6 +826,34 @@ fn detect_browser_playwright(workspace_root: &Path) -> Option<(String, String)> 
                 .take(DEPENDENCY_VERSION_LIMIT)
                 .collect::<String>()
         ),
+    ))
+}
+
+fn detect_macos_system_browser(workspace_root: &Path) -> Option<(String, String)> {
+    let output = StdCommand::new("/bin/bash")
+        .arg(workspace_root.join("scripts/macos-system-browser.sh"))
+        .arg("--resolve-executable")
+        .stdin(StdProcessStdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let executable = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    if !executable.is_absolute() || !executable.is_file() {
+        return None;
+    }
+    let version = StdCommand::new(&executable)
+        .arg("--version")
+        .stdin(StdProcessStdio::null())
+        .output()
+        .ok()?;
+    if !version.status.success() {
+        return None;
+    }
+    Some((
+        executable.display().to_string(),
+        dependency_version_text(&version.stdout, &version.stderr)?,
     ))
 }
 
@@ -894,18 +927,18 @@ fn browser_playwright_install_commands(
         .into_iter()
         .find(|candidate| candidate.is_file())?;
     let playwright_cli = package_dir.join("node_modules/playwright/cli.js");
-    Some(vec![
-        DependencyInstallCommand {
-            program: npm.to_string_lossy().to_string(),
-            args: vec![
-                "ci".to_string(),
-                "--omit=dev".to_string(),
-                "--no-audit".to_string(),
-                "--no-fund".to_string(),
-            ],
-            current_dir: Some(package_dir.clone()),
-        },
-        DependencyInstallCommand {
+    let mut commands = vec![DependencyInstallCommand {
+        program: npm.to_string_lossy().to_string(),
+        args: vec![
+            "ci".to_string(),
+            "--omit=dev".to_string(),
+            "--no-audit".to_string(),
+            "--no-fund".to_string(),
+        ],
+        current_dir: Some(package_dir.clone()),
+    }];
+    if !cfg!(target_os = "macos") {
+        commands.push(DependencyInstallCommand {
             program: node.to_string_lossy().to_string(),
             args: vec![
                 playwright_cli.to_string_lossy().to_string(),
@@ -913,8 +946,9 @@ fn browser_playwright_install_commands(
                 "chromium".to_string(),
             ],
             current_dir: Some(package_dir),
-        },
-    ])
+        });
+    }
+    Some(commands)
 }
 
 fn dependency_install_path() -> std::ffi::OsString {
@@ -950,11 +984,26 @@ fn dependency_install_path() -> std::ffi::OsString {
 }
 
 fn dependency_command_candidates(candidate: &str) -> Vec<PathBuf> {
+    let path = std::env::var_os("PATH");
+    dependency_command_candidates_in_path(candidate, path.as_deref())
+}
+
+fn dependency_command_candidates_in_path(
+    candidate: &str,
+    command_path: Option<&std::ffi::OsStr>,
+) -> Vec<PathBuf> {
     let candidate_path = Path::new(candidate);
     if candidate_path.components().count() > 1 {
         return vec![candidate_path.to_path_buf()];
     }
     let mut candidates = Vec::new();
+    if let Some(command_path) = command_path {
+        candidates.extend(
+            std::env::split_paths(command_path)
+                .filter(|directory| !directory.as_os_str().is_empty())
+                .map(|directory| directory.join(candidate)),
+        );
+    }
     let roots: &[&str] = if cfg!(target_os = "macos") {
         &[
             "/opt/homebrew/bin",
@@ -980,6 +1029,8 @@ fn dependency_command_candidates(candidate: &str) -> Vec<PathBuf> {
         candidates.push(PathBuf::from(home).join(".cargo/bin").join(candidate));
     }
     candidates.push(candidate_path.to_path_buf());
+    let mut seen = std::collections::BTreeSet::new();
+    candidates.retain(|candidate| seen.insert(candidate.clone()));
     candidates
 }
 

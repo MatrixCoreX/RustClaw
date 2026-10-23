@@ -43,6 +43,14 @@ For example, “summarize this document” becomes a task. The agent inspects th
 
 Messaging channels are optional. Configure them only when the browser workflow is already working and you need access from another app.
 
+On macOS, media browsing uses an installed, vendor-signed Google Chrome or
+Microsoft Edge, with Chrome preferred. Install a supported browser from the
+system dependency settings if none is available. Release packages do not embed
+a testing Chromium application. Media skills keep their own browser profiles,
+separate from personal cookies and from other browser identities; a first
+platform login can still be required. Linux and Raspberry Pi browser behavior
+is unchanged.
+
 ### Product identity and safe renaming
 
 `configs/product_identity.toml` is the only product-identity source. Its display name,

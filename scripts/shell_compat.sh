@@ -176,13 +176,13 @@ resolve_python3_with_tomllib() {
   local candidate resolved seen=""
   for candidate in \
     "${APP_PYTHON_BIN:-}" \
-    "$(command -v python3 2>/dev/null || true)" \
+    "$(type -P python3 2>/dev/null || true)" \
     /usr/local/bin/python3 \
     /opt/homebrew/bin/python3 \
-    "$(command -v python3.14 2>/dev/null || true)" \
-    "$(command -v python3.13 2>/dev/null || true)" \
-    "$(command -v python3.12 2>/dev/null || true)" \
-    "$(command -v python3.11 2>/dev/null || true)"; do
+    "$(type -P python3.14 2>/dev/null || true)" \
+    "$(type -P python3.13 2>/dev/null || true)" \
+    "$(type -P python3.12 2>/dev/null || true)" \
+    "$(type -P python3.11 2>/dev/null || true)"; do
     [[ -n "$candidate" && -x "$candidate" ]] || continue
     resolved="$(cd "$(dirname "$candidate")" 2>/dev/null && pwd -P)/$(basename "$candidate")"
     case ":$seen:" in

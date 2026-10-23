@@ -4,8 +4,10 @@ import path from "node:path";
 import { writeAtomic } from "./csv.mjs";
 import { loginCompanionBrowserArgs } from "./login_companion.mjs";
 import { SUPPORTED_PLATFORMS } from "./platforms.mjs";
+import { browserProfileDirectory } from "./macos_browser_selection.mjs";
 
 const ENVIRONMENT_FILE = "browser-environment.json";
+const contextProfiles = new WeakMap();
 const CHROME_PREFERENCES_FILE = path.join("Default", "Preferences");
 
 function isDirectory(value) {
@@ -225,7 +227,8 @@ export function persistentContextLaunchOptions({
     env: hostEnv,
     // Drop Chromium's default automation switch. Stored profile data still cannot
     // add a user-agent, proxy, or extra flags.
-    ignoreDefaultArgs: [AUTOMATION_DEFAULT_ARG],
+    ignoreDefaultArgs: [AUTOMATION_DEFAULT_ARG,
+      ...(hostPlatform === "darwin" ? ["--use-mock-keychain"] : [])],
     args,
   };
 }
@@ -241,7 +244,7 @@ export async function launchPlatformBrowser({ chromium, root, platform, executab
   native = nativeBrowserEnvironment() }) {
   if (!SUPPORTED_PLATFORMS.includes(platform)) throw new Error("platform_unsupported");
   native = validateEnvironment(native);
-  const profile = path.join(root, "browser-profile", platform);
+  const profile = browserProfileDirectory(root, platform, executablePath, native.host_platform);
   await fs.mkdir(profile, { recursive: true });
   // These profiles belong exclusively to this skill. Clear a stale crash marker
   // before launch only when Chrome does not hold the profile lock; cookies,
@@ -256,6 +259,7 @@ export async function launchPlatformBrowser({ chromium, root, platform, executab
     raspberryPi: isRaspberryPiHost(),
     companionActive: !headless && isRaspberryPiHost(),
   }));
+  contextProfiles.set(context, profile);
   try {
     await concealAutomationMarkers(context);
     // Only persist after Chromium has successfully acquired this profile's lock.
@@ -295,6 +299,7 @@ export async function closePlatformBrowser({ context, root, platform,
     throw Object.assign(new Error("browser_close_failed"), { cause: closeError });
   }
 
-  const profile = path.join(root, "browser-profile", platform);
+  const profile = contextProfiles.get(context) || path.join(root, "browser-profile", platform);
   if (!await managedProfileLocked(profile)) await markManagedProfileClean(profile);
+  contextProfiles.delete(context);
 }

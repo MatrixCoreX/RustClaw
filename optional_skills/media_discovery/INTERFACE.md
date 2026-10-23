@@ -2,7 +2,7 @@
 
 ## Capability Summary
 
-Run explicitly requested batch, feed, keyword, or continuous background browser collection for Douyin, Xiaohongshu, Kuaishou, Toutiao, Weibo, TikTok, YouTube, and Bilibili. A lone copied share payload or URL whose content should be downloaded and returned now belongs to `media_download.download`, even when it is used as a `seed_urls` input shape; this skill does not provide immediate single-post media delivery. All platforms default to `browser_mode=visible`; pass `silent` only when the user explicitly requests silent or windowless collection. The full macOS release uses its bundled Chromium and source/development installs may use an installed Chrome/Chromium. Collection uses conservative platform-specific pacing/rest; it does not spoof UA/proxy or bypass challenges. A visible run keeps the platform window available for login or human verification. An explicitly silent run may open one temporary manual-verification browser; `/` or `/jingxuan` plus the local confirm tab resumes that batch visibly without solving the slider automatically.
+Run explicitly requested batch, feed, keyword, or continuous background browser collection for Douyin, Xiaohongshu, Kuaishou, Toutiao, Weibo, TikTok, YouTube, and Bilibili. A lone copied share payload or URL whose content should be downloaded and returned now belongs to `media_download.download`, even when it is used as a `seed_urls` input shape; this skill does not provide immediate single-post media delivery. All platforms default to `browser_mode=visible`; pass `silent` only when the user explicitly requests silent or windowless collection. On macOS, use an installed, supported vendor-signed Chrome or Edge with browser-identity-isolated private profiles, never an embedded testing browser or personal cookies. Collection uses conservative platform-specific pacing/rest; it does not spoof UA/proxy or bypass challenges. A visible run keeps the platform window available for login or human verification. An explicitly silent run may open one temporary manual-verification browser; `/` or `/jingxuan` plus the local confirm tab resumes that batch visibly without solving the slider automatically.
 Rendered media screenshots, author titles (`title`), and captions (`platform_text`, empty without a distinct caption) are stored in `videos.csv` / `images.csv`, without OCR, model review, original-image or video downloads.
 Available views, reads, likes, comments, favorites, shares, reposts, coins and danmaku retain platform display precision; verified integer counters also receive exact numeric values. Unavailable fields remain absent. Saved records, CSV and AiAPP retain the same capture-time metrics.
 Video covers use an unobscured rendered frame, platform poster, or a Douyin/Kuaishou search tile under `video_covers/`; blank overlay player shots are discarded. Whole-page and login-dialog screenshots never substitute for missing media.
@@ -303,6 +303,16 @@ platform's display precision. Each metric snapshot carries `captured_at`.
 Toutiao's unverified `showCount` is not exposed as impressions. Weibo observes only the current post response already requested by its browser; raw responses, cookies and media tokens are never stored with counters. Rejected posts retain only aggregate filtering counts, without records, media previews or captions.
 
 ## Browser and Capture Rules
+
+On macOS, select an installed, vendor-signed Google Chrome or Microsoft Edge
+(Chromium major 120 or newer), preferring Chrome. Check metadata and code
+signatures before launch; do not fall back to an embedded testing browser.
+If neither is available, report `browser_missing` and install a supported
+browser through system dependency settings. Keep automation data in this
+skill's private per-browser-identity, per-platform profile, separate from
+personal browser cookies. A new browser identity may require one platform
+login; earlier private profiles are preserved. Linux and Raspberry Pi retain
+their existing browser paths and resource limits.
 
 - Each platform pins host locale/timezone and the existing 1280×900 collection window
   in private `browser-profile/<platform>/browser-environment.json`, shared by collection

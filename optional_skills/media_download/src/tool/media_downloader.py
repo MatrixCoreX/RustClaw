@@ -2572,6 +2572,10 @@ def find_chrome_executable(chrome_path: str | None = None) -> str | None:
         if expanded.exists():
             return str(expanded)
         return shutil.which(chrome_path)
+    if sys.platform == "darwin":
+        from macos_browser_selection import select_macos_browser
+        browser = select_macos_browser()
+        return browser.executable if browser is not None else None
     for executable in CHROMIUM_BROWSER_EXECUTABLES:
         executable_path = Path(executable).expanduser()
         if executable_path.exists():

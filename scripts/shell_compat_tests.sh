@@ -5,6 +5,16 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=shell_compat.sh
 source "$ROOT_DIR/scripts/shell_compat.sh"
 
+(
+  unset APP_PYTHON_BIN
+  configure_python3_with_tomllib
+  first_python="$APP_PYTHON_BIN"
+  unset APP_PYTHON_BIN
+  configure_python3_with_tomllib
+  [[ "$APP_PYTHON_BIN" == "$first_python" ]]
+  python3 -c 'import tomllib'
+)
+
 [[ "$(cargo_jobs_for_host_capacity x86_64 14680064 10485760 8)" == "4" ]]
 [[ "$(cargo_jobs_for_host_capacity x86_64 14680064 9437184 8)" == "2" ]]
 [[ "$(cargo_jobs_for_host_capacity x86_64 14680064 6291456 8)" == "1" ]]

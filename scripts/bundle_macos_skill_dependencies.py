@@ -149,13 +149,6 @@ def copy_external_libraries(root: Path, origins: dict[Path, Path]) -> None:
         subprocess.run(["codesign", "--force", "--sign", "-", str(path)], check=True)
 
 
-def app_root(executable: Path) -> Path:
-    for parent in (executable, *executable.parents):
-        if parent.suffix == ".app":
-            return parent
-    raise ValueError("macos_chromium_app_missing")
-
-
 def require_file(path: Path, label: str, executable: bool = False) -> Path:
     resolved = path.expanduser().resolve(strict=True)
     if not resolved.is_file() or resolved.is_symlink():
@@ -174,7 +167,6 @@ def main() -> None:
     parser.add_argument("--tesseract", type=Path, required=True)
     parser.add_argument("--tessdata", type=Path, required=True)
     parser.add_argument("--chi-sim", type=Path, required=True)
-    parser.add_argument("--chromium", type=Path, required=True)
     parser.add_argument("--whisper-cli", type=Path, required=True)
     parser.add_argument("--whisper-model", type=Path, required=True)
     args = parser.parse_args()
@@ -189,7 +181,6 @@ def main() -> None:
     whisper_cli = require_file(args.whisper_cli, "whisper-cli", executable=True)
     chi_sim = require_file(args.chi_sim, "tesseract-chi-sim")
     whisper_model = require_file(args.whisper_model, "whisper-model")
-    chromium = require_file(args.chromium, "chromium", executable=True)
     tessdata = args.tessdata.expanduser().resolve(strict=True)
     if not tessdata.is_dir() or not (tessdata / "eng.traineddata").is_file():
         raise ValueError("macos_tessdata_invalid")
@@ -225,12 +216,6 @@ def main() -> None:
         model_root.mkdir(parents=True)
         shutil.copy2(whisper_model, model_root / "ggml-base.bin")
 
-        chromium_source = app_root(chromium)
-        chromium_target = root / "chromium/Chromium.app"
-        copy_tree_without_links(chromium_source, chromium_target)
-        relative_chromium = chromium.relative_to(chromium_source)
-        chromium_target_executable = chromium_target / relative_chromium
-
         copy_external_libraries(root, origins)
         write_wrapper(
             root / "bin/git",
@@ -245,19 +230,17 @@ def main() -> None:
             'export TESSDATA_PREFIX="$root/share/tessdata"\n'
             'exec "$root/bin/tesseract.real" "$@"\n',
         )
-        chromium_relative = chromium_target_executable.relative_to(root).as_posix()
-        write_wrapper(
-            root / "bin/chromium",
-            'root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"\n'
-            f'exec "$root/{chromium_relative}" "$@"\n',
-        )
+        browser_launcher = Path(__file__).with_name("macos-system-browser.sh")
+        shutil.copy2(browser_launcher, root / "bin/chromium")
+        (root / "bin/chromium").chmod(0o755)
+        subprocess.run(["/bin/bash", "-n", str(root / "bin/chromium")], check=True)
 
         checks = {
             "git": run(str(root / "bin/git"), "--version").strip(),
             "ffmpeg": first_output_line(str(root / "bin/ffmpeg"), "-version"),
             "ffprobe": first_output_line(str(root / "bin/ffprobe"), "-version"),
             "tesseract": first_output_line(str(root / "bin/tesseract"), "--version"),
-            "chromium": run(str(root / "bin/chromium"), "--version").strip(),
+            "chromium": "system_browser_required",
             "whisper_cli": first_output_line(str(root / "bin/whisper-cli"), "--help"),
         }
         languages = run(str(root / "bin/tesseract"), "--list-langs")

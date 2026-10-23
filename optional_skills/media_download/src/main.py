@@ -23,6 +23,7 @@ SCHEMA_VERSION = 1
 TOOL_DIR = Path(__file__).resolve().parent / "tool"
 sys.path.insert(0, str(TOOL_DIR))
 from video_inputs import prepare_video_inputs, promote_video_audio_delivery
+from macos_browser_selection import select_macos_browser
 
 def interpreter_bin_directory(executable: str) -> Path:
     """Preserve a virtual environment's bin path instead of resolving its Python symlink."""
@@ -485,11 +486,17 @@ def _build_download_command(
     if not _bool(args, "browser_fallback", True):
         command.append("--no-browser-fallback")
 
+    browser = select_macos_browser()
+    if browser is not None:
+        command.extend(["--chrome-path", browser.executable])
     if storage_directory is not None:
+        profile_root = storage_directory / "browser-profile"
+        if browser is not None:
+            profile_root /= browser.profile_namespace
         command.extend(
             [
                 "--browser-profile-dir",
-                str(storage_directory / "browser-profile"),
+                str(profile_root),
             ]
         )
         if not resolve_only:

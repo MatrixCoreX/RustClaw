@@ -8,6 +8,17 @@
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
+On macOS, browser-backed media access uses an installed, vendor-signed Google
+Chrome or Microsoft Edge (Chromium major 120 or newer), preferring Chrome.
+The skill checks application metadata and code signatures; a missing, obsolete
+or untrusted browser is not replaced by a bundled testing browser. Install a
+supported browser through the system dependency settings before retrying.
+Automation uses only this skill's private profiles, separated by browser
+identity and platform, and never imports personal browser cookies by default.
+Existing private profiles are preserved; a new browser identity may need one
+platform login. Explicit CLI browser paths remain a technician-controlled
+override. Linux and Raspberry Pi browser discovery are unchanged.
+
 - Download public media from Douyin, Kuaishou, Xiaohongshu, TikTok, YouTube, Bilibili, WeChat Channels, Toutiao, and Weibo shares. Bilibili BV, AV, and `b23.tv` links use `yt-dlp` with a first-party Referer. Douyin, Xiaohongshu, WeChat Channels, Toutiao, and Weibo image posts attempt every original image plus the platform article. Delivery is best effort: one unavailable component does not suppress successful media or text. Up to nine images are delivered individually; larger sets use one ordered ZIP. Available article text is delivered inline and as a UTF-8 artifact, also included in a large image ZIP.
 - Resolve direct media URLs without downloading.
 - Provide local image OCR and prepare local video for X. Local speech recognition is a separate optional `local_asr` process skill, so ordinary media download never installs or imports Torch, ModelScope, or FunASR. Local image OCR runs Tesseract first and then uses the skill's granted internal LLM gateway for layout and typo review; unavailable review falls back to raw OCR text.

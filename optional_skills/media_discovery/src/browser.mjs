@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import path from "node:path";
+import { selectMacOSBrowser } from "./macos_browser_selection.mjs";
 import { browserStageError, recordBrowserFailure } from "./browser_diagnostics.mjs";
 import { createManualConfirmation } from "./manual_handoff.mjs";
 import {
@@ -279,22 +280,17 @@ export function guiAvailable(environment = process.env, platform = process.platf
 }
 
 async function existingExecutable() {
-  const candidates = process.platform === "darwin"
-    ? [
-        process.env.APP_BUNDLED_CHROMIUM_PATH,
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        "/Applications/Chromium.app/Contents/MacOS/Chromium",
-        "/opt/homebrew/bin/chromium",
-        "/usr/local/bin/chromium",
-      ]
-    : [
+  if (process.platform === "darwin") {
+    return (await selectMacOSBrowser())?.executablePath || null;
+  }
+  const candidates = [
         "/usr/bin/google-chrome-stable",
         "/usr/bin/google-chrome",
         "/opt/google/chrome/google-chrome",
         "/usr/bin/chromium",
         "/usr/bin/chromium-browser",
         "/snap/bin/chromium",
-      ];
+  ];
   for (const candidate of candidates) {
     if (!candidate) continue;
     if (await fs.access(candidate).then(() => true).catch(() => false)) return candidate;

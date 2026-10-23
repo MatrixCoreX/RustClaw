@@ -800,6 +800,10 @@ async function navigateWithFallback(page, url, preferredWaitUntil, deadlineAt) {
     };
 }
 
+function browserDefaultArgExclusions(platform = process.platform) {
+    return platform === 'darwin' ? ['--use-mock-keychain'] : [];
+}
+
 async function createBrowserContext(networkPolicy = {}, contextOptions = {}) {
     if (!playwright) {
         try {
@@ -838,6 +842,7 @@ async function createBrowserContext(networkPolicy = {}, contextOptions = {}) {
             executablePath,
             headless: true,
             env: launchEnv,
+            ignoreDefaultArgs: browserDefaultArgExclusions(),
             args: [
                 '--headless=new',
                 '--disable-dev-shm-usage',
@@ -1892,6 +1897,7 @@ if (require.main === module) {
 
 module.exports = {
     SkillError,
+    browserDefaultArgExclusions,
     classifyError,
     classifyNavigationFailure,
     compactErrorMessage,

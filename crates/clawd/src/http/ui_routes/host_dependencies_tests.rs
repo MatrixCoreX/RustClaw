@@ -1,9 +1,9 @@
 use super::{
     bounded_tail, browser_playwright_install_commands, build_ui_router,
-    dependency_command_candidates, dependency_install_commands,
-    dependency_runtime_state_from_counts, dependency_version_text, dependency_version_text_for,
-    detect_browser_playwright_manifest, host_dependency_catalog,
-    install_declared_host_dependencies, linux_dependency_package,
+    dependency_command_candidates, dependency_command_candidates_in_path,
+    dependency_install_commands, dependency_runtime_state_from_counts, dependency_version_text,
+    dependency_version_text_for, detect_browser_playwright_manifest, detect_macos_system_browser,
+    host_dependency_catalog, install_declared_host_dependencies, linux_dependency_package,
     playwright_managed_browser_available, prepare_dependency_install,
 };
 
@@ -67,6 +67,29 @@ fn command_detection_includes_service_safe_platform_paths() {
             .iter()
             .any(|candidate| candidate == std::path::Path::new("/usr/bin/ffmpeg")));
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn command_detection_prefers_effective_runtime_path_without_duplicate_candidates() {
+    let candidates = dependency_command_candidates_in_path(
+        "tesseract",
+        Some(std::ffi::OsStr::new(
+            "/fixture/host/bin:/usr/bin:/fixture/host/bin",
+        )),
+    );
+    assert_eq!(
+        candidates[0],
+        std::path::Path::new("/fixture/host/bin/tesseract")
+    );
+    assert_eq!(candidates[1], std::path::Path::new("/usr/bin/tesseract"));
+    assert_eq!(
+        candidates
+            .iter()
+            .filter(|path| path.ends_with("host/bin/tesseract"))
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -189,7 +212,10 @@ fn playwright_install_is_fixed_to_the_browser_skill_package() {
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let commands = browser_playwright_install_commands(&workspace_root)
         .expect("browser Playwright install command");
-    assert_eq!(commands.len(), 2);
+    assert_eq!(
+        commands.len(),
+        if cfg!(target_os = "macos") { 1 } else { 2 }
+    );
     assert_eq!(
         commands[0].args,
         vec!["ci", "--omit=dev", "--no-audit", "--no-fund"]
@@ -199,9 +225,39 @@ fn playwright_install_is_fixed_to_the_browser_skill_package() {
         .as_deref()
         .is_some_and(|path| path.ends_with("crates/skills/browser_web")));
     assert!(commands[0].program.ends_with("npm"));
-    assert!(commands[1].program.ends_with("node"));
-    assert!(commands[1].args[0].ends_with("node_modules/playwright/cli.js"));
-    assert_eq!(&commands[1].args[1..], ["install", "chromium"]);
+    if !cfg!(target_os = "macos") {
+        assert!(commands[1].program.ends_with("node"));
+        assert!(commands[1].args[0].ends_with("node_modules/playwright/cli.js"));
+        assert_eq!(&commands[1].args[1..], ["install", "chromium"]);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn macos_browser_detection_requires_a_successful_selector_and_executable() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = std::env::temp_dir().join(format!("browser-host-probe-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(root.join("scripts")).expect("fixture directory");
+    let executable = root.join("browser fixture");
+    std::fs::write(&executable, "#!/bin/sh\nprintf 'Browser 156.0\\n'\n").expect("browser fixture");
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+        .expect("fixture executable permissions");
+    let selector = root.join("scripts/macos-system-browser.sh");
+    std::fs::write(
+        &selector,
+        format!("#!/bin/sh\nprintf '%s\\n' '{}'\n", executable.display()),
+    )
+    .expect("selector fixture");
+    assert_eq!(
+        detect_macos_system_browser(&root),
+        Some((
+            executable.display().to_string(),
+            "Browser 156.0".to_string()
+        ))
+    );
+    std::fs::write(&selector, "#!/bin/sh\nexit 127\n").expect("missing browser fixture");
+    assert!(detect_macos_system_browser(&root).is_none());
+    std::fs::remove_dir_all(root).expect("remove owned fixture");
 }
 
 #[test]

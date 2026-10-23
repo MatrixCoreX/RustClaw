@@ -142,6 +142,9 @@ jobs:
       - name: Prepare locked browser skill runtime assets
         run: npm ci --ignore-scripts --prefix crates/skills/browser_web
 
+      - name: Test host dependency contracts
+        run: cargo test -p clawd host_dependencies -- --nocapture
+
       - name: Test Release installation boundaries
         run: python3 -m unittest discover -s scripts/tests -p 'test_release*.py'
 

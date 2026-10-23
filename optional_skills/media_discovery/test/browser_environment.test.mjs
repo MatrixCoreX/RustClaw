@@ -16,6 +16,7 @@ import {
   persistentContextLaunchOptions,
 } from "../src/browser_environment.mjs";
 import { handleRequest } from "../src/main.mjs";
+import { browserProfileDirectory } from "../src/macos_browser_selection.mjs";
 
 const host = { platform: "linux", arch: "x64", locale: "zh-CN", timeZone: "Asia/Shanghai" };
 const fileFor = (root, platform = "douyin") => path.join(root, "browser-profile", platform, "browser-environment.json");
@@ -73,6 +74,16 @@ test("system-service execution discovers the current user's Wayland session", as
   assert.equal(environment.WAYLAND_DISPLAY, "wayland-7");
   assert.equal(environment.XAUTHORITY, authorityPath);
   assert.equal(environment.DISPLAY, undefined);
+});
+
+test("macOS launches keep real keychain encryption rather than Playwright's mock store", () => {
+  const options = persistentContextLaunchOptions({
+    executablePath: "/fixture/chrome", headless: true,
+    environment: nativeBrowserEnvironment(host), hostEnv: {}, hostPlatform: "darwin",
+  });
+  assert.deepEqual(options.ignoreDefaultArgs, [AUTOMATION_DEFAULT_ARG, "--use-mock-keychain"]);
+  assert.equal(options.args.includes("--use-mock-keychain"), false);
+  assert.equal(options.args.includes("--password-store=basic"), false);
 });
 
 test("system-service X11 discovery falls back to the user's standard authority file", async t => {
@@ -263,7 +274,28 @@ test("platform profiles remain isolated; host migration uses the destination env
   await (await launchPlatformBrowser({ ...options, native })).close();
   assert.notEqual(launches[0].profile, launches[1].profile);
   assert.equal(launches[2].options.locale, "en-GB");
-  assert.deepEqual(JSON.parse(await fs.readFile(fileFor(root), "utf8")), native);
+  const migratedFile = path.join(browserProfileDirectory(root, "douyin", options.executablePath, "darwin"),
+    "browser-environment.json");
+  assert.deepEqual(JSON.parse(await fs.readFile(migratedFile, "utf8")), native);
+  assert.equal(await fs.readFile(fileFor(root), "utf8"), saved);
+});
+
+test("closing a macOS browser cleans only its selected encryption-identity profile", async t => {
+  const { root, options } = await fixture(t);
+  const executablePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+  const native = nativeBrowserEnvironment({ ...host, platform: "darwin", arch: "arm64" });
+  const legacy = path.join(root, "browser-profile/douyin/Default/Preferences");
+  await fs.mkdir(path.dirname(legacy), { recursive: true });
+  const crashed = JSON.stringify({ profile: { exit_type: "Crashed", exited_cleanly: false } });
+  await fs.writeFile(legacy, crashed);
+  const context = await launchPlatformBrowser({ ...options, executablePath, native });
+  const preferences = path.join(browserProfileDirectory(root, "douyin", executablePath, "darwin"),
+    "Default/Preferences");
+  await fs.mkdir(path.dirname(preferences), { recursive: true });
+  await fs.writeFile(preferences, crashed);
+  await closePlatformBrowser({ context, root, platform: "douyin" });
+  assert.equal(JSON.parse(await fs.readFile(preferences, "utf8")).profile.exit_type, "Normal");
+  assert.equal(await fs.readFile(legacy, "utf8"), crashed);
 });
 
 test("stored data cannot inject browser flags, user agents or proxies", async t => {

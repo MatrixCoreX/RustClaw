@@ -5,6 +5,7 @@ const path = require('node:path');
 
 const {
     SkillError,
+    browserDefaultArgExclusions,
     classifyError,
     classifyNavigationFailure,
     deriveExecutionBudget,
@@ -18,6 +19,11 @@ const {
     sanitizeExtractedText,
     validateNetworkUrl,
 } = require('./browser_web.js');
+
+test('macOS removes the mock keychain default without weakening Linux sandbox options', () => {
+    assert.deepEqual(browserDefaultArgExclusions('darwin'), ['--use-mock-keychain']);
+    assert.deepEqual(browserDefaultArgExclusions('linux'), []);
+});
 
 test('derives one work deadline with cleanup reserve from the runner budget', () => {
     const budget = deriveExecutionBudget('180', 1_000);

@@ -6,6 +6,7 @@ import test from "node:test";
 import { chromium } from "playwright";
 import { browserCapability, waitForInteractiveLogin } from "../src/browser.mjs";
 import { closePlatformBrowser, launchPlatformBrowser, nativeBrowserEnvironment } from "../src/browser_environment.mjs";
+import { browserProfileDirectory } from "../src/macos_browser_selection.mjs";
 
 const enabled = process.env.MEDIA_DISCOVERY_BROWSER_TEST === "1";
 const source = "https://www.douyin.com/video/73100000";
@@ -53,7 +54,7 @@ test("real browser reuses locale, timezone, viewport and session across restart"
     } finally { await closePlatformBrowser({ context, root, platform: "douyin" }); }
   }
   const preferences = JSON.parse(await fs.readFile(
-    path.join(root, "browser-profile", "douyin", "Default", "Preferences"), "utf8"));
+    path.join(browserProfileDirectory(root, "douyin", options.executablePath), "Default", "Preferences"), "utf8"));
   assert.equal(preferences.profile.exit_type, "Normal");
   assert.equal(preferences.profile.exited_cleanly, true);
 });
@@ -72,7 +73,9 @@ test("actual manual verification popup uses the same environment and still requi
     await context.addCookies([{ name: "sessionid", value: "fixture-only", url: source,
       expires: Math.floor(Date.now() / 1000) + 3600 }]);
   } finally { await closePlatformBrowser({ context, root, platform: "douyin" }); }
-  const saved = await fs.readFile(path.join(root, "browser-profile", "douyin", "browser-environment.json"), "utf8");
+  const environmentFile = path.join(browserProfileDirectory(root, "douyin", capability.chromium_executable),
+    "browser-environment.json");
+  const saved = await fs.readFile(environmentFile, "utf8");
   const originalLaunch = chromium.launchPersistentContext.bind(chromium);
   let manual;
   t.mock.method(chromium, "launchPersistentContext", async (profile, options) => {
@@ -103,7 +106,7 @@ test("actual manual verification popup uses the same environment and still requi
   assert.equal(result.ready, true);
   assert.equal(result.user_confirmed, true);
   assert.deepEqual(manual.pages(), []);
-  assert.equal(await fs.readFile(path.join(root, "browser-profile", "douyin", "browser-environment.json"), "utf8"), saved);
+  assert.equal(await fs.readFile(environmentFile, "utf8"), saved);
 });
 
 test("forced TikTok rate-limit handoff opens login and verifies persisted authentication", {

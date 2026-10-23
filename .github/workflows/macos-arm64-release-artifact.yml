@@ -104,6 +104,34 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Prepare relocatable macOS Python runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${PACKAGE_ARCH}" in
+            aarch64) python_sha256=d66c67f16148c7454b1509c32747175f7669c8b8e105b97b92a0000d66af6e6e ;;
+            x86_64) python_sha256=73b503a2d3f47f0601265d7936744b77dc4ee75d2a3e88a470594a014dcf6822 ;;
+            *) exit 64 ;;
+          esac
+          archive="cpython-3.13.15+20260929-${RUST_TARGET}-install_only_stripped.tar.gz"
+          archive_path="${RUNNER_TEMP}/${archive}"
+          curl --fail --location --retry 3 --output "${archive_path}" \
+            "https://github.com/astral-sh/python-build-standalone/releases/download/20260929/${archive}"
+          echo "${python_sha256}  ${archive_path}" | shasum -a 256 -c -
+          runtime_parent="${RUNNER_TEMP}/relocatable-python"
+          mkdir -p "${runtime_parent}"
+          tar -xzf "${archive_path}" -C "${runtime_parent}"
+          runtime_root="${runtime_parent}/python"
+          env -i HOME="$HOME" PATH=/usr/bin:/bin \
+            "${runtime_root}/bin/python3" -I -c 'import json, ssl, tomllib, venv; print(json.dumps({"runtime":"standalone_python"}))'
+          if otool -L "${runtime_root}/bin/python3" | grep -F '/Library/Frameworks/Python.framework'; then
+            echo "Packaged Python must not require a separately installed Framework" >&2
+            exit 1
+          fi
+          echo "APP_RELEASE_PYTHON_RUNTIME_ROOT=${runtime_root}" >> "$GITHUB_ENV"
+          echo "APP_PYTHON_BIN=${runtime_root}/bin/python3" >> "$GITHUB_ENV"
+          echo "${runtime_root}/bin" >> "$GITHUB_PATH"
+
       - name: Setup Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
@@ -136,6 +164,9 @@ jobs:
           set -euo pipefail
           python3 -m unittest discover -s scripts/security -p test_release_config_guard.py
           python3 -m unittest discover -s scripts/tests -p test_release_skill_sources.py
+          python3 -m unittest discover -s scripts/tests -p test_macos_system_browser.py
+          python3 -m unittest discover -s optional_skills/media_download/tests -p test_macos_browser_selection.py
+          node --test optional_skills/media_discovery/test/macos_browser_selection.test.mjs
           python3 scripts/check_product_identity_coupling.py --self-test
           python3 scripts/check_product_identity_coupling.py
           python3 scripts/check_polyglot_skill_contracts.py --self-test
@@ -147,6 +178,9 @@ jobs:
 
       - name: Prepare locked browser skill runtime assets
         run: npm ci --ignore-scripts --prefix crates/skills/browser_web
+
+      - name: Test host dependency contracts
+        run: cargo test -p clawd host_dependencies -- --nocapture
 
       - name: Test Release installation boundaries
         run: python3 -m unittest discover -s scripts/tests -p 'test_release*.py'
@@ -181,6 +215,9 @@ jobs:
           set -euo pipefail
           export HOMEBREW_NO_AUTO_UPDATE=1
           brew install cmake ffmpeg tesseract git
+          if ! bash scripts/macos-system-browser.sh --resolve-executable; then
+            brew install --cask google-chrome
+          fi
 
           whisper_source="${RUNNER_TEMP}/whisper-cpp-source"
           whisper_build="${RUNNER_TEMP}/whisper-cpp-build"
@@ -208,14 +245,6 @@ jobs:
             exit 1
           fi
 
-          npm ci --ignore-scripts --prefix optional_skills/media_discovery
-          playwright_root="${RUNNER_TEMP}/playwright-browsers"
-          PLAYWRIGHT_BROWSERS_PATH="${playwright_root}" \
-            optional_skills/media_discovery/node_modules/.bin/playwright install chromium
-          chromium_executable="$(PLAYWRIGHT_BROWSERS_PATH="${playwright_root}" node -e \
-            'const { chromium } = require("./optional_skills/media_discovery/node_modules/playwright"); process.stdout.write(chromium.executablePath())')"
-          [[ -x "${chromium_executable}" ]]
-
           dependency_downloads="${RUNNER_TEMP}/skill-dependency-downloads"
           mkdir -p "${dependency_downloads}"
           curl --fail --location --retry 3 \
@@ -235,9 +264,19 @@ jobs:
             --tesseract "$(brew --prefix tesseract)/bin/tesseract" \
             --tessdata "$(brew --prefix tesseract)/share/tessdata" \
             --chi-sim "${dependency_downloads}/chi_sim.traineddata" \
-            --chromium "${chromium_executable}" \
             --whisper-cli "${whisper_cli}" \
             --whisper-model "${dependency_downloads}/ggml-base.bin"
+
+      - name: Test signed system browser and isolated skill profiles
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --prefix optional_skills/media_discovery
+          node --test optional_skills/media_discovery/test/*.test.mjs
+          MEDIA_DISCOVERY_BROWSER_TEST=1 node --test \
+            optional_skills/media_discovery/test/browser_environment.integration.test.mjs
+          node --test crates/skills/browser_web/*tests.js
+          python3 -m unittest discover -s scripts/tests -p test_macos_system_browser.py
 
       - name: Verify native skill receipts
         shell: bash
@@ -267,7 +306,7 @@ jobs:
           signing_key="${RUNNER_TEMP}/release-signing-key"
           printf '%s\n' "${RELEASE_SIGNING_KEY}" > "${signing_key}"
           chmod 600 "${signing_key}"
-          python_runtime_root="${pythonLocation:?setup-python did not expose pythonLocation}"
+          python_runtime_root="${APP_RELEASE_PYTHON_RUNTIME_ROOT:?standalone Python runtime missing}"
           node_runtime_root="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve().parent.parent)' "$(command -v node)")"
           [[ -x "${python_runtime_root}/bin/python3" ]]
           [[ -x "${node_runtime_root}/bin/node" ]]
@@ -299,7 +338,7 @@ jobs:
           DESKTOP_NATIVE_TARGET: ${{ env.RUST_TARGET }}
         run: |
           set -euo pipefail
-          export APP_DESKTOP_BOOTSTRAP_PYTHON_ROOT="${pythonLocation:?setup-python did not expose pythonLocation}"
+          export APP_DESKTOP_BOOTSTRAP_PYTHON_ROOT="${APP_RELEASE_PYTHON_RUNTIME_ROOT:?standalone Python runtime missing}"
           npm ci --prefix desktop
           npm run build --prefix desktop -- --target "${RUST_TARGET}" --bundles app
           app="desktop/target/${RUST_TARGET}/release/bundle/macos/agent-desktop.app"
@@ -413,6 +452,8 @@ jobs:
           [[ -f "${runtime_root}/.release-tag" ]]
           [[ -x "${runtime_root}/target/release/skillctl" ]]
           [[ -x "${runtime_root}/prebuilt/toolchains/python/bin/python3" ]]
+          env -i HOME="$HOME" PATH=/usr/bin:/bin \
+            "${runtime_root}/prebuilt/toolchains/python/bin/python3" -I -c 'import ssl, tomllib'
           [[ -x "${runtime_root}/prebuilt/toolchains/node/bin/node" ]]
           host_tools="${runtime_root}/prebuilt/toolchains/host"
           for tool in git ffmpeg ffprobe tesseract chromium whisper-cli; do
@@ -424,7 +465,10 @@ jobs:
           "${host_tools}/bin/ffmpeg" -version >/dev/null
           "${host_tools}/bin/ffprobe" -version >/dev/null
           "${host_tools}/bin/tesseract" --list-langs | grep -qx 'chi_sim'
+          # A vendor-signed system browser is a host dependency, not a copied app bundle.
+          [[ ! -e "${host_tools}/chromium/Chromium.app" ]]
           "${host_tools}/bin/chromium" --version
+          "${host_tools}/bin/chromium" --resolve-executable
           speech_fixture="${RUNNER_TEMP}/bundled-media-smoke.aiff"
           media_fixture="${RUNNER_TEMP}/bundled-media-smoke.wav"
           /usr/bin/say -o "${speech_fixture}" \

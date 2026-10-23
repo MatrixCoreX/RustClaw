@@ -305,7 +305,9 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(raised.exception.error_code, "unsupported_action")
 
     def test_download_routes_profile_checkpoints_to_private_skill_storage(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            self.skill, "select_macos_browser", return_value=None,
+        ):
             root = Path(directory)
             storage = root / "private-storage"
             storage.mkdir()
