@@ -13,8 +13,8 @@ class OutputSelectionError(RuntimeError):
 
 
 def validate_output_mode(mode):
-    if mode is not None and (not isinstance(mode, str) or mode not in {"video", "audio", "video_audio"}):
-        raise OutputSelectionError("output_mode must be video, audio, or video_audio", "invalid_output_mode")
+    if mode is not None and (not isinstance(mode, str) or mode not in {"media", "media_audio", "video", "audio", "video_audio"}):
+        raise OutputSelectionError("output_mode must be media, media_audio, video, audio, or video_audio", "invalid_output_mode")
 
 
 def select_download_output(artifacts, mode, artifact_factory, run=None):
@@ -24,6 +24,19 @@ def select_download_output(artifacts, mode, artifact_factory, run=None):
         return artifacts
     videos = [a for a in artifacts if a.get("mime_type", "").startswith("video/")]
     audio = [a for a in artifacts if a.get("mime_type", "").startswith("audio/")]
+    if mode in {"media", "media_audio"}:
+        articles = [a for a in artifacts if a.get("artifact_role") == "article_text"]
+        originals = videos or [a for a in artifacts if a.get("artifact_role") == "image_archive"] or [a for a in artifacts if a.get("mime_type", "").startswith("image/")]
+        if mode == "media":
+            if not originals and not articles:
+                raise OutputSelectionError("No original video, images, or article were available", "media_not_found")
+            return originals + articles
+        # Reuse deterministic audio extraction only for an explicitly selected
+        # audio companion. Image posts retain their directly collected audio.
+        if not originals and not audio and not articles:
+            raise OutputSelectionError("No original media was available", "media_not_found")
+        companions = select_download_output(artifacts, "video_audio", artifact_factory, run=run) if videos or audio else []
+        return originals + [a for a in companions if a.get("mime_type", "").startswith("audio/")] + articles
     if mode == "video":
         if not videos:
             raise OutputSelectionError("No video was available for this post", "video_not_found")

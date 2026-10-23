@@ -45,7 +45,7 @@ fn nni_validate_artifact_delivery(delivery: &NniArtifactDelivery) -> bool {
         && url.scheme() == "https" && url.username().is_empty() && url.password().is_none()
         && url.origin().ascii_serialization() == delivery.origin
         && !delivery.required_kinds.is_empty() && delivery.required_kinds.len() <= 2
-        && delivery.required_kinds.iter().all(|k| matches!(k.as_str(), "video" | "audio"))
+        && delivery.required_kinds.iter().all(|k| matches!(k.as_str(), "media" | "video" | "audio"))
         && delivery.required_kinds.iter().collect::<std::collections::BTreeSet<_>>().len() == delivery.required_kinds.len()
         && delivery.max_file_bytes > 0 && delivery.max_file_bytes <= 512 * 1024 * 1024
 }
@@ -84,24 +84,50 @@ async fn nni_upload_task_artifacts(
         .build()?;
     let mut missing = false;
     for kind in &delivery.required_kinds {
-        let Some(manifest) = manifests.iter().find(|item| &item.kind == kind) else {
+        let Some(manifest) = manifests.iter().find(|item| nni_delivery_kind_matches(kind, &item.kind, &item.mime_type)) else {
             missing = true;
             continue;
         };
-        if manifest.size_bytes > delivery.max_file_bytes {
-            return Err(NniDeliveryError("artifact_too_large").into());
+        nni_upload_delivery_manifest(state, &client, assignment, delivery, local_task_id, manifest).await?;
+    }
+    // Platform article text is an optional original component. Its presence
+    // does not require a separate model operation or make missing prose fatal.
+    if delivery.required_kinds.iter().any(|kind| kind == "media") {
+        if let Some(article) = manifests.iter().find(|item| item.kind == "text" && item.mime_type == "text/plain") {
+            nni_upload_delivery_manifest(state, &client, assignment, delivery, local_task_id, article)
+                .await.map_err(|_| NniDeliveryError("article_upload_failed"))?;
         }
-        anyhow::ensure!(manifest.size_bytes > 0, NniDeliveryError("artifact_size_invalid"));
-        let path = crate::task_artifacts::validated_delivery_artifact_path(
-            &state.skill_rt.workspace_root, local_task_id, manifest,
-        ).ok_or(NniDeliveryError("artifact_path_invalid"))?;
-        nni_upload_artifact_chunks(&client, assignment, delivery, manifest, &path).await?;
     }
     anyhow::ensure!(!missing, NniDeliveryError("required_artifact_missing"));
     Ok(())
 }
 
+async fn nni_upload_delivery_manifest(
+    state: &AppState,
+    client: &reqwest::Client,
+    assignment: &NniWorkAssignment,
+    delivery: &NniArtifactDelivery,
+    local_task_id: &str,
+    manifest: &crate::task_artifacts::TaskArtifactManifest,
+) -> anyhow::Result<()> {
+    if manifest.size_bytes > delivery.max_file_bytes {
+        return Err(NniDeliveryError("artifact_too_large").into());
+    }
+    anyhow::ensure!(manifest.size_bytes > 0, NniDeliveryError("artifact_size_invalid"));
+    let path = crate::task_artifacts::validated_delivery_artifact_path(
+        &state.skill_rt.workspace_root, local_task_id, manifest,
+    ).ok_or(NniDeliveryError("artifact_path_invalid"))?;
+    nni_upload_artifact_chunks(client, assignment, delivery, manifest, &path).await
+}
+
 include!("nni_work_upload_chunks.rs");
+
+fn nni_delivery_kind_matches(required: &str, kind: &str, mime: &str) -> bool {
+    if required == "media" {
+        return kind == "video" || (kind == "file" && mime == "application/zip");
+    }
+    required == kind
+}
 
 fn percent_encode_filename(value: &str) -> String {
     value.as_bytes().iter().map(|byte| {

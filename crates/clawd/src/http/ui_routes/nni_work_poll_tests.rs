@@ -11,6 +11,9 @@ fn request() -> NniRemoteHeartbeatRequest {
             supported_task_types: vec!["capability_v1".to_string()],
             worker_instance_id: "11111111-2222-4333-8444-555555555555".to_string(),
             active_lease: None,
+            capability_refs: vec![],
+            artifact_origins: vec![],
+            max_file_bytes: 0,
         }),
         work_report: None,
     }

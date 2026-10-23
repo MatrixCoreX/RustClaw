@@ -222,4 +222,8 @@ Response:
 
 ### Explicit downloadable components
 
-`download.output_mode` is optional: `video`, `audio`, or `video_audio`. Omit it to preserve the existing image/article/media delivery. `audio` extracts a standalone AAC/M4A track using FFmpeg without requesting speech recognition or changing sample rate/channels. `video_audio` returns both when available; a source with no audio still returns its video. This parameter is independent from `text_conversion_scope`. Public website workers set `public_only=true` to use a separate anonymous browser profile; private authorized profiles and system browser cookies are not reused. Stable failures include `invalid_output_mode`, `video_not_found`, `audio_not_found`, and `ffmpeg_unavailable`.
+`output_mode=media`: video/image ZIP + original TXT; `media_audio` adds audio, never OCR/ASR/models. Omit for legacy output. `public_only=true` isolates anonymous sessions.
+
+## Download Output Details
+
+`download.output_mode`: `media` returns video or an ordered original-image ZIP, even for small sets; `media_audio` adds collected audio or FFmpeg-extracted AAC/M4A without changing channels/sample rate. `video`, `audio`, and `video_audio` remain supported. These modes do not request OCR, ASR, or models. Omit mode for legacy image/article delivery and its nine-image threshold. `public_only=true` uses a separate anonymous browser profile, never personal/system cookies. Errors include `invalid_output_mode`, `media_not_found`, `video_not_found`, `audio_not_found`, and `ffmpeg_unavailable`.

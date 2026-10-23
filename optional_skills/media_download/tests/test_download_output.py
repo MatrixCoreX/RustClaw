@@ -52,3 +52,39 @@ class DownloadOutputTests(unittest.TestCase):
             self.assertIn("--no-system-browser-cookies", command)
             private = main._build_download_command({"share": "https://www.douyin.com/video/123"}, root / "output", resolve_only=False, storage_directory=root / "private")
             self.assertNotEqual(profile, private[private.index("--browser-profile-dir") + 1])
+
+
+class OriginalMediaOutputTests(unittest.TestCase):
+    def test_automatic_media_selects_originals_and_audio_only_on_request(self):
+        video = {"mime_type": "video/mp4", "path": "/unused.mp4"}
+        audio = {"mime_type": "audio/mp4", "path": "/unused.m4a"}
+        archive = {"mime_type": "application/zip", "artifact_role": "image_archive", "path": "/unused.zip"}
+        self.assertEqual(m.select_download_output([video, audio], "media", None), [video])
+        self.assertEqual(m.select_download_output([archive, audio], "media", None), [archive])
+        self.assertEqual(m.select_download_output([archive, audio], "media_audio", None), [archive, audio])
+        self.assertEqual(m.select_download_output([archive], "media_audio", None), [archive])
+        article = {"mime_type": "text/plain", "artifact_role": "article_text", "path": "/original.txt"}
+        self.assertEqual(m.select_download_output([video, audio, article], "media", None), [video, article])
+        self.assertEqual(m.select_download_output([archive, audio, article], "media_audio", None), [archive, audio, article])
+        self.assertEqual(m.select_download_output([article], "media", None), [article])
+
+    def test_website_can_archive_a_small_image_set_without_changing_legacy_threshold(self):
+        import zipfile
+        main_spec = importlib.util.spec_from_file_location("download_archive_fixture", MODULE.parent.parent / "main.py")
+        main = importlib.util.module_from_spec(main_spec)
+        main_spec.loader.exec_module(main)
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            image = root / "001.jpg"
+            image.write_bytes(b"original-image")
+            artifacts = [dict(main._artifact(image), artifact_role="original_image")]
+            legacy, delivery, inputs = main._package_large_image_delivery(artifacts, root)
+            self.assertEqual(legacy, artifacts)
+            self.assertIsNone(delivery)
+            packed, delivery, inputs = main._package_large_image_delivery(artifacts, root, force_archive=True)
+            self.assertTrue(image.exists())
+            self.assertEqual(inputs["image_count"], 1)
+            self.assertEqual(delivery["image_count"], 1)
+            with zipfile.ZipFile(packed[0]["path"]) as archive:
+                self.assertEqual(archive.namelist(), ["001.jpg"])
+                self.assertEqual(archive.read("001.jpg"), b"original-image")

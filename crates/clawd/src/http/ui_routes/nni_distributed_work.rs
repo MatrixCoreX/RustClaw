@@ -54,6 +54,12 @@ struct NniWorkerCapabilities {
     worker_instance_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     active_lease: Option<NniActiveWorkLease>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    capability_refs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    artifact_origins: Vec<String>,
+    #[serde(default, skip_serializing_if = "nni_zero_file_limit")]
+    max_file_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -352,6 +358,29 @@ fn nni_work_sha256(value: &str) -> String {
     hex::encode(Sha256::digest(value.as_bytes()))
 }
 
+fn nni_zero_file_limit(value: &u64) -> bool { *value == 0 }
+
+fn nni_advertised_capability_grants(state: &AppState) -> (Vec<String>, Vec<String>, u64) {
+    let Ok(policy) = nni_read_work_policy(state) else { return (vec![], vec![], 0); };
+    if nni_local_work_identity(state, &policy).is_err() { return (vec![], vec![], 0); }
+    let refs: Vec<String> = policy.capabilities.iter().filter(|capability| {
+        let args = policy.argument_constraints.get(*capability)
+            .and_then(|args| serde_json::to_value(args).ok()).unwrap_or_else(|| json!({}));
+        let (action, record) = crate::capability_resolver::resolve_capability_action_with_record_for_state(
+            state, capability, args,
+        );
+        let enabled = state.get_skills_list();
+        let executable = match action.as_ref() {
+            Some(crate::AgentAction::CallSkill { skill, .. }) => enabled.contains(skill),
+            Some(crate::AgentAction::CallTool { tool, .. }) if record.source == "registry" => enabled.contains(tool),
+            _ => false,
+        };
+        executable && record.required_companions.is_empty()
+    }).cloned().collect();
+    if refs.is_empty() { return (refs, vec![], 0); }
+    (refs, policy.artifact_origins, policy.max_file_bytes)
+}
+
 fn nni_current_worker_capabilities(state: &AppState) -> Option<NniWorkerCapabilities> {
     if nni_work_assignment_verifying_keys().is_err() {
         return None;
@@ -377,6 +406,7 @@ fn nni_current_worker_capabilities(state: &AppState) -> Option<NniWorkerCapabili
             lease_token_sha256: nni_work_sha256(&value.assignment.lease_token),
         })
     });
+    let (capability_refs, artifact_origins, max_file_bytes) = nni_advertised_capability_grants(state);
     Some(NniWorkerCapabilities {
         protocol_version: NNI_WORK_PROTOCOL_VERSION,
         platform: nni_work_platform()?.to_string(),
@@ -384,6 +414,9 @@ fn nni_current_worker_capabilities(state: &AppState) -> Option<NniWorkerCapabili
         supported_task_types,
         worker_instance_id: nni_worker_instance_id(state).ok()?,
         active_lease,
+        capability_refs,
+        artifact_origins,
+        max_file_bytes,
     })
 }
 
@@ -816,6 +849,7 @@ fn nni_capability_task_payload(
         "args": args,
         "_requested_capability": payload.capability,
         "_execution_only": true,
+        "_task_source": "distributed_work",
     });
     crate::task_execution_policy::stamp_authenticated_submission_policy(
         &mut direct,
@@ -1113,7 +1147,7 @@ async fn nni_process_work_state(state: &AppState, resume: bool) -> anyhow::Resul
                             .await
                     }
                     Err(error) => {
-                        nni_failed_work_result("capability_task_enqueue_failed", error.to_string())
+                        nni_failed_work_result("worker_capability_unavailable", error.to_string())
                     }
                 }
             }

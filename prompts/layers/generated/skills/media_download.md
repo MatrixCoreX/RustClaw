@@ -175,15 +175,15 @@ Response:
 {"request_id":"media-3","status":"ok","text":"Reviewed OCR text.","error_text":null,"extra":{"schema_version":1,"source_skill":"media_download","status":"ok","action":"ocr","count":1,"urls":[],"artifacts":[{"path":"/workspace/.agent-runtime/artifacts/task-3/image_text_ocr.txt","filename":"image_text_ocr.txt","mime_type":"text/plain","size_bytes":18,"artifact_role":"recognized_text","recognition_source":"local_ocr","recognition_engine":"tesseract"}],"recognition":{"source":"local_ocr","engine":"tesseract"},"recognition_delivery":{"mode":"inline_and_artifact","source":"local_ocr","engine":"tesseract","character_count":18,"text":"Reviewed OCR text.","artifact_path":"/workspace/.agent-runtime/artifacts/task-3/image_text_ocr.txt","artifact_filename":"image_text_ocr.txt"},"delivery":{"intent":"artifact","deliver_to_user":true},"output_directory":"/workspace/.agent-runtime/artifacts/task-3","diagnostics":""}}
 ```
 
+### Explicit downloadable components
+
+`output_mode=media`: video/image ZIP + original TXT; `media_audio` adds audio, never OCR/ASR/models. Omit for legacy output. `public_only=true` isolates anonymous sessions.
+
 ## Output Contract
 - Use only actions and params declared in the interface spec.
 - Keep args minimal and explicit.
 - On uncertainty, prefer safe/readonly behavior first.
 - For setup or configuration questions about this skill, treat the config entry points section as the grounding source for where changes actually live.
-
-### Explicit downloadable components
-
-`download.output_mode` is optional: `video`, `audio`, or `video_audio`. Omit it to preserve the existing image/article/media delivery. `audio` extracts a standalone AAC/M4A track using FFmpeg without requesting speech recognition or changing sample rate/channels. `video_audio` returns both when available; a source with no audio still returns its video. This parameter is independent from `text_conversion_scope`. Public website workers set `public_only=true` to use a separate anonymous browser profile; private authorized profiles and system browser cookies are not reused. Stable failures include `invalid_output_mode`, `video_not_found`, `audio_not_found`, and `ffmpeg_unavailable`.
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.

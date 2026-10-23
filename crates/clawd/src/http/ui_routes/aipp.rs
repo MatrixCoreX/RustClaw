@@ -17,6 +17,9 @@ const AIPP_TASK_ACTIVITY_TASK_ID_MAX: usize = 128;
 const AIPP_BUNDLE_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
 const AIPP_TASK_ACTIVITY_MATCH_SQL: &str = r#"
              WHERE (:channel IS NULL OR tasks.channel = :channel)
+               AND COALESCE(tasks.idempotency_key, '') NOT LIKE 'nni-capability:%'
+               AND COALESCE(CASE WHEN json_valid(tasks.payload_json)
+                   THEN json_extract(tasks.payload_json, '$._task_source') END, '') != 'distributed_work'
                AND (
                     :communication_only = 0
                     OR tasks.channel IN ('telegram', 'whatsapp', 'feishu', 'lark', 'wechat')

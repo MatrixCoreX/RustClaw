@@ -685,12 +685,14 @@ def _available_archive_path(output_dir: Path) -> Path:
 def _package_large_image_delivery(
     artifacts: list[dict[str, Any]],
     output_dir: Path,
+    *,
+    force_archive: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None]:
     images = [item for item in artifacts if item.get("artifact_role") == "original_image"]
     if not images:
         return artifacts, None, None
 
-    if len(images) <= IMAGE_ARCHIVE_THRESHOLD:
+    if len(images) <= IMAGE_ARCHIVE_THRESHOLD and not force_archive:
         return artifacts, None, None
 
     delivery = {
@@ -2078,6 +2080,7 @@ def respond(
         artifacts, image_delivery, processing_inputs = _package_large_image_delivery(
             artifacts,
             output_dir,
+            force_archive=args.get("output_mode") in {"media", "media_audio"},
         )
         inline_article = _article_text_delivery(artifacts)
     elif action == "ocr" and deliver_to_user:

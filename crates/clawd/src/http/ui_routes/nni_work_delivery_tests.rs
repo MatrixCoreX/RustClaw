@@ -30,3 +30,14 @@ fn artifact_filename_header_encodes_unicode_and_header_delimiters() {
     assert_eq!(percent_encode_filename("a b\r\n.mp4"), "a%20b%0D%0A.mp4");
     assert!(percent_encode_filename("音频.m4a").is_ascii());
 }
+
+#[test]
+fn original_media_delivery_accepts_video_or_image_archives_only() {
+    assert!(nni_delivery_kind_matches("media", "video", "video/mp4"));
+    assert!(nni_delivery_kind_matches("media", "file", "application/zip"));
+    assert!(!nni_delivery_kind_matches("media", "file", "application/json"));
+    assert!(!nni_delivery_kind_matches("media", "audio", "audio/mp4"));
+    let mut grant = delivery();
+    grant.required_kinds = vec!["media".to_string(), "audio".to_string()];
+    assert!(nni_validate_artifact_delivery(&grant));
+}

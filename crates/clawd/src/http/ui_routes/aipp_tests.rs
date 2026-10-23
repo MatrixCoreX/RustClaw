@@ -38,6 +38,7 @@ fn task_activity_db() -> rusqlite::Connection {
         r#"
         CREATE TABLE tasks (
             task_id TEXT PRIMARY KEY,
+            idempotency_key TEXT,
             channel TEXT NOT NULL,
             status TEXT NOT NULL,
             payload_json TEXT NOT NULL,
@@ -1071,4 +1072,19 @@ fn sandbox_bundle_headers_confine_code_and_browser_features() {
             .and_then(|value| value.to_str().ok()),
         Some("nosniff")
     );
+}
+
+#[test]
+fn personal_activity_excludes_distributed_work_but_keeps_auditable_tasks() {
+    let db = task_activity_db();
+    for id in ["personal", "distributed", "legacy-distributed"] {
+        insert_task_activity(&db, id, "ui", "succeeded", "fixture", "fixture.run", false);
+    }
+    db.execute("UPDATE tasks SET payload_json=?1 WHERE task_id='distributed'",
+        [json!({"_task_source": "distributed_work", "args": {"share": "https://media.example.test/item"}}).to_string()]).unwrap();
+    db.execute("UPDATE tasks SET idempotency_key='nni-capability:fixture:1' WHERE task_id='legacy-distributed'", []).unwrap();
+    let page = read_aipp_task_activity_page(&db, "fixture", "all", 0, &[], &AippMediaQuery::default()).unwrap();
+    assert_eq!(page["total_item_count"], 1);
+    assert_eq!(page["items"][0]["task_id"], "personal");
+    assert_eq!(db.query_row("SELECT count(*) FROM tasks", [], |row| row.get::<_, i64>(0)).unwrap(), 3);
 }

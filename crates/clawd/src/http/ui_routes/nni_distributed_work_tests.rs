@@ -225,6 +225,8 @@ fn capability_assignment_enters_the_authenticated_local_task_queue() {
             NniWorkPayload::Command(_) => panic!("expected capability payload"),
         };
 
+    let advertised = nni_advertised_capability_grants(&state);
+    assert_eq!(advertised.0, vec!["web.search".to_string()]);
     let local_task_id = nni_enqueue_capability_task(&state, &assignment, &payload)
         .expect("enqueue local capability task");
     let (payload_json, status, user_key, principal_id): (String, String, String, String) = state
@@ -257,6 +259,11 @@ fn capability_assignment_enters_the_authenticated_local_task_queue() {
         queued["_agent_execution_policy"]["authority"],
         "authenticated_admin"
     );
+    let registry = state.get_skills_registry();
+    *state.core.skill_views_snapshot.write().unwrap() = std::sync::Arc::new(crate::SkillViewsSnapshot {
+        binding: Default::default(), registry, skills_list: std::sync::Arc::new(Default::default()),
+    });
+    assert!(nni_advertised_capability_grants(&state).0.is_empty());
     std::fs::remove_dir_all(root).unwrap();
 }
 
