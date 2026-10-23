@@ -6477,6 +6477,7 @@ def build_youtube_command(
             [
                 "--merge-output-format",
                 "mp4",
+                "--write-info-json",
                 "--print",
                 "after_move:filepath",
                 "-o",
@@ -6512,7 +6513,10 @@ def find_downloaded_youtube_output(output_template: Path) -> Path | None:
         (
             path
             for path in output_template.parent.iterdir()
-            if path.is_file() and path.name.startswith(prefix) and path.name.endswith(suffix)
+            if path.is_file()
+            and path.name.startswith(prefix)
+            and path.name.endswith(suffix)
+            and path.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov", ".m4v"}
         ),
         key=lambda path: path.stat().st_mtime,
     )
@@ -7258,6 +7262,23 @@ def media_type_message(
     return f"detected_media: unknown (platform={platform})"
 
 
+def article_from_ytdlp_info(saved_path: Path) -> ArticleContent | None:
+    """Read first-party post prose, never infer it from a title or share input."""
+    try:
+        payload = json.loads(saved_path.with_suffix(".info.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    body = normalize_article_field(payload.get("description"))
+    if not body:
+        return None
+    author = normalize_article_field(payload.get("uploader")) or normalize_article_field(payload.get("channel"))
+    return ArticleContent(
+        normalize_article_field(payload.get("title")), body, author, "yt_dlp.description"
+    )
+
+
 def save_video_article_if_available(
     article: ArticleContent | None,
     *,
@@ -7268,9 +7289,8 @@ def save_video_article_if_available(
     share_text: str,
     overwrite: bool,
 ) -> Path | None:
-    if normalize_platform(platform) not in {"wechat_channels", "toutiao", "weibo"} or not article_has_platform_text(article):
+    if article is None or not article.body.strip():
         return None
-    assert article is not None
     try:
         return save_article_content(
             article,
@@ -9755,6 +9775,17 @@ def handle_resolved_media(
             verbose=args.verbose,
             platform=platform,
         )
+        saved_article = save_video_article_if_available(
+            article_from_ytdlp_info(saved_path) or article,
+            platform=platform,
+            output_dir=saved_path.parent,
+            output_name=saved_path.name,
+            item_id=item_id,
+            share_text=share_text,
+            overwrite=args.overwrite,
+        )
+        if saved_article is not None:
+            print(saved_article)
         if args.save_meta:
             save_metadata(saved_path.with_suffix(".json"), platform, item_id, candidates, image_candidates, logs)
         handle_downloaded_video(saved_path, args)
