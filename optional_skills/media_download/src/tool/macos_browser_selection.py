@@ -52,7 +52,7 @@ def select_macos_browser(
                 if not major.isascii() or not major.isdecimal() or int(major) < MINIMUM_CHROMIUM_MAJOR:
                     continue
                 requirement = (
-                    f'anchor apple generic and identifier "{bundle_id}" '
+                    f'=anchor apple generic and identifier "{bundle_id}" '
                     f'and certificate leaf[subject.OU] = "{team}"'
                 )
                 subprocess.run(

@@ -28,7 +28,8 @@ for browser in chrome edge; do
     version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist" 2>/dev/null)" || continue
     major="${version%%.*}"
     [[ "$major" =~ ^[0-9]+$ ]] && (( 10#$major >= 120 )) || continue
-    requirement="anchor apple generic and identifier \"$bundle_id\" and certificate leaf[subject.OU] = \"$team\""
+    # An unprefixed codesign requirement is interpreted as a filename.
+    requirement="=anchor apple generic and identifier \"$bundle_id\" and certificate leaf[subject.OU] = \"$team\""
     /usr/bin/codesign --verify --strict -R "$requirement" "$app" 2>/dev/null || continue
     if [[ "${1:-}" == --resolve-executable ]]; then
       printf '%s\n' "$executable"

@@ -37,7 +37,7 @@ export async function selectMacOSBrowser({
         const major = String(info.CFBundleShortVersionString || "").split(".")[0];
         if (info.CFBundleIdentifier !== bundleId || info.CFBundleExecutable !== executableName
           || !/^[0-9]+$/u.test(major) || Number(major) < MINIMUM_CHROMIUM_MAJOR) continue;
-        const requirement = `anchor apple generic and identifier "${bundleId}" and certificate leaf[subject.OU] = "${team}"`;
+        const requirement = `=anchor apple generic and identifier "${bundleId}" and certificate leaf[subject.OU] = "${team}"`;
         await execute("/usr/bin/codesign", ["--verify", "--strict", "-R", requirement, app],
           { timeout: 5000 });
         return { executablePath, bundleId };

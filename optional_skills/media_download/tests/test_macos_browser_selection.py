@@ -46,6 +46,7 @@ class MacOSBrowserSelectionTest(unittest.TestCase):
         self.assertEqual(selected.profile_namespace, "macos-com.google.Chrome")
         command = run.call_args.args[0]
         self.assertEqual(command[0], "/usr/bin/codesign")
+        self.assertTrue(command[4].startswith("=anchor apple generic and identifier "))
         self.assertIn('certificate leaf[subject.OU] = "EQHXZ8M8AV"', command[4])
         self.assertEqual(run.call_args.kwargs["timeout"], 5)
 
