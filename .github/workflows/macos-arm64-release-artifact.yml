@@ -177,7 +177,23 @@ jobs:
           python3 scripts/check_rag_contracts.py
 
       - name: Prepare locked browser skill runtime assets
-        run: npm ci --ignore-scripts --prefix crates/skills/browser_web
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --prefix crates/skills/browser_web
+          npm ci --ignore-scripts --prefix optional_skills/media_discovery
+
+      - name: Test signed system browser and isolated skill profiles
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! bash scripts/macos-system-browser.sh --resolve-executable; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install --cask google-chrome
+          fi
+          node --test optional_skills/media_discovery/test/*.test.mjs
+          MEDIA_DISCOVERY_BROWSER_TEST=1 node --test \
+            optional_skills/media_discovery/test/browser_environment.integration.test.mjs
+          node --test crates/skills/browser_web/*tests.js
+          python3 -m unittest discover -s scripts/tests -p test_macos_system_browser.py
 
       - name: Test host dependency contracts
         run: cargo test -p clawd host_dependencies -- --nocapture
@@ -266,17 +282,6 @@ jobs:
             --chi-sim "${dependency_downloads}/chi_sim.traineddata" \
             --whisper-cli "${whisper_cli}" \
             --whisper-model "${dependency_downloads}/ggml-base.bin"
-
-      - name: Test signed system browser and isolated skill profiles
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm ci --ignore-scripts --prefix optional_skills/media_discovery
-          node --test optional_skills/media_discovery/test/*.test.mjs
-          MEDIA_DISCOVERY_BROWSER_TEST=1 node --test \
-            optional_skills/media_discovery/test/browser_environment.integration.test.mjs
-          node --test crates/skills/browser_web/*tests.js
-          python3 -m unittest discover -s scripts/tests -p test_macos_system_browser.py
 
       - name: Verify native skill receipts
         shell: bash

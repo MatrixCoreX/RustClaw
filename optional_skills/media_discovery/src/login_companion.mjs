@@ -275,11 +275,12 @@ export async function createLoginCompanionHandoff({
   platform,
   reasonCode,
   environment = process.env,
+  hostPlatform = process.platform,
   runtimeDirectory: explicitDirectory,
   compactDisplay = raspberryPiDisplaySize(),
   now = () => Date.now(),
 } = {}) {
-  const companionOptions = { environment, runtimeDirectory: explicitDirectory };
+  const companionOptions = { environment, hostPlatform, runtimeDirectory: explicitDirectory };
   if (!root || !page || !PLATFORM_RE.test(String(platform || ""))
     || !loginCompanionActive(companionOptions)) return null;
 

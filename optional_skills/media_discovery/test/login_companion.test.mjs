@@ -124,6 +124,7 @@ for (const platform of ["douyin", "kuaishou", "weibo"]) test(
     platform,
     reasonCode: "login_required",
     environment: fixture.environment,
+    hostPlatform: "linux",
     compactDisplay: { width: 480, height: 320 },
   });
   assert.ok(handoff);
@@ -185,6 +186,7 @@ test("a mismatched browser action cannot reveal a verification window", async t 
     page: browser.page,
     platform: "douyin",
     environment: fixture.environment,
+    hostPlatform: "linux",
   });
   assert.ok(handoff);
   const actionPath = path.join(
@@ -201,4 +203,15 @@ test("a mismatched browser action cannot reveal a verification window", async t 
   assert.equal(await handoff.revealIfRequested(), false);
   assert.equal(browser.broughtToFront(), 0);
   await handoff.clear();
+});
+
+test("macOS never creates a Pi companion handoff from a copied heartbeat", async t => {
+  const fixture = await runtimeFixture(t);
+  const browser = browserPage();
+  const handoff = await createLoginCompanionHandoff({
+    root: fixture.root, page: browser.page, platform: "douyin",
+    environment: fixture.environment, hostPlatform: "darwin",
+  });
+  assert.equal(handoff, null);
+  assert.equal(browser.broughtToFront(), 0);
 });

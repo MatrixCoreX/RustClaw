@@ -254,7 +254,8 @@ test("manual and silent launches reuse saved settings and leave login data untou
     assert.equal(actual.timezoneId, "Asia/Shanghai");
     assert.deepEqual(actual.viewport, { width: 1280, height: 900 });
     assert.equal(actual.userAgent, undefined);
-    assert.deepEqual(actual.ignoreDefaultArgs, [AUTOMATION_DEFAULT_ARG]);
+    assert.deepEqual(actual.ignoreDefaultArgs, [AUTOMATION_DEFAULT_ARG,
+      ...(process.platform === "darwin" ? ["--use-mock-keychain", "--password-store=basic"] : [])]);
     assert.equal(actual.args.includes(AUTOMATION_BLINK_FLAG), true);
     assert.equal(actual.proxy, undefined);
   }
