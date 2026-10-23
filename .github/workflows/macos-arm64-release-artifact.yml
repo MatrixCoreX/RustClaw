@@ -189,6 +189,19 @@ jobs:
           if ! bash scripts/macos-system-browser.sh --resolve-executable; then
             HOMEBREW_NO_AUTO_UPDATE=1 brew install --cask google-chrome
           fi
+          executable="$(bash scripts/macos-system-browser.sh --resolve-executable)"
+          app="${executable%/Contents/MacOS/*}"
+          for key in CFBundleIdentifier CFBundleExecutable CFBundleShortVersionString; do
+            /usr/bin/plutil -extract "$key" raw -o - "$app/Contents/Info.plist"
+          done
+          node --input-type=module -e '
+            import { browserCapability } from "./optional_skills/media_discovery/src/browser.mjs";
+            const capability = await browserCapability();
+            if (typeof capability.chromium_executable !== "string") {
+              throw new Error("signed_system_browser_selection_failed");
+            }
+            console.log(JSON.stringify(capability));
+          '
           node --test optional_skills/media_discovery/test/*.test.mjs
           MEDIA_DISCOVERY_BROWSER_TEST=1 node --test \
             optional_skills/media_discovery/test/browser_environment.integration.test.mjs

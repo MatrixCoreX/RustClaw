@@ -26,10 +26,14 @@ export async function selectMacOSBrowser({
       const executablePath = path.join(app, "Contents", "MacOS", executableName);
       try {
         await access(executablePath);
-        const { stdout } = await execute("/usr/bin/plutil", [
-          "-convert", "json", "-o", "-", path.join(app, "Contents", "Info.plist"),
-        ], { timeout: 5000, maxBuffer: 1024 * 1024 });
-        const info = JSON.parse(stdout);
+        const info = {};
+        // Project only scalar fields; unrelated plist types need not support JSON.
+        for (const key of ["CFBundleIdentifier", "CFBundleExecutable", "CFBundleShortVersionString"]) {
+          const { stdout } = await execute("/usr/bin/plutil", [
+            "-extract", key, "raw", "-o", "-", path.join(app, "Contents", "Info.plist"),
+          ], { timeout: 5000, maxBuffer: 1024 * 1024 });
+          info[key] = stdout.trim();
+        }
         const major = String(info.CFBundleShortVersionString || "").split(".")[0];
         if (info.CFBundleIdentifier !== bundleId || info.CFBundleExecutable !== executableName
           || !/^[0-9]+$/u.test(major) || Number(major) < MINIMUM_CHROMIUM_MAJOR) continue;

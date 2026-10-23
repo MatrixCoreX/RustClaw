@@ -15,11 +15,14 @@ function fixture({ chromeVersion = "156.0.1", chromeError, available = ["chrome"
       calls.push({ program, args, settings });
       const chrome = args.at(-1).includes("Google Chrome.app");
       if (program.endsWith("plutil")) {
-        return { stdout: JSON.stringify({
+        const info = {
           CFBundleIdentifier: chrome ? "com.google.Chrome" : "com.microsoft.edgemac",
           CFBundleExecutable: chrome ? "Google Chrome" : "Microsoft Edge",
           CFBundleShortVersionString: chrome ? chromeVersion : "155.0.1",
-        }) };
+        };
+        assert.deepEqual(args.slice(0, 1), ["-extract"]);
+        assert.deepEqual(args.slice(2, 5), ["raw", "-o", "-"]);
+        return { stdout: `${info[args[1]]}\n` };
       }
       if (chrome && chromeError) throw chromeError;
       return { stdout: "" };
@@ -33,9 +36,10 @@ test("signed system Chrome wins without launching a browser or reading personal 
   const result = await selectMacOSBrowser(options);
   assert.equal(result.bundleId, "com.google.Chrome");
   assert.equal(result.executablePath, "/fixtures/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
-  assert.deepEqual(calls.map(call => call.program), ["/usr/bin/plutil", "/usr/bin/codesign"]);
-  assert.match(calls[1].args[3], /EQHXZ8M8AV/u);
-  assert.equal(calls[1].settings.timeout, 5000);
+  assert.deepEqual(calls.map(call => call.program),
+    ["/usr/bin/plutil", "/usr/bin/plutil", "/usr/bin/plutil", "/usr/bin/codesign"]);
+  assert.match(calls[3].args[3], /EQHXZ8M8AV/u);
+  assert.equal(calls[3].settings.timeout, 5000);
 });
 
 test("obsolete or signature-invalid Chrome does not hide signed Edge", async () => {
