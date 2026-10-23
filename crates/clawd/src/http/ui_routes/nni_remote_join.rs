@@ -1634,7 +1634,10 @@ fn normalize_nni_node_url(raw: &str) -> Result<String, &'static str> {
 include!("nni_runtime_state.rs");
 
 include!("nni_distributed_work.rs");
+include!("nni_work_delivery.rs");
 
+include!("nni_signed_exchange.rs");
+include!("nni_work_poll.rs");
 include!("nni_heartbeat_worker.rs");
 
 fn toml_value_string_list(value: &toml::Value) -> Option<Vec<String>> {

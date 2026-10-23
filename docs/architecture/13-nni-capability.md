@@ -183,55 +183,39 @@ asynchronous lock. It stops future attempts without deleting history. Persisted 
 successful node host, and the next expected heartbeat time. Runtime decisions never derive these
 fields by parsing error prose.
 
-### Heartbeat-carried work bootstrap
+### Independent work channel
 
-Distributed work is disabled by default. A deployment opts in with
-`APP_NNI_WORK_PULL_ENABLED=true`. A non-empty `APP_NNI_WORK_ALLOWED_PROGRAMS` basename list is
-additionally required only when the deployment enables `command_v1`; the optional
-`APP_NNI_WORK_COMMAND_TIMEOUT_MAX_SECONDS` may only reduce that adapter's 300-second command ceiling.
-An opted-in deployment must also pin at least one compressed secp256k1 Core public key in
-`APP_NNI_WORK_ASSIGNMENT_VERIFY_KEYS`; comma-separated keys support a controlled rotation overlap.
-If the key list is absent or invalid, the runtime does not advertise work capability and cannot be
-leased a task.
-The runtime advertises its compiled platform/architecture, supported adapter types, and a stable
-worker instance ID only on a normally due heartbeat.
+Distributed execution remains disabled by default. Explicitly enable
+`APP_NNI_WORK_PULL_ENABLED=true` and pin Core secp256k1 public keys with
+`APP_NNI_WORK_ASSIGNMENT_VERIFY_KEYS`. Joined nodes use a separate outbound HTTPS
+worker with `/work/request` and `/work/verify`. An idle verify request waits up to
+25 seconds and returns immediately when matching work is enqueued. Waiting holds
+no database transaction, creates no persistent empty-task records, and wakes only
+one matching node. Each node has one work request; failures use bounded backoff.
 
-A successful heartbeat may return one `command_v1` or `capability_v1` assignment for the exact
-device or the first matching device. The bounded command adapter still validates its local program
-allowlist and invokes the basename plus argument vector directly with no shell, inherited secrets,
-or privilege escalation. A capability assignment instead becomes a local authenticated-admin
-`run_capability` ask task. It therefore follows the existing `CapabilityResolver`, `PlanVerifier`,
-registry-generation, receipt, policy-grant, permission, and sandbox checks. Built-in tools,
-built-in skills, and external skills share this path; an external skill is callable only after
-admission, enablement, host authorization, and capability projection into the current generation.
-The work carrier never starts a tool or skill by name on its own.
+Work acquisition, lease renewal and result reporting are independent of reward
+heartbeats. Active work renews every 20 seconds; completion is persisted before
+waking the transport for immediate reporting. Pending results are removed only
+after verifying Core's signed acknowledgement. Reward heartbeats no longer carry
+worker capabilities or results and retain their interval, authorization and reward
+semantics.
 
-The assignment is accepted only as a schema-v2 `secp256k1-sha256` envelope signed by Core. Its
-signature binds the current heartbeat task ID, target device, platform/architecture, exact payload,
-lease token, attempt, issuance time, and expiry. Unsigned legacy data, unknown keys, mutation, and
-replay on another heartbeat are rejected before anything is persisted or executed; TLS to an Edge
-is transport protection, not the assignment's authority boundary.
+Before hardware signing, the runtime recomputes the `nni-work-poll-v1` challenge,
+binding the request ID, nonce, complete capabilities and exact result digest.
+Core's schema-v2 assignment/control envelopes retain their device, platform,
+payload, attempt and lease bindings. Their existing `heartbeat_task_id` field now
+correlates an independent work request; cross-request replay is rejected. Edge
+cannot forge a receipt to discard an unreported local result.
 
-The report acknowledgement, poll status, and optional assignment arrive inside a separate signed
-work-control envelope bound to the same heartbeat and device. The runtime removes a pending local
-result only after that envelope verifies; an Edge can drop traffic but cannot forge acceptance and
-make the runtime discard an uncommitted result.
-
-For any heartbeat carrying worker capabilities or a pending result, the runtime also recomputes the
-Core challenge from the returned nonce and the exact outbound metadata before asking the hardware
-to sign. A public Edge therefore cannot alter a result or capability declaration and use the device
-as a blind signing oracle.
-
-Completion is atomically persisted as `completed_pending_report`. It neither wakes the heartbeat
-worker nor creates a network request. The next normally scheduled heartbeat carries the result;
-the server binds its digest into that heartbeat's challenge and commits it only after the same
-hardware signature verifies. Work preparation, result acceptance, and leasing errors remain
-structured `work_*` fields and cannot turn an accepted heartbeat into a failure. While a capability
-task is active, normal heartbeats carry only its lease-token digest and renew the lease; local task
-identity is persisted so a runtime restart resumes observing the same task. Capability work has no
-device-wrapper wall-clock deadline, while `command_v1` retains its hard 300-second maximum. Future
-inference and training use separate versioned task adapters and artifact transport rather than
-placing large model payloads inside heartbeat JSON.
+Existing `command_v1` execution retains its local program allowlist, cleared
+environment, no shell, and 300-second ceiling. `capability_v1` retains the local
+authenticated execution identity, resolver/verifier, pinned generation, receipt,
+host grant and sandbox. Local task IDs survive restart; capability execution gets
+no new wrapper-wide deadline. Leaving the network blocks new assignments while
+in-flight work retains its issuing coordinator for recovery. Both endpoints and
+runtimes must be upgraded; reward heartbeats no longer dispatch legacy work.
+Hardware signing uses its existing serial gate, which is never held during a long
+poll. Large artifact transfer requires a separate broker contract.
 
 ## Process and Security Contract
 

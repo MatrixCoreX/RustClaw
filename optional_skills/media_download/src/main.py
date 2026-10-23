@@ -24,6 +24,7 @@ TOOL_DIR = Path(__file__).resolve().parent / "tool"
 sys.path.insert(0, str(TOOL_DIR))
 from video_inputs import prepare_video_inputs, promote_video_audio_delivery
 from macos_browser_selection import select_macos_browser
+from download_output import validate_output_mode, select_download_output, OutputSelectionError
 
 def interpreter_bin_directory(executable: str) -> Path:
     """Preserve a virtual environment's bin path instead of resolving its Python symlink."""
@@ -490,7 +491,7 @@ def _build_download_command(
     if browser is not None:
         command.extend(["--chrome-path", browser.executable])
     if storage_directory is not None:
-        profile_root = storage_directory / "browser-profile"
+        profile_root = storage_directory / ("public-browser-profile" if _bool(args, "public_only", False) else "browser-profile")
         if browser is not None:
             profile_root /= browser.profile_namespace
         command.extend(
@@ -2001,6 +2002,11 @@ def respond(
                 maximum=2_592_000,
             )
         )
+        try:
+            validate_output_mode(args.get("output_mode"))
+        except OutputSelectionError as error:
+            raise SkillFailure(str(error), error_code=error.error_code,
+                               message_key=f"media_download.error.{error.error_code}") from error
         storage_directory = _skill_storage_directory(request)
         if action == "download":
             command = _build_download_command(
@@ -2079,6 +2085,12 @@ def respond(
             artifacts,
             fallback_from=_string(args, "fallback_from", max_length=64),
         )
+    if action == "download" and args.get("output_mode") is not None:
+        try:
+            artifacts = select_download_output(artifacts, args["output_mode"], _artifact)
+        except OutputSelectionError as error:
+            raise SkillFailure(str(error), error_code=error.error_code,
+                               message_key=f"media_download.error.{error.error_code}") from error
     if action == "download":
         processing_inputs = _composite_processing_inputs(artifacts, processing_inputs)
         processing_inputs = prepare_video_inputs(

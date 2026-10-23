@@ -144,44 +144,31 @@ NNI Core 在同一事务中完成付款方扣款、收款方入账、两条不�
 历史。持久状态分别记录 `last_attempt_at_ts`、`last_success_at_ts`、`last_error_code`、连续失败
 次数、最后成功节点 host 和下一次预期心跳时间。运行时不会解析错误文案来推导这些字段。
 
-### 心跳携带任务启动能力
+### 独立工作通道
 
-分布式任务默认关闭。部署时必须显式设置 `APP_NNI_WORK_PULL_ENABLED=true`。只有启用
-`command_v1` 时才额外要求非空的 `APP_NNI_WORK_ALLOWED_PROGRAMS` 程序基名白名单；可选的
-`APP_NNI_WORK_COMMAND_TIMEOUT_MAX_SECONDS` 只能把该 adapter 的 300 秒命令上限调低。运行时
-还必须在 `APP_NNI_WORK_ASSIGNMENT_VERIFY_KEYS` 固定至少一把 Core 的压缩 secp256k1 公钥；
-逗号分隔的多把公钥只用于受控轮换重叠。公钥缺失或非法时，运行时不会声明任务能力，也不会领取
-任务。运行时只在原定心跳到期时，上报编译目标的平台/架构、支持的 adapter 类型和稳定 worker
-instance ID。
+分布式任务默认关闭，部署时显式设置 `APP_NNI_WORK_PULL_ENABLED=true`，并在
+`APP_NNI_WORK_ASSIGNMENT_VERIFY_KEYS` 固定 Core 的压缩 secp256k1 公钥。节点加入网络后，
+独立 worker 通过出站 HTTPS `/work/request` 和 `/work/verify` 领取工作。空闲 verify 请求
+最多等待 25 秒；匹配任务入队时立即返回。等待连接不持有数据库事务，不写空任务账本，
+服务端只唤醒一个匹配节点。每个节点只保持一个工作请求，错误时按有界退避重连。
 
-一次成功心跳最多返回一个精确设备或首台匹配设备可领取的 `command_v1` / `capability_v1`
-任务。受限命令 adapter 仍校验本地程序白名单，并以程序基名和参数数组直接执行，不经过 shell、
-不继承 secret、不能提权。能力任务则转换为本机已认证管理员的 `run_capability` ask 任务，继续
-经过现有 `CapabilityResolver`、`PlanVerifier`、registry generation、receipt、policy grant、
-权限和 sandbox 检查。内置工具、内置技能和外置技能使用同一路径；外置技能只有完成准入、启用、
-宿主授权并把 capability 投影到当前 generation 后才可调用。心跳承载层自身不按工具名或技能名
-直接启动任何进程。
+工作领取、执行续租和结果回报不依赖奖励心跳。运行中每 20 秒通过工作通道续租；完成后先
+原子落盘，再唤醒通道立即回报。验签确认结果已接收后才删除本地待回报状态。正常奖励心跳
+不再携带 worker 能力或结果，也不触发任务领取，原间隔、资产授权和奖励语义保持不变。
 
-任务只接受 Core 签发的 schema-v2 `secp256k1-sha256` 信封。签名绑定当前心跳任务 ID、目标设备、
-平台/架构、完整 payload、租约 token、尝试次数、签发时间和到期时间；未签名旧数据、未知公钥、
-内容篡改或跨心跳重放都会在落盘与执行前被拒绝。到 Edge 的 TLS 只是传输保护，不再是任务授权
-边界。
+节点在签名前重新计算带 `nni-work-poll-v1` 域、请求 ID、随机数、完整能力和结果摘要的
+challenge。Core 的 schema-v2 派单与控制信封继续绑定目标设备、平台、架构、payload、
+attempt 和租约；既有 `heartbeat_task_id` 字段现在承载独立工作请求的关联 ID，不能跨请求
+重放。Core 签名控制信封确认结果提交状态，Edge 不能伪造确认使节点丢失尚未提交的结果。
 
-结果确认、领取状态和可选任务还会进入另一层绑定同一心跳与设备的 Core 签名控制信封。运行时只有
-在该信封验签通过后才删除本地待上报结果；Edge 可以丢弃流量，但不能伪造“已接收”并诱使设备
-丢失尚未提交的结果。
+任务只支持既有 `command_v1` 与 `capability_v1`。受控命令保持本机程序白名单、无 shell、
+清空环境和最多 300 秒上限。能力任务继续经过本机已认证执行身份、`CapabilityResolver`、
+`PlanVerifier`、固定 generation、receipt、host grant 与 sandbox，不按技能名启动进程。
+本地任务 ID 持久保存，重启后继续观察同一任务；能力任务不增加 wrapper 整体硬超时。
 
-只要心跳携带 worker 能力或待上报结果，运行时还会在请求硬件签名前，用 Core 返回的随机数和
-本机刚发送的完整元数据重新计算挑战。公开 Edge 因此不能篡改结果或能力声明后，再把设备当作
-不透明挑战的盲签器。
-
-执行完成后只原子落盘为 `completed_pending_report`，既不唤醒心跳 worker，也不新增网络请求。
-下一次原定心跳携带结果；服务端把结果摘要绑定进该次 heartbeat challenge，并在同一个硬件签名
-验证通过后提交结果。任务准备、结果提交或领取失败只体现在结构化 `work_*` 字段中，不能把已经
-接受的心跳改成失败。能力任务运行时，正常心跳只携带 lease token 摘要续租；本地任务 ID 会持久
-保存，运行时重启后继续观察同一个任务。能力任务没有设备 wrapper 的整任务硬超时，`command_v1`
-仍保留 300 秒上限。未来推理和训练使用独立版本化 adapter 与 artifact 传输，不把大模型数据塞进
-心跳 JSON。
+暂停接单或退出后不接受新的派单，在途任务保留原协调节点和本地状态以便收尾。旧版本通过
+心跳领取任务的模式不再派发工作，两端须一起升级。签名 helper 仍使用硬件操作串行门禁，
+不会因网络长轮询占用该门禁。大型结果文件需要另外的 artifact broker 合同，不进入控制 JSON。
 
 ## 进程与安全合同
 

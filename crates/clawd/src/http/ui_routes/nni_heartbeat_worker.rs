@@ -32,10 +32,11 @@ fn nni_heartbeat_worker_sleep_seconds(next_due_at_ts: Option<u64>, now: u64) -> 
 }
 
 pub(crate) fn spawn_nni_heartbeat_worker(state: AppState) {
+    spawn_nni_work_poll_worker(state.clone());
     tokio::spawn(async move {
-        nni_resume_work_worker(state.clone());
         loop {
-            let force_immediate = nni_heartbeat_immediate_request_flag().swap(false, Ordering::AcqRel);
+            let force_immediate =
+                nni_heartbeat_immediate_request_flag().swap(false, Ordering::AcqRel);
             if let Err(err) = nni_heartbeat_tick(&state, force_immediate).await {
                 append_nni_log_event_best_effort(
                     &state,
@@ -211,7 +212,6 @@ async fn nni_recorded_heartbeat(
                     "node_url": data.get("node_url").and_then(Value::as_str).unwrap_or(""),
                 }),
             );
-            nni_handle_work_heartbeat_response(state, &data);
             Ok(data)
         }
         Err(err) => {
@@ -292,13 +292,12 @@ async fn run_nni_heartbeat_with_network_retries(
             Err(err) => return Err(err),
         }
     }
-    Err(last_error
-        .unwrap_or_else(|| {
-            NniHeartbeatError::network(
-                "nni_heartbeat_network_retries_exhausted",
-                "nni_heartbeat_network_retries_exhausted",
-            )
-        }))
+    Err(last_error.unwrap_or_else(|| {
+        NniHeartbeatError::network(
+            "nni_heartbeat_network_retries_exhausted",
+            "nni_heartbeat_network_retries_exhausted",
+        )
+    }))
 }
 
 async fn run_nni_heartbeat_once(
@@ -349,147 +348,16 @@ async fn run_nni_heartbeat_once_for_node(
     node_url: &str,
     device_pubkey: &str,
 ) -> Result<Value, NniHeartbeatError> {
-    let request_endpoint = nni_remote_api_endpoint(node_url, "heartbeat/request");
-    let worker_capabilities = nni_current_worker_capabilities(state);
-    let work_report = nni_pending_work_report_for_node(state, node_url, device_pubkey);
-    let heartbeat_request = NniRemoteHeartbeatRequest {
-        device_pubkey: device_pubkey.to_string(),
-        client_user_key: NNI_HEARTBEAT_USER_KEY.to_string(),
-        worker_capabilities,
-        work_report,
-    };
-    let request_resp = state
-        .core
-        .public_http_client
-        .post(&request_endpoint)
-        .timeout(nni_remote_api_timeout())
-        .json(&heartbeat_request)
-        .send()
-        .await
-        .map_err(|err| {
-            NniHeartbeatError::network("heartbeat_request_network_failed", err.to_string())
-        })?;
-    let request_status = request_resp.status();
-    let request_body = request_resp
-        .json::<ApiResponse<Value>>()
-        .await
-        .map_err(|err| {
-            NniHeartbeatError::non_network("heartbeat_request_body_failed", err.to_string())
-        })?;
-    if !request_status.is_success() || !request_body.ok {
-        let error_code =
-            nni_remote_api_error_code(&request_body, "heartbeat_request_failed");
-        return Err(NniHeartbeatError::non_network(
-            error_code,
-            format!("status={} data={:?}", request_status, request_body.data),
-        ));
-    }
-    let request_data = request_body
-        .data
-        .ok_or_else(|| {
-            NniHeartbeatError::non_network(
-                "heartbeat_request_missing_data",
-                "heartbeat_request_missing_data",
-            )
-        })?;
-    let task_id = request_data
-        .get("task_id")
-        .and_then(|value| value.as_str())
-        .map(str::to_string)
-        .ok_or_else(|| {
-            NniHeartbeatError::non_network(
-                "heartbeat_task_id_missing",
-                "heartbeat_task_id_missing",
-            )
-        })?;
-    let expected_task_id = task_id.clone();
-    let challenge = request_data
-        .get("challenge")
-        .and_then(|value| value.as_str())
-        .map(str::to_string)
-        .ok_or_else(|| {
-            NniHeartbeatError::non_network(
-                "heartbeat_challenge_missing",
-                "heartbeat_challenge_missing",
-            )
-        })?;
-    nni_verify_heartbeat_work_challenge(
-        &challenge,
-        request_data
-            .get("work_challenge_nonce")
-            .and_then(Value::as_str),
-        heartbeat_request.worker_capabilities.as_ref(),
-        heartbeat_request.work_report.as_ref(),
+    nni_signed_exchange(
+        state,
+        node_url,
+        "heartbeat",
+        &NniRemoteHeartbeatRequest {
+            device_pubkey: device_pubkey.to_string(),
+            client_user_key: NNI_HEARTBEAT_USER_KEY.to_string(),
+            worker_capabilities: None,
+            work_report: None,
+        },
     )
-    .map_err(|error_code| NniHeartbeatError::non_network(error_code, error_code))?;
-
-    let sign_output = run_nni_signature_helper(state, &[String::from("sign_challenge"), challenge])
-        .await
-        .map_err(|err| {
-            NniHeartbeatError::non_network("heartbeat_signature_helper_failed", err)
-        })?;
-    if !sign_output.ok {
-        return Err(NniHeartbeatError::non_network(
-            "heartbeat_signature_failed",
-            sign_output
-                .error
-                .or_else(
-                    || (!sign_output.stderr_tail.is_empty()).then_some(sign_output.stderr_tail),
-                )
-                .unwrap_or_else(|| "heartbeat_signature_failed".to_string()),
-        ));
-    }
-    let signature = sign_output
-        .payload
-        .get("signature")
-        .and_then(|value| value.as_str())
-        .map(str::to_string)
-        .ok_or_else(|| {
-            NniHeartbeatError::non_network(
-                "heartbeat_signature_missing",
-                "heartbeat_signature_missing",
-            )
-        })?;
-
-    let verify_endpoint = nni_remote_api_endpoint(node_url, "heartbeat/verify");
-    let verify_resp = state
-        .core
-        .public_http_client
-        .post(&verify_endpoint)
-        .timeout(nni_remote_api_timeout())
-        .json(&NniRemoteHeartbeatVerifyRequest { task_id, signature })
-        .send()
-        .await
-        .map_err(|err| {
-            NniHeartbeatError::network("heartbeat_verify_network_failed", err.to_string())
-        })?;
-    let verify_status = verify_resp.status();
-    let verify_body = verify_resp
-        .json::<ApiResponse<Value>>()
-        .await
-        .map_err(|err| {
-            NniHeartbeatError::non_network("heartbeat_verify_body_failed", err.to_string())
-        })?;
-    if !verify_status.is_success() || !verify_body.ok {
-        let error_code = nni_remote_api_error_code(&verify_body, "heartbeat_verify_failed");
-        return Err(NniHeartbeatError::non_network(
-            error_code,
-            format!("status={} data={:?}", verify_status, verify_body.data),
-        ));
-    }
-    let data = verify_body
-        .data
-        .ok_or_else(|| {
-            NniHeartbeatError::non_network(
-                "heartbeat_verify_missing_data",
-                "heartbeat_verify_missing_data",
-            )
-        })?;
-    if data.get("task_id").and_then(Value::as_str) != Some(expected_task_id.as_str()) {
-        return Err(NniHeartbeatError::non_network(
-            "heartbeat_verify_task_id_mismatch",
-            "heartbeat_verify_task_id_mismatch",
-        ));
-    }
-    Ok(data)
+    .await
 }

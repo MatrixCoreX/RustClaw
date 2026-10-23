@@ -445,6 +445,7 @@ fn write_nni_config_with_selected_node(
         config.joined = joined;
     }
     write_nni_runtime_config(state, &config)?;
+    nni_work_poll_notify().notify_one();
     read_nni_config(state)
 }
 

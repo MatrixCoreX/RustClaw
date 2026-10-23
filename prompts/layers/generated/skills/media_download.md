@@ -181,6 +181,10 @@ Response:
 - On uncertainty, prefer safe/readonly behavior first.
 - For setup or configuration questions about this skill, treat the config entry points section as the grounding source for where changes actually live.
 
+### Explicit downloadable components
+
+`download.output_mode` is optional: `video`, `audio`, or `video_audio`. Omit it to preserve the existing image/article/media delivery. `audio` extracts a standalone AAC/M4A track using FFmpeg without requesting speech recognition or changing sample rate/channels. `video_audio` returns both when available; a source with no audio still returns its video. This parameter is independent from `text_conversion_scope`. Public website workers set `public_only=true` to use a separate anonymous browser profile; private authorized profiles and system browser cookies are not reused. Stable failures include `invalid_output_mode`, `video_not_found`, `audio_not_found`, and `ffmpeg_unavailable`.
+
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
 Use these optional subheading labels when needed:
