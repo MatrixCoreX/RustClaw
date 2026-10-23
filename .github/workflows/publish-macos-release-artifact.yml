@@ -116,18 +116,6 @@ jobs:
             (cd dist-release && sha256sum -c "$(basename "${checksum}")")
           done
 
-      - name: Keep the PKG for the official website only
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          packages=(dist-release/*.pkg)
-          [[ "${#packages[@]}" -eq 1 ]]
-          package_checksum="${packages[0]}.sha256"
-          [[ -s "${package_checksum}" ]]
-          install -d dist-release/website-only
-          mv "${packages[0]}" "${package_checksum}" dist-release/website-only/
-
       - name: Split assets above the GitHub Release limit
         shell: bash
         run: |
@@ -150,5 +138,5 @@ jobs:
             gh release create "${RELEASE_TAG}" "${assets[@]}" \
               --title "Agent runtime macOS ${{ inputs.architecture }} ${RELEASE_TAG}" \
               --target "${SOURCE_SHA}" \
-              --notes "Verified full macOS package with the desktop installer, bundled Skill Store packages, AiAPP assets, and local multimedia dependencies."
+              --notes "Verified full macOS package with PKG, DMG and app ZIP desktop installers, bundled Skill Store packages, AiAPP assets, and local multimedia dependencies. Assets above the GitHub Release limit are split with checksum metadata."
           fi

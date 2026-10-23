@@ -278,6 +278,43 @@ class ReleaseInstallationTests(unittest.TestCase):
         invocation = 'bash "$BOOTSTRAP/deploy-github-release.sh" --root "$ROOT_DIR" --force "$restart_option"'
         self.assertIn(invocation, source)
 
+    def test_macos_publisher_keeps_pkg_and_checksum_in_upload_set(self):
+        workflow = (ROOT / ".github/workflows/publish-macos-release-artifact.yml").read_text()
+        self.assertIn('packages=(dist-release/*.pkg)', workflow)
+        self.assertIn('[[ "${#packages[@]}" -eq 1 ]]', workflow)
+        self.assertIn('find dist-release -maxdepth 1 -type f -print0', workflow)
+        self.assertNotIn('website-only', workflow)
+        self.assertIn('PKG, DMG and app ZIP', workflow)
+        tool = ROOT / "scripts/release_asset_parts.py"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = root / "fixture-installer.pkg"
+            payload = bytes(range(251)) * 17
+            digest = hashlib.sha256(payload).hexdigest()
+            package.write_bytes(payload)
+            checksum = root / f"{package.name}.sha256"
+            checksum.write_text(f"{digest}  {package.name}\n")
+            self.assertEqual({p.name for p in root.iterdir()}, {package.name, checksum.name})
+            split = subprocess.run(
+                [sys.executable, str(tool), "split", str(root), "--max-bytes", "1024"],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(split.returncode, 0, split.stdout + split.stderr)
+            assets = {p.name for p in root.iterdir() if p.is_file()}
+            manifest = root / f"{package.name}.parts.json"
+            self.assertIn(manifest.name, assets)
+            self.assertIn(checksum.name, assets)
+            metadata = json.loads(manifest.read_text())
+            self.assertEqual(metadata["sha256"], digest)
+            self.assertTrue(all(part["name"] in assets for part in metadata["parts"]))
+            assembled = subprocess.run(
+                [sys.executable, str(tool), "assemble", str(manifest), "--root", str(root)],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(assembled.returncode, 0, assembled.stdout + assembled.stderr)
+            self.assertEqual(package.read_bytes(), payload)
+            self.assertEqual(checksum.read_text().split()[0], hashlib.sha256(package.read_bytes()).hexdigest())
+
     def test_package_includes_bridge_local_runtime_dependencies(self):
         package_source = (ROOT / "package-release.sh").read_text()
         bridge = ROOT / "services/wa-web-bridge"
