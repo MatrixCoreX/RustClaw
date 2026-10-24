@@ -129,6 +129,11 @@ struct NniLocalWorkState {
     started_at_unix: Option<i64>,
     #[serde(default)]
     result: Option<NniWorkResult>,
+    // Only new verified assignments can opt in. Old state defaults to retained.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cleanup: Option<crate::task_result_retention::DeliveryCleanupEnrollment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cleanup_plan: Option<crate::task_result_retention::files::TaskOwnedCleanupPlan>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -280,13 +285,23 @@ fn nni_write_private_file(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
             .unwrap_or("state"),
         uuid::Uuid::new_v4().simple()
     ));
-    fs::write(&temporary, bytes)?;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&temporary)?;
+    file.write_all(bytes)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))?;
     }
+    file.sync_all()?;
     fs::rename(&temporary, path)?;
+    fs::File::open(parent)?.sync_all()?;
     Ok(())
 }
 
@@ -350,6 +365,7 @@ fn append_nni_work_audit(state: &AppState, local: &NniLocalWorkState) -> anyhow:
         file.set_permissions(fs::Permissions::from_mode(0o600))?;
     }
     writeln!(file, "{}", serde_json::to_string(&event)?)?;
+    file.sync_all()?;
     Ok(())
 }
 
@@ -389,10 +405,12 @@ fn nni_current_worker_capabilities(state: &AppState) -> Option<NniWorkerCapabili
     if !nni_work_pull_enabled() && local.is_none() {
         return None;
     }
-    if local
-        .as_ref()
-        .is_some_and(|value| value.status == "completed_pending_report")
-    {
+    if local.as_ref().is_some_and(|value| {
+        matches!(
+            value.status.as_str(),
+            "completed_pending_report" | "cleanup_pending"
+        )
+    }) {
         return None;
     }
     let mut supported_task_types = vec!["capability_v1".to_string()];
@@ -406,7 +424,8 @@ fn nni_current_worker_capabilities(state: &AppState) -> Option<NniWorkerCapabili
             lease_token_sha256: nni_work_sha256(&value.assignment.lease_token),
         })
     });
-    let (capability_refs, artifact_origins, max_file_bytes) = nni_advertised_capability_grants(state);
+    let (capability_refs, artifact_origins, max_file_bytes) =
+        nni_advertised_capability_grants(state);
     Some(NniWorkerCapabilities {
         protocol_version: NNI_WORK_PROTOCOL_VERSION,
         platform: nni_work_platform()?.to_string(),
@@ -865,16 +884,27 @@ fn nni_enqueue_capability_task(
     state: &AppState,
     assignment: &NniWorkAssignment,
     payload: &NniWorkCapabilityPayload,
-) -> anyhow::Result<String> {
+    cleanup: Option<&crate::task_result_retention::DeliveryCleanupEnrollment>,
+) -> anyhow::Result<(String, bool)> {
     let policy = nni_capability_policy(state, payload)?;
     let identity = nni_local_work_identity(state, &policy)?;
-    let direct = nni_capability_task_payload(state, &identity, payload)?;
+    let mut direct = nni_capability_task_payload(state, &identity, payload)?;
+    if let Some(cleanup) = cleanup {
+        direct["_delivery_cleanup"] = serde_json::to_value(cleanup)?;
+    }
     let task_id = uuid::Uuid::new_v4();
     let idempotency_key = format!(
         "nni-capability:{}:{}",
         assignment.task_id, assignment.attempt
     );
-    let (persisted_task_id, _) = crate::repo::insert_submitted_task(
+    if let Some(cleanup) = cleanup {
+        crate::task_result_retention::register_enrollment(
+            &state.skill_rt.workspace_root,
+            &task_id.to_string(),
+            cleanup,
+        )?;
+    }
+    let inserted = crate::repo::insert_submitted_task(
         state,
         &task_id,
         identity.user_id,
@@ -887,8 +917,33 @@ fn nni_enqueue_capability_task(
         Some(&idempotency_key),
         "run_skill",
         &direct.to_string(),
-    )?;
-    Ok(persisted_task_id.to_string())
+    );
+    let (persisted_task_id, _) = match inserted {
+        Ok(value) => value,
+        Err(error) => {
+            if cleanup.is_some() {
+                let _ = crate::task_result_retention::discard_candidate(
+                    &state.skill_rt.workspace_root,
+                    &task_id.to_string(),
+                );
+            }
+            return Err(error);
+        }
+    };
+    if persisted_task_id != task_id && cleanup.is_some() {
+        crate::task_result_retention::discard_candidate(
+            &state.skill_rt.workspace_root,
+            &task_id.to_string(),
+        )?;
+    }
+    let enrolled = cleanup.is_some()
+        && crate::task_result_retention::read_enrollment(
+            &state.skill_rt.workspace_root,
+            &persisted_task_id.to_string(),
+        )?
+        .as_ref()
+            == cleanup;
+    Ok((persisted_task_id.to_string(), enrolled))
 }
 
 fn nni_capability_result_text(result: Option<&Value>) -> String {
@@ -1079,6 +1134,7 @@ fn nni_accept_work_assignment(state: &AppState, heartbeat_data: &Value) {
         );
         return;
     }
+    let cleanup = nni_cleanup_enrollment(state, &assignment);
     let local = NniLocalWorkState {
         schema_version: NNI_WORK_STATE_SCHEMA_VERSION,
         node_url: node_url.to_string(),
@@ -1087,6 +1143,8 @@ fn nni_accept_work_assignment(state: &AppState, heartbeat_data: &Value) {
         local_task_id: None,
         started_at_unix: None,
         result: None,
+        cleanup,
+        cleanup_plan: None,
     };
     if let Err(error) = write_nni_local_work_state(state, &local) {
         append_nni_log_event_best_effort(
@@ -1116,6 +1174,9 @@ async fn nni_process_work_state(state: &AppState, resume: bool) -> anyhow::Resul
     let Some(mut local) = read_nni_local_work_state(state)? else {
         return Ok(());
     };
+    if local.status == "cleanup_pending" {
+        return nni_finish_acknowledged_cleanup(state, &local);
+    }
     if local.status == "running" && resume && local.assignment.task_type == "command_v1" {
         local.status = "completed_pending_report".to_string();
         local.result = Some(nni_failed_work_result(
@@ -1139,12 +1200,25 @@ async fn nni_process_work_state(state: &AppState, resume: bool) -> anyhow::Resul
                 .await
             }
             Ok(NniWorkPayload::Capability(payload)) => {
-                match nni_enqueue_capability_task(state, &local.assignment, &payload) {
-                    Ok(local_task_id) => {
+                match nni_enqueue_capability_task(
+                    state,
+                    &local.assignment,
+                    &payload,
+                    local.cleanup.as_ref(),
+                ) {
+                    Ok((local_task_id, enrolled)) => {
+                        if !enrolled {
+                            local.cleanup = None;
+                        }
                         local.local_task_id = Some(local_task_id.clone());
                         write_nni_local_work_state(state, &local)?;
-                        nni_wait_for_capability_task(state, &local_task_id, local.started_at_unix, &local.assignment)
-                            .await
+                        nni_wait_for_capability_task(
+                            state,
+                            &local_task_id,
+                            local.started_at_unix,
+                            &local.assignment,
+                        )
+                        .await
                     }
                     Err(error) => {
                         nni_failed_work_result("worker_capability_unavailable", error.to_string())
@@ -1157,9 +1231,21 @@ async fn nni_process_work_state(state: &AppState, resume: bool) -> anyhow::Resul
         local.result = Some(nni_bound_work_result_for_heartbeat(result));
         write_nni_local_work_state(state, &local)?;
     } else if local.status == "running" && local.assignment.task_type == "capability_v1" {
+        if local.local_task_id.is_none() {
+            if let Some(cleanup) = local.cleanup.as_ref() {
+                local.local_task_id = nni_recover_enrolled_task(state, cleanup)?;
+                write_nni_local_work_state(state, &local)?;
+            }
+        }
         let result = match local.local_task_id.as_deref() {
             Some(local_task_id) => {
-                nni_wait_for_capability_task(state, local_task_id, local.started_at_unix, &local.assignment).await
+                nni_wait_for_capability_task(
+                    state,
+                    local_task_id,
+                    local.started_at_unix,
+                    &local.assignment,
+                )
+                .await
             }
             None => nni_failed_work_result("local_task_id_missing", "local_task_id_missing"),
         };
@@ -1192,10 +1278,15 @@ fn nni_remove_local_work_state(state: &AppState) -> anyhow::Result<()> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error.into()),
     }
+    fs::File::open(nni_work_dir(state))?.sync_all()?;
     Ok(())
 }
 
-fn nni_handle_work_response(state: &AppState, heartbeat_data: &Value) {
+fn nni_handle_work_response(
+    state: &AppState,
+    heartbeat_data: &Value,
+    submitted_report: Option<&NniHeartbeatWorkReport>,
+) {
     let node_url = heartbeat_data
         .get("node_url")
         .and_then(Value::as_str)
@@ -1268,10 +1359,14 @@ fn nni_handle_work_response(state: &AppState, heartbeat_data: &Value) {
         }
     };
     if let Some(local) = local {
-        if local.status == "running" && control.work_poll_status == "error"
+        if local.status == "running"
+            && control.work_poll_status == "error"
             && control.work_poll_error_code.as_deref() == Some("nni_work_active_lease_invalid")
-            && local.node_url.trim_end_matches('/') == node_url.trim_end_matches('/') {
-            if let Some(id) = &local.local_task_id { let _ = crate::repo::cancel_task_by_id(state, id); }
+            && local.node_url.trim_end_matches('/') == node_url.trim_end_matches('/')
+        {
+            if let Some(id) = &local.local_task_id {
+                let _ = crate::repo::cancel_task_by_id(state, id);
+            }
         }
         if local.status == "completed_pending_report"
             && local.node_url.trim_end_matches('/') == node_url.trim_end_matches('/')
@@ -1281,7 +1376,18 @@ fn nni_handle_work_response(state: &AppState, heartbeat_data: &Value) {
             let accepted = matches!(report_status, "accepted" | "already_reported");
             let terminal_rejection = report_status == "error"
                 && report_error_code.is_some_and(nni_work_report_error_is_terminal);
-            if accepted || terminal_rejection {
+            let cleanup_ack = accepted || (report_status == "error"
+                && report_error_code.is_some_and(nni_cleanup_terminal_lease_error));
+            if cleanup_ack && local.cleanup.is_some() {
+                if let Err(error) = nni_acknowledge_cleanup(state, &local, submitted_report) {
+                    append_nni_log_event_best_effort(
+                        state,
+                        "distributed_work_cleanup_deferred",
+                        json!({"task_id": local.assignment.task_id, "error_code": "work_cleanup_failed", "error": error.to_string()}),
+                    );
+                    return;
+                }
+            } else if (accepted || terminal_rejection) && local.cleanup.is_none() {
                 if let Err(error) = append_nni_work_audit(state, &local)
                     .and_then(|()| nni_remove_local_work_state(state))
                 {
@@ -1330,7 +1436,12 @@ fn nni_handle_work_response(state: &AppState, heartbeat_data: &Value) {
 
 fn nni_resume_work_worker(state: AppState) {
     match read_nni_local_work_state(&state) {
-        Ok(Some(local)) if matches!(local.status.as_str(), "assigned" | "running") => {
+        Ok(Some(local))
+            if matches!(
+                local.status.as_str(),
+                "assigned" | "running" | "cleanup_pending"
+            ) =>
+        {
             nni_spawn_work_worker(state, true);
         }
         Ok(_) => {}
@@ -1341,6 +1452,8 @@ fn nni_resume_work_worker(state: AppState) {
         ),
     }
 }
+
+include!("nni_work_cleanup.rs");
 
 #[cfg(test)]
 #[path = "nni_distributed_work_tests.rs"]

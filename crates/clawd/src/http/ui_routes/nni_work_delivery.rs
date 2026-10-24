@@ -13,6 +13,13 @@ struct NniArtifactDelivery {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct NniArtifactCleanupGrant {
+    origin: String,
+    capability: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct NniWorkPolicy {
     schema_version: u32,
     principal_id: String,
@@ -20,6 +27,8 @@ struct NniWorkPolicy {
     #[serde(default)]
     argument_constraints: BTreeMap<String, BTreeMap<String, Value>>,
     artifact_origins: Vec<String>,
+    #[serde(default)]
+    artifact_cleanup_grants: Vec<NniArtifactCleanupGrant>,
     max_file_bytes: u64,
 }
 
@@ -30,9 +39,19 @@ fn nni_read_work_policy(state: &AppState) -> anyhow::Result<NniWorkPolicy> {
     let bytes = std::fs::read(path)?;
     anyhow::ensure!(bytes.len() <= 16 * 1024, "work_policy_too_large");
     let policy: NniWorkPolicy = serde_json::from_slice(&bytes)?;
-    anyhow::ensure!(policy.schema_version == 1 && !policy.principal_id.is_empty()
-        && policy.capabilities.len() <= 64 && policy.artifact_origins.len() <= 16
-        && policy.max_file_bytes <= 512 * 1024 * 1024, "work_policy_invalid");
+    anyhow::ensure!(
+        policy.schema_version == 1
+            && !policy.principal_id.is_empty()
+            && policy.capabilities.len() <= 64
+            && policy.artifact_origins.len() <= 16
+            && policy.artifact_cleanup_grants.len() <= 16
+            && policy
+                .artifact_cleanup_grants
+                .iter()
+                .all(|grant| policy.artifact_origins.contains(&grant.origin) && policy.capabilities.contains(&grant.capability))
+            && policy.max_file_bytes <= 512 * 1024 * 1024,
+        "work_policy_invalid"
+    );
     Ok(policy)
 }
 

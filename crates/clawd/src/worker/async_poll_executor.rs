@@ -33,6 +33,7 @@ pub(super) async fn execute_async_poll_dispatch_result_with_state(
     now_ts: i64,
     default_retry_after_seconds: i64,
 ) -> Option<Value> {
+    let _result_write_guard = crate::task_result_retention::write_gate::begin_writing(state, &claimed.task_id).await.ok()?;
     if let Some(mut payload) =
         execute_async_poll_dispatch_result(claimed, now_ts, default_retry_after_seconds)
     {

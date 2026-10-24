@@ -14,6 +14,7 @@ pub(crate) mod conversation_history;
 pub(crate) mod conversation_inputs;
 pub(crate) mod conversation_reply_items;
 pub(crate) mod crypto_storage;
+pub(crate) mod distributed_task_cleanup;
 pub(crate) mod pending_channel_requests;
 pub(crate) mod principal_ownership;
 pub(crate) mod submit;

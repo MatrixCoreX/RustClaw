@@ -83,6 +83,19 @@ fn spawn_nni_work_poll_worker(state: AppState) {
 }
 
 async fn nni_work_poll_tick(state: &AppState) -> Result<bool, NniHeartbeatError> {
+    if let Some(local) = read_nni_local_work_state(state)
+        .map_err(|_| {
+            NniHeartbeatError::non_network(
+                "nni_work_state_read_failed",
+                "nni_work_state_read_failed",
+            )
+        })?
+        .filter(|work| work.status == "cleanup_pending")
+    {
+        nni_finish_acknowledged_cleanup(state, &local).map_err(|_| {
+            NniHeartbeatError::non_network("work_cleanup_failed", "work_cleanup_failed")
+        })?;
+    }
     let config = read_nni_config(state).map_err(|_| {
         NniHeartbeatError::non_network("nni_work_config_read_failed", "nni_work_config_read_failed")
     })?;
@@ -127,7 +140,7 @@ async fn nni_work_poll_tick(state: &AppState) -> Result<bool, NniHeartbeatError>
         .map_err(|code| NniHeartbeatError::non_network(code, code))?;
     data["node_url"] = Value::String(node_url.to_string());
     data["local_device_pubkey"] = Value::String(device);
-    nni_handle_work_response(state, &data);
+    nni_handle_work_response(state, &data, request.work_report.as_ref());
     if verified.work_poll_status == "error" || verified.work_report_status == "error" {
         let code = verified
             .work_poll_error_code

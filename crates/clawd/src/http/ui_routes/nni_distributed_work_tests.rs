@@ -227,8 +227,9 @@ fn capability_assignment_enters_the_authenticated_local_task_queue() {
 
     let advertised = nni_advertised_capability_grants(&state);
     assert_eq!(advertised.0, vec!["web.search".to_string()]);
-    let local_task_id = nni_enqueue_capability_task(&state, &assignment, &payload)
+    let (local_task_id, enrolled) = nni_enqueue_capability_task(&state, &assignment, &payload, None)
         .expect("enqueue local capability task");
+    assert!(!enrolled);
     let (payload_json, status, user_key, principal_id): (String, String, String, String) = state
         .core
         .db

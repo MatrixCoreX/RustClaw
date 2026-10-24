@@ -746,3 +746,41 @@ planner_capabilities = [
         Some("[REDACTED]")
     );
 }
+
+#[tokio::test]
+async fn host_enrolled_success_avoids_shared_memory_while_forged_ordinary_fields_keep_it() {
+    let root=std::env::temp_dir().join(format!("agent-outcome-retention-{}",uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let mut state=state_with_runtime_registry(); state.skill_rt.workspace_root=root.clone();
+    state.seed_test_auth_identity("retention-fixture-admin", "admin");
+    state.policy.memory.write_filter_enabled = false;
+    crate::memory::scope::ensure_memory_scope_schema(&*state.core.db.get().unwrap()).unwrap();
+    crate::memory::service::insert_memory_with_kind(&state,42,7,Some("retention-fixture-admin"),"ui",None,
+        crate::memory::MEMORY_ROLE_ASSISTANT,"fixture-memory-preflight",256,crate::memory::MemoryWriteKind::AssistantOutcome).unwrap();
+    let enrollment=crate::task_result_retention::DeliveryCleanupEnrollment {
+        schema_version:1,work_id:format!("nni-work-{}",uuid::Uuid::new_v4().simple()),attempt:1,
+        capability:"fixture.download".to_string(),origin:"https://media.example.org".to_string(),
+        job_id:uuid::Uuid::new_v4().to_string(),payload_sha256:"a".repeat(64),
+    };
+    for enrolled in [false,true] {
+        let mut task=claimed_run_skill_task(&uuid::Uuid::new_v4().to_string());
+        task.user_key = Some("retention-fixture-admin".to_string());
+        let payload=json!({"skill_name":"run_cmd","args":{"command":"fixture"},
+            "_task_source":"distributed_work","_requested_capability":enrollment.capability,
+            "_delivery_cleanup":enrollment});
+        task.payload_json=payload.to_string(); insert_running_task(&state,&task);
+        let text=if enrolled {"enrolled-outcome-body"} else {"ordinary-outcome-body"};
+        if enrolled {
+            crate::task_result_retention::register_enrollment(&root,&task.task_id,&enrollment).unwrap();
+            state.core.db.get().unwrap().execute("UPDATE tasks SET idempotency_key=?2 WHERE task_id=?1",rusqlite::params![task.task_id,enrollment.idempotency_key()]).unwrap();
+        }
+        let verification=super::super::run_skill_permission::verify_direct_run_skill(&state,&task,"run_cmd",payload["args"].clone());
+        super::finalize_run_skill_result(&state,&task,&payload,"run_cmd",&verification,Ok(crate::skills::SkillRunOutcome {
+            text:text.to_string(),notify:Some(false),validation:None,output_contract_validation:None,extra:None,
+        })).await.unwrap();
+        let (status,result)=task_status_and_result(&state,&task.task_id); assert_eq!(status,"succeeded"); assert_eq!(result["text"],text);
+        let count:usize=state.core.db.get().unwrap().query_row("SELECT COUNT(*) FROM memories WHERE content=?1",[text],|r|r.get(0)).unwrap();
+        assert_eq!(count,usize::from(!enrolled));
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}

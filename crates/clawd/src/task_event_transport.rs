@@ -157,6 +157,11 @@ fn publish_event_internal(
     payload: Value,
     active_claim: Option<&ClaimedTask>,
 ) -> anyhow::Result<Option<Value>> {
+    let _result_write_guard = match crate::task_result_retention::write_gate::try_begin_writing(state, task_id) {
+        Ok(guard) => guard,
+        Err(error) if error.is::<crate::task_result_retention::write_gate::RetiredResult>() => return Ok(None),
+        Err(error) => return Err(error),
+    };
     if let Some(task) = active_claim {
         if !crate::repo::is_task_claim_active(state, task_id, task.claim_attempt)? {
             let db = state.core.db.get().context("task event claim db pool")?;
@@ -199,6 +204,16 @@ fn publish_event_internal(
             let mut db = state.core.db.get().context("task_event_db_pool")?;
             db.execute_batch(INIT_TASK_EVENT_SQL)?;
             let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            if crate::task_result_retention::is_retired(state, &tx, task_id)? {
+                // A producer may have read the old result before ACK retirement.
+                // Do not re-create payloads or replay state after that commit.
+                tx.execute(
+                    "DELETE FROM task_event_artifacts WHERE task_id=?1",
+                    [task_id],
+                )?;
+                tx.commit()?;
+                return Ok((None, None));
+            }
             if let Some(task) = active_claim {
                 let claim_is_active = tx
                     .query_row(
@@ -708,6 +723,7 @@ fn persist_large_payload_if_needed(
     payload: Value,
     timestamp_ms: u64,
 ) -> anyhow::Result<(Value, Vec<Value>)> {
+    let _result_write_guard = crate::task_result_retention::write_gate::try_begin_writing(state, task_id)?;
     let serialized = serde_json::to_vec(&payload)?;
     if serialized.len() <= EVENT_MAX_BYTES {
         let artifact_refs = collect_artifact_refs(&payload);

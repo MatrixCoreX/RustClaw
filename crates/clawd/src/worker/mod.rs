@@ -628,9 +628,11 @@ pub(crate) async fn process_run_skill_task(
     task: &crate::ClaimedTask,
     payload: &Value,
 ) -> anyhow::Result<()> {
+    let _result_write_guard = crate::task_result_retention::write_gate::begin_writing(state, &task.task_id).await?;
     let prepared_input = prepare_run_skill_input(payload);
 
-    info!(
+    if crate::task_result_retention::retains_shared_outcome(state, &task.task_id, payload) {
+        info!(
         "worker_once: processing run_skill task_id={} user_id={} chat_id={} skill_name={} args={}",
         task.task_id,
         task.user_id,
@@ -640,6 +642,9 @@ pub(crate) async fn process_run_skill_task(
             &prepared_input.args.to_string()
         ))
     );
+    } else {
+        info!("worker_once: processing run_skill task_id={} skill_name={} result_retention=after_delivery_ack", task.task_id, prepared_input.skill_name);
+    }
 
     let verification = run_skill_permission::verify_direct_run_skill(
         state,
