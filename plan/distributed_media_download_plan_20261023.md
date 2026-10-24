@@ -1,5 +1,16 @@
 # 分布式媒体下载与即时任务领取实施计划
 
+## 当前完成状态（2026-10-24 联合验收）
+
+- 输入错误弹窗已部署到 `https://media.matrixai.one`：粘贴格式错误、多链接、无有效链接或不支持平台的内容立即弹窗；键盘输入在失焦/提交时验证，同一未修改内容不反复弹窗，无效输入不创建任务。中英文和主题样式沿用现有页面。
+- Linux、Mac、Pi 已运行最终节点主程序 `bf8fdd8ab13df50c7e27622ba120440a22290918`。只有精确授权的媒体应用新任务会在签名确认回传后清理本地媒体、正文、事件和临时目录；普通 Agent、其他 NNI 应用及旧历史不做批量清理。
+- 生产联合测试完成 4 轮真实未缓存任务、4 轮独立用户缓存复用，10 个交付文件均完成实际 HTTPS 字节及 SHA-256 核对。Core 的真实领取设备/attempt/报告签名及节点清理均独立核对，下载任务模型调用为 0。
+- 六条旧普通任务的完整行、参数/结果、事件和文件前后摘要一致；新版 Mac 新增一轮普通下载，观察超过 60 秒后完整结果、文件和事件仍保留，无清理登记。普通任务逻辑保持。
+- 三个媒体白名单成员全部恢复，最后恢复时在线 3、忙碌 0、可用 3、排队 0。白名单轮流只保留指定节点时，通用 NNI 三节点始终在线，未撤销其他任务资格。
+- 原媒体域名独立访问、与主页同一前端 Git/Vite 项目及配色架构保持；不新增 `matrixai.one/media` 合并路由。
+- 边界：Pi 本轮真实网站验收为 B 站，早前两次抖音未完成不算通过；未做真实浏览器点击/ESC/焦点验收，弹窗已有逻辑/SSR/线上资源与接口验证。抖音下载回传通过，但独立 Chrome 进程启动证据未捕获，不能单独标记浏览器启动实测通过。
+
+
 状态：媒体站、Core、本机与 Mac 下载节点已上线；图片阈值、两条下载路径和 Mac 持久启动已完成正常用例验收。Mac 重复测试发现间歇性上传中断，重新提交后成功，稳定性问题保留记录，见末尾。
 以下保留分阶段历史记录；当前版本、限制和验收状态以末尾 2026-10-24 记录为准。
 
@@ -312,3 +323,88 @@ self-test/检查、旧 agent-mode payload 检查和用户可见硬编码语言�
 - 第二轮临时诊断记录仍有四个分片请求在完整请求体到达前中断，重试后分别完成，最终文件校验全部通过。因此本次不能表述为上传链路从未出错，也未将间歇上传问题标记为已修复。
 - Mac 同一 launchd 主进程 PID 24693 连续运行约四小时，runs=1、没有重启；所有执行均使用正式技能 0.3.78。测试完成后已逐字节恢复原媒体环境文件，撤除临时 Nginx 上传诊断配置，恢复共享池并确认在线 2、忙碌 0、可用 2。
 - 本机受保护证据：`/tmp/media-mac-repeat-final-audit-20261024.json`、`/tmp/media-mac-repeat-first-failure-20261024.json`、`/tmp/media-mac-repeat-upload-diagnostics-20261024.jsonl`。Mac 的执行证据保留于 `data/runtime-upgrades/media-20261024-mac/repeat-video-audio-evidence.json`。
+
+## 2026-10-24 媒体应用独立节点白名单
+
+- 按用户新增要求，管理后台增加「媒体下载节点」分类，支持设备公钥添加、备注修改、复制完整公钥、连接与能力状态、移除确认和错误反馈；提供中英文。权限为独立的 `media_nodes`，既有管理员授权不自动扩展；超级管理员仍可管理全部分类。旧权限表在生产数据库副本上完成迁移预演，原有六条授权逐条保持不变。
+- 白名单按 NNI 设备签名公钥识别，不使用 IP、设备名或资产账户公钥。Pi 是真实硬件签名身份；本机和 Mac 当前为模拟签名身份，不能将三者都描述为硬件身份。加入公钥后仍须通过原有 NNI 签名、授权与本地能力/技能授权检查。
+- 该名单仅控制本媒体应用：Core 的 `NNI_SERVER_MEDIA_APP_ORIGIN` 显式配置为 `https://media.matrixai.one`，只对匹配该交付源站的 `media_download.download` 任务强制名单。普通 NNI 命令、其他 capability、不含本站交付信息的媒体调用、其他应用的媒体调用、普通 Agent 下载及原 NNI/LLM 白名单不受影响。未配置此应用的普通 Core 不因此新增全局媒体限制。
+- 配置好的本站应用在空名单时不能领取任务。池任务和定向任务在实际领取时都检查名单，移除后不能再领取本站新任务；已有合法租约允许续约和完成上传，不取消其他任务。媒体站的在线、忙碌、可用和排队统计按同一应用与名单过滤。增删改使用正式鉴权 API，并保留不可变审计。
+- 任务领取继续使用独立长轮询，任务创建和名单准入均可唤醒匹配的空闲节点；不依赖奖励心跳或十分钟结算周期。节点忙碌时先完成当前任务，再领取下一项。
+- Core 最终部署 `d37b0c6915b10df89cde313a50615fa265efe5b0`；过渡提交 `216e22a` 只在隔离数据库副本预演，没有切换为生产服务。网站 API、主站和媒体站前端部署 `116c06de6ec1e30eb885f280a6e3ebc690ffbb5c`，包含前端提交 `71b468e`。所有源码先本机提交推送，再只读同步；原 Core 124 个源码文件与旧提交逐文件摘要一致，旧源码、SQLite 和系统密钥均已备份。
+- 新 Core 在数据库副本中完成启动与账本对账，`quick_check`、外键检查通过；生产健康与账本对账正常，发布版本号与新提交一致。既有环境文件曾覆盖版本号，已仅更新该发布标记行并核对其他环境行未变。没有修改账本、奖励规则或设备授权。
+- 验证通过：Core 51 项，网站后端 80 项，前端 51 项及类型检查。真实 HTTP 签名测试覆盖空名单、添加、移除、冒用签名、跨平台、已有租约完成、普通任务和其他应用不受影响。前端只构建一次，原 Google 登录公开 client ID 保持；主站、媒体站的实际 HTTPS HTML 和新版管理页面 JS 摘要均与本机构建一致。浏览器控制工具没有可用浏览器，未声称做过真实浏览器点击验收。
+- 本机、Mac、Pi 三个不同设备公钥已通过正式 Core 管理 API 加入，初始名单由 0 变为 3；Pi 领取尚未开启时合资格在线为 2。随后通过网站既有 mTLS 管理连接再次核对应用绑定和三条记录。没有伪造注册设备、修改任务数据库或清除缓存。
+- 生产实机增删已验证：确认没有活动媒体任务后，通过网站原有 mTLS 管理服务移除本机和 Mac。媒体名单剩 Pi 一条，当时 Pi 尚未领取，媒体站实际 HTTPS 状态显示在线 0、可用 0、排队 0；同一时刻通用 NNI 工作通道仍显示本机和 Mac 两台在线、可用 2。随后正式 API 加回两台，最终三条名单、媒体在线 2、通用在线 2，七条增删审计完整保留。这项验证证明移除媒体资格没有撤销其他工作通道资格。
+- 受保护证据：`/tmp/media-whitelist-core-seed-result-20261024.json`、`/tmp/media-whitelist-live-list-20261024.json`、`/tmp/media-node-whitelist-deployed-frontend-proof-20261024.json`；三台完整公钥、历史分享内容及测试会话均只保存在权限 600 的本机或节点测试文件，不提交到仓库。
+- 跨用户缓存又完成两轮真实 HTTPS 验证：两个独立会话分别提交同一 B 站作品的原链接、附不同分享文案和跟踪参数的链接，均立即 `succeeded/cache_hit=true`。5,689,554 bytes 视频和 2,017,431 bytes 音频均重新下载核对全文件摘要，两次一致；Core 总任务数保持 20，没有再次派单。另一会话访问前一会话任务仍为 404。证据 `/tmp/media-global-cache-repeated-proof-20261024.json`。缓存是全站共享内容，但用户任务记录仍隔离；缓存清理或所需组件缺失时不能保证永不重新处理。
+
+### Pi 接入验收进展
+
+- Pi 为 `linux/aarch64`，内存约 1 GiB、glibc 2.41，使用原设备签名芯片与身份。源码/配置/原二进制、约 701 MB 主数据库及约 1.17 GB 媒体私有状态已备份；未删除模型、个人浏览器资料或成功构建缓存。
+- 在本机从纯净已提交 `b9058cf69da953ee288f9d12b4d44d56a4b0777f` 交叉构建 ARM64 `clawd`、runner、skillctl，完整构建成功。最高 glibc 要求为 2.39，Pi 原生 ELF、动态依赖和 CLI 检查通过。`clawd` SHA-256 为 `d423c4cb86b82964e16636d19077c7cb8e17e08b2350a9f7e33c16f7bec1b2a7`；成功产物、源归档和构建 manifest 保存在 `data/runtime-upgrades/pi-node-build-20261024`。
+- Pi 已通过原 systemd 服务运行新二进制，健康检查通过，未出现重启循环。两项既有命令授权保持，独立小屏进程保持。实际低内存计划为一个 worker、一个并发技能、关闭 runner warm pool。
+- 媒体技能已通过正式 Skill Store 完成源码构建、协议冒烟、准入和启用 0.3.78，generation 64。真实芯片仍为 ready、hardware、非 simulated，指纹 `6afbc9964bb071ca` 未变。原 `heartbeat_work_challenge_nonce_missing` 已清除，奖励心跳成功且授权有效。
+- 第一条匿名图文加音频自测 `625d2a16-49a2-4761-83a6-5f889c4f8e83` 在 493 秒后仍停留于源站解析，没有产物；已通过正式取消 API 取消，确认 runner/浏览器退出，LLM 调用 0 次，不计通过。保留 `small-smoke-incomplete-evidence.json`，没有用个人登录资料替换匿名测试。
+- 第二条抖音匿名视频加音频自测 `82c17d83-fd07-407f-a159-cd1d5ed663d7` 在 709 秒后仍无产物，已正式取消并确认 runner/浏览器退出，不计通过。仅只读诊断确认常规 DNS/HTTPS、CA bundle、无代理环境和浏览器 renderer 可用，但页面没有取得媒体；未确定具体原因，未关闭 TUN、修改路由或借用个人登录资料。
+- Mac 同源匿名对照 `8f57aa02-2f04-4ef7-bef2-d6af95d4cdfe` 则真实成功：79.220 秒，普通结构化 `run_skill`、`public_only=true`、阈值 9、LLM 调用 0。独立宿主 API GET 200 流式验证 44,285,038 bytes，SHA-256 与先前历史一致。它只能证明同源当前在 Mac 可用，不能单独判定 Pi 被限制；证据 `/tmp/media-mac-anonymous-control-evidence.json`。
+- Pi 改用历史 B 站小视频后，`bced3515-4e93-4a61-a7bd-f8c8ac448b28` 真实成功，runner 6 秒、LLM 0。MP4 为 5,689,554 bytes，AV1 1920×1080 加 AAC，实际文件/manifest/独立宿主 API 字节与 SHA-256 `3a26299871f605aed68a0615c7f48a70d16ac9839af48433bbb78f7059d5468b` 一致。与旧历史文件的摘要不同，不能声称历史字节相同或已确定只差容器标签。
+- Pi 同源独立音频自测 `67a64560-50a1-465a-8658-7875d3086a17` 真实成功，runner 8 秒、LLM 0。audio/mp4 为 2,016,169 bytes，只有 AAC、48 kHz、双声道，没有视频流，SHA-256 `353d61451c4c0a20c02ba01f380f87620da92996a0ff69a50307565323ba10cb`，与宿主 API 流式结果一致。
+- Pi 的下载、音频、硬件、准入与未完成样本证据已复制到本机 `/tmp/media-pi-*-20261024.json`，均权限 600。当前继续保持 `pull=false`，等待用户新增的 ACK 后清理机制完成后再做网站联合验证；不把本地自测或缓存命中算成 Pi 网站回传成功。
+
+## 新增开发：仅媒体应用节点任务不保留结果
+
+- 用户明确要求：节点不用保留本媒体应用分配任务的结果；自己 Agent 的任务结果按原逻辑保留，不修改、不清理。其他 NNI 应用和任务也保持原行为。
+- 当前确认的缺口：AI APP 已隐藏分布式任务，但上传后的节点文件和任务结果仍可能保留；隐藏界面不等于本地清理。需要同时处理该任务自己的交付副本、技能执行工作目录、数据库结果和任务专属结果副本，不能只删除 NNI `current.json`。
+- 开发方案为宿主策略按交付 origin 明确 opt-in，仅对新验签、已授权且精确绑定的应用任务建立私有 enrollment。普通 API 提交即使伪造来源或保留策略字段，也不能获得清理资格。不得按技能名、内容相似性或整个目录批量清理。
+- 完成下载、服务器验收全部必需文件并校验摘要、节点验证本次报告的签名 ACK 后，先持久化待清理状态，再删除该任务自己的结果文件和内容副本；保留必要的任务状态、时间、摘要及最小 NNI 审计。上传或报告仍需重试时不能提前删除。中途重启、重复 ACK、部分删除和权限故障应可恢复、幂等，不重新下载来伪装恢复成功。
+- 新 enrollment 任务不向共享 Agent 记忆和正文日志写入结果，避免事后按文本删除共享数据。普通 Agent 的记忆、结果、文件和日志继续原分支；共享技能存储、浏览器资料、模型、缓存和无法确认归属的旧历史不做批量删除。
+- 清理授权进一步收紧为宿主配置的精确 `(origin, capability)` 配对，默认空；仅为本媒体应用配置配对，不能连带清理同源站的其他 NNI 能力。已确认结束的失败/取消 attempt 也清残留；无签名确认、仍可同 attempt 续传的失败暂存继续重试。格式不合法的报告不能当作任意终态错误提前清理。
+- 匿名浏览器原先仍使用共享技能的 public profile，可能留下 HTTP/媒体缓存；新 enrolled 应用任务改用宿主 task-owned 临时 directory storage，经原有 storage resolver、授权和 sandbox 映射，任务结束一起清理。普通 Agent 和伪造标记任务仍使用原 descriptor，共享 profile 不删除。
+- 在独立干净分支实施，保留主工作区既有用户修改。发布时区分本机既有用户定制 runtime 与 Mac/Pi 的干净源码版本，不能为部署清理功能而丢失本机原有 Agent 改动。
+- 完成后按用户要求多轮验证：真实节点回传与清理、断线和重启恢复、上传失败可重试、跨用户缓存不重复派发、普通 Agent 结果和文件完整保留、其他应用不受影响、伪造标记/错误 ACK/路径逃逸不能触发清理。
+
+## 输入错误弹窗（已上线）
+
+- 用户要求格式不正确、没有有效媒体链接或来自未支持平台的链接/分享文案，输入后弹窗报错。粘贴完整内容时立即验证；键盘输入在失焦或提交时验证，不逐字符反复弹窗。同一未修改内容去重，关闭后保留原文并回到输入框；提交无效时在 workspace actions/API 前拦截。
+- 继续使用现有唯一 `share-policy` 平台和链接规则，不新增平台或法律审查，不恢复先前删除的「常见分享平台」板块。复用原生 dialog、主题变量和中英文文案。
+- 提交并推送、构建部署 `c9fb7634464b04da68a026e6cbcfec0c64494708`，保留远端同期已提交的主页 footer 变更；媒体测试 51 项和类型检查通过。原 Google 登录公开 client ID 保持，主站/媒体站 HTTPS HTML 与入口 bundle 均与本机构建摘要一致。浏览器环境没有可用浏览器，没有声称做过现场键盘、ESC 和焦点点击验收。
+- 发布证据：`/tmp/media-input-dialog-frontend-c9fb7634464b.json`、`/tmp/media-input-dialog-deployed-proof-20261024.json`。网站 API 仍为 `116c06de`，Core 仍为 `d37b0c6`；本次只更新前端。
+- 线上后端补测五类无效输入：纯文案、非 HTTP(S) 链接、不支持平台、伪装域名和多链接均 HTTP 400，错误码为 `invalid_share` 或 `unsupported_platform`；同一测试会话任务列表前后完全一致。证据 `/tmp/media-invalid-live-rejections-20261024.json`。
+
+## 节点结果清理实现与发行验证（进行中）
+
+- 已提交并推送 `825f1a2d5a42a56d447916ab435ac40f7978df01`，位于独立分支 `codex/node-result-cleanup-20261024`。初始实现 `bbfa52797` 经末次 review 后增加 child storage symlink 前后检查，未将初始中间产物部署。只需更新 clawd，不重装技能或替换 runner/skillctl。
+- 初始全面聚焦验证覆盖 NNI 115、事件 21、资源 31、恢复 17、存储合同 15 及 finalizer、记忆、DB；最终版本重新完整构建 test binary，并重验 retention 16、storage 5、DB 2、memory 1、finalizer 9，全部通过。symlink 回归验证共享目标内容与 0750 权限不变。品牌、双品牌 UI、storage ownership、跨平台等相关门禁已运行；现存耦合与长文件债务相对基线没有新增。
+- 已实际运行 Apple target 交叉检查，但本机 Linux 编译器缺少 Darwin SDK/参数支持，aws-lc-sys 阶段 exit 101，明确记为环境受阻；Mac 正在做正式原生构建，不能把交叉检查写成通过。受保护分组和源码版本证据 `/tmp/media-node-cleanup-validation.json`。
+- 已采集普通 Agent 升级前对照：Linux 三任务三文件、Mac 一任务一文件、Pi 两任务两文件，覆盖任务整行、参数/结果、四类事件和全文件 SHA-256；后续重复采集逐项比对。此过程不清理普通任务、不按内容匹配共享记忆。
+- 本机新 native source 在隔离目录保留既有 54 路径 overlay；清理 delta 与 overlay 没有源码路径交集。旧本机运行二进制缺少精确构建快照，因此只承诺保留已核对的当前用户源码，不伪称已证明旧 binary 与新 overlay 完全同源。Root 后续仅计划文档改变，不影响 clawd 编译输入。
+- Pi 原部署目录含不完整历史源码；发现与 b905 基线不同后已停止覆盖，将文件带回本机审查，main.rs 精确匹配历史提交 `7b61cea2919eb15f58bf821751b61b2b3f5f96d8`。原目录保持原样；最终已推送源码归档放入独立升级目录，归档 SHA-256 为 `163ecea120a498d87894b5a47f8c723e551c4d3abbd6e5afd6c143716efe6764`，对应最终提交，供本次实际 binary 来源审计。Pi 新备份包括约 702 MB 主库、一致性检查通过的 audit 库、原 binary、policy、配置和进程环境。
+- 发行前另发现确证边界：0.3.78 的 Chrome TemporaryDirectory/netlog 默认系统临时目录，Mac 或无 bwrap 情况强杀 Python 时可能遗留。`825f1a2` 因此仍为中间版本、没有部署；正在仅为 trusted enrolled 调用设置 receipt 已允许的 TMPDIR/TMP/TEMP 到任务所属、经过实际 sandbox 映射的目录，普通 Agent 环境保持。不会为了未授权的 XDG_CACHE_HOME 扩展 runner/SDK/技能 receipt。Mac 825 中间原生构建成功、缓存保留；Linux/ARM 在主 crate 初期只中断自身 Cargo，保留全部依赖缓存，待该窄修完成后编译最终主程序。
+- TEMP3 最终窄修已验证并推送 `bf8fdd8ab13df50c7e27622ba120440a22290918`（`codex/node-task-temp-20261024`）：只改变 clawd 生产代码，基于已固定 receipt/policy 的有效 allowlist 和不可变 typed launch 校验三个 TEMP 变量，不再次选 current，固定包变量冲突或缺授权明确失败；按实际 sandbox storage 映射晚应用，普通与伪标记任务环境不变。runner 只有测试改动，无 SDK、runner 或技能生产改动，不要求重装。
+- 最终版本的 clawd test no-run 4 分 10 秒成功，TEMP 5、全 retention 21、DB 2、memory 1、finalizer 9、NNI 115、事件 21、资源 31 均通过；正式 `SkillLaunchSpec → ChildLaunch → Python tempfile` 子进程 1 项（含三种父 backend 分支）通过。双品牌 UI、identity/storage/cross-platform 等相关检查通过；新增中性 exact-pin resolver 调用 surface 21→22 已单独审查记录，业务技能 literal 没有新增，不改用户 baseline。Apple cross 仍为已确认工具链环境 exit 101。验证 `/tmp/media-node-task-temp-validation.json`。
+- Linux/ARM 与 Mac 均复用之前已完成的默认 release 依赖缓存，正在构建最终 bf8 的 clawd 主程序；所有中间 binary 均未部署。Root 已有其他并行工作正常安装媒体技能 0.3.80，本次只更新 clawd，按当时实际安装、receipt 和 generation 保留，不退回 0.3.78；其三个 TEMP 变量准入已只读确认兼容。
+
+## 最终主程序部署与生产联合测试
+
+- 三机运行代码基线均为已推送 `bf8fdd8ab13df50c7e27622ba120440a22290918`，本机另外保留冻结的 54 路径用户改动；1524 项已有 Rust/Cargo/编译配置输入反复核对没有漂移。本机产物不能冒称纯净 bf8 或与旧 binary 的全部原源码完全同源。
+- 本机 x86_64 clawd SHA-256 `e62f67b93a69ecb2a1ecdf6ee5a31c2c296eab479d30c0e7635fa71c96379cdf`，PID 502696；原 `.80 / generation 237` 及当前 receipt 保留。新 clawd、NNI 授权和健康检查通过；依赖服务 webd、telegramd、wechatd 已按原入口恢复，未替换其 binary 或渠道配置。5297 等待用户输入的旧任务没有强制 timeout/replay，8621 普通任务自然完成，两条整行摘要都保持。
+- Mac 原生 x86_64 clawd SHA-256 `2697615ad38b50d0621347892b5e62b79e8e26a01350d0ffdc6e8e2618186bb7`，PID 45099；`.78 / generation 34`、原 receipt、10 项 grant、runner/skillctl、身份和 launchd/env 保持。稳定观察超过 90 秒；新运行期奖励心跳后来也实际成功，未把升级前的旧心跳误记成新心跳。
+- Pi ARM64 clawd SHA-256 `4fd117dcc95873907757e8cd43f509ecad800af6024dbf41b8dc74b95f3b5ac1`，PID 300732；`.78 / generation 64`、真实硬件签名身份、两项原命令权限和独立小屏保持。先新 binary+精确 pair 保持 pull=false 验健康和普通样本，再开启领取；防自动重写 unit 的临时 /run override 已移除。原不完整源码未覆盖，最终源码保存在独立不可变升级目录。
+- 新主程序部署前已保全配置/身份/receipt 与一致 SQLite：本机主库 10,423,144,448 bytes 的目标 quick_check 和快照行数匹配，流式摘要核对通过，源只读事务已经释放；大备份位于已验证的 Windows 专属目录，不挤占 Root 小剩余空间。没有用旧快照恢复覆盖现有数据库。
+
+| 实际节点 | 平台与样本 | 任务耗时 | 交付 | 结果 |
+| --- | --- | ---: | --- | --- |
+| Pi | B 站 14 秒公开视频 | 17.5 秒 | MP4 1,702,210 B、M4A 321,641 B、TXT 216 B | 成功；节点文件/正文/事件/asyncjob 已清 |
+| Mac | B 站 14 秒公开视频 | 25.1 秒 | MP4 1,653,957 B、M4A 324,941 B、TXT 294 B | 成功；节点文件/正文/事件/asyncjob 已清 |
+| Mac | 历史抖音链接的新任务 | 85.6 秒 | MP4 7,069,072 B、TXT 179 B | 成功；节点文件/正文/事件/asyncjob 已清 |
+| 本机 Linux | B 站 37 秒公开视频 | 14.4 秒 | MP4 4,442,341 B、M4A 934,429 B | 成功；节点文件/正文/事件/asyncjob 已清 |
+
+- 表中任务均 `cache_hit=false`，耗时为任务进入成功状态的时间，随后另做完整 HTTPS 下载核对；无原文的样本不生成模型文章占位。三条 B 站新样本来自既有历史公开视频的官方 related API，不能冒称全部是此前已成功下载的历史样本。
+- 四轮 Core 任务均实际 attempt 1、指定真实设备签名确认：Pi `nni-work-cdc3344851dfb0e829cb225ce8448091`，Mac B 站 `nni-work-58b65e0430d4b53be82c04b77aa39306`，Mac 抖音 `nni-work-b03ade642972294686d4cb0d1716d742`，本机 `nni-work-3ca8d8a89bc9a2dad6f70d5e93fc5561`。节点相应 UUID 的九类命名空间及已登记 asyncjob 都不存在，task/result 成为最小 tombstone，事件与新共享 memory 计数为 0，实际 Python 子进程 TMPDIR/TMP/TEMP 作用于 task-owned 或正确 sandbox 映射路径，LLM 指标 0。
+- 清理后再由不同会话提交相同作品、不同分享文案/跟踪参数：四轮均缓存成功，文件完整摘要一致，不为该请求再分配 Core 任务；读取另一会话原任务仍为 404。此前全站缓存的两轮证明也保留。当前识别规则无法将所有不透明/无法解析短链都保证为同一作品；需要组件不全、缓存淘汰或真实文件缺失时仍会重新处理。
+- 测试时原客户端达到现有 24 小时新任务额度，真实返回 `429/quota_exceeded`，没有创建任务。只读核对是独立客户 IP 组、不是 loopback 全站误限。后续两轮使用另一台实际服务器的公网 HTTPS guest 会话，仍经过正常 Cookie/Origin/CSRF/额度；没有修改限额、伪造转发头、改任务数据库、清缓存或用缓存命中冒充节点采集。
+- 新版普通 Mac 结构化任务 `f438892a-75d8-4de5-8426-65883ddeeb83` 实际 runner 7 秒、LLM0，视频 5,689,555 B，SHA-256 `b731cd8bfebb83e8c8f71d43cf4aad79e5b869eb593cbeaedba75044147de6ee`；首次及 60.685 秒后 Host API 都完整返回同一字节/摘要，完整 row/result/payload、journal 和 stream/archive 各 15 条摘要保持，无分布式来源/清理登记。该普通测试结果按原逻辑保留；与旧 5,689,554 B 历史不冒称整文件一致。
+- 本机旧普通三任务、Mac 旧普通一任务、Pi 旧普通两任务均重做完整快照比对，原参数/结果、四类事件及交付文件摘要一致；没有为清理分布式任务而删除共享个人资料或普通记录。
+- 最终私有证据集中于 `data/runtime-upgrades/media-node-joint-validation-20261024/joint-validation.json` 及同目录分组证明，目录 700/文件 600。原分享内容、会话 Cookie、完整公钥及凭据不提交 Git。浏览器启动专项仅有源代码/路径检查，未捕获本轮实际 Chrome PID/CDP/socket，不据下载成功推断该专项已通过。
+- 最终实现已通过普通 merge 集成到本仓库 main：`9df951ac35a0c7a635b2b7ef1a1ff7d05679fdda`，没有 force、stash、reset 或全量暂存。执行前核对 main/feature 变更及全部 dirty/untracked 路径零冲突、无 hooks/隐藏索引标志/进行中 Git 操作；合并前后 51 个既有修改或未跟踪路径逐项摘要/类型保持，没有将其他用户修改提交。bf8 与合并头的 Rust 生产实现相同，main 另外保留原已提交的 .80 依赖更新。
