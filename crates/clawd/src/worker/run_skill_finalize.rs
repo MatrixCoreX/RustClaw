@@ -730,11 +730,13 @@ async fn finalize_run_skill_success(
             task.task_id,
             skill_name
         );
-        info!(
-            "task_journal_summary task_id={} kind=run_skill phase=async_wait {}",
-            task.task_id,
-            journal.to_log_json()
-        );
+        if crate::task_result_retention::retains_shared_outcome(state, &task.task_id, payload) {
+            info!(
+                "task_journal_summary task_id={} kind=run_skill phase=async_wait {}",
+                task.task_id,
+                journal.to_log_json()
+            );
+        }
         info!("{}", crate::LOG_CALL_WRAP);
         state.clear_task_llm_call_count(&task.task_id);
         return Ok(());
@@ -760,18 +762,20 @@ async fn finalize_run_skill_success(
         task.claim_attempt,
         &result.to_string(),
     )?;
-    let _ = crate::memory::service::insert_memory_with_kind(
-        state,
-        task.user_id,
-        task.chat_id,
-        task.user_key.as_deref(),
-        &task.channel,
-        task.external_chat_id.as_deref(),
-        crate::memory::MEMORY_ROLE_ASSISTANT,
-        &clean_text,
-        state.policy.memory.item_max_chars.max(256),
-        crate::memory::MemoryWriteKind::AssistantOutcome,
-    );
+    if crate::task_result_retention::retains_shared_outcome(state, &task.task_id, payload) {
+        let _ = crate::memory::service::insert_memory_with_kind(
+            state,
+            task.user_id,
+            task.chat_id,
+            task.user_key.as_deref(),
+            &task.channel,
+            task.external_chat_id.as_deref(),
+            crate::memory::MEMORY_ROLE_ASSISTANT,
+            &clean_text,
+            state.policy.memory.item_max_chars.max(256),
+            crate::memory::MemoryWriteKind::AssistantOutcome,
+        );
+    }
     let _ = repo::insert_audit_log(
         state,
         Some(task.user_id),
@@ -788,17 +792,21 @@ async fn finalize_run_skill_success(
         None,
     );
     info!("{}", crate::LOG_CALL_WRAP);
-    info!(
-        "task_call_end task_id={} kind=run_skill status=success skill={} result={}",
-        task.task_id,
-        skill_name,
-        crate::truncate_for_log(&clean_text)
-    );
-    info!(
-        "task_journal_summary task_id={} kind=run_skill phase=finalize {}",
-        task.task_id,
-        journal.to_log_json()
-    );
+    if crate::task_result_retention::retains_shared_outcome(state, &task.task_id, payload) {
+        info!(
+            "task_call_end task_id={} kind=run_skill status=success skill={} result={}",
+            task.task_id,
+            skill_name,
+            crate::truncate_for_log(&clean_text)
+        );
+        info!(
+            "task_journal_summary task_id={} kind=run_skill phase=finalize {}",
+            task.task_id,
+            journal.to_log_json()
+        );
+    } else {
+        info!("task_call_end task_id={} kind=run_skill status=success skill={} result_retention=after_delivery_ack", task.task_id, skill_name);
+    }
     info!("{}", crate::LOG_CALL_WRAP);
     state.clear_task_llm_call_count(&task.task_id);
     Ok(())
@@ -940,10 +948,19 @@ async fn finalize_run_skill_failure(
     let notify_outcome =
         super::maybe_notify_schedule_result(state, task, payload, false, err_text).await;
     super::record_schedule_notify_outcome(&mut journal, notify_outcome);
-    error!(
-        "worker_once: run_skill task_id={} skill={} failed: {}",
-        task.task_id, skill_name, err_text
-    );
+    let retain_shared =
+        crate::task_result_retention::retains_shared_outcome(state, &task.task_id, payload);
+    if retain_shared {
+        error!(
+            "worker_once: run_skill task_id={} skill={} failed: {}",
+            task.task_id, skill_name, err_text
+        );
+    } else {
+        error!(
+            "worker_once: run_skill task_id={} skill={} error_code=distributed_execution_failed",
+            task.task_id, skill_name
+        );
+    }
     let result = journal.attach_to_result(json!({
         "text": err_text,
     }));
@@ -967,21 +984,29 @@ async fn finalize_run_skill_failure(
             })
             .to_string(),
         ),
-        Some(err_text),
+        if retain_shared {
+            Some(err_text)
+        } else {
+            Some("distributed_execution_failed")
+        },
     );
     info!("{}", crate::LOG_CALL_WRAP);
-    info!(
-        "task_call_end task_id={} kind=run_skill status=failed skill={} error={}",
-        task.task_id,
-        skill_name,
-        crate::truncate_for_log(err_text)
-    );
-    info!(
-        "task_journal_summary task_id={} kind=run_skill phase=failure error={} {}",
-        task.task_id,
-        crate::truncate_for_log(err_text),
-        journal.to_log_json()
-    );
+    if retain_shared {
+        info!(
+            "task_call_end task_id={} kind=run_skill status=failed skill={} error={}",
+            task.task_id,
+            skill_name,
+            crate::truncate_for_log(err_text)
+        );
+        info!(
+            "task_journal_summary task_id={} kind=run_skill phase=failure error={} {}",
+            task.task_id,
+            crate::truncate_for_log(err_text),
+            journal.to_log_json()
+        );
+    } else {
+        info!("task_call_end task_id={} kind=run_skill status=failed skill={} error_code=distributed_execution_failed", task.task_id, skill_name);
+    }
     info!("{}", crate::LOG_CALL_WRAP);
     state.clear_task_llm_call_count(&task.task_id);
     Ok(())

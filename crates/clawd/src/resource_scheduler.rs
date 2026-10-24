@@ -1002,7 +1002,9 @@ fn read_durable_resource_lease_metadata(job_dir: &Path) -> Option<DurableResourc
 }
 
 fn spawn_durable_resource_lease_monitor(lease: ResourceLease, job_dir: PathBuf) {
+    let monitor = crate::task_result_retention::monitors::DurableJobMonitorGuard::register(&job_dir);
     tokio::spawn(async move {
+        let _monitor = monitor;
         let pid = crate::local_process_job::read_pid(&job_dir);
         let mut observed_peak_memory_mib = 0_u64;
         loop {

@@ -675,3 +675,15 @@ async fn lagged_broadcast_consumer_recovers_from_persisted_replay() {
         (NOTIFIER_CAPACITY + 2) as u64
     );
 }
+
+#[test]
+fn retired_enrolled_task_cannot_recreate_large_payload_before_event_transaction() {
+    let fixture = crate::task_result_retention::test_support::Fixture::new();
+    fixture.enroll(); fixture.insert(&fixture.task_id,"run_skill",&fixture.enrollment.idempotency_key(),&fixture.payload());
+    publish_event(&fixture.state,&fixture.task_id,"tool_finished",json!({"output":"before retirement"})).unwrap();
+    crate::repo::distributed_task_cleanup::retire_result(&fixture.state,&fixture.task_id,&fixture.enrollment).unwrap();
+    // This is the prior autocommit insert before the later event transaction.
+    assert!(persist_large_payload_if_needed(&fixture.state,&fixture.task_id,"task_final",json!({"output":"x".repeat(EVENT_MAX_BYTES+100)}),now_ms()).is_err());
+    let count:usize=fixture.state.core.db.get().unwrap().query_row("SELECT COUNT(*) FROM task_event_artifacts WHERE task_id=?1",[&fixture.task_id],|r|r.get(0)).unwrap();
+    assert_eq!(count,0);
+}
