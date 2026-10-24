@@ -704,3 +704,97 @@ fn http_json_idempotency_header_comes_only_from_structured_execution_context() {
     let error = http_idempotency_header(&invalid).expect_err("invalid header must fail closed");
     assert_eq!(error.error_code, "http_idempotency_key_invalid");
 }
+
+#[tokio::test]
+async fn admitted_temporary_environment_reaches_the_installed_python_child() {
+    const PROBE: &str = "APP_TEST_TEMP_ENV_PROBE";
+    if std::env::var(PROBE).ok().as_deref() != Some("1") {
+        // Keep the test process environment unchanged, including under parallel
+        // cargo tests. Only a one-test subprocess receives the scoped values.
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("task temp with space");
+        std::fs::create_dir(&target).unwrap();
+        let output = Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("tests::admitted_temporary_environment_reaches_the_installed_python_child")
+            .arg("--nocapture")
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env(PROBE, "1")
+            .env("TMPDIR", &target)
+            .env("TMP", &target)
+            .env("TEMP", &target)
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{} {}",
+            String::from_utf8_lossy(&output.stderr),
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert!(std::fs::read_dir(&target).unwrap().any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("child-temp-probe-")));
+        return;
+    }
+    let manifest = skill_sdk::PackageManifest::from_toml_str(include_str!(
+        "../../../optional_skills/media_download/skill.toml"
+    ))
+    .unwrap();
+    for key in ["TMPDIR", "TMP", "TEMP"] {
+        assert!(manifest.run.environment_allowlist.iter().any(|v| v == key));
+    }
+    let target = PathBuf::from(std::env::var_os("TMPDIR").unwrap())
+        .canonicalize()
+        .unwrap();
+    for backend in ["direct", "bubblewrap", "macos_seatbelt"] {
+        // Feed the same typed, receipt-resolved launch carrier as production.
+        // Its effective allowlist may be narrower than the manifest.
+        let effective = manifest
+            .run
+            .environment_allowlist
+            .iter()
+            .filter(|key| ["TMPDIR", "TMP", "TEMP", "PATH"].contains(&key.as_str()))
+            .cloned()
+            .collect();
+        let spec = SkillLaunchSpec {
+            schema_version:1, skill_name:manifest.package.name.clone(), version:manifest.package.version.clone(),
+            adapter:manifest.build.adapter.clone(), launcher:manifest.run.launcher.clone(),
+            program:PathBuf::from("python3"), working_directory:target.clone(),
+            args:vec!["-c".to_string(),"import os,tempfile,json; p=tempfile.mkdtemp(prefix='child-temp-probe-'); print(json.dumps({'tmp':p,'env':{k:os.environ.get(k) for k in ('TMPDIR','TMP','TEMP')},'unapproved':os.environ.get('APP_TEST_TEMP_ENV_PROBE')}))".to_string()],
+            environment:BTreeMap::from([("PATH".to_string(),std::env::var("PATH").unwrap_or_default())]),
+            environment_allowlist:effective, remote_endpoint:None, timeout_seconds:30, progress_frames:false,
+            execution_profile:Default::default(), sandbox_profile:manifest.security.sandbox.clone(),
+            runtime_network:false, install_root:target.clone(), manifest_digest:"a".repeat(64), receipt_digest:"b".repeat(64),
+        };
+        let launch = ChildLaunch::installed(spec);
+        let output = child_process_command_for_parent(&launch, Some(backend))
+            .unwrap()
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{} {}",
+            String::from_utf8_lossy(&output.stderr),
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let actual: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(Path::new(actual["tmp"].as_str().unwrap())
+            .canonicalize()
+            .unwrap()
+            .starts_with(&target));
+        assert!(actual["unapproved"].is_null());
+        for key in ["TMPDIR", "TMP", "TEMP"] {
+            assert_eq!(
+                Path::new(actual["env"][key].as_str().unwrap())
+                    .canonicalize()
+                    .unwrap(),
+                target
+            );
+        }
+    }
+}

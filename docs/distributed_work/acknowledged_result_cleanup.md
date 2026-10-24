@@ -67,8 +67,15 @@ traversal, noncanonical UUIDs and symlink ancestors/roots are rejected.
 For an enrolled task, a declared directory storage descriptor is resolved into
 a fresh task-owned namespace through the existing SkillStorageResolver. The
 normal sandbox/storage grant and schema still apply; browser profiles,
-checkpoints and their caches live there. Ordinary Agent and other applications
-keep the original descriptor. A declared SQLite storage for this opt-in mode
+checkpoints and their caches live there. Its `process-temp` child also contains
+Python/Chrome temporary profiles and sensitive netlogs, including leftovers
+from a killed child. `TMPDIR`, `TMP` and `TEMP` are set only for enrolled
+invocations, after environment isolation, using the existing sandbox storage
+mapping. The installed receipt must forward all three variables and must not
+pin them to fixed package values; otherwise execution fails before launch.
+No new environment variable, child permission, receipt or runner protocol is
+introduced. Ordinary Agent and other applications keep their original
+descriptor and environment unchanged. A declared SQLite storage for this opt-in mode
 fails explicitly instead of silently sharing persistent data.
 
 From enrollment onward this execution does not copy its arguments/results into

@@ -697,6 +697,22 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
         state, &task.task_id, &retention_payload, storage_descriptor,
     ).map_err(|error| runner_host_pre_dispatch_error(canonical_skill_name,
         "work_cleanup_storage_unavailable", "retry_task_storage", json!({"error":error.to_string()})))?;
+    let task_temporary = if crate::task_result_retention::retains_shared_outcome(
+        state, &task.task_id, &retention_payload,
+    ) { None } else {
+        // Resolve only the exact receipt already pinned for this invocation;
+        // fixed package env is not present on the lightweight version pin.
+        let launch = resolver.resolve_pinned(canonical_skill_name,
+            &installed_launch.version, &installed_launch.manifest_digest,
+            &installed_launch.receipt_digest,
+        ).map_err(|error| runner_pre_dispatch_error(canonical_skill_name,
+            &error, "refresh_skill_admission"))?;
+        crate::task_result_retention::temporary::prepare(
+            state, &task.task_id, &retention_payload, storage_descriptor.as_ref(),
+            &launch.environment_allowlist, &launch.environment,
+        ).map_err(|error| runner_host_pre_dispatch_error(canonical_skill_name,
+            "work_cleanup_temp_unavailable", "retry_task_storage", json!({"error":error.to_string()})))?
+    };
     let storage_writable_directory = storage_descriptor.as_ref().and_then(|descriptor| {
         if descriptor.storage_kind == "directory" {
             descriptor
@@ -1214,7 +1230,7 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
         );
     }
     if inherited_sandbox_backend.is_none() {
-        if let Some(storage_directory) = sandbox_storage_directory {
+        if let Some(storage_directory) = sandbox_storage_directory.as_ref() {
             cmd.env(
                 skill_sdk::SKILL_STORAGE_WRITABLE_DIRECTORY_ENV,
                 storage_directory,
@@ -1270,6 +1286,12 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
         cmd.env(env_name, token);
     }
     apply_parent_execution_backend(&mut cmd, inherited_sandbox_backend);
+    // Apply after strict isolation and receipt-declared env. Installed children
+    // forward these existing allowlisted variables into their real processes.
+    crate::task_result_retention::temporary::apply(
+        &mut cmd, task_temporary.as_ref(), sandbox_storage_directory.as_deref(),
+    ).map_err(|error| runner_host_pre_dispatch_error(canonical_skill_name,
+        "work_cleanup_temp_unavailable", "retry_task_storage", json!({"error":error.to_string()})))?;
     cmd.current_dir(&state.skill_rt.workspace_root);
     if let Some(plan) = durable_job_plan.as_ref() {
         let (sandbox_job_dir, sandbox_global_slot_root, sandbox_skill_slot_root) =

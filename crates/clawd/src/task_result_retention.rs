@@ -10,6 +10,8 @@ use serde_json::Value;
 pub(crate) mod files;
 #[path = "durable_job_monitor.rs"]
 pub(crate) mod monitors;
+#[path = "task_retention_temp.rs"]
+pub(crate) mod temporary;
 #[path = "task_retention_storage.rs"]
 pub(crate) mod storage;
 #[cfg(test)]
