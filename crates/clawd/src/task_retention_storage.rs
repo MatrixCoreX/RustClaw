@@ -27,6 +27,10 @@ pub(crate) fn descriptor_for_task(
         .join("task-storage")
         .join(task_id);
     super::files::validate_owned_path(&state.skill_rt.workspace_root, &root)?;
+    super::files::validate_owned_path(
+        &state.skill_rt.workspace_root,
+        &root.join(&descriptor.skill_name),
+    )?;
     let configured = root
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("work_cleanup_path_invalid"))?;
@@ -37,7 +41,14 @@ pub(crate) fn descriptor_for_task(
     )?;
     let scoped =
         resolver.directory_descriptor(&descriptor.skill_name, descriptor.schema_version)?;
-    super::files::validate_owned_path(&state.skill_rt.workspace_root, &root)?;
+    let scoped_path = scoped
+        .directory_path
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("work_cleanup_path_invalid"))?;
+    super::files::validate_owned_path(
+        &state.skill_rt.workspace_root,
+        std::path::Path::new(scoped_path),
+    )?;
     Ok(Some(scoped))
 }
 

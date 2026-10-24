@@ -152,3 +152,48 @@ fn enrolled_sqlite_storage_fails_without_touching_shared_database() {
     assert_eq!(std::fs::read(&path).unwrap(), b"shared-sqlite-fixture");
     std::fs::remove_file(path).unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+fn enrolled_storage_rejects_child_symlink_without_changing_shared_files_or_permissions() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let fixture = Fixture::new();
+    fixture.enroll();
+    fixture.insert(
+        &fixture.task_id,
+        "run_skill",
+        &fixture.enrollment.idempotency_key(),
+        &fixture.payload(),
+    );
+    let normal = fixture
+        .state
+        .core
+        .skill_storage
+        .directory_descriptor("fixture", 1)
+        .unwrap();
+    let shared = fixture.root.join("shared-profile");
+    std::fs::create_dir_all(&shared).unwrap();
+    std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o750)).unwrap();
+    std::fs::write(shared.join("keep"), b"ordinary-private-profile").unwrap();
+    let before = std::fs::metadata(&shared).unwrap().permissions().mode();
+    let task = claw_core::workspace_state::workspace_artifacts_root(&fixture.root)
+        .join("task-storage")
+        .join(&fixture.task_id);
+    std::fs::create_dir_all(&task).unwrap();
+    symlink(&shared, task.join("fixture")).unwrap();
+    assert!(descriptor_for_task(
+        &fixture.state,
+        &fixture.task_id,
+        &fixture.payload(),
+        Some(normal)
+    )
+    .is_err());
+    assert_eq!(
+        std::fs::read(shared.join("keep")).unwrap(),
+        b"ordinary-private-profile"
+    );
+    assert_eq!(
+        std::fs::metadata(&shared).unwrap().permissions().mode(),
+        before
+    );
+}
