@@ -21,6 +21,11 @@ pub(crate) fn descriptor_for_task(
         descriptor.storage_kind == "directory",
         "work_cleanup_storage_kind_unsupported"
     );
+    let enrollment = super::read_enrollment(&state.skill_rt.workspace_root, task_id)?
+        .ok_or_else(|| anyhow::anyhow!("work_auth_enrollment_missing"))?;
+    let authentication = crate::http::ui_routes::nni_browser_authentication_scope(
+        state, &enrollment.origin, &enrollment.capability,
+    ).map(|scope| authentication_storage(&descriptor, scope)).transpose()?;
     let task = uuid::Uuid::parse_str(task_id)?;
     ensure!(task.to_string() == task_id, "work_cleanup_task_id_invalid");
     let root = claw_core::workspace_state::workspace_artifacts_root(&state.skill_rt.workspace_root)
@@ -39,8 +44,9 @@ pub(crate) fn descriptor_for_task(
         configured,
         descriptor.database_busy_timeout_ms,
     )?;
-    let scoped =
+    let mut scoped =
         resolver.directory_descriptor(&descriptor.skill_name, descriptor.schema_version)?;
+    scoped.browser_authentication = authentication;
     let scoped_path = scoped
         .directory_path
         .as_deref()
@@ -50,6 +56,34 @@ pub(crate) fn descriptor_for_task(
         std::path::Path::new(scoped_path),
     )?;
     Ok(Some(scoped))
+}
+
+fn authentication_storage(
+    descriptor: &SkillStorageDescriptor,
+    scope_id: String,
+) -> anyhow::Result<crate::skill_storage::BrowserAuthenticationStorage> {
+    let base = std::path::Path::new(descriptor.directory_path.as_deref()
+        .ok_or_else(|| anyhow::anyhow!("work_auth_storage_missing"))?);
+    ensure!(base.is_absolute() && !std::fs::symlink_metadata(base)?.file_type().is_symlink(),
+        "work_auth_storage_invalid");
+    let directory = base.join("application-authentication").join(&scope_id);
+    super::files::validate_owned_path(base, &directory)?;
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)] {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(&directory)?;
+    ensure!(super::files::validate_owned_path(base, &directory)? && directory.is_dir(),
+        "work_auth_storage_invalid");
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(crate::skill_storage::BrowserAuthenticationStorage {
+        schema_version: 1, directory_path: directory.to_string_lossy().into_owned(), scope_id,
+    })
 }
 
 #[cfg(test)]

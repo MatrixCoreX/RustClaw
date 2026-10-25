@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import uuid
 
 from small_screen_login_challenge import (
     fit_login_challenge_image_size,
@@ -14,6 +15,37 @@ from small_screen_strings import STRINGS
 
 
 class SmallScreenLoginChallengeTest(unittest.TestCase):
+    def test_task_login_challenge_is_visible_then_removed_without_reading_media(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tasks = root / ".agent-runtime" / "artifacts" / "task-storage"
+            storage = tasks / str(uuid.uuid4()) / "media_download"
+            challenge = storage / "login_challenge"; challenge.mkdir(parents=True)
+            (challenge / "challenge.png").write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+            (storage / "private-video.mp4").write_bytes(b"not-a-challenge")
+            (challenge / "current.json").write_text(json.dumps({"schema_version": 1,
+                "status": "awaiting_user", "platform": "wechat_channels", "image_file": "challenge.png",
+                "updated_at_epoch": 100, "cropped": True}))
+            self.assertIsNone(load_login_challenge(root / "skills", now=108))
+            shown = load_login_challenge(root / "skills", task_storage_root=tasks, now=108)
+            self.assertEqual(shown["platform"], "wechat_channels")
+            self.assertEqual(shown["source_skill"], "media_download")
+            self.assertNotIn("private-video", json.dumps(shown))
+            (challenge / "current.json").unlink()
+            self.assertIsNone(load_login_challenge(root / "skills", task_storage_root=tasks, now=108))
+
+    def test_task_challenge_scanner_rejects_symlinked_or_non_task_directories(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); tasks = root / "tasks"; tasks.mkdir()
+            outside = root / "ordinary"; challenge = outside / "media_download" / "login_challenge"
+            challenge.mkdir(parents=True)
+            (challenge / "challenge.png").write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+            (challenge / "current.json").write_text(json.dumps({"schema_version": 1,
+                "status": "awaiting_user", "platform": "wechat_channels", "image_file": "challenge.png", "updated_at_epoch": 100}))
+            (tasks / str(uuid.uuid4())).symlink_to(outside, target_is_directory=True)
+            (tasks / "invalid-task-id").mkdir()
+            (tasks / "invalid-task-id" / "media_download").symlink_to(outside / "media_download", target_is_directory=True)
+            self.assertIsNone(load_login_challenge(root / "skills", task_storage_root=tasks, now=108))
     def test_cropped_qr_is_enlarged_but_full_page_capture_is_not(self):
         self.assertEqual(
             fit_login_challenge_image_size(

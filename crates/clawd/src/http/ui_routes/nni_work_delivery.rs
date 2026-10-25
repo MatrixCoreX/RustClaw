@@ -20,6 +20,13 @@ struct NniArtifactCleanupGrant {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct NniBrowserAuthenticationGrant {
+    origin: String,
+    capability: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct NniWorkPolicy {
     schema_version: u32,
     principal_id: String,
@@ -29,6 +36,8 @@ struct NniWorkPolicy {
     artifact_origins: Vec<String>,
     #[serde(default)]
     artifact_cleanup_grants: Vec<NniArtifactCleanupGrant>,
+    #[serde(default)]
+    browser_authentication_grants: Vec<NniBrowserAuthenticationGrant>,
     max_file_bytes: u64,
 }
 
@@ -45,14 +54,30 @@ fn nni_read_work_policy(state: &AppState) -> anyhow::Result<NniWorkPolicy> {
             && policy.capabilities.len() <= 64
             && policy.artifact_origins.len() <= 16
             && policy.artifact_cleanup_grants.len() <= 16
+            && policy.browser_authentication_grants.len() <= 16
             && policy
                 .artifact_cleanup_grants
                 .iter()
                 .all(|grant| policy.artifact_origins.contains(&grant.origin) && policy.capabilities.contains(&grant.capability))
+            && policy.browser_authentication_grants.iter().all(|grant|
+                policy.artifact_origins.contains(&grant.origin) && policy.capabilities.contains(&grant.capability))
             && policy.max_file_bytes <= 512 * 1024 * 1024,
         "work_policy_invalid"
     );
     Ok(policy)
+}
+
+// An explicit host grant, separate from task-result deletion and package self-
+// declarations. Only the exact application/capability/principal shares a store.
+pub(crate) fn nni_browser_authentication_scope(
+    state: &AppState,
+    origin: &str,
+    capability: &str,
+) -> Option<String> {
+    let policy = nni_read_work_policy(state).ok()?;
+    policy.browser_authentication_grants.iter().any(|grant|
+        grant.origin == origin && grant.capability == capability
+    ).then(|| nni_work_sha256(&format!("{}\n{}\n{}", policy.principal_id, origin, capability)))
 }
 
 fn nni_validate_artifact_delivery(delivery: &NniArtifactDelivery) -> bool {

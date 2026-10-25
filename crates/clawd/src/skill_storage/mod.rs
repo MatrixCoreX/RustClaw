@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub(crate) use ownership::KbUserDataSnapshot;
-pub(crate) use resolver::{SkillStorageDescriptor, SkillStorageResolver};
+pub(crate) use resolver::{BrowserAuthenticationStorage, SkillStorageDescriptor, SkillStorageResolver};
 
 #[derive(Clone)]
 pub(crate) struct SkillStorageRuntime {

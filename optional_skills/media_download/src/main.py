@@ -26,6 +26,9 @@ from video_inputs import prepare_video_inputs, promote_video_audio_delivery
 from macos_browser_selection import select_macos_browser
 from download_failure import ERROR_PREFIX, read_error
 from download_output import validate_output_mode, select_download_output, OutputSelectionError
+from browser_authentication import DIRECTORY_ENV, SCOPE_ENV
+
+AUTHENTICATION_METADATA_PREFIX = "__MEDIA_BROWSER_AUTHENTICATION__:"
 
 def interpreter_bin_directory(executable: str) -> Path:
     """Preserve a virtual environment's bin path instead of resolving its Python symlink."""
@@ -359,6 +362,45 @@ def _skill_storage_directory(request: dict[str, Any]) -> Path | None:
         return None
     path = Path(raw).expanduser()
     return path if path.is_absolute() else None
+
+
+def _browser_authentication_context(request: dict[str, Any]) -> dict[str, str] | None:
+    context = request.get("context")
+    storage = context.get("skill_storage") if isinstance(context, dict) else None
+    value = storage.get("browser_authentication") if isinstance(storage, dict) else None
+    if value is None:
+        return None
+    if (not isinstance(value, dict) or value.get("schema_version") != 1
+            or not isinstance(value.get("directory_path"), str)
+            or not Path(value["directory_path"]).is_absolute()
+            or not isinstance(value.get("scope_id"), str)
+            or re.fullmatch(r"[a-f0-9]{64}", value["scope_id"]) is None):
+        raise SkillFailure("host browser authentication storage is unavailable",
+                           error_code="browser_authentication_unavailable",
+                           message_key="media_download.error.browser_authentication_unavailable")
+    return {"directory_path": value["directory_path"], "scope_id": value["scope_id"]}
+
+
+def _authentication_metadata(stderr: str) -> dict[str, Any] | None:
+    for line in reversed(stderr.splitlines()):
+        if not line.startswith(AUTHENTICATION_METADATA_PREFIX):
+            continue
+        try:
+            value = json.loads(line[len(AUTHENTICATION_METADATA_PREFIX):])
+        except (ValueError, TypeError):
+            continue
+        if (not isinstance(value, dict) or value.get("schema_version") != 1
+                or value.get("status") not in {"unknown", "valid", "expired", "reauthentication_required"}):
+            continue
+        metadata = {"schema_version": 1, "status": value["status"]}
+        for key in ("last_verified_at", "last_checked_at", "earliest_cookie_expiry"):
+            number = value.get(key)
+            if number is None or (type(number) in (int, float) and 0 <= number < 1e12):
+                metadata[key] = number
+        if type(value.get("has_session_cookies")) is bool:
+            metadata["has_session_cookies"] = value["has_session_cookies"]
+        return metadata
+    return None
 
 
 def _input_path(request: dict[str, Any], raw: str) -> Path:
@@ -1399,7 +1441,7 @@ def _diagnostics(stderr: str) -> str:
         line
         for line in stderr.splitlines()
         if not line.strip().startswith(
-            (CHILD_PROGRESS_PREFIX, CHILD_RESULT_PREFIX, RESOLVE_METADATA_PREFIX, ERROR_PREFIX)
+            (CHILD_PROGRESS_PREFIX, CHILD_RESULT_PREFIX, RESOLVE_METADATA_PREFIX, ERROR_PREFIX, AUTHENTICATION_METADATA_PREFIX)
         )
     ).strip()
     if len(value) <= MAX_DIAGNOSTIC_CHARS:
@@ -1514,6 +1556,11 @@ def _failure_from_process(
         ),
         "side_effect_applied": not output_rollback_ok or profile_checkpoint is not None,
     }
+    if (authentication := _authentication_metadata(stderr)) is not None:
+        details["browser_authentication"] = authentication
+        if authentication.get("status") == "valid":
+            details["side_effect_applied"] = True
+            details["failure_phase"] = "execution_partial"
     for key in ("status_code", "retry_after_seconds"):
         if key in failure:
             details[key] = failure[key]
@@ -1582,11 +1629,17 @@ def _run_tool(
     timeout_seconds: int | None,
     storage_directory: Path | None = None,
     progress_callback: Callable[[str, int, int, dict[str, Any] | None], None] | None = None,
+    browser_authentication: dict[str, str] | None = None,
 ) -> tuple[str, str, list[dict[str, Any]]]:
     before = _snapshot(output_dir)
     checkpoint_before = _profile_checkpoint_pointers(storage_directory)
     environment = os.environ.copy()
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    environment.pop(DIRECTORY_ENV, None)
+    environment.pop(SCOPE_ENV, None)
+    if browser_authentication is not None:
+        environment[DIRECTORY_ENV] = browser_authentication["directory_path"]
+        environment[SCOPE_ENV] = browser_authentication["scope_id"]
     try:
         completed = _run_process(
             command,
@@ -1989,6 +2042,7 @@ def respond(
             raise SkillFailure(str(error), error_code=error.error_code,
                                message_key=f"media_download.error.{error.error_code}") from error
         storage_directory = _skill_storage_directory(request)
+        authentication = _browser_authentication_context(request) if action == "download" and _bool(args, "public_only", False) else None
         if action == "download":
             image_archive_threshold = _image_archive_threshold(args)
             command = _build_download_command(
@@ -2021,6 +2075,7 @@ def respond(
         operation_timeout,
         storage_directory,
         progress.forward_child if progress is not None else None,
+        **({"browser_authentication": authentication} if authentication is not None else {}),
     )
     source_media = _child_result_metadata(stderr) if action == "download" else None
     if progress is not None:
@@ -2122,6 +2177,8 @@ def respond(
     if resolve_metadata is not None:
         extra["resolve_metadata"] = resolve_metadata
     if action == "download":
+        if (authentication_metadata := _authentication_metadata(stderr)) is not None:
+            extra["browser_authentication"] = authentication_metadata
         if source_media is not None:
             extra["source_media"] = source_media
         extra["content_bundle"] = _content_bundle(

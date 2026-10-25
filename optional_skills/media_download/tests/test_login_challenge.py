@@ -88,6 +88,22 @@ class LoginChallengeTest(unittest.TestCase):
                 )
             )
 
+    def test_public_task_profile_publishes_and_clears_its_own_temporary_challenge(self):
+        with tempfile.TemporaryDirectory() as directory:
+            storage = Path(directory) / "task" / "media_download"
+            profile = storage / "public-browser-profile" / "wechat_channels"
+            profile.mkdir(parents=True)
+            client = FakeClient()
+            with mock.patch.object(self.challenge, "companion_browser_args", return_value=[]):
+                def result(command_id, timeout):
+                    if command_id == 1:
+                        return {"result": {"result": {"value": {"x": 20, "y": 20, "width": 140, "height": 140}}}}
+                    return {"result": {"data": base64.b64encode(PNG).decode("ascii")}}
+                self.assertTrue(self.challenge.publish_login_challenge(client, result, profile, "wechat_channels"))
+            self.assertTrue((storage / "login_challenge" / "current.json").is_file())
+            self.challenge.clear_login_challenge(profile, "wechat_channels")
+            self.assertFalse((storage / "login_challenge" / "current.json").exists())
+
     def test_live_companion_minimizes_only_linux_login_browser(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory)

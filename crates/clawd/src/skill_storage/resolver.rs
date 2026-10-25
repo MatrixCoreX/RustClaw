@@ -9,6 +9,13 @@ pub(crate) struct SkillStorageResolver {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub(crate) struct BrowserAuthenticationStorage {
+    pub(crate) schema_version: u32,
+    pub(crate) directory_path: String,
+    pub(crate) scope_id: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub(crate) struct SkillStorageDescriptor {
     pub(crate) schema_version: u32,
     pub(crate) skill_name: String,
@@ -24,6 +31,8 @@ pub(crate) struct SkillStorageDescriptor {
     pub(crate) database_temp_store: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) directory_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) browser_authentication: Option<BrowserAuthenticationStorage>,
 }
 
 impl SkillStorageResolver {
@@ -125,6 +134,7 @@ impl SkillStorageResolver {
             database_mmap_size_bytes: self.resource_profile.mmap_size_bytes(),
             database_temp_store: self.resource_profile.temp_store(),
             directory_path: None,
+            browser_authentication: None,
         })
     }
 
@@ -145,6 +155,7 @@ impl SkillStorageResolver {
             database_mmap_size_bytes: None,
             database_temp_store: None,
             directory_path: Some(path.display().to_string()),
+            browser_authentication: None,
         })
     }
 }

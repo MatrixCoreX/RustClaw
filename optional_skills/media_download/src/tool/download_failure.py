@@ -13,6 +13,7 @@ RETRYABLE_CODES = {
 }
 ERROR_CODES = RETRYABLE_CODES | {
     "execution_failed", "dependency_unavailable", "media_not_found", "access_denied", "not_found",
+    "browser_authentication_unavailable",
 }
 
 

@@ -2588,6 +2588,7 @@ class SmallScreenApp:
             self._t(
                 "login_challenge_browser_hint"
                 if browser_action
+                else "login_challenge_wechat_channels_hint" if platform == "wechat_channels"
                 else "login_challenge_hint"
             )
         )
@@ -2669,7 +2670,10 @@ class SmallScreenApp:
         if now - self._login_companion_heartbeat_at >= COMPANION_REFRESH_SECONDS:
             if publish_login_companion_heartbeat(now=now):
                 self._login_companion_heartbeat_at = now
-        challenge = load_login_challenge(self._skill_data_root)
+        challenge = load_login_challenge(
+            self._skill_data_root,
+            task_storage_root=os.path.join(_root_dir(), ".agent-runtime", "artifacts", "task-storage"),
+        )
         if challenge is None:
             self._hide_login_challenge()
         else:

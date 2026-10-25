@@ -421,6 +421,7 @@ fn declared_skill_storage_descriptor_uses_its_mapped_sandbox_target() {
         database_mmap_size_bytes: Some(0),
         database_temp_store: Some("file"),
         directory_path: None,
+        browser_authentication: None,
     };
 
     let mapped = map_storage_descriptor_to_sandbox(Some(descriptor), Some(&sandbox_storage))
@@ -452,6 +453,7 @@ fn declared_directory_storage_uses_only_its_mapped_sandbox_directory() {
         database_mmap_size_bytes: None,
         database_temp_store: None,
         directory_path: Some(host_storage.display().to_string()),
+        browser_authentication: None,
     };
 
     let mapped = map_storage_descriptor_to_sandbox(Some(descriptor), Some(&sandbox_storage))
@@ -463,6 +465,27 @@ fn declared_directory_storage_uses_only_its_mapped_sandbox_directory() {
         Some("/run/agent-runtime-writable/3")
     );
     assert_eq!(mapped.database_path, "");
+}
+
+#[test]
+fn authentication_storage_requires_its_own_mapped_sandbox_directory() {
+    let resolver = crate::skill_storage::SkillStorageResolver::test_default();
+    let mut ordinary = Some(resolver.directory_descriptor("fixture", 1).unwrap());
+    let ordinary_json = serde_json::to_value(&ordinary).unwrap();
+    map_browser_authentication_to_sandbox(&mut ordinary, None).unwrap();
+    assert_eq!(serde_json::to_value(&ordinary).unwrap(), ordinary_json);
+    ordinary.as_mut().unwrap().browser_authentication = Some(crate::skill_storage::BrowserAuthenticationStorage {
+        schema_version: 1,
+        scope_id: "a".repeat(64),
+        directory_path: "/private/application-authentication".into(),
+    });
+    assert!(map_browser_authentication_to_sandbox(&mut ordinary, None).is_err());
+    let target = std::path::Path::new("/run/agent-runtime-writable/4");
+    map_browser_authentication_to_sandbox(&mut ordinary, Some(target)).unwrap();
+    let mapped = ordinary.unwrap();
+    assert_eq!(mapped.browser_authentication.unwrap().directory_path, target.display().to_string());
+    assert_eq!(mapped.directory_path, resolver.directory_descriptor("fixture", 1).unwrap().directory_path);
+    std::fs::remove_dir_all(resolver.root()).unwrap();
 }
 
 #[test]

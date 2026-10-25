@@ -173,3 +173,16 @@ fn map_storage_descriptor_to_sandbox(
     }
     Ok(descriptor)
 }
+
+fn map_browser_authentication_to_sandbox(
+    descriptor: &mut Option<crate::skill_storage::SkillStorageDescriptor>,
+    sandbox_directory: Option<&std::path::Path>,
+) -> Result<(), String> {
+    if let Some(authentication) = descriptor.as_mut()
+        .and_then(|descriptor| descriptor.browser_authentication.as_mut()) {
+        authentication.directory_path = sandbox_directory
+            .ok_or_else(|| "browser authentication sandbox target unavailable".to_string())?
+            .display().to_string();
+    }
+    Ok(())
+}

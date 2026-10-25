@@ -1,4 +1,7 @@
 import importlib.util
+import contextlib
+import io
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -198,6 +201,43 @@ class WechatChannelsAccessTest(unittest.TestCase):
         self.assertEqual(browser_parse.call_count, 2)
         self.assertFalse(browser_parse.call_args_list[0].kwargs["visible"])
         self.assertTrue(browser_parse.call_args_list[1].kwargs["visible"])
+
+    def test_explicit_login_rejection_invalidates_saved_authentication_and_reports_status(self):
+        from browser_authentication import AuthenticationStore
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); vault = root / "auth"; vault.mkdir(mode=0o700)
+            store = AuthenticationStore(vault, "a" * 64, self.access.YUANBAO_HOME, "wechat_channels")
+            with store.lease():
+                store.capture(lambda *_: {"cookies": [{"name": "session", "value": "fixture-private", "domain": "yuanbao.tencent.com"}]})
+            captured = io.StringIO()
+            with mock.patch.object(self.access.AuthenticationStore, "from_environment", return_value=store), mock.patch.object(
+                self.access, "parse_share_with_browser", side_effect=self.access.WechatChannelsAccessError(self.access.LOGIN_REQUIRED)
+            ), contextlib.redirect_stderr(captured):
+                with self.assertRaises(self.access.WechatChannelsAccessError) as failure:
+                    self.access.resolve_share("https://weixin.qq.com/sph/A88dF8Ju34", browser_profile_root=root / "profile",
+                        chrome="fixture-browser", timeout=5, browser_fallback=False)
+                self.assertEqual(failure.exception.error_code, "login_required")
+            self.assertIn('"status":"reauthentication_required"', captured.getvalue())
+            self.assertNotIn("fixture-private", captured.getvalue())
+            self.assertEqual(json.loads((vault / "wechat_channels.json").read_text())["cookies"], [])
+
+    def test_network_timeout_does_not_clear_saved_authentication(self):
+        from browser_authentication import AuthenticationStore
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); vault = root / "auth"; vault.mkdir(mode=0o700)
+            store = AuthenticationStore(vault, "a" * 64, self.access.YUANBAO_HOME, "wechat_channels")
+            with store.lease():
+                store.capture(lambda *_: {"cookies": [{"name": "session", "value": "fixture-private", "domain": "yuanbao.tencent.com"}]})
+            before = (vault / "wechat_channels.json").read_bytes()
+            with mock.patch.object(self.access.AuthenticationStore, "from_environment", return_value=store), mock.patch.object(
+                self.access, "parse_share_with_browser", side_effect=self.access.WechatChannelsAccessError("wechat_channels_access_timeout", error_code="request_timeout")
+            ) as browser, contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(self.access.WechatChannelsAccessError) as failure:
+                    self.access.resolve_share("https://weixin.qq.com/sph/A88dF8Ju34", browser_profile_root=root / "profile",
+                        chrome="fixture-browser", timeout=5, browser_fallback=True)
+                self.assertEqual(failure.exception.error_code, "request_timeout")
+                self.assertEqual(browser.call_count, 1)
+            self.assertEqual((vault / "wechat_channels.json").read_bytes(), before)
 
 
 if __name__ == "__main__":

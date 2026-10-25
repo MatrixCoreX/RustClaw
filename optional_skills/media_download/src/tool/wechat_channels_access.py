@@ -1,9 +1,10 @@
 """Resolve WeChat Channels shares through a skill-owned Yuanbao session.
 
-The login session lives only in the media_download private browser profile. The
-module never imports cookies from the user's normal browser and never exposes
-session cookies to the downloader process. Yuanbao is called inside Chromium;
-only the short-lived preview token is used for the public Channels feed call.
+Ordinary calls use the skill's private browser profile. Host-enrolled application
+tasks may restore only their explicitly granted authentication vault; their
+browser profile and media cache remain temporary. Personal browser cookies are
+never imported. Yuanbao is called inside Chromium; only the short-lived preview
+token is used for the public Channels feed call.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from typing import Any, Callable, Iterator
 import xiaohongshu_access
 from browser_devtools import DevToolsConnection, DevToolsError
 import login_challenge
+from browser_authentication import AuthenticationStore, AuthenticationStoreError
 
 
 YUANBAO_HOME = "https://yuanbao.tencent.com/"
@@ -51,6 +53,22 @@ _SHARE_CODE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 class WechatChannelsAccessError(RuntimeError):
     """A stable provider-scoped access failure."""
+
+    def __init__(self, message: str, *, error_code: str | None = None):
+        super().__init__(message)
+        self.error_code = error_code or (message if message in {
+            LOGIN_REQUIRED, DISPLAY_UNAVAILABLE, INTERACTIVE_TIMEOUT, INTERACTIVE_CANCELLED,
+        } else "execution_failed")
+
+
+@contextlib.contextmanager
+def _authentication_observation(authentication: AuthenticationStore | None):
+    try:
+        yield
+    finally:
+        if authentication is not None:
+            import sys
+            print("__MEDIA_BROWSER_AUTHENTICATION__:" + json.dumps(authentication.metadata(), separators=(",", ":")), file=sys.stderr, flush=True)
 
 
 @dataclass(frozen=True)
@@ -288,6 +306,21 @@ def _classify_parse_result(value: dict[str, Any]) -> tuple[str, dict[str, Any] |
     raise WechatChannelsAccessError(f"wechat_channels_parse_error:{code}")
 
 
+
+def _request_login_dialog(client: DevToolsConnection, cancellation_check=None) -> bool:
+    # Only open the platform's own sign-in control. Completing authorization is
+    # always left to the user on the official login screen.
+    expression = """(() => {
+      if (location.origin !== 'https://yuanbao.tencent.com') return false;
+      if (document.querySelector('iframe[src^="https://open.weixin.qq.com/connect/qrconnect"]')) return true;
+      const nodes = [...document.querySelectorAll('.yb-nav__user .nick-info-name, button, [role="button"]')];
+      const node = nodes.find(element => /^(Not logged in|Log In|Log in|Sign in|未登录|登录)$/.test(element.textContent?.trim() || '') && element.getBoundingClientRect().width > 0);
+      if (!node) return false;
+      node.click(); return true;
+    })()"""
+    response = _wait_result(client, client.send("Runtime.evaluate", {"expression": expression, "returnByValue": True}), 5.0, cancellation_check)
+    return response.get("result", {}).get("result", {}).get("value") is True
+
 def _stop_browser(process: subprocess.Popen[Any]) -> None:
     if process.poll() is not None:
         return
@@ -308,14 +341,17 @@ def parse_share_with_browser(
     request_timeout: float,
     login_timeout: float = LOGIN_WAIT_SECONDS,
     cancellation_check: Callable[[], None] | None = None,
+    authentication: AuthenticationStore | None = None,
 ) -> dict[str, Any]:
     environment = xiaohongshu_access.desktop_session_environment()
     port, debug_args = _devtools_endpoint()
+    companion_arguments = login_challenge.companion_browser_args(environment) if visible else []
+    companion_qr = visible and bool(companion_arguments)
     command = [
         chrome,
-        *([] if visible else ["--headless=new"]),
-        *(xiaohongshu_access.visible_chrome_args(environment) if visible else []),
-        *(login_challenge.companion_browser_args(environment) if visible else []),
+        *(["--headless=new"] if not visible or companion_qr else []),
+        *(xiaohongshu_access.visible_chrome_args(environment) if visible and not companion_qr else []),
+        *([] if companion_qr else companion_arguments),
         "--disable-gpu",
         "--no-sandbox",
         "--disable-dev-shm-usage",
@@ -325,7 +361,7 @@ def parse_share_with_browser(
         "--remote-allow-origins=*",
         f"--user-data-dir={profile_dir}",
         "--profile-directory=Default",
-        YUANBAO_HOME,
+        "about:blank" if authentication is not None else YUANBAO_HOME,
     ]
     process = subprocess.Popen(
         command,
@@ -349,8 +385,24 @@ def parse_share_with_browser(
         )
         client.send("Runtime.enable")
         client.send("Network.enable")
+        if authentication is not None:
+            def authentication_call(method: str, params: dict[str, Any]) -> dict[str, Any]:
+                response = _wait_result(client, client.send(method, params), 10.0, cancellation_check)
+                if "error" in response:
+                    raise AuthenticationStoreError("browser_authentication_browser_command_failed")
+                return response.get("result", {})
+            authentication.restore(authentication_call)
+            _wait_result(client, client.send("Page.navigate", {"url": YUANBAO_HOME}), 10.0, cancellation_check)
         deadline = time.monotonic() + (scan_timeout if visible else max(5.0, request_timeout))
         ready_polls = 0
+        login_requested = False
+        def reconnect_page():
+            nonlocal client
+            if client is not None:
+                client.close()
+            client = DevToolsConnection(_wait_for_page(port, process, request_timeout, cancellation_check), timeout=min(max(request_timeout, 1.0), 10.0))
+            client.send("Runtime.enable")
+            client.send("Network.enable")
         while time.monotonic() < deadline:
             if cancellation_check is not None:
                 cancellation_check()
@@ -385,8 +437,12 @@ def parse_share_with_browser(
                     )
                 )
             except DevToolsError:
+                reconnect_page()
                 state, data = "retry", None
             except WechatChannelsAccessError as exc:
+                if exc.error_code == INTERACTIVE_CANCELLED and process.poll() is None:
+                    reconnect_page()
+                    continue
                 if str(exc) not in {
                     "wechat_channels_browser_command_timeout",
                     "wechat_channels_browser_evaluation_failed",
@@ -396,17 +452,27 @@ def parse_share_with_browser(
             if state == "ok" and data is not None:
                 ready_polls += 1
                 if not visible or ready_polls >= LOGIN_READY_POLLS:
+                    if authentication is not None:
+                        authentication.capture(authentication_call)
                     return data
             elif state == LOGIN_REQUIRED:
                 ready_polls = 0
                 if not visible:
                     raise WechatChannelsAccessError(LOGIN_REQUIRED)
+                if not login_requested:
+                    try:
+                        login_requested = _request_login_dialog(client, cancellation_check)
+                    except (DevToolsError, WechatChannelsAccessError) as exc:
+                        if process.poll() is not None or (isinstance(exc, WechatChannelsAccessError)
+                                and exc.error_code != INTERACTIVE_CANCELLED):
+                            raise
+                        reconnect_page()
             else:
                 ready_polls = 0
             time.sleep(LOGIN_POLL_SECONDS if visible else 0.25)
         if visible:
             raise WechatChannelsAccessError(INTERACTIVE_TIMEOUT)
-        raise WechatChannelsAccessError(LOGIN_REQUIRED)
+        raise WechatChannelsAccessError("wechat_channels_access_timeout", error_code="request_timeout")
     finally:
         if visible:
             login_challenge.clear_login_challenge(profile_dir, "wechat_channels")
@@ -572,7 +638,9 @@ def resolve_share(
         raise WechatChannelsAccessError(LOGIN_REQUIRED)
 
     logs = ["wechat_channels: resolving through skill-owned Yuanbao session"]
-    with profile_lock(profile_dir, cancellation_check):
+    authentication = AuthenticationStore.from_environment(YUANBAO_HOME, "wechat_channels")
+    authentication_lease = authentication.lease(cancellation_check) if authentication is not None else contextlib.nullcontext()
+    with profile_lock(profile_dir, cancellation_check), authentication_lease, _authentication_observation(authentication):
         try:
             parsed = parse_share_with_browser(
                 chrome=chrome,
@@ -581,11 +649,14 @@ def resolve_share(
                 visible=False,
                 request_timeout=timeout,
                 cancellation_check=cancellation_check,
+                **({"authentication": authentication} if authentication is not None else {}),
             )
             logs.append("wechat_channels: reused saved Yuanbao login")
         except WechatChannelsAccessError as exc:
-            if str(exc) != LOGIN_REQUIRED:
+            if exc.error_code != LOGIN_REQUIRED:
                 raise
+            if authentication is not None:
+                authentication.require_login()
             if not browser_fallback:
                 raise
             environment = xiaohongshu_access.desktop_session_environment()
@@ -599,9 +670,9 @@ def resolve_share(
                 visible=True,
                 request_timeout=timeout,
                 cancellation_check=cancellation_check,
+                **({"authentication": authentication} if authentication is not None else {}),
             )
             logs.append("wechat_channels: interactive Yuanbao login completed")
-
     playable_url = parsed.get("playable_url")
     if not isinstance(playable_url, str):
         raise WechatChannelsAccessError("wechat_channels_parse_schema_changed")

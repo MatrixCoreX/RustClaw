@@ -725,6 +725,9 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
                 .map(std::path::Path::to_path_buf)
         }
     });
+    let authentication_directory = storage_descriptor.as_ref()
+        .and_then(|descriptor| descriptor.browser_authentication.as_ref())
+        .map(|authentication| PathBuf::from(&authentication.directory_path));
     let artifact_output_directory = invocation_artifact_output_directory(
         &state.skill_rt.workspace_root,
         &task.task_id,
@@ -1038,6 +1041,9 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
         storage_writable_directory.as_deref(),
         (!warm_reuse_allowed).then_some(artifact_output_directory.as_path()),
     );
+    if let Some(directory) = authentication_directory.as_ref() {
+        additional_writable_paths.push(directory.clone());
+    }
     if let Some(plan) = durable_job_plan.as_ref() {
         additional_writable_paths.extend([
             plan.job_dir.clone(),
@@ -1126,9 +1132,17 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
             ))
         })
         .transpose()?;
-    let storage_descriptor = map_storage_descriptor_to_sandbox(
+    let sandbox_authentication_directory = sandbox_target_for_source(
+        authentication_directory.as_deref(), &additional_writable_paths,
+        &prepared.additional_writable_targets,
+    );
+    let mut storage_descriptor = map_storage_descriptor_to_sandbox(
         storage_descriptor,
         sandbox_storage_directory.as_deref(),
+    )?;
+    map_browser_authentication_to_sandbox(
+        &mut storage_descriptor,
+        sandbox_authentication_directory.as_deref(),
     )?;
     let skill_context = build_runner_skill_context(
         state,

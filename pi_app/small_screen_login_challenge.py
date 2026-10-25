@@ -6,6 +6,7 @@ import json
 import os
 import re
 import time
+import uuid
 from pathlib import Path
 
 
@@ -108,6 +109,28 @@ def _challenge_state_paths(skill_data_root):
     return paths
 
 
+def _task_challenge_state_paths(task_storage_root):
+    """Inspect only the host task namespace and short-lived challenge records."""
+    if task_storage_root is None:
+        return []
+    root = Path(task_storage_root)
+    try:
+        if root.is_symlink():
+            return []
+        directories = list(root.iterdir())
+    except OSError:
+        return []
+    paths = []
+    for directory in directories:
+        try:
+            if directory.is_symlink() or not directory.is_dir() or str(uuid.UUID(directory.name)) != directory.name:
+                continue
+        except (OSError, ValueError):
+            continue
+        paths.extend(_challenge_state_paths(directory))
+    return paths
+
+
 def _load_challenge_state(state_path, current_time, max_age_seconds):
     challenge_dir = state_path.parent
     try:
@@ -177,12 +200,12 @@ def _load_challenge_state(state_path, current_time, max_age_seconds):
     }
 
 
-def load_login_challenge(skill_data_root, *, now=None, max_age_seconds=15):
+def load_login_challenge(skill_data_root, *, task_storage_root=None, now=None, max_age_seconds=15):
     """Return the newest validated challenge from a skill-private state directory."""
     current_time = time.time() if now is None else float(now)
     challenges = [
         challenge
-        for state_path in _challenge_state_paths(skill_data_root)
+        for state_path in (_challenge_state_paths(skill_data_root) + _task_challenge_state_paths(task_storage_root))
         if (
             challenge := _load_challenge_state(
                 state_path, current_time, max_age_seconds

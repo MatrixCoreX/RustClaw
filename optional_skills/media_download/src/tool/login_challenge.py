@@ -56,16 +56,18 @@ _CHALLENGE_RECT_SCRIPT = r"""
     return parts.join(' ').toLowerCase().slice(0, 4000);
   };
   const candidates = Array.from(document.querySelectorAll(
-    'canvas, img, svg, [class*="qr" i], [id*="qr" i], [aria-label*="scan" i]'
+    'canvas, img, svg, [class*="qr" i], [id*="qr" i], [aria-label*="scan" i], iframe[src^="https://open.weixin.qq.com/connect/qrconnect"]'
   ));
   let best = null;
   for (const node of candidates) {
     const rect = node.getBoundingClientRect();
     if (!visible(node, rect)) continue;
+    const officialWeChatQr = node.tagName === 'IFRAME'
+      && node.src.startsWith('https://open.weixin.qq.com/connect/qrconnect?');
     const ratio = rect.width / rect.height;
-    if (ratio < 0.58 || ratio > 1.72) continue;
+    if (!officialWeChatQr && (ratio < 0.58 || ratio > 1.72)) continue;
     const tokens = textFor(node);
-    const hasQrMarker = /qrcode|qr-code|qr_code|\bqr\b/.test(tokens);
+    const hasQrMarker = officialWeChatQr || /qrcode|qr-code|qr_code|\bqr\b/.test(tokens);
     const hasScanInstruction = /二维码|扫码|scan\s*(the|a)?\s*(code|qr)/.test(tokens);
     if (!hasQrMarker && !hasScanInstruction) continue;
     let score = 0;
@@ -76,7 +78,8 @@ _CHALLENGE_RECT_SCRIPT = r"""
     score += Math.min(30, Math.sqrt(rect.width * rect.height) / 12);
     if (!best || score > best.score) {
       best = {score, x: rect.left + scrollX, y: rect.top + scrollY,
-        width: rect.width, height: rect.height};
+        width: rect.width, height: officialWeChatQr ? Math.min(rect.width, rect.height) : rect.height,
+        viewport_only: officialWeChatQr};
     }
   }
   if (!best || best.score < 25) return null;
@@ -87,7 +90,7 @@ _CHALLENGE_RECT_SCRIPT = r"""
 
 def _challenge_dir(profile_dir: Path) -> Path | None:
     profile = Path(profile_dir).expanduser()
-    if profile.parent.name != "browser-profile":
+    if profile.parent.name not in {"browser-profile", "public-browser-profile"}:
         return None
     return profile.parent.parent / "login_challenge"
 
@@ -257,7 +260,7 @@ def publish_login_challenge(
             height = float(rect.get("height") or 0)
             if 72 <= width <= 1400 and 72 <= height <= 1400:
                 padding = min(28.0, max(12.0, min(width, height) * 0.08))
-                screenshot_params["captureBeyondViewport"] = True
+                screenshot_params["captureBeyondViewport"] = not rect.get("viewport_only", False)
                 screenshot_params["clip"] = {
                     "x": max(0.0, float(rect.get("x") or 0) - padding),
                     "y": max(0.0, float(rect.get("y") or 0) - padding),
