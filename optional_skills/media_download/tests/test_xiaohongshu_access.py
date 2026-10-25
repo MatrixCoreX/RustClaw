@@ -159,6 +159,7 @@ class XiaohongshuAccessTest(unittest.TestCase):
                 "platform": "xiaohongshu",
                 "media_kind": "video",
                 "candidate_source": "xiaohongshu.stream.EF4[0].masterUrl",
+                "watermark_status": "unverified",
                 "provenance": "structured_item_payload",
                 "exact_item_structured": True,
                 "skill_profile_reused": False,
@@ -367,6 +368,7 @@ class XiaohongshuAccessTest(unittest.TestCase):
                 page_url="https://www.xiaohongshu.com/explore/example",
                 note_id="example",
                 on_opened=opened,
+                timeout=30,
             )
 
         self.assertIs(result, interactive)
@@ -375,6 +377,8 @@ class XiaohongshuAccessTest(unittest.TestCase):
         self.assertIsNone(access_once.call_args_list[0].kwargs.get("on_opened"))
         self.assertTrue(access_once.call_args_list[1].kwargs["visible"])
         self.assertIs(access_once.call_args_list[1].kwargs["on_opened"], opened)
+        self.assertEqual(access_once.call_args_list[0].kwargs["timeout"], 15)
+        self.assertEqual(access_once.call_args_list[1].kwargs["timeout"], 600)
 
     def test_background_browser_mode_does_not_require_desktop_arguments(self) -> None:
         environment = {"DISPLAY": ":0", "WAYLAND_DISPLAY": "wayland-0"}

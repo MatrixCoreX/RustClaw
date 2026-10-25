@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from browser_devtools import DevToolsConnection, DevToolsError
+from browser_profile_lock import serialize_profile
 import login_challenge
 
 
@@ -694,6 +695,7 @@ def _wait_for_skill_owned_access_once(
                 process.wait(timeout=5)
 
 
+@serialize_profile("profile_dir")
 def wait_for_skill_owned_access(
     *,
     chrome: str,
@@ -701,6 +703,7 @@ def wait_for_skill_owned_access(
     page_url: str,
     note_id: str | None,
     timeout: float = LOGIN_WAIT_SECONDS,
+    interactive_timeout: float = LOGIN_WAIT_SECONDS,
     on_tick: Callable[[], None] | None = None,
     on_opened: Callable[[], None] | None = None,
 ) -> SkillOwnedAccessResult:
@@ -721,7 +724,7 @@ def wait_for_skill_owned_access(
         profile_dir=profile_dir,
         page_url=page_url,
         note_id=note_id,
-        timeout=timeout,
+        timeout=interactive_timeout,
         visible=True,
         on_tick=on_tick,
         on_opened=on_opened,

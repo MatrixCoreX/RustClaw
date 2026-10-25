@@ -44,6 +44,8 @@ import xiaohongshu_access
 import tiktok_access
 import youtube_access
 from browser_devtools import DevToolsConnection, DevToolsError
+from browser_profile_lock import serialize_profile
+from download_failure import ERROR_CODES, emit_error
 from task_cancellation import CancellationToken, OperationCancelled, terminate_process
 
 try:
@@ -210,6 +212,10 @@ CHROMIUM_BROWSER_EXECUTABLES = (
 
 class DouyinDownloadError(RuntimeError):
     """Raised when the download cannot be completed."""
+
+    def __init__(self, message: str, *, error_code: str = "execution_failed"):
+        super().__init__(message)
+        self.error_code = message if message in ERROR_CODES else error_code
 
 
 _TASK_CONTEXT = threading.local()
@@ -3471,6 +3477,7 @@ def gather_toutiao_browser_item_candidates(
     return candidates, image_candidates, article, logs
 
 
+@serialize_profile("browser_profile_dir", platform_subdir=normalize_platform, on_tick=raise_if_task_cancelled)
 def gather_browser_candidates(
     share_text: str,
     *,
@@ -4308,7 +4315,8 @@ def gather_douyin_profile_posts(
     if not chrome:
         raise DouyinDownloadError(
             "A Chromium-compatible browser is required for Douyin profile downloads. "
-            "Install Chrome, Chromium, Edge, Brave, or pass --chrome-path."
+            "Install Chrome, Chromium, Edge, Brave, or pass --chrome-path.",
+            error_code="dependency_unavailable",
         )
 
     logs: list[str] = []
@@ -4816,7 +4824,8 @@ def gather_xiaohongshu_profile_posts(
     chrome = find_chrome_executable(chrome_path)
     if not chrome:
         raise DouyinDownloadError(
-            "A Chromium-compatible browser is required for Xiaohongshu profile downloads."
+            "A Chromium-compatible browser is required for Xiaohongshu profile downloads.",
+            error_code="dependency_unavailable",
         )
 
     logs: list[str] = []
@@ -5841,6 +5850,7 @@ def selected_video_source_contract(platform: str, candidate: Candidate) -> dict[
         "platform": normalized_platform,
         "media_kind": "video",
         "candidate_source": candidate.source,
+        "watermark_status": "unverified",
     }
     if normalized_platform == "xiaohongshu":
         exact_item_structured = xiaohongshu_has_verified_item_media([candidate], [])
@@ -6151,7 +6161,8 @@ def mux_separate_audio_stream(
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise DouyinDownloadError(
-            "ffmpeg is required to combine a Douyin adaptive video and its audio stream."
+            "ffmpeg is required to combine a Douyin adaptive video and its audio stream.",
+            error_code="dependency_unavailable",
         )
 
     audio_path: Path | None = None
@@ -6255,7 +6266,8 @@ def compose_live_photo_video(
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise DouyinDownloadError(
-            "ffmpeg is required to reconstruct a complete Douyin live-photo video."
+            "ffmpeg is required to reconstruct a complete Douyin live-photo video.",
+            error_code="dependency_unavailable",
         )
 
     audio_path: Path | None = None
@@ -6383,7 +6395,7 @@ def find_yt_dlp_binary(yt_dlp_bin: str | None = None) -> str:
 
     found = shutil.which("yt-dlp")
     if not found:
-        raise DouyinDownloadError("yt-dlp is required for this platform but was not found in PATH.")
+        raise DouyinDownloadError("yt-dlp is required for this platform but was not found in PATH.", error_code="dependency_unavailable")
     return found
 
 
@@ -9629,7 +9641,7 @@ def handle_resolved_media(
                 "because no Chromium-compatible browser was found. Install Chrome, Chromium, "
                 "Edge, Brave, or pass --chrome-path; use --no-browser-fallback to skip this check."
         )
-        raise DouyinDownloadError(message)
+        raise DouyinDownloadError(message, error_code="media_not_found")
 
     print(media_type_message(platform, candidates, image_candidates, article), file=sys.stderr)
 
@@ -10005,7 +10017,7 @@ def handle_resolved_media(
 
     if silent_fallback_path is not None:
         silent_fallback_path.unlink(missing_ok=True)
-    raise DouyinDownloadError(f"All candidates failed. Last error: {last_error}")
+    raise DouyinDownloadError(f"All candidates failed. Last error: {last_error}") from last_error
 
 
 @dataclass
@@ -10650,13 +10662,13 @@ def main(argv: list[str] | None = None) -> int:
         try:
             return process_x_folder(args)
         except (DouyinDownloadError, OSError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
+            emit_error(exc)
             return 1
     if args.ocr_file:
         try:
             return process_ocr_file(args)
         except (DouyinDownloadError, OSError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
+            emit_error(exc)
             return 1
     cookie = normalize_cookie(args.cookie)
     if should_start_interactive(args):
@@ -10666,7 +10678,7 @@ def main(argv: list[str] | None = None) -> int:
         share_text = read_share_text(args)
         return handle_share_text(args, share_text, cookie)
     except (DouyinDownloadError, OSError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        emit_error(exc)
         return 1
 
 

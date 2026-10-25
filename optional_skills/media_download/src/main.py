@@ -24,6 +24,7 @@ TOOL_DIR = Path(__file__).resolve().parent / "tool"
 sys.path.insert(0, str(TOOL_DIR))
 from video_inputs import prepare_video_inputs, promote_video_audio_delivery
 from macos_browser_selection import select_macos_browser
+from download_failure import ERROR_PREFIX, read_error
 from download_output import validate_output_mode, select_download_output, OutputSelectionError
 
 def interpreter_bin_directory(executable: str) -> Path:
@@ -1398,7 +1399,7 @@ def _diagnostics(stderr: str) -> str:
         line
         for line in stderr.splitlines()
         if not line.strip().startswith(
-            (CHILD_PROGRESS_PREFIX, CHILD_RESULT_PREFIX, RESOLVE_METADATA_PREFIX)
+            (CHILD_PROGRESS_PREFIX, CHILD_RESULT_PREFIX, RESOLVE_METADATA_PREFIX, ERROR_PREFIX)
         )
     ).strip()
     if len(value) <= MAX_DIAGNOSTIC_CHARS:
@@ -1497,46 +1498,10 @@ def _failure_from_process(
     output_rollback_ok: bool = False,
     profile_checkpoint: dict[str, Any] | None = None,
 ) -> SkillFailure:
-    lowered = stderr.lower()
-    if any(
-        marker in lowered
-        for marker in (
-            "was not found in path",
-            "is required",
-            "is not installed",
-            "no module named",
-        )
-    ):
-        error_code = "dependency_unavailable"
-        message_key = "media_download.error.dependency_unavailable"
-    elif "interactive_verification_timeout" in lowered:
-        error_code = "interactive_verification_timeout"
-        message_key = "media_download.error.interactive_verification_timeout"
-    elif "interactive_verification_cancelled" in lowered:
-        error_code = "interactive_verification_cancelled"
-        message_key = "media_download.error.interactive_verification_cancelled"
-    elif "display_unavailable" in lowered:
-        error_code = "display_unavailable"
-        message_key = "media_download.error.display_unavailable"
-    elif "login_required" in lowered:
-        error_code = "login_required"
-        message_key = "media_download.error.login_required"
-    elif (
-        "no downloadable" in lowered
-        or "no media" in lowered
-        or "media_not_found" in lowered
-    ):
-        error_code = "media_not_found"
-        message_key = "media_download.error.media_not_found"
-    else:
-        error_code = "execution_failed"
-        message_key = "media_download.error.execution_failed"
-    retryable = error_code in {
-        "login_required",
-        "display_unavailable",
-        "interactive_verification_timeout",
-        "interactive_verification_cancelled",
-    } or any(marker in lowered for marker in ("timed out", "timeout", "temporarily", "connection reset"))
+    failure = read_error(stderr)
+    error_code = failure["error_code"]
+    message_key = failure["message_key"]
+    retryable = failure["retryable"]
     readable = _diagnostics(stderr) or f"{action} failed with exit code {returncode}"
     details: dict[str, Any] = {
         "exit_code": returncode,
@@ -1549,6 +1514,9 @@ def _failure_from_process(
         ),
         "side_effect_applied": not output_rollback_ok or profile_checkpoint is not None,
     }
+    for key in ("status_code", "retry_after_seconds"):
+        if key in failure:
+            details[key] = failure[key]
     if profile_checkpoint is not None:
         details["profile_collection"] = profile_checkpoint
     return SkillFailure(

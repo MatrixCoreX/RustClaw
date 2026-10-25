@@ -571,7 +571,8 @@ class AdapterTest(unittest.TestCase):
         failure = self.skill._failure_from_process(
             "download",
             1,
-            "no downloadable media was exposed by the public page",
+            "no downloadable media was exposed by the public page\n" + self.skill.ERROR_PREFIX
+            + json.dumps({"schema_version": 1, "error_code": "media_not_found", "retryable": False}),
             [],
             output_rollback_ok=True,
         )
@@ -589,7 +590,7 @@ class AdapterTest(unittest.TestCase):
         failure = self.skill._failure_from_process(
             "download",
             1,
-            "wechat_channels_media_not_found",
+            self.skill.ERROR_PREFIX + json.dumps({"schema_version": 1, "error_code": "media_not_found", "retryable": False}),
             [],
             output_rollback_ok=True,
         )
@@ -604,7 +605,7 @@ class AdapterTest(unittest.TestCase):
         failure = self.skill._failure_from_process(
             "download",
             1,
-            "xiaohongshu: login_required\nlogin_required",
+            self.skill.ERROR_PREFIX + json.dumps({"schema_version": 1, "error_code": "login_required", "retryable": True}),
             [],
             output_rollback_ok=True,
         )
@@ -617,7 +618,8 @@ class AdapterTest(unittest.TestCase):
         failure = self.skill._failure_from_process(
             "download",
             1,
-            "xiaohongshu: login_required\nxiaohongshu: interactive_login=interactive_verification_timeout",
+            "xiaohongshu: login_required\n" + self.skill.ERROR_PREFIX
+            + json.dumps({"schema_version": 1, "error_code": "interactive_verification_timeout", "retryable": True}),
             [],
             output_rollback_ok=True,
         )
@@ -643,7 +645,8 @@ class AdapterTest(unittest.TestCase):
                     command,
                     1,
                     "",
-                    "no downloadable media was exposed by the public page",
+                    "no downloadable media was exposed by the public page\n" + self.skill.ERROR_PREFIX
+                    + json.dumps({"schema_version": 1, "error_code": "media_not_found", "retryable": False}),
                 )
 
             request = {
