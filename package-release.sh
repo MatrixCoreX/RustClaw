@@ -290,6 +290,12 @@ copy_if_exists "install-latest-release.sh"
 if [[ "$INSTALL_ALL_BUNDLED_SKILLS" == "1" ]]; then
   copy_bundled_runtime "$RELEASE_PYTHON_RUNTIME_ROOT" python "bin/python3"
   copy_bundled_runtime "$RELEASE_NODE_RUNTIME_ROOT" node "bin/node"
+  if [[ "$APP_PACKAGE_TARGET" == *-linux-* ]]; then
+    # env -i alone can still load a system libpython or CI's toolcache prefix.
+    # Require a moved copy and SDK-style copied venvs in an isolated namespace.
+    python3 "$SCRIPT_DIR/scripts/verify_linux_python_runtime.py" \
+      "$STAGE_PROJECT_DIR/prebuilt/toolchains/python"
+  fi
   "$STAGE_PROJECT_DIR/prebuilt/toolchains/python/bin/python3" -I -c \
     'import json, tomllib; print(json.dumps({"runtime":"python"}))' >/dev/null
   "$STAGE_PROJECT_DIR/prebuilt/toolchains/node/bin/node" \

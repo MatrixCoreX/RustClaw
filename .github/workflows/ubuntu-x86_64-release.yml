@@ -100,7 +100,30 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: "3.13"
+          python-version: "3.13.16"
+
+      - name: Prepare locked relocatable Linux Python runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="cpython-3.13.16+20261020-${RUST_TARGET}-install_only_stripped.tar.gz"
+          python_sha256=f326b7a386bf22def82e55dc3b95d2bef8b7c938b4c98ec32dd65433e7720b50
+          archive_path="${RUNNER_TEMP}/${archive}"
+          curl --fail --location --retry 3 --output "${archive_path}" \
+            "https://github.com/astral-sh/python-build-standalone/releases/download/20261020/${archive}"
+          echo "${python_sha256}  ${archive_path}" | sha256sum -c -
+          runtime_parent="${RUNNER_TEMP}/relocatable-linux-python"
+          mkdir -p "${runtime_parent}"
+          tar -xzf "${archive_path}" -C "${runtime_parent}"
+          runtime_root="${runtime_parent}/python"
+          python3 scripts/verify_linux_python_runtime.py "${runtime_root}" --expected-version 3.13.16
+          {
+            echo "APP_RELEASE_PYTHON_RUNTIME_ROOT=${runtime_root}"
+            echo "APP_PYTHON_BIN=${runtime_root}/bin/python3"
+            echo "APP_TEST_LINUX_PYTHON_RUNTIME_ROOT=${runtime_root}"
+            echo "APP_TEST_NONPORTABLE_PYTHON_RUNTIME_ROOT=${pythonLocation:?setup-python root missing}"
+          } >> "$GITHUB_ENV"
+          echo "${runtime_root}/bin" >> "$GITHUB_PATH"
 
       - name: Setup Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -172,7 +195,7 @@ jobs:
           signing_key="${RUNNER_TEMP}/release-signing-key"
           printf '%s\n' "${RELEASE_SIGNING_KEY}" > "${signing_key}"
           chmod 600 "${signing_key}"
-          python_runtime_root="${pythonLocation:?setup-python did not expose pythonLocation}"
+          python_runtime_root="${APP_RELEASE_PYTHON_RUNTIME_ROOT:?relocatable Python runtime missing}"
           node_runtime_root="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve().parent.parent)' "$(command -v node)")"
           [[ -x "${python_runtime_root}/bin/python3" ]]
           [[ -x "${node_runtime_root}/bin/node" ]]
