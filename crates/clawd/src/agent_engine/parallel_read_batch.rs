@@ -193,7 +193,7 @@ pub(super) async fn dispatch_independent_read_batch(
             async move {
                 let mut executed_actions = 0;
                 let mut ended_with_user_visible_output = false;
-                let decision = dispatch_round_action(
+                let decision = Box::pin(dispatch_round_action(
                     state,
                     task,
                     goal,
@@ -210,7 +210,7 @@ pub(super) async fn dispatch_independent_read_batch(
                     &mut executed_actions,
                     &mut ended_with_user_visible_output,
                     agent_run_context,
-                )
+                ))
                 .await;
                 ChildReadResult {
                     state: child_state,

@@ -569,89 +569,35 @@ fn machine_default_payload_nonempty_and_key_namespaced() {
     }
 }
 
-/// 老 super-fallback key 的机器默认 payload 一定在
-/// `all_clarify_fallback_texts_from_dict` 集合里（即使字典没显式配置）；
-/// 这是历史 DB 兼容性守底。
 #[test]
-fn all_texts_includes_legacy_super_fallback_machine_default() {
-    let empty_dict = HashMap::new();
-    let texts = all_clarify_fallback_texts_from_dict(&empty_dict);
-    let legacy_default = legacy_super_fallback_machine_payload();
-    assert!(
-        texts.iter().any(|text| text == legacy_default.trim()),
-        "legacy machine default missing from {texts:?}"
-    );
-}
-
-/// 老 super-fallback key 即使被字典 override 成自定义文案，也仍能被
-/// `is_known_clarify_fallback_text_with_dict` 识别 —— 关键的历史 DB 兼容契约。
-#[test]
-fn legacy_super_fallback_recognized_when_overridden_by_dict() {
-    let mut dict = HashMap::new();
-    dict.insert(
-        LEGACY_SUPER_FALLBACK_KEY.to_string(),
-        "我需要确认一下：你这条消息是针对哪件事情？请补充目标或上下文，我立刻继续处理。"
-            .to_string(),
-    );
-    assert!(is_known_clarify_fallback_text_with_dict(
-        &dict,
-        "我需要确认一下：你这条消息是针对哪件事情？请补充目标或上下文，我立刻继续处理。"
+fn machine_fallback_payloads_are_recognized_by_fields_not_serialization() {
+    assert!(is_machine_fallback_payload(
+        &legacy_super_fallback_machine_payload()
     ));
-}
-
-/// 任意 source 的机器默认 payload，都能被 `is_known_*` 识别回来（用空 dict 跑，
-/// 强制走 default）。这是比对端 should_skip_* 正确性的核心契约。
-#[test]
-fn machine_default_payload_per_source_is_recognized_by_is_known() {
-    let dict = HashMap::new();
-    for src in ClarifyFallbackSource::all() {
-        let default_payload = src.machine_default_payload();
-        let text = lookup_or_default(&dict, src.i18n_key(), &default_payload);
-        assert!(
-            is_known_clarify_fallback_text_with_dict(&dict, &text),
-            "source={src:?} text={text:?} not recognized by is_known"
+    for source in ClarifyFallbackSource::all() {
+        assert!(is_machine_fallback_payload(
+            &source.machine_default_payload()
+        ));
+        let reordered = format!(
+            "{{ \"reason_code\": \"{}\", \"message_key\": \"{}\" }}",
+            source.as_metric_label(),
+            source.i18n_key(),
         );
+        assert!(is_machine_fallback_payload(&reordered));
     }
 }
 
-/// 字典里配置了某 source 文案，且历史 DB 里写入的是该 source 的渲染结果
-/// （含已替换的 {context_hint} → 空），可被识别。这是新 source 上线后
-/// 比对端"无字符串硬编码"契约的正向例。
 #[test]
-fn dict_overridden_source_text_is_recognized() {
-    let mut dict = HashMap::new();
-    dict.insert(
-        ClarifyFallbackSource::SynthesisEmpty.i18n_key().to_string(),
-        "我还没能根据现有证据生成可靠最终答案。请补充缺少的目标。".to_string(),
-    );
-    assert!(is_known_clarify_fallback_text_with_dict(
-        &dict,
-        "我还没能根据现有证据生成可靠最终答案。请补充缺少的目标。"
-    ));
-}
-
-/// 空字符串 / 空白不应被识别为 fallback（避免误把"答案是空"当成 fallback 去跳过）。
-#[test]
-fn blank_text_is_not_recognized_as_fallback() {
-    let dict = HashMap::new();
-    assert!(!is_known_clarify_fallback_text_with_dict(&dict, ""));
-    assert!(!is_known_clarify_fallback_text_with_dict(&dict, "   "));
-    assert!(!is_known_clarify_fallback_text_with_dict(&dict, "\n\n"));
-}
-
-/// 普通成功答案不应被识别为 fallback（防止误伤）。
-#[test]
-fn normal_answer_text_is_not_recognized_as_fallback() {
-    let dict = HashMap::new();
-    for sample in [
-        "有，路径：agent-runtime.service",
-        "/home/guagua/agent-runtime/Cargo.toml",
+fn localized_prose_and_inconsistent_fields_do_not_control_context() {
+    for value in [
+        "",
+        "   ",
         "README.md",
-        "执行成功，已写入 3 个文件。",
+        "我还没能根据现有证据生成可靠最终答案。请补充缺少的目标。",
+        "The model is unavailable. Please try again.",
+        r#"{"message_key":"clawd.msg.fallback.llm_unavailable","reason_code":"other"}"#,
+        r#"{"message_key":"unrelated","reason_code":"llm_unavailable"}"#,
     ] {
-        assert!(
-            !is_known_clarify_fallback_text_with_dict(&dict, sample),
-            "sample={sample:?} unexpectedly recognized as fallback"
-        );
+        assert!(!is_machine_fallback_payload(value), "{value}");
     }
 }

@@ -429,7 +429,6 @@ fn route_allows_verified_terminal_answer_promotion(
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
     if route_result.delivery_required
-        || route_result.delivery_required
         || matches!(
             route_result.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken

@@ -171,9 +171,8 @@ fn terminal_answer_only_can_skip_answer_verifier(
     route_result: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
-    journal.step_results.is_empty()
-        && !route_result.output_contract.requires_content_evidence
-        && !route_result.output_contract.delivery_required
+    journal.capability_results.is_empty()
+        && !evidence_policy_requires_observation(route_result)
         && !route_result.output_contract.requests_exact_command_output()
         && route_result.output_contract.locator_kind == crate::OutputLocatorKind::None
         && route_result.output_contract.locator_hint.trim().is_empty()

@@ -1,6 +1,43 @@
 use super::*;
 
 #[tokio::test]
+async fn unrelated_mutation_does_not_erase_failed_attempts() {
+    let state = test_state();
+    let task = test_task();
+    let mut loop_state = LoopState::new();
+    loop_state
+        .failed_action_fingerprints
+        .insert("failed-network-read".into(), 1);
+    handle_skill_step_success(
+        &state,
+        &task,
+        &mut loop_state,
+        "write-other",
+        &ok_step("step_1", "write_file", "ok"),
+        1,
+        1,
+        "write_file",
+        "skill",
+        "",
+        &serde_json::json!({"path":"other.txt"}),
+        "ok",
+        crate::execution_recipe::ActionEffect::mutate(),
+        crate::execution_recipe::ValidationObservation::Passed,
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        loop_state
+            .failed_action_fingerprints
+            .get("failed-network-read"),
+        Some(&1)
+    );
+}
+
+#[tokio::test]
 async fn validation_failure_records_failed_output_and_advances_recipe_repair() {
     let state = test_state();
     let task = test_task();

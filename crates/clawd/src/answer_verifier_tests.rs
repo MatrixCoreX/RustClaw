@@ -71,7 +71,7 @@ fn unclassified_freeform_response_skips_answer_verifier() {
 }
 
 #[test]
-fn unclassified_terminal_respond_step_uses_operation_audit() {
+fn unclassified_terminal_respond_step_skips_operation_audit() {
     let mut route = route_with_mode();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
@@ -87,11 +87,15 @@ fn unclassified_terminal_respond_step_uses_operation_audit() {
             "candidate response",
         ));
 
-    assert!(should_verify_answer(&route, &journal, "candidate response"));
+    assert!(!should_verify_answer(
+        &route,
+        &journal,
+        "candidate response"
+    ));
 }
 
 #[test]
-fn planner_plain_terminal_answer_uses_operation_audit() {
+fn planner_plain_terminal_answer_skips_operation_audit() {
     let mut route = route_with_mode();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
@@ -110,7 +114,36 @@ fn planner_plain_terminal_answer_uses_operation_audit() {
             "candidate response",
         ));
 
-    assert!(should_verify_answer(&route, &journal, "candidate response"));
+    assert!(!should_verify_answer(
+        &route,
+        &journal,
+        "candidate response"
+    ));
+}
+
+#[test]
+fn terminal_answer_cannot_skip_required_structured_evidence() {
+    let mut route = route_with_mode();
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.selection.structured_field_selector = Some("current_user".into());
+    let mut journal = crate::task_journal::TaskJournal::for_task("task-fields", "ask", "inspect");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "respond",
+            "unobserved value",
+        ));
+    assert!(should_verify_answer(&route, &journal, "unobserved value"));
+    assert!(!structurally_satisfies_answer_contract(
+        &route,
+        &journal,
+        "unobserved value"
+    ));
 }
 
 #[test]

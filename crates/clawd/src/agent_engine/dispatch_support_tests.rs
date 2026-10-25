@@ -349,6 +349,32 @@ fn test_state_with_registry() -> AppState {
     test_state_with_registry_excluding(&[])
 }
 
+#[test]
+fn recovery_uses_action_effect_instead_of_whole_skill_read_allowlist() {
+    let state = test_state_with_registry();
+    let read_only = super::failure_recovery::is_read_only_skill_invocation;
+    assert!(read_only(
+        &state,
+        "task_control",
+        &serde_json::json!({"action":"get"})
+    ));
+    assert!(!read_only(
+        &state,
+        "task_control",
+        &serde_json::json!({"action":"cancel_one"})
+    ));
+    assert!(!read_only(
+        &state,
+        "task_control",
+        &serde_json::json!({"action":"resume"})
+    ));
+    assert!(!read_only(
+        &state,
+        "db_basic",
+        &serde_json::json!({"action":"sqlite_execute"})
+    ));
+}
+
 fn test_state_with_registry_excluding(disabled: &[&str]) -> AppState {
     let agents_by_id = HashMap::from([(
         DEFAULT_AGENT_ID.to_string(),

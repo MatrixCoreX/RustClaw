@@ -15,6 +15,7 @@ use super::{
     record_answer_verifier_required_evidence_rollout_attribution,
     resume_context_has_directory_lookup_failure, resume_context_path_batch_facts_are_missing_only,
     resume_failure_is_unbound_path_lookup_clarify_result,
+    route_allows_verified_terminal_answer_promotion,
     should_reinsert_execution_summaries_for_delivery,
 };
 
@@ -60,6 +61,31 @@ fn finalization_uses_machine_fallback_when_planner_contract_is_unavailable() {
 
     assert!(selected.does_not_request_exact_command_output());
     assert!(!selected.delivery_required);
+}
+
+#[test]
+fn verified_terminal_promotion_keeps_delivery_and_exact_shape_guards() {
+    let journal = crate::task_journal::TaskJournal::for_task(
+        "verified-terminal-guard",
+        "ask",
+        "return the answer",
+    );
+    let mut route = route_result();
+    route.response_shape = crate::OutputResponseShape::Free;
+    assert!(route_allows_verified_terminal_answer_promotion(
+        &route, &journal
+    ));
+
+    route.delivery_required = true;
+    assert!(!route_allows_verified_terminal_answer_promotion(
+        &route, &journal
+    ));
+
+    route.delivery_required = false;
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    assert!(!route_allows_verified_terminal_answer_promotion(
+        &route, &journal
+    ));
 }
 
 // ensure_journal_task_metrics_* tests 已搬移到 finalize/journal.rs（Stage 3.1）。

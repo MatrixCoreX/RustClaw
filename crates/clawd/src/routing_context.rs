@@ -1,5 +1,5 @@
 use rusqlite::params;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::{AppState, ClaimedTask};
 
@@ -7,9 +7,14 @@ use crate::{AppState, ClaimedTask};
 struct ExecutionAnchor {
     source_task_id: String,
     ts: String,
+    task_status: String,
+    attempt_status: String,
     capability: String,
     action: Option<String>,
     data: Option<Value>,
+    error_code: Option<String>,
+    message_key: Option<String>,
+    retryable: Option<bool>,
     evidence_count: usize,
     artifact_count: usize,
     request: String,
@@ -18,12 +23,18 @@ struct ExecutionAnchor {
 
 #[derive(Debug)]
 struct CapabilityAnchorProjection {
+    status: String,
     capability: String,
     action: Option<String>,
     data: Option<Value>,
+    error_code: Option<String>,
+    message_key: Option<String>,
+    retryable: Option<bool>,
     evidence_locators: Vec<String>,
     artifact_refs: Vec<String>,
 }
+
+type RecentExecutionRow = (String, String, String, String, String, String);
 
 fn query_recent_execution_rows(
     state: &AppState,
@@ -33,17 +44,17 @@ fn query_recent_execution_rows(
     user_key: Option<&str>,
     conversation_id: Option<&str>,
     limit: usize,
-) -> anyhow::Result<Vec<(String, String, String, String, String)>> {
+) -> anyhow::Result<Vec<RecentExecutionRow>> {
     let mut stmt = db.prepare(
         "SELECT task_id, kind, payload_json,
-                CASE
-                    WHEN status = 'succeeded' THEN COALESCE(result_json, '{}')
-                    ELSE json_object(
+                COALESCE(NULLIF(result_json, ''),
+                    json_object(
                         'status', status,
                         'text', '[prior_task_' || status || ']'
                     )
-                END,
-                updated_at
+                ),
+                updated_at,
+                status
          FROM tasks
          WHERE user_id = ?1
            AND chat_id = ?2
@@ -71,7 +82,8 @@ fn query_recent_execution_rows(
             let payload_json: String = row.get(2)?;
             let result_json: String = row.get(3)?;
             let updated_at: String = row.get(4)?;
-            Ok((task_id, kind, payload_json, result_json, updated_at))
+            let status: String = row.get(5)?;
+            Ok((task_id, kind, payload_json, result_json, updated_at, status))
         },
     )?;
     let mut out = Vec::new();
@@ -82,6 +94,8 @@ fn query_recent_execution_rows(
             // capability target cannot become the apparent latest anchor.
             // Only omit the transient assistant reply from prompt-visible data.
             row.3 = r#"{"text":"[transient_assistant_reply_omitted]"}"#.to_string();
+        } else if row.5 != "succeeded" {
+            row.3 = compact_prior_terminal_result(&row.3, &row.5);
         }
         out.push(row);
     }
@@ -105,15 +119,68 @@ fn result_json_primary_text(result_json: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn should_skip_recent_execution_row(state: &AppState, kind: &str, result_json: &str) -> bool {
+fn should_skip_recent_execution_row(_state: &AppState, kind: &str, result_json: &str) -> bool {
     if kind != "ask" {
         return false;
     }
-    // §7.2: 集合化 fallback 比对 —— 旧 super-fallback 与新 7 个 source 文案任一命中
-    // 都跳过，不让历史 fallback turn 进 recent_execution 上下文拼接。
     result_json_primary_text(result_json)
-        .map(|text| crate::fallback::is_known_clarify_fallback_text(state, &text))
+        .map(|text| crate::fallback::is_machine_fallback_payload(&text))
         .unwrap_or(false)
+}
+
+fn compact_prior_terminal_result(result_json: &str, task_status: &str) -> String {
+    let parsed = serde_json::from_str::<Value>(result_json).ok();
+    let projection = parsed.as_ref().and_then(capability_anchor_from_result);
+    let mut attempt = serde_json::Map::new();
+    if let Some(projection) = projection {
+        attempt.insert("schema_version".to_string(), json!(1));
+        attempt.insert("status".to_string(), json!(projection.status));
+        attempt.insert("capability".to_string(), json!(projection.capability));
+        if let Some(action) = projection.action {
+            attempt.insert("action".to_string(), json!(action));
+        }
+        if let Some(data) = projection.data {
+            attempt.insert("data".to_string(), data);
+        }
+        if projection.error_code.is_some()
+            || projection.message_key.is_some()
+            || projection.retryable.is_some()
+        {
+            attempt.insert(
+                "error".to_string(),
+                json!({
+                    "code": projection.error_code,
+                    "message_key": projection.message_key,
+                    "retryable": projection.retryable,
+                }),
+            );
+        }
+        if let Some(retryable) = projection.retryable {
+            attempt.insert("retry".to_string(), json!({"retryable": retryable}));
+        }
+    }
+    let text = truncate_snippet(
+        &redact_prior_private_artifact_paths(&task_result_summary(result_json)),
+        800,
+    );
+    json!({
+        "status": task_status,
+        "text": if text.is_empty() {
+            format!("[prior_task_{task_status}]")
+        } else {
+            text
+        },
+        "task_journal": {
+            "trace": {
+                "capability_results": if attempt.is_empty() {
+                    Vec::<Value>::new()
+                } else {
+                    vec![Value::Object(attempt)]
+                }
+            }
+        }
+    })
+    .to_string()
 }
 
 pub(crate) fn build_recent_execution_context(
@@ -143,7 +210,7 @@ fn load_recent_execution_rows(
     state: &AppState,
     task: &ClaimedTask,
     limit: usize,
-) -> Vec<(String, String, String, String, String)> {
+) -> Vec<RecentExecutionRow> {
     let conversation_id = crate::conversation_state::task_conversation_id(task);
     let user_key = task
         .user_key
@@ -189,10 +256,7 @@ fn load_recent_execution_rows(
     Vec::new()
 }
 
-fn render_recent_execution_context(
-    rows: &[(String, String, String, String, String)],
-    limit: usize,
-) -> String {
+fn render_recent_execution_context(rows: &[RecentExecutionRow], limit: usize) -> String {
     let mut sections = Vec::new();
     let anchor_block = render_recent_execution_anchor_context(rows);
     if anchor_block != "<none>" {
@@ -200,11 +264,15 @@ fn render_recent_execution_context(
     }
 
     let mut items = Vec::new();
-    for (task_id, kind, payload_json, result_json, updated_at) in rows.iter().take(limit) {
+    for (task_id, kind, payload_json, result_json, updated_at, status) in rows.iter().take(limit) {
         let req = task_payload_summary(kind, payload_json);
-        let result = task_result_summary(result_json);
+        let result = if status == "succeeded" {
+            task_result_summary(result_json)
+        } else {
+            format!("[prior_task_{status}]")
+        };
         items.push(format!(
-            "- source_task_id={task_id} scope=prior_task_context ts={updated_at} kind={kind} request={} result={}",
+            "- source_task_id={task_id} scope=prior_task_context ts={updated_at} kind={kind} terminal_status={status} request={} result={}",
             truncate_snippet(&req, 220),
             truncate_snippet(&result, 320)
         ));
@@ -220,32 +288,39 @@ fn render_recent_execution_context(
     }
 }
 
-fn render_recent_execution_anchor_context(
-    rows: &[(String, String, String, String, String)],
-) -> String {
-    let Some((task_id, kind, payload_json, result_json, updated_at)) = rows.first() else {
+fn render_recent_execution_anchor_context(rows: &[RecentExecutionRow]) -> String {
+    let Some((task_id, kind, payload_json, result_json, updated_at, status)) = rows.first() else {
         return "<none>".to_string();
     };
     let Some(anchor) =
-        extract_execution_anchor(task_id, kind, payload_json, result_json, updated_at)
+        extract_execution_anchor(task_id, kind, payload_json, result_json, updated_at, status)
     else {
         return "<none>".to_string();
     };
 
+    let completed_success = anchor.task_status == "succeeded" && anchor.attempt_status == "ok";
     let mut lines = vec![
         format!("- source_task_id={}", anchor.source_task_id),
         "- scope=prior_task_context".to_string(),
-        format!("- prior_succeeded_ts={}", anchor.ts),
+        format!("- prior_task_status={}", anchor.task_status),
+        format!("- prior_attempt_status={}", anchor.attempt_status),
+        format!("- prior_attempted_ts={}", anchor.ts),
         format!("- prior_capability={}", anchor.capability),
     ];
     if let Some(action) = anchor.action.as_deref() {
         lines.push(format!("- prior_action={action}"));
     }
     if let Some(data) = anchor.data.as_ref() {
-        lines.push(format!(
-            "- prior_capability_summary={}",
-            truncate_snippet(&data.to_string(), 320)
-        ));
+        lines.push(format!("- prior_capability_summary={}", data));
+    }
+    if let Some(error_code) = anchor.error_code.as_deref() {
+        lines.push(format!("- prior_error_code={error_code}"));
+    }
+    if let Some(message_key) = anchor.message_key.as_deref() {
+        lines.push(format!("- prior_message_key={message_key}"));
+    }
+    if let Some(retryable) = anchor.retryable {
+        lines.push(format!("- prior_retryable={retryable}"));
     }
     if anchor.evidence_count > 0 {
         lines.push(format!("- prior_evidence_count={}", anchor.evidence_count));
@@ -255,16 +330,23 @@ fn render_recent_execution_anchor_context(
     }
     lines.push(format!(
         "- prior_request={}",
-        truncate_snippet(&anchor.request, 180)
+        truncate_snippet(&anchor.request, 400)
     ));
     lines.push(format!(
         "- prior_result={}",
         truncate_snippet(&anchor.result, 220)
     ));
-    lines.push(
-        "- anchor_rule=This is prior-task background, never current-task execution evidence. It may help interpret a genuine follow-up, but it cannot satisfy a new execution request. Do not use prior-task paths or artifacts unless the current task supplies an authorized attachment or canonical artifact binding.".to_string(),
-    );
-    format!("### PRIOR_TASK_EXECUTION_ANCHOR\n{}", lines.join("\n"))
+    lines.push(if completed_success {
+        "- anchor_rule=prior_task_background_only".to_string()
+    } else {
+        "- anchor_rule=prior_attempt_semantic_delta".to_string()
+    });
+    let heading = if completed_success {
+        "PRIOR_TASK_EXECUTION_ANCHOR"
+    } else {
+        "PRIOR_TASK_ATTEMPT_ANCHOR"
+    };
+    format!("### {heading}\n{}", lines.join("\n"))
 }
 
 fn extract_execution_anchor(
@@ -273,6 +355,7 @@ fn extract_execution_anchor(
     payload_json: &str,
     result_json: &str,
     updated_at: &str,
+    task_status: &str,
 ) -> Option<ExecutionAnchor> {
     let request = task_payload_summary(kind, payload_json);
     let result = task_result_summary(result_json);
@@ -281,14 +364,21 @@ fn extract_execution_anchor(
     let projection = result_value
         .as_ref()
         .and_then(capability_anchor_from_result)
-        .or_else(|| capability_anchor_from_run_skill_payload(kind, payload.as_ref()))?;
+        .or_else(|| {
+            capability_anchor_from_run_skill_payload(kind, payload.as_ref(), task_status)
+        })?;
 
     Some(ExecutionAnchor {
         source_task_id: source_task_id.to_string(),
         ts: updated_at.to_string(),
+        task_status: machine_ref(task_status).unwrap_or("unknown").to_string(),
+        attempt_status: projection.status,
         capability: projection.capability,
         action: projection.action,
         data: projection.data,
+        error_code: projection.error_code,
+        message_key: projection.message_key,
+        retryable: projection.retryable,
         evidence_count: projection.evidence_locators.len(),
         artifact_count: projection.artifact_refs.len(),
         request,
@@ -302,11 +392,28 @@ fn capability_anchor_from_result(result: &Value) -> Option<CapabilityAnchorProje
         "/final_result_json/task_journal/trace/capability_results",
         "/result/task_journal/trace/capability_results",
     ];
-    POINTERS
+    let results = POINTERS
         .iter()
-        .filter_map(|pointer| result.pointer(pointer).and_then(Value::as_array))
-        .flat_map(|items| items.iter().rev())
-        .find_map(capability_anchor_from_envelope)
+        .find_map(|pointer| result.pointer(pointer).and_then(Value::as_array))?;
+    let mut projection = results
+        .iter()
+        .rev()
+        .find_map(capability_anchor_from_envelope)?;
+    let prior_steps = results.iter().rev().skip(1).take(4).filter_map(|value| {
+        let capability = machine_ref(value.get("capability")?.as_str()?)?;
+        if capability_is_runtime_control(capability) { return None; }
+        Some(json!({
+            "capability": capability,
+            "status": machine_ref(value.get("status")?.as_str()?)?,
+            "attempted_effect": value.get("effect").and_then(Value::as_str).and_then(machine_ref),
+        }))
+    }).collect::<Vec<_>>();
+    if !prior_steps.is_empty() {
+        let data = projection.data.get_or_insert_with(|| json!({}));
+        data.as_object_mut()?
+            .insert("prior_steps".into(), json!(prior_steps));
+    }
+    Some(projection)
 }
 
 fn capability_is_runtime_control(capability: &str) -> bool {
@@ -314,9 +421,7 @@ fn capability_is_runtime_control(capability: &str) -> bool {
 }
 
 fn capability_anchor_from_envelope(value: &Value) -> Option<CapabilityAnchorProjection> {
-    if value.get("status").and_then(Value::as_str) != Some("ok") {
-        return None;
-    }
+    let status = machine_ref(value.get("status")?.as_str()?)?.to_string();
     let capability = machine_ref(value.get("capability")?.as_str()?)?.to_string();
     if capability_is_runtime_control(&capability) {
         return None;
@@ -326,11 +431,32 @@ fn capability_anchor_from_envelope(value: &Value) -> Option<CapabilityAnchorProj
         .and_then(Value::as_str)
         .and_then(machine_ref)
         .map(ToString::to_string);
-    let data = value
-        .get("data")
-        .filter(|data| !data.is_null() && !data.as_object().is_some_and(|map| map.is_empty()))
-        .map(redacted_context_value)
-        .map(strip_prior_task_locators);
+    let mut context_data = match value.get("data").and_then(bounded_prior_context_value) {
+        Some(Value::Object(fields)) => fields,
+        Some(data) => serde_json::Map::from_iter([("observation".into(), data)]),
+        None => serde_json::Map::new(),
+    };
+    if let Some(args) = value
+        .pointer("/provenance/continuation_args")
+        .and_then(bounded_prior_context_value)
+    {
+        context_data.insert("prior_args".into(), args);
+    }
+    let data = (!context_data.is_empty()).then_some(Value::Object(context_data));
+    let error_code = value
+        .pointer("/error/code")
+        .and_then(Value::as_str)
+        .and_then(machine_ref)
+        .map(ToString::to_string);
+    let message_key = value
+        .pointer("/error/message_key")
+        .and_then(Value::as_str)
+        .and_then(machine_ref)
+        .map(ToString::to_string);
+    let retryable = value
+        .pointer("/retry/retryable")
+        .and_then(Value::as_bool)
+        .or_else(|| value.pointer("/error/retryable").and_then(Value::as_bool));
     let evidence_locators = value
         .get("evidence")
         .and_then(Value::as_array)
@@ -352,9 +478,13 @@ fn capability_anchor_from_envelope(value: &Value) -> Option<CapabilityAnchorProj
         .filter_map(redacted_reference)
         .collect();
     Some(CapabilityAnchorProjection {
+        status,
         capability,
         action,
         data,
+        error_code,
+        message_key,
+        retryable,
         evidence_locators,
         artifact_refs,
     })
@@ -363,6 +493,7 @@ fn capability_anchor_from_envelope(value: &Value) -> Option<CapabilityAnchorProj
 fn capability_anchor_from_run_skill_payload(
     kind: &str,
     payload: Option<&Value>,
+    task_status: &str,
 ) -> Option<CapabilityAnchorProjection> {
     if kind != "run_skill" {
         return None;
@@ -380,9 +511,17 @@ fn capability_anchor_from_run_skill_payload(
         .and_then(machine_ref)
         .map(ToString::to_string);
     Some(CapabilityAnchorProjection {
+        status: if task_status == "succeeded" {
+            "ok".to_string()
+        } else {
+            "error".to_string()
+        },
         capability,
         action,
         data: args,
+        error_code: None,
+        message_key: None,
+        retryable: None,
         evidence_locators: Vec::new(),
         artifact_refs: Vec::new(),
     })
@@ -406,6 +545,53 @@ fn redacted_reference(value: &str) -> Option<String> {
 fn redacted_context_value(value: &Value) -> Value {
     let redacted = crate::visible_text::sanitize_user_visible_text(&value.to_string());
     serde_json::from_str(&redacted).unwrap_or(Value::String(redacted))
+}
+
+pub(crate) fn bounded_prior_context_value(value: &Value) -> Option<Value> {
+    fn project(value: &Value, depth: usize, budget: &mut usize) -> Option<Value> {
+        if depth > 5 || *budget < 8 {
+            return None;
+        }
+        let projected = match value {
+            Value::Object(fields) => Value::Object(
+                fields
+                    .iter()
+                    .take(32)
+                    .filter(|(key, _)| key.len() <= 64 && !is_prior_task_locator_key(key))
+                    .filter_map(|(key, value)| {
+                        *budget = budget.saturating_sub(key.len() + 4);
+                        project(value, depth + 1, budget).map(|value| (key.clone(), value))
+                    })
+                    .collect(),
+            ),
+            Value::Array(items) => Value::Array(
+                items
+                    .iter()
+                    .take(16)
+                    .filter_map(|value| project(value, depth + 1, budget))
+                    .collect(),
+            ),
+            Value::String(text) if text.len() > 512 || is_private_artifact_locator(text) => {
+                return None
+            }
+            other => {
+                let size = other.to_string().len();
+                if size > *budget {
+                    return None;
+                }
+                *budget -= size;
+                other.clone()
+            }
+        };
+        match &projected {
+            Value::Null => None,
+            Value::Object(fields) if fields.is_empty() => None,
+            Value::Array(items) if items.is_empty() => None,
+            _ => Some(projected),
+        }
+    }
+    let safe = strip_prior_task_locators(redacted_context_value(value));
+    project(&safe, 0, &mut 2048)
 }
 
 fn strip_prior_task_locators(value: Value) -> Value {
@@ -432,6 +618,20 @@ fn is_prior_task_locator_key(key: &str) -> bool {
     matches!(
         key.as_str(),
         "path"
+            | "credentials"
+            | "authorization"
+            | "permissions"
+            | "confirmation"
+            | "confirmations"
+            | "policy_grant"
+            | "grant"
+            | "cookie"
+            | "cookies"
+            | "password"
+            | "secret"
+            | "api_key"
+            | "access_token"
+            | "private_key"
             | "paths"
             | "uri"
             | "url"
@@ -445,6 +645,10 @@ fn is_prior_task_locator_key(key: &str) -> bool {
             | "fallback_input_value"
             | "fallback_input_value_artifact_ref"
     ) || key.ends_with("_path")
+        || key.ends_with("_token")
+        || key.ends_with("_secret")
+        || key.ends_with("_password")
+        || key.ends_with("_key")
         || key.ends_with("_paths")
         || key.ends_with("_uri")
         || key.ends_with("_url")
@@ -503,7 +707,9 @@ fn task_result_summary(result_json: &str) -> String {
         .get("text")
         .and_then(|x| x.as_str())
         .or_else(|| v.as_str())
-        .unwrap_or(result_json)
+        .or_else(|| v.get("messages")?.as_array()?.first()?.as_str())
+        .or_else(|| v.pointer("/task_journal/summary/final_answer")?.as_str())
+        .unwrap_or("")
         .to_string();
     sanitize_result_summary(&text)
 }

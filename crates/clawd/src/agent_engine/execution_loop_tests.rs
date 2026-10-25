@@ -2,12 +2,11 @@ use super::{
     action_counts_as_tool_call, action_effect_is_repeatable_for_active_recipe,
     action_observation_boundary, active_tool_event_payload, capture_round_progress_snapshot,
     check_repeat_action_guard, completed_terminal_termination_allows_replay,
-    finalize_execute_round_outcome, prior_structured_observation_satisfies_read_only_action,
-    record_deferred_plan_tail, registry_allows_completed_result_reuse,
-    registry_allows_fresh_non_idempotent_repeat, registry_allows_repeated_idempotent_action,
-    safe_command_preview, successful_structured_observation_satisfies_selector,
-    terminal_poll_after_termination_is_fresh, terminal_synthesis_can_skip_remaining_actions,
-    waiting_task_allows_repeated_observation,
+    finalize_execute_round_outcome, record_deferred_plan_tail,
+    registry_allows_completed_result_reuse, registry_allows_fresh_non_idempotent_repeat,
+    registry_allows_repeated_idempotent_action, safe_command_preview,
+    successful_structured_observation_satisfies_selector, terminal_poll_after_termination_is_fresh,
+    terminal_synthesis_can_skip_remaining_actions, waiting_task_allows_repeated_observation,
 };
 use crate::agent_engine::action_fingerprint_for_policy;
 use crate::agent_engine::support::{
@@ -518,8 +517,10 @@ fn incomplete_structured_observation_keeps_terminal_discussion_actions() {
 }
 
 #[test]
-fn completed_structured_observation_skips_later_read_only_capability() {
+fn completed_structured_observation_does_not_skip_a_different_target() {
     let state = state_with_registry(structured_observation_registry_fixture(), &["preview_tool"]);
+    let task = task_fixture("task-distinct-observation");
+    let policy = test_policy(true);
     let mut loop_state = super::LoopState::new();
     loop_state.output_contract = Some(crate::IntentOutputContract {
         response_shape: crate::OutputResponseShape::Strict,
@@ -541,20 +542,37 @@ fn completed_structured_observation_skips_later_read_only_capability() {
             finished_at: 0,
         });
 
-    assert!(prior_structured_observation_satisfies_read_only_action(
-        &state,
-        None,
-        &loop_state,
-        &crate::AgentAction::CallCapability {
-            capability: "preview.inspect".to_string(),
-            args: serde_json::json!({}),
-        },
-    ));
+    let previous = crate::AgentAction::CallCapability {
+        capability: "preview.inspect".to_string(),
+        args: serde_json::json!({"target": "first"}),
+    };
+    let next = crate::AgentAction::CallCapability {
+        capability: "preview.inspect".to_string(),
+        args: serde_json::json!({"target": "second"}),
+    };
+    loop_state
+        .successful_action_fingerprints
+        .insert(action_fingerprint_for_policy(&state, &policy, &previous), 1);
+    let fingerprint = action_fingerprint_for_policy(&state, &policy, &next);
+    assert_eq!(
+        check_repeat_action_guard(
+            &state,
+            &task,
+            &mut loop_state,
+            &policy,
+            &next,
+            &fingerprint,
+            2,
+        ),
+        None
+    );
 }
 
 #[test]
 fn completed_structured_observation_does_not_skip_mutating_capability() {
     let state = state_with_registry(structured_observation_registry_fixture(), &["preview_tool"]);
+    let task = task_fixture("task-distinct-effect");
+    let policy = test_policy(true);
     let mut loop_state = super::LoopState::new();
     loop_state.output_contract = Some(crate::IntentOutputContract {
         response_shape: crate::OutputResponseShape::Strict,
@@ -576,15 +594,23 @@ fn completed_structured_observation_does_not_skip_mutating_capability() {
             finished_at: 0,
         });
 
-    assert!(!prior_structured_observation_satisfies_read_only_action(
-        &state,
-        None,
-        &loop_state,
-        &crate::AgentAction::CallCapability {
-            capability: "preview.apply".to_string(),
-            args: serde_json::json!({}),
-        },
-    ));
+    let action = crate::AgentAction::CallCapability {
+        capability: "preview.apply".to_string(),
+        args: serde_json::json!({}),
+    };
+    let fingerprint = action_fingerprint_for_policy(&state, &policy, &action);
+    assert_eq!(
+        check_repeat_action_guard(
+            &state,
+            &task,
+            &mut loop_state,
+            &policy,
+            &action,
+            &fingerprint,
+            2,
+        ),
+        None
+    );
 }
 
 #[test]

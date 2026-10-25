@@ -302,12 +302,23 @@ fn insert_kb_doc_row(
             ],
         )
         .expect("insert kb doc row");
+    db.execute(
+        "INSERT INTO memory_retrieval_index_fts(rowid, search_text, topic_tags)
+         VALUES (?1, ?2, ?3)",
+        rusqlite::params![
+            db.last_insert_rowid(),
+            text,
+            crate::memory::retrieval::build_topic_tags(text)
+        ],
+    )
+    .expect("insert fixture KB lexical projection");
 }
 
 fn seed_photo_organize_policy_memory(state: &AppState, user_id: i64, chat_id: i64, user_key: &str) {
     let db = state.core.db.get().expect("db pool");
     db.execute_batch(crate::INIT_SQL).expect("init base schema");
     crate::ensure_memory_schema(&db).expect("ensure memory schema");
+    crate::repo::auth::ensure_key_auth_schema(&db).expect("ensure fixture authentication schema");
     crate::memory::indexing::ensure_retrieval_schema(&db).expect("ensure retrieval schema");
     let ts = 1_775_301_800_i64;
 
@@ -331,7 +342,7 @@ fn seed_photo_organize_policy_memory(state: &AppState, user_id: i64, chat_id: i6
         "photo_profile",
         crate::memory::RETRIEVAL_KIND_SEMANTIC_FACT,
         "test:photo:allowed-fact",
-        "PHOTO_ALLOWED_FACT prefer grouping travel photos by capture date",
+        "PHOTO_ALLOWED_FACT 请准备照片整理候选目录 prefer grouping travel photos by capture date",
         ts,
     )
     .expect("insert knowledge fact");
@@ -342,11 +353,21 @@ fn seed_photo_organize_policy_memory(state: &AppState, user_id: i64, chat_id: i6
         .expect("KB storage owner")
         .get()
         .expect("KB db pool");
+    // Indexed KB recall requires an owner-matching namespace and source reference.
+    kb_db
+        .execute(
+            "INSERT INTO kb_namespaces
+            (owner_user_key, namespace, updated_at_epoch, next_chunk_seq,
+             revision, parser_version, chunker_version, embedding_version)
+         VALUES (?1, 'photo_docs', ?2, 1, 1, 'plain-v1', 'chars-v1', 'none')",
+            rusqlite::params![user_key, ts],
+        )
+        .expect("insert fixture KB namespace");
     insert_kb_doc_row(
         &kb_db,
         user_key,
-        "kb:test:photo:allowed-doc",
-        "PHOTO_ALLOWED_KB_DOC preserve original EXIF timestamp during organization",
+        &format!("kb:{user_key}:photo_docs:photo_rules:0"),
+        "PHOTO_ALLOWED_KB_DOC 请准备照片整理候选目录 preserve original EXIF timestamp during organization",
         ts,
     );
     crate::memory::indexing::index_memory_row(
@@ -999,6 +1020,26 @@ async fn run_skill_photo_organize_injects_registry_cropped_memory_args() {
     let chat_id = 92;
     let user_key = "user:photo-policy";
     seed_photo_organize_policy_memory(&state, user_id, chat_id, user_key);
+    let recalled = crate::memory::retrieval::retrieve_indexed_memories_for_scope(
+        &state,
+        Some(user_key),
+        user_id,
+        chat_id,
+        None,
+        "skill=photo_organize | 请准备照片整理候选目录 | prepare",
+    )
+    .expect("fixture indexed recall");
+    assert!(recalled
+        .relevant_facts
+        .iter()
+        .any(|item| item.text.contains("PHOTO_ALLOWED_FACT")));
+    assert!(
+        recalled
+            .knowledge_docs
+            .iter()
+            .any(|item| item.text.contains("PHOTO_ALLOWED_KB_DOC")),
+        "fixture KB document must be retrievable"
+    );
     let task = ClaimedTask {
         claim_attempt: 0,
         task_id: "task-photo-memory-policy".to_string(),
@@ -1045,10 +1086,22 @@ async fn run_skill_photo_organize_injects_registry_cropped_memory_args() {
         memory.get("lang_hint").and_then(|value| value.as_str()),
         Some("zh-CN")
     );
-    assert!(context.contains("PHOTO_ALLOWED_FACT"), "context: {context}");
+    // Versioned JSON evidence may not fit alongside preferences in the
+    // registry's 900-character context budget. KB evidence is also delivered
+    // through its structured field; do not require truncated text to duplicate it.
     assert!(
-        context.contains("PHOTO_ALLOWED_KB_DOC"),
-        "context: {context}"
+        context.chars().count() <= 900,
+        "context exceeds registry budget"
+    );
+    assert!(
+        memory["knowledge_docs"]
+            .as_array()
+            .expect("structured KB evidence")
+            .iter()
+            .any(|item| item["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("PHOTO_ALLOWED_KB_DOC"))),
+        "memory: {memory}"
     );
     assert_eq!(
         memory

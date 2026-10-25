@@ -39,10 +39,10 @@ pub(crate) fn is_transient_assistant_context_text_basic(text: &str) -> bool {
         || crate::finalize::is_execution_summary_message(trimmed)
 }
 
-pub(super) fn is_transient_assistant_context_text(state: &AppState, text: &str) -> bool {
+pub(super) fn is_transient_assistant_context_text(_state: &AppState, text: &str) -> bool {
     let trimmed = strip_llm_reply_memory_prefix(text);
     is_transient_assistant_context_text_basic(trimmed)
-        || crate::fallback::is_known_clarify_fallback_text(state, trimmed)
+        || crate::fallback::is_machine_fallback_payload(trimmed)
 }
 
 fn assistant_context_text_for_recall<'a>(state: &AppState, text: &'a str) -> Option<&'a str> {
@@ -499,7 +499,7 @@ pub(super) fn classify_assistant_context_reply_kind(
 }
 
 fn extract_last_turn_assistant_text_from_task(
-    state: &AppState,
+    _state: &AppState,
     status: &str,
     result_json: Option<&str>,
     error_text: Option<&str>,
@@ -518,7 +518,7 @@ fn extract_last_turn_assistant_text_from_task(
     };
     let assistant_text = assistant_text.unwrap_or_else(|| result_json.to_string());
     match classify_assistant_context_reply_kind(parsed.as_ref(), &assistant_text, |t| {
-        crate::fallback::is_known_clarify_fallback_text(state, t)
+        crate::fallback::is_machine_fallback_payload(t)
     }) {
         AssistantContextReplyKind::Normal => Some(assistant_text),
         AssistantContextReplyKind::ClarifyPlaceholder => {

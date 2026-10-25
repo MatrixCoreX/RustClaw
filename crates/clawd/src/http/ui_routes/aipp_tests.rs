@@ -63,6 +63,35 @@ fn task_activity_db() -> rusqlite::Connection {
     db
 }
 
+#[test]
+fn task_activity_count_uses_event_membership_not_a_full_task_scan() {
+    let db = task_activity_db();
+    let sql =
+        format!("EXPLAIN QUERY PLAN SELECT COUNT(*) FROM tasks {AIPP_TASK_ACTIVITY_MATCH_SQL}");
+    let mut statement = db.prepare(&sql).unwrap();
+    let plan = statement
+        .query_map(
+            rusqlite::named_params! {
+                ":skill_name": "fixture", ":channel": Option::<&str>::None,
+                ":status": Option::<&str>::None, ":communication_only": 0,
+                ":needle": Option::<&str>::None, ":hidden_json": "[]",
+                ":cleared_through_event_ms": 0,
+            },
+            |row| row.get::<_, String>(3),
+        )
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert!(
+        !plan.iter().any(|line| line.starts_with("SCAN tasks")),
+        "{plan:?}"
+    );
+    assert!(
+        !plan.iter().any(|line| line.contains("CORRELATED")),
+        "{plan:?}"
+    );
+}
+
 fn insert_task_activity(
     db: &rusqlite::Connection,
     task_id: &str,
@@ -1073,6 +1102,7 @@ fn sandbox_bundle_headers_confine_code_and_browser_features() {
         Some("nosniff")
     );
 }
+
 
 #[test]
 fn personal_activity_excludes_distributed_work_but_keeps_auditable_tasks() {

@@ -453,9 +453,6 @@ async fn handle_skill_step_success(
             .successful_action_fingerprints
             .entry(fingerprint.to_string())
             .or_insert(0) += 1;
-        if action_effect.mutates {
-            loop_state.failed_action_fingerprints.clear();
-        }
     } else {
         *loop_state
             .failed_action_fingerprints
@@ -1591,6 +1588,10 @@ pub(super) async fn execute_prepared_skill_action(
     if let Some(provenance) = capability_result.provenance.as_object_mut() {
         provenance.insert("task_id".to_string(), json!(task.task_id));
         provenance.insert("action_fingerprint".to_string(), json!(fingerprint));
+        if let Some(args) = crate::routing_context::bounded_prior_context_value(classification_args)
+        {
+            provenance.insert("continuation_args".to_string(), args);
+        }
         if super::workspace_action_revision::local_primitive_path(
             state,
             &crate::AgentAction::CallSkill {

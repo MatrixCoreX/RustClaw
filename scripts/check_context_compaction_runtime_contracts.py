@@ -4,11 +4,20 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+CONTEXT_PROJECTION_TEMPLATES = {
+    "prompts/layers/overlays/context_runtime_context.md": "__RUNTIME_CONTEXT__",
+    "prompts/layers/overlays/context_active_task.md": "__ACTIVE_TASK_CONTEXT__",
+    "prompts/layers/overlays/context_active_execution_anchor.md": "__ACTIVE_EXECUTION_ANCHOR__",
+    "prompts/layers/overlays/context_session_aliases.md": "__SESSION_ALIAS_BINDINGS__",
+    "prompts/layers/overlays/context_recent_execution.md": "__RECENT_EXECUTION_CONTEXT__",
+}
 
 REQUIRED_FILE_TOKENS = {
     "crates/clawd/src/agent_engine/context_compaction.rs": (
@@ -180,6 +189,46 @@ REQUIRED_FILE_TOKENS = {
 }
 
 
+def parse_usize_constant(source: str, name: str) -> int | None:
+    match = re.search(
+        rf"\bconst\s+{re.escape(name)}\s*:\s*usize\s*=\s*([0-9_]+)\s*;",
+        source,
+    )
+    if match is None:
+        return None
+    return int(match.group(1).replace("_", ""))
+
+
+def prompt_budget_findings(
+    relative: str,
+    template: str,
+    placeholder: str,
+    template_max_chars: int,
+    overhead_max_chars: int,
+) -> list[str]:
+    findings: list[str] = []
+    placeholder_count = template.count(placeholder)
+    if placeholder_count != 1:
+        findings.append(
+            f"context_prompt_placeholder_count_invalid:{relative}:"
+            f"expected=1:actual={placeholder_count}"
+        )
+    template_chars = len(template)
+    if template_chars > template_max_chars:
+        findings.append(
+            f"context_prompt_template_budget_exceeded:{relative}:"
+            f"actual={template_chars}:limit={template_max_chars}"
+        )
+    if placeholder_count == 1:
+        overhead_chars = template_chars - len(placeholder)
+        if overhead_chars > overhead_max_chars:
+            findings.append(
+                f"context_prompt_overhead_budget_exceeded:{relative}:"
+                f"actual={overhead_chars}:limit={overhead_max_chars}"
+            )
+    return findings
+
+
 def evaluate_texts(texts: dict[str, str]) -> list[str]:
     findings: list[str] = []
     for relative, tokens in REQUIRED_FILE_TOKENS.items():
@@ -230,6 +279,31 @@ def evaluate_texts(texts: dict[str, str]) -> list[str]:
     for marker in embedded_rules:
         if marker in context_builder:
             findings.append(f"embedded_context_continuity_rule_present:{marker}")
+
+    template_max_chars = parse_usize_constant(
+        context_builder, "CONTEXT_PROMPT_TEMPLATE_MAX_CHARS"
+    )
+    overhead_max_chars = parse_usize_constant(
+        context_builder, "CONTEXT_PROMPT_OVERHEAD_MAX_CHARS"
+    )
+    if template_max_chars is None:
+        findings.append("context_prompt_template_budget_constant_missing")
+    if overhead_max_chars is None:
+        findings.append("context_prompt_overhead_budget_constant_missing")
+    if template_max_chars is not None and overhead_max_chars is not None:
+        for relative, placeholder in CONTEXT_PROJECTION_TEMPLATES.items():
+            template = texts.get(relative)
+            if template is None:
+                continue
+            findings.extend(
+                prompt_budget_findings(
+                    relative,
+                    template,
+                    placeholder,
+                    template_max_chars,
+                    overhead_max_chars,
+                )
+            )
     return findings
 
 
@@ -249,6 +323,13 @@ def run_self_test() -> int:
     }
     worker_path = "crates/clawd/src/worker/ask_execution_context.rs"
     valid[worker_path] = "\n".join(REQUIRED_FILE_TOKENS[worker_path])
+    context_builder_path = "crates/clawd/src/task_context_builder.rs"
+    valid[context_builder_path] += "\n" + "\n".join(
+        (
+            "const CONTEXT_PROMPT_TEMPLATE_MAX_CHARS: usize = 2_000;",
+            "const CONTEXT_PROMPT_OVERHEAD_MAX_CHARS: usize = 1_800;",
+        )
+    )
     assert not evaluate_texts(valid)
 
     broken = dict(valid)
@@ -258,6 +339,52 @@ def run_self_test() -> int:
     findings = evaluate_texts(broken)
     assert any("missing_token" in finding for finding in findings)
     assert "context_compaction_runtime_order_invalid" in findings
+
+    synthetic_placeholder = "P" * 200
+    exact_budget_template = "x" * 1_800 + synthetic_placeholder
+    assert not prompt_budget_findings(
+        "synthetic.md",
+        exact_budget_template,
+        synthetic_placeholder,
+        2_000,
+        1_800,
+    )
+    assert any(
+        finding.startswith("context_prompt_template_budget_exceeded:")
+        for finding in prompt_budget_findings(
+            "synthetic.md",
+            exact_budget_template + "x",
+            synthetic_placeholder,
+            2_000,
+            1_800,
+        )
+    )
+    assert any(
+        finding.startswith("context_prompt_overhead_budget_exceeded:")
+        for finding in prompt_budget_findings(
+            "synthetic.md",
+            "x" * 1_801 + synthetic_placeholder,
+            synthetic_placeholder,
+            2_001,
+            1_800,
+        )
+    )
+    assert any(
+        finding.startswith("context_prompt_placeholder_count_invalid:")
+        for finding in prompt_budget_findings(
+            "synthetic.md", "no slot", synthetic_placeholder, 2_000, 1_800
+        )
+    )
+    assert any(
+        finding.startswith("context_prompt_placeholder_count_invalid:")
+        for finding in prompt_budget_findings(
+            "synthetic.md",
+            synthetic_placeholder * 2,
+            synthetic_placeholder,
+            2_000,
+            1_800,
+        )
+    )
     print("CONTEXT_COMPACTION_RUNTIME_CONTRACT_SELF_TEST ok")
     return 0
 

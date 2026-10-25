@@ -8,14 +8,8 @@
 //! 2. 文案矩阵化：每个 source 一条 i18n key，告诉用户"我在哪卡住、你能怎么帮我"；
 //! 3. 通过 `tracing::info!` 事件 `clarify_fallback_emitted` 上报 source 与 task_id，
 //!    后续 `inspect_task.sh` 与未来 metric 都按 `fallback_source` label 聚合；
-//! 4. 比对端（finalize/task / memory / routing_context 用以跳过历史 fallback turn）
-//!    走 [`is_known_clarify_fallback_text`] 集合判定，不再依赖单条字符串相等。
-//!
-//! 兼容性：旧 key `clawd.msg.clarify_question_fallback` 在
-//! [`all_clarify_fallback_texts`] 集合里保留，确保历史 DB 里的旧 fallback 文案
-//! 仍能被识别为 placeholder 跳过；新写入一律走新 source。
-
-use std::collections::HashMap;
+//! 4. Context consumers recognize structured machine fallback payloads only.
+//!    Localized prose must never control memory or execution-context inclusion.
 
 use crate::AppState;
 use serde::Deserialize;
@@ -870,6 +864,7 @@ impl ClarifyFallbackSource {
 /// 旧的"超级 fallback" i18n key，保留用于历史 DB 兼容比对（写入端不再使用）。
 pub(crate) const LEGACY_SUPER_FALLBACK_KEY: &str = "clawd.msg.clarify_question_fallback";
 
+#[cfg(test)]
 pub(crate) fn legacy_super_fallback_machine_payload() -> String {
     json!({
         "message_key": LEGACY_SUPER_FALLBACK_KEY,
@@ -936,66 +931,16 @@ pub(crate) fn fallback_prefers_english_for_language_hint(
     }
 }
 
-/// 底层 helper：直接接受 `i18n_dict`，不依赖 `AppState`，便于单测。
-pub(crate) fn all_clarify_fallback_texts_from_dict(dict: &HashMap<String, String>) -> Vec<String> {
-    let mut out = Vec::new();
-    for src in ClarifyFallbackSource::all() {
-        let default_payload = src.machine_default_payload();
-        push_fallback_text_variants(
-            &mut out,
-            &lookup_or_default(dict, src.i18n_key(), &default_payload),
-        );
-        push_fallback_text_variants(&mut out, &default_payload);
-    }
-    let legacy_default = legacy_super_fallback_machine_payload();
-    push_fallback_text_variants(
-        &mut out,
-        &lookup_or_default(dict, LEGACY_SUPER_FALLBACK_KEY, &legacy_default),
-    );
-    push_fallback_text_variants(&mut out, &legacy_default);
-    out.sort();
-    out.dedup();
-    out
-}
-
-fn push_fallback_text_variants(out: &mut Vec<String>, text: &str) {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return;
-    }
-    out.push(trimmed.to_string());
-    let context_empty = trimmed.replace("{context_hint}", "").trim().to_string();
-    if !context_empty.is_empty() {
-        out.push(context_empty);
-    }
-}
-
-/// 判定一段文本是不是已知的 clarify-fallback 占位符。
-/// 用于跳过这类回答，不污染 recent context / memory 拼接。
-pub(crate) fn is_known_clarify_fallback_text(state: &AppState, text: &str) -> bool {
-    is_known_clarify_fallback_text_with_dict(&state.policy.schedule.i18n_dict, text)
-}
-
-/// 底层 helper：直接接受 `i18n_dict`，不依赖 `AppState`，便于单测。
-pub(crate) fn is_known_clarify_fallback_text_with_dict(
-    dict: &HashMap<String, String>,
-    text: &str,
-) -> bool {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
+pub(crate) fn is_machine_fallback_payload(text: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text.trim()) else {
         return false;
-    }
-    all_clarify_fallback_texts_from_dict(dict)
-        .iter()
-        .any(|known| known == trimmed)
-}
-
-fn lookup_or_default(dict: &HashMap<String, String>, key: &str, default_text: &str) -> String {
-    dict.get(key)
-        .cloned()
-        .unwrap_or_else(|| default_text.to_string())
-        .trim()
-        .to_string()
+    };
+    let key = value.get("message_key").and_then(serde_json::Value::as_str);
+    let reason = value.get("reason_code").and_then(serde_json::Value::as_str);
+    (key == Some(LEGACY_SUPER_FALLBACK_KEY) && reason == Some("legacy_super_fallback"))
+        || ClarifyFallbackSource::all().iter().any(|source| {
+            key == Some(source.i18n_key()) && reason == Some(source.as_metric_label())
+        })
 }
 
 #[cfg(test)]

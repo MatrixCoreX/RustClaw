@@ -83,6 +83,113 @@ fn ordinary_no_io_turn_still_skips_unnecessary_verification() {
 }
 
 #[test]
+fn terminal_respond_step_skips_unnecessary_verification() {
+    let mut journal = TaskJournal::for_task("loop-respond", "ask", "summarize the prior turn");
+    journal.step_results.push(TaskJournalStepTrace::ok(
+        "step_1",
+        "respond",
+        "The prior turn did not complete.",
+    ));
+    let reply = AskReply::non_llm("The prior turn did not complete.".to_string())
+        .with_task_journal(journal);
+    let contract =
+        answer_contract_for_reply("summarize the prior turn", &reply).expect("neutral contract");
+
+    assert!(!crate::answer_verifier::should_verify_answer(
+        &contract,
+        reply.task_journal.as_ref().unwrap(),
+        &reply.text,
+    ));
+}
+
+#[test]
+fn terminal_synthesis_step_skips_unnecessary_verification() {
+    let mut journal = TaskJournal::for_task("loop-synthesis", "ask", "rewrite this answer");
+    journal.step_results.push(TaskJournalStepTrace::ok(
+        "step_1",
+        "synthesize_answer",
+        "Rewritten answer.",
+    ));
+    let reply = AskReply::non_llm("Rewritten answer.".to_string()).with_task_journal(journal);
+    let contract =
+        answer_contract_for_reply("rewrite this answer", &reply).expect("neutral contract");
+
+    assert!(!crate::answer_verifier::should_verify_answer(
+        &contract,
+        reply.task_journal.as_ref().unwrap(),
+        &reply.text,
+    ));
+}
+
+#[test]
+fn failed_terminal_respond_step_still_requires_verification() {
+    let mut journal = TaskJournal::for_task("loop-respond-failed", "ask", "answer the request");
+    journal.step_results.push(TaskJournalStepTrace::new(
+        "step_1",
+        "respond",
+        crate::executor::StepExecutionStatus::Error,
+        None,
+        Some(r#"{"error_code":"response_failed"}"#.to_string()),
+    ));
+    let reply = AskReply::non_llm("The request completed.".to_string()).with_task_journal(journal);
+    let contract =
+        answer_contract_for_reply("answer the request", &reply).expect("neutral contract");
+
+    assert!(crate::answer_verifier::should_verify_answer(
+        &contract,
+        reply.task_journal.as_ref().unwrap(),
+        &reply.text,
+    ));
+}
+
+#[test]
+fn terminal_respond_with_capability_result_still_requires_verification() {
+    let mut journal = TaskJournal::for_task("loop-capability-result", "ask", "report the result");
+    journal.step_results.push(TaskJournalStepTrace::ok(
+        "step_2",
+        "respond",
+        "The operation completed.",
+    ));
+    journal
+        .capability_results
+        .push(claw_core::capability_result::CapabilityResultEnvelope::ok(
+            "system.inspect",
+            Some("status".to_string()),
+            json!({"state": "ready"}),
+        ));
+    let reply =
+        AskReply::non_llm("The operation completed.".to_string()).with_task_journal(journal);
+    let contract =
+        answer_contract_for_reply("report the result", &reply).expect("neutral contract");
+
+    assert!(crate::answer_verifier::should_verify_answer(
+        &contract,
+        reply.task_journal.as_ref().unwrap(),
+        &reply.text,
+    ));
+}
+
+#[test]
+fn terminal_respond_with_required_evidence_still_requires_verification() {
+    let mut journal = TaskJournal::for_task("loop-required-evidence", "ask", "report the evidence");
+    journal.step_results.push(TaskJournalStepTrace::ok(
+        "step_1",
+        "respond",
+        "Observed value: ready.",
+    ));
+    let reply = AskReply::non_llm("Observed value: ready.".to_string()).with_task_journal(journal);
+    let mut contract =
+        answer_contract_for_reply("report the evidence", &reply).expect("neutral contract");
+    contract.output_contract.requires_content_evidence = true;
+
+    assert!(crate::answer_verifier::should_verify_answer(
+        &contract,
+        reply.task_journal.as_ref().unwrap(),
+        &reply.text,
+    ));
+}
+
+#[test]
 fn verifier_replan_projects_missing_dispatch_as_machine_data() {
     let summary = TaskJournalAnswerVerifierSummary {
         pass: false,

@@ -84,8 +84,7 @@ fn revision_fingerprint(
     results: &[CapabilityResultEnvelope],
 ) -> String {
     let trusted = |result: &&CapabilityResultEnvelope| {
-        result.status == CapabilityResultStatus::Ok
-            && result.provenance.get("source").and_then(Value::as_str) == Some("runtime_step")
+        result.provenance.get("source").and_then(Value::as_str) == Some("runtime_step")
             && result.provenance.get("task_id").and_then(Value::as_str) == Some(task_id)
     };
     let Some((index, previous)) = results.iter().enumerate().rev().find(|(_, result)| {
@@ -108,7 +107,8 @@ fn revision_fingerprint(
         let Some(output) = result.data.get("output") else {
             continue;
         };
-        if result.effect.as_deref() != Some("mutate")
+        if result.status != CapabilityResultStatus::Ok
+            || result.effect.as_deref() != Some("mutate")
             || result
                 .provenance
                 .get("host_workspace_primitive")

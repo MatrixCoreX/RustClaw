@@ -55,3 +55,40 @@ fn read_batch_width_respects_runtime_skill_capacity() {
     assert_eq!(bounded_parallel_read_width(2, 8), 2);
     assert_eq!(bounded_parallel_read_width(3, 0), 1);
 }
+
+#[test]
+fn parallel_dispatch_future_keeps_nested_runner_state_off_the_thread_stack() {
+    let state = AppState::test_default_with_fixture_provider();
+    let task = ClaimedTask {
+        claim_attempt: 1,
+        task_id: "batch-stack-budget".into(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "ui".into(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".into(),
+        payload_json: "{}".into(),
+    };
+    let policy = super::super::support::load_agent_loop_guard_policy(&state);
+    let mut loop_state = LoopState::new();
+    let future = dispatch_independent_read_batch(
+        &state,
+        &task,
+        "inspect",
+        "inspect",
+        &[],
+        &[],
+        &mut loop_state,
+        &policy,
+        &[],
+        0,
+        None,
+    );
+    let bytes = std::mem::size_of_val(&future);
+    assert!(
+        bytes < 128 * 1024,
+        "parallel dispatcher future grew to {bytes} bytes"
+    );
+}

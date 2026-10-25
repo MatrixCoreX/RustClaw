@@ -231,7 +231,7 @@ fn first_round_media_capability_eagerly_exposes_app_and_web_share_default_downlo
         "wechat_channels_share",
         "https://weixin.qq.com/sph/<short-code>",
         "must use this dedicated media-delivery capability by default",
-        "do not use generic browser page extraction",
+        "Do not use generic browser page extraction",
     ] {
         assert!(
             media_line.contains(expected),

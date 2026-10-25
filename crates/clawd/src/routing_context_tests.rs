@@ -9,6 +9,7 @@ fn extracts_generic_anchor_from_capability_result_envelope() {
         r#"{"text":"inspect the selected item"}"#,
         r#"{"text":"done","task_journal":{"trace":{"capability_results":[{"schema_version":1,"status":"ok","capability":"catalog.lookup","action":"lookup","data":{"item_id":"item-42","value":106.02},"artifacts":[{"id":"artifact-1","path":"/tmp/report.json"}],"evidence":[{"id":"ev-1","source":"catalog.lookup","locator":"catalog://item-42","metadata":{}}],"delivery":{"intent":"model_synthesis","constraints":{}}}]}}}"#,
         "1710668477",
+        "succeeded",
     )
     .expect("anchor");
     assert_eq!(anchor.capability, "catalog.lookup");
@@ -30,6 +31,7 @@ fn legacy_visible_text_does_not_create_a_semantic_anchor() {
         r#"{"text":"查询中芯国际今天涨跌情况"}"#,
         r#"{"text":"subtask#1 skill(stock): success [SH688981] 中芯国际 现价106.020 今开108.540 昨收108.600"}"#,
         "1710668477",
+        "succeeded",
     )
     .is_none());
 }
@@ -45,6 +47,7 @@ fn extracts_run_skill_anchor_from_structured_payload() {
         ),
         r#"{"text":"done"}"#,
         "1710668477",
+        "succeeded",
     )
     .expect("anchor");
     assert_eq!(anchor.capability, "catalog_lookup");
@@ -64,6 +67,7 @@ fn extracts_run_skill_anchor_from_structured_payload() {
             ),
             r#"{"text":"done"}"#.to_string(),
             "1710668477".to_string(),
+            "succeeded".to_string(),
         )],
         1,
     );
@@ -79,6 +83,7 @@ fn newer_non_execution_turn_invalidates_older_execution_anchor() {
             r#"{"text":"target-beta"}"#.to_string(),
             r#"{"text":"which operation"}"#.to_string(),
             "200".to_string(),
+            "succeeded".to_string(),
         ),
         (
             "task-older".to_string(),
@@ -86,6 +91,7 @@ fn newer_non_execution_turn_invalidates_older_execution_anchor() {
             r#"{"text":"target-alpha"}"#.to_string(),
             r#"{"text":"done","task_journal":{"trace":{"capability_results":[{"schema_version":1,"status":"ok","capability":"catalog.lookup","action":"lookup","data":{"item_id":"target-alpha"}}]}}}"#.to_string(),
             "100".to_string(),
+            "succeeded".to_string(),
         ),
     ];
 
@@ -104,6 +110,7 @@ fn runtime_plan_capabilities_do_not_replace_the_domain_execution_anchor() {
         r#"{"text":"inspect the selected item"}"#,
         r#"{"text":"done","task_journal":{"trace":{"capability_results":[{"schema_version":1,"status":"ok","capability":"catalog.lookup","action":"lookup","data":{"item_id":"item-42"}},{"schema_version":1,"status":"ok","capability":"task.plan_update","action":"update_steps","data":{"plan_revision":2}}]}}}"#,
         "200",
+        "succeeded",
     )
     .expect("domain anchor");
 
@@ -116,7 +123,7 @@ fn runtime_plan_capabilities_do_not_replace_the_domain_execution_anchor() {
 }
 
 #[test]
-fn failed_turn_is_a_recency_barrier_for_older_execution_anchors() {
+fn failed_turn_becomes_an_attempt_anchor_and_blocks_older_success_anchor() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let db = state.core.db.get().expect("db");
     db.execute_batch(
@@ -144,8 +151,11 @@ fn failed_turn_is_a_recency_barrier_for_older_execution_anchors() {
     .expect("insert successful anchor");
     db.execute(
         "INSERT INTO tasks (task_id, user_id, chat_id, user_key, kind, payload_json, result_json, status, updated_at)
-         VALUES ('task-newer-failure', 1, 2, 'test-user', 'ask', ?1, NULL, 'failed', '200')",
-        params![r#"{"conversation_id":"conversation-selected","text":"target-beta"}"#],
+         VALUES ('task-newer-failure', 1, 2, 'test-user', 'ask', ?1, ?2, 'failed', '200')",
+        params![
+            r#"{"conversation_id":"conversation-selected","text":"collect target-beta with filter-gamma and limit 10"}"#,
+            r#"{"text":"collection did not finish","task_journal":{"trace":{"capability_results":[{"schema_version":1,"status":"error","capability":"catalog.collect","action":"collect","data":{},"error":{"code":"interactive_verification_required","message_key":"catalog.verification.required","retryable":true},"retry":{"retryable":true},"delivery":{"intent":"model_synthesis","constraints":{}}}]}}}"#,
+        ],
     )
     .expect("insert failed barrier");
 
@@ -160,11 +170,91 @@ fn failed_turn_is_a_recency_barrier_for_older_execution_anchors() {
     )
     .expect("query recent rows");
     assert_eq!(rows[0].0, "task-newer-failure");
-    assert_eq!(render_recent_execution_anchor_context(&rows), "<none>");
+    let anchor = render_recent_execution_anchor_context(&rows);
+    assert!(anchor.contains("### PRIOR_TASK_ATTEMPT_ANCHOR"));
+    assert!(anchor.contains("prior_task_status=failed"));
+    assert!(anchor.contains("prior_attempt_status=error"));
+    assert!(anchor.contains("prior_capability=catalog.collect"));
+    assert!(anchor.contains("prior_action=collect"));
+    assert!(anchor.contains("prior_error_code=interactive_verification_required"));
+    assert!(anchor.contains("prior_retryable=true"));
+    assert!(anchor.contains("target-beta with filter-gamma and limit 10"));
+    assert!(!anchor.contains("target-alpha"));
     let context = render_recent_execution_context(&rows, 8);
     assert!(context.contains("target-beta"));
     assert!(context.contains("[prior_task_failed]"));
-    assert!(!context.contains("latest_capability="));
+    assert!(context.contains("prior_attempt_semantic_delta"));
+}
+
+#[test]
+fn failed_attempt_compaction_keeps_machine_semantics_without_large_payloads() {
+    let large_payload = "x".repeat(32_000);
+    let result = serde_json::json!({
+        "text": large_payload,
+        "task_journal": {
+            "trace": {
+                "capability_results": [{
+                    "schema_version": 1,
+                    "status": "error",
+                    "capability": "catalog.collect",
+                    "action": "collect",
+                    "data": {
+                        "large_payload": "y".repeat(32_000),
+                        "path": "/tmp/private-result.json"
+                    },
+                    "artifacts": [{"path": "/tmp/private-result.json"}],
+                    "error": {
+                        "code": "interactive_verification_required",
+                        "message_key": "catalog.verification.required",
+                        "retryable": true
+                    },
+                    "retry": {"retryable": true}
+                }]
+            }
+        }
+    })
+    .to_string();
+
+    let compact = compact_prior_terminal_result(&result, "failed");
+    assert!(compact.len() < 2_000);
+    assert!(compact.contains("catalog.collect"));
+    assert!(compact.contains("interactive_verification_required"));
+    assert!(compact.contains("catalog.verification.required"));
+    assert!(!compact.contains("large_payload"));
+    assert!(!compact.contains("private-result.json"));
+}
+
+#[test]
+fn failed_attempt_keeps_bounded_parameters_and_partial_effects_without_authority() {
+    let result = json!({"task_journal":{"trace":{"capability_results":[{
+        "schema_version":1, "status":"error", "capability":"catalog.collect", "action":"collect",
+        "data":{"side_effect_applied":true,"completed_items":3,"total_items":10},
+        "provenance":{"continuation_args":{
+            "target":"catalog-a", "topics":["finance"], "limit":10,
+            "authorization":"secret", "private_key":"secret", "grant":{"admin":true},
+            "path":"/tmp/private.txt", "raw_body":"x".repeat(32_000)
+        }}
+    }]}}})
+    .to_string();
+    let compact = compact_prior_terminal_result(&result, "failed");
+    for expected in [
+        "catalog-a",
+        "finance",
+        "completed_items",
+        "side_effect_applied",
+    ] {
+        assert!(compact.contains(expected), "{expected}");
+    }
+    for forbidden in [
+        "secret",
+        "private.txt",
+        "raw_body",
+        "authorization",
+        "admin",
+    ] {
+        assert!(!compact.contains(forbidden), "{forbidden}");
+    }
+    assert!(compact.len() < 4000);
 }
 
 #[test]
@@ -234,6 +324,7 @@ fn prior_execution_projection_hides_private_locators_and_cannot_claim_current_ev
         r#"{"text":"transcribe the video"}"#.to_string(),
         r#"{"text":"saved /home/test/.agent-runtime/artifacts/skill-invocations/task-prior/media/out.txt","task_journal":{"trace":{"capability_results":[{"schema_version":1,"status":"ok","capability":"media.transform","action":"transcribe","data":{"path":"/home/test/.agent-runtime/artifacts/skill-invocations/task-prior/media/out.txt","transcript":"done"},"artifacts":[{"artifact_ref":"artifact:task/task-prior/a1","path":"/home/test/.agent-runtime/artifacts/skill-invocations/task-prior/media/out.txt"}]}]}}}"#.to_string(),
         "200".to_string(),
+        "succeeded".to_string(),
     )];
 
     let context = render_recent_execution_anchor_context(&rows);
@@ -242,7 +333,7 @@ fn prior_execution_projection_hides_private_locators_and_cannot_claim_current_ev
     assert!(context.contains("source_task_id=task-prior"));
     assert!(context.contains("scope=prior_task_context"));
     assert!(context.contains("prior_artifact_count=1"));
-    assert!(context.contains("never current-task execution evidence"));
+    assert!(context.contains("prior_task_background_only"));
     assert!(!context.contains("/home/test/.agent-runtime"));
     assert!(!context.contains("artifact:task/task-prior/a1"));
 }

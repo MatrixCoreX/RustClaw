@@ -25,17 +25,17 @@ pub(super) fn ask_result_payload(
 }
 
 pub(super) fn should_skip_ask_memory_pair(
-    state: &AppState,
+    _state: &AppState,
     answer_text: &str,
     answer_messages: &[String],
 ) -> bool {
-    if crate::fallback::is_known_clarify_fallback_text(state, answer_text) {
+    if crate::fallback::is_machine_fallback_payload(answer_text) {
         return true;
     }
     answer_messages
         .iter()
         .filter(|message| !crate::finalize::is_execution_summary_message(message))
-        .any(|message| crate::fallback::is_known_clarify_fallback_text(state, message))
+        .any(|message| crate::fallback::is_machine_fallback_payload(message))
 }
 
 pub(super) fn non_failure_final_status(

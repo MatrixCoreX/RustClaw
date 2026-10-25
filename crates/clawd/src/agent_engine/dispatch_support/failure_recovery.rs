@@ -434,23 +434,12 @@ pub(crate) fn classify_skill_failure_recovery(
     None
 }
 
-fn is_read_only_skill_invocation(state: &AppState, normalized_skill: &str, args: &Value) -> bool {
-    if state.skill_is_read_only(normalized_skill) {
-        return true;
-    }
-    match normalized_skill {
-        "read_file" | "list_dir" | "fs_search" | "system_basic" | "log_analyze" | "doc_parse"
-        | "git_basic" | "http_basic" | "stock" | "weather" | "web_search_extract"
-        | "health_check" | "task_control" => true,
-        "db_basic" => args
-            .get("action")
-            .and_then(|v| v.as_str())
-            .map(|a| {
-                a.eq_ignore_ascii_case("sqlite_query")
-                    || a.eq_ignore_ascii_case("schema_version")
-                    || a.eq_ignore_ascii_case("sqlite_schema_version")
-            })
-            .unwrap_or(true),
-        _ => false,
-    }
+pub(super) fn is_read_only_skill_invocation(
+    state: &AppState,
+    normalized_skill: &str,
+    args: &Value,
+) -> bool {
+    let effect =
+        crate::execution_recipe::classify_skill_action_effect(state, normalized_skill, args);
+    !effect.mutates && (effect.observes || effect.validates)
 }

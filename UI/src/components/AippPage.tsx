@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 
 import { formatUiError } from "../lib/ui-error";
+import { PageRequestLifecycle } from "../lib/page-request-lifecycle";
 import { AippSkillRemovalError, removeAippAndSkill } from "../lib/aipp-skill-removal";
 import { skillStoreErrorMessage } from "../lib/skill-store";
 import { AIPP_PAGE_SIZE, collectionGroupKey, completeCollectionPage, groupCollectionItems } from "../lib/aipp-collection";
@@ -1036,7 +1037,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
   const [removingCollectionSequences, setRemovingCollectionSequences] = useState<number[]>([]);
   const [installActionSkill, setInstallActionSkill] = useState<string | null>(null);
   const installAbortRef = useRef<AbortController | null>(null);
-  const requestSequence = useRef(0);
+  const pageRequests = useRef(new PageRequestLifecycle());
   const autoRefreshInFlight = useRef(false);
   const apiFetchRef = useRef(apiFetch);
   const translateRef = useRef(t);
@@ -1168,8 +1169,9 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
   };
 
   const fetchPage = useCallback(async (silent = false) => {
-    const currentRequest = ++requestSequence.current;
-    if (showGuide) { setLoading(false); return; }
+    const currentRequest = pageRequests.current.begin(silent);
+    if (currentRequest === null) return;
+    if (showGuide) { pageRequests.current.invalidate(); setLoading(false); return; }
     if (
       !selectedSkill
       || !selectedApp?.installed
@@ -1177,6 +1179,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
     ) {
       setPage(null);
       setActivityPage(null);
+      pageRequests.current.invalidate();
       setLoading(false);
       return;
     }
@@ -1202,7 +1205,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
       if (!response.ok || !body.ok || !body.data) {
         throw new Error(body.error || `aipp_items_http_${response.status}`);
       }
-      if (currentRequest === requestSequence.current) {
+      if (pageRequests.current.isCurrent(currentRequest)) {
         if (selectedApp.renderer === "collection_feed_v1") {
           const complete = await completeCollectionPage(body.data as AippMediaPageResponse, async nextCursor => {
             const nextParams = new URLSearchParams(params);
@@ -1211,8 +1214,8 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
             const nextBody = await nextResponse.json() as ApiResponse<AippMediaPageResponse>;
             if (!nextResponse.ok || !nextBody.ok || !nextBody.data) throw new Error(nextBody.error || `aipp_items_http_${nextResponse.status}`);
             return nextBody.data;
-          }, () => currentRequest === requestSequence.current);
-          if (currentRequest !== requestSequence.current) return;
+          }, () => pageRequests.current.isCurrent(currentRequest));
+          if (!pageRequests.current.isCurrent(currentRequest)) return;
           setPage(complete);
           setActivityPage(null);
         } else {
@@ -1221,11 +1224,11 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
         }
       }
     } catch (cause) {
-      if (!silent && currentRequest === requestSequence.current) {
+      if (!silent && pageRequests.current.isCurrent(currentRequest)) {
         setError(formatUiError(cause, translateRef.current, "Ai APP 内容读取失败。", "Could not load Ai APP content."));
       }
     } finally {
-      if (!silent && currentRequest === requestSequence.current) setLoading(false);
+      if (pageRequests.current.finish(currentRequest)) setLoading(false);
     }
   }, [activityChannel, activityStatus, cursor, kind, platform, searchQuery, selectedApp?.installed, selectedApp?.renderer, selectedSkill, sortOrder, showGuide]);
 
@@ -1328,6 +1331,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
 
   useEffect(() => {
     void fetchPage();
+    return () => pageRequests.current.invalidate();
   }, [fetchPage]);
 
   useEffect(() => {

@@ -1785,7 +1785,8 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
                     "runner"
                 }
             );
-            runner::run_skill_with_runner_once_pinned(
+            // Keep the large runner future off nested agent/Tokio poll frames.
+            Box::pin(runner::run_skill_with_runner_once_pinned(
                 execution_state,
                 task,
                 &skill_name,
@@ -1799,7 +1800,7 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
                     .map(|selection| selection.key.as_str()),
                 pinned_execution_binding,
                 Some(&resource_estimate_key),
-            )
+            ))
             .await?
         }
         SkillKind::Builtin => unreachable!(),

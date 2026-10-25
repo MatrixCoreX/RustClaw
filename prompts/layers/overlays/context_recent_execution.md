@@ -2,19 +2,18 @@
 Purpose: project bounded recent execution evidence for short follow-ups.
 Component: clawd `task_context_builder`
 Input slot: RECENT_EXECUTION_CONTEXT
-Version: 2026-07-17.2
+Version: 2026-10-22.1
 -->
 
 ### RECENT_EXECUTION_CONTEXT
 
 Context contract:
-- Use this block only as supporting evidence for genuinely short follow-up requests.
-- Every row in this block belongs to a prior task. Prior-task success, output, or discussion never satisfies the current task's execution or verification requirements.
-- Reuse a previous target only when the current request or recent context already binds exactly one concrete target of the correct type.
-- Prior-task private paths and artifacts are not executable inputs. Use only an attachment or canonical artifact binding supplied by the current task.
-- A concrete target in a newer recent turn takes precedence over an older execution anchor. Never replace that newer target with the anchor's target.
-- Do not let this block override a required clarification.
-- Do not treat an artifact-type noun alone as a concrete target.
+- Prior tasks provide supporting evidence for follow-up interpretation, never current execution or verification evidence.
+- `prior_task_background_only` is background only. `prior_attempt_semantic_delta` / `PRIOR_TASK_ATTEMPT_ANCHOR` preserves failed/canceled intent, not permission to retry.
+- For genuine follow-ups, apply the current request as a delta: keep unchanged constraints, apply changes, inspect partial effects. Bounded `prior_args` and observations may be incomplete.
+- Never infer continuation from phrases/shared nouns or inherit incompatible frames, credentials, confirmations, authorization, attachments, or private artifact locators.
+- Reuse only one unambiguous, type-compatible target. Newer concrete targets override older anchors; artifact-type nouns alone do not bind targets.
+- Execute private paths/artifacts only through the current task's authorized attachment or canonical binding. Clarify remaining ambiguity.
 
 __RECENT_EXECUTION_CONTEXT__
 

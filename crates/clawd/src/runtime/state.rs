@@ -2030,12 +2030,6 @@ impl AppState {
             .unwrap_or(false)
     }
 
-    pub(crate) fn skill_is_read_only(&self, canonical_name: &str) -> bool {
-        self.skill_manifest(canonical_name)
-            .map(|manifest| manifest.side_effect == Some(false))
-            .unwrap_or(false)
-    }
-
     pub(crate) fn skill_output_contract(
         &self,
         canonical_name: &str,

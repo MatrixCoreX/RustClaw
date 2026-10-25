@@ -45,23 +45,20 @@ const AIPP_TASK_ACTIVITY_MATCH_SQL: &str = r#"
                     ) > 0
                )
                AND (
-                    EXISTS (
-                        SELECT 1
+                    tasks.task_id IN (
+                        SELECT task_event_stream.task_id
                           FROM task_event_stream
-                         WHERE task_event_stream.task_id = tasks.task_id
-                           AND json_extract(task_event_stream.event_json, '$.event_kind') = 'tool_finished'
+                         WHERE json_extract(task_event_stream.event_json, '$.event_kind') = 'tool_finished'
                            AND json_extract(task_event_stream.event_json, '$.payload.skill') = :skill_name
                            AND COALESCE(
                                json_extract(task_event_stream.event_json, '$.payload.requested_action_ref'),
                                ''
                            ) != (:skill_name || '.capabilities')
                            AND task_event_stream.created_at_ms > :cleared_through_event_ms
-                    )
-                    OR EXISTS (
-                        SELECT 1
+                        UNION
+                        SELECT task_event_archive.task_id
                           FROM task_event_archive
-                         WHERE task_event_archive.task_id = tasks.task_id
-                           AND json_extract(task_event_archive.event_json, '$.event_kind') = 'tool_finished'
+                         WHERE json_extract(task_event_archive.event_json, '$.event_kind') = 'tool_finished'
                            AND json_extract(task_event_archive.event_json, '$.payload.skill') = :skill_name
                            AND COALESCE(
                                json_extract(task_event_archive.event_json, '$.payload.requested_action_ref'),
@@ -370,7 +367,6 @@ fn aipp_media_item(record: &Value) -> Option<Value> {
     }))
 }
 
-
 fn bounded_aipp_text(value: Option<&Value>, max_chars: usize) -> String {
     value
         .and_then(Value::as_str)
@@ -495,10 +491,8 @@ fn task_activity_item(
         .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
         .unwrap_or_else(|| json!({}));
     let input_text = task_activity_input_text(&payload);
-    let mut result_text = bounded_aipp_visible_text(
-        result.get("text"),
-        AIPP_TASK_ACTIVITY_RESULT_MAX_CHARS,
-    );
+    let mut result_text =
+        bounded_aipp_visible_text(result.get("text"), AIPP_TASK_ACTIVITY_RESULT_MAX_CHARS);
     let projected_error = error_text.and_then(|value| {
         let sanitized = crate::visible_text::sanitize_user_visible_text(value);
         let sanitized = sanitized.trim();
@@ -586,7 +580,11 @@ fn normalize_aipp_record_sequences(values: &[u64]) -> Result<Vec<u64>, String> {
 }
 
 fn aipp_media_record_exists(root: &Path, sequence: u64) -> bool {
-    sequence > 0 && root.join("records").join(format!("{sequence:012}.json")).is_file()
+    sequence > 0
+        && root
+            .join("records")
+            .join(format!("{sequence:012}.json"))
+            .is_file()
 }
 
 fn owned_aipp_task_activity_ids(
@@ -678,7 +676,10 @@ fn read_aipp_task_activity_page(
     } else {
         ("<", "DESC")
     };
-    let limit = query.limit.unwrap_or(AIPP_PAGE_SIZE).clamp(1, AIPP_TASK_ACTIVITY_LIMIT);
+    let limit = query
+        .limit
+        .unwrap_or(AIPP_PAGE_SIZE)
+        .clamp(1, AIPP_TASK_ACTIVITY_LIMIT);
     let needle = query
         .query
         .as_deref()
@@ -888,9 +889,7 @@ fn declared_media_platforms(input_schema: &Value) -> BTreeSet<String> {
         .flatten()
         .filter_map(Value::as_str)
         .filter(|value| {
-            !value.is_empty()
-                && value.len() <= 64
-                && !value.chars().any(char::is_control)
+            !value.is_empty() && value.len() <= 64 && !value.chars().any(char::is_control)
         })
         .take(32)
         .map(str::to_string)
@@ -910,7 +909,10 @@ fn read_aipp_media_page_with_platforms(
         Err(_) => return Err("aipp_media_storage_read_failed".to_string()),
     };
     let sort_order = aipp_media_sort_order(query)?;
-    let limit = query.limit.unwrap_or(AIPP_PAGE_SIZE).clamp(1, AIPP_MEDIA_RECORD_LIMIT);
+    let limit = query
+        .limit
+        .unwrap_or(AIPP_PAGE_SIZE)
+        .clamp(1, AIPP_MEDIA_RECORD_LIMIT);
     let has_filter = query.kind.is_some()
         || query.platform.is_some()
         || query
@@ -986,9 +988,7 @@ fn read_aipp_media_page_with_platforms(
             .get("platform")
             .and_then(Value::as_str)
             .filter(|value| {
-                !value.is_empty()
-                    && value.len() <= 64
-                    && !value.chars().any(char::is_control)
+                !value.is_empty() && value.len() <= 64 && !value.chars().any(char::is_control)
             })
         {
             observed_platforms.insert(platform.to_string());
@@ -1239,12 +1239,7 @@ async fn get_aipp_items(
         .map(|request| declared_media_platforms(&request.input_schema))
         .unwrap_or_default();
     let page = tokio::task::spawn_blocking(move || {
-        read_aipp_media_page_with_platforms(
-            &root,
-            &query,
-            &hidden_sequences,
-            &declared_platforms,
-        )
+        read_aipp_media_page_with_platforms(&root, &query, &hidden_sequences, &declared_platforms)
     })
     .await;
     match page {
@@ -1494,10 +1489,9 @@ fn remove_aipp_media_items(
             );
         }
     };
-    if sequences
-        .iter()
-        .any(|sequence| !aipp_media_record_exists(&root, *sequence) && !already_hidden.contains(sequence))
-    {
+    if sequences.iter().any(|sequence| {
+        !aipp_media_record_exists(&root, *sequence) && !already_hidden.contains(sequence)
+    }) {
         return aipp_api_error(StatusCode::BAD_REQUEST, "aipp_media_remove_unknown");
     }
     let hidden = match service.hide_aipp_record_sequences(skill_name, &sequences) {

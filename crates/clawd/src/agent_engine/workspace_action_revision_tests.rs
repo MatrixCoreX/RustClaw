@@ -76,6 +76,23 @@ fn unrelated_failed_untrusted_or_noop_changes_do_not_unlock_replay() {
 }
 
 #[test]
+fn failed_action_is_unlocked_only_by_an_attested_same_target_repair() {
+    let mut failed = result("read", "file.txt", "read-1");
+    failed.status = CapabilityResultStatus::Error;
+    failed.effect = Some("observe".to_string());
+    let mut results = vec![failed, result("write", "other.txt", "write-1")];
+    assert_eq!(
+        revision_fingerprint("read", "file.txt", "task", &results),
+        "read"
+    );
+    results.push(result("repair", "file.txt", "write-2"));
+    assert_ne!(
+        revision_fingerprint("read", "file.txt", "task", &results),
+        "read"
+    );
+}
+
+#[test]
 fn external_calls_and_workspace_escape_have_no_local_revision_scope() {
     let state = AppState::test_default_with_fixture_provider();
     for (skill, args) in [

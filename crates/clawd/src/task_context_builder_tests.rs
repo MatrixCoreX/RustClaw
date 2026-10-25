@@ -85,7 +85,7 @@ fn stale_active_task_context_is_suppressed_after_a_newer_terminal_turn() {
 }
 
 #[test]
-fn failed_followup_suppresses_stale_primary_and_execution_anchors_in_full_bundle() {
+fn failed_followup_replaces_stale_success_anchor_with_latest_attempt_anchor() {
     let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let db = state.core.db.get().expect("db");
     db.execute(
@@ -125,9 +125,13 @@ fn failed_followup_suppresses_stale_primary_and_execution_anchors_in_full_bundle
     )
     .expect("old task");
     db.execute(
-        "INSERT INTO tasks(task_id,user_id,chat_id,user_key,principal_id,channel,kind,payload_json,status,error_text,created_at,updated_at)
-         VALUES ('task-new-failure',7,8,'context-key',?1,'ui','ask',?2,'failed','execution_failed','200','200')",
-        rusqlite::params![principal_id, failed_payload],
+        "INSERT INTO tasks(task_id,user_id,chat_id,user_key,principal_id,channel,kind,payload_json,status,result_json,error_text,created_at,updated_at)
+         VALUES ('task-new-failure',7,8,'context-key',?1,'ui','ask',?2,'failed',?3,'execution_failed','200','200')",
+        rusqlite::params![
+            principal_id,
+            failed_payload,
+            r#"{"text":"newer attempt failed","task_journal":{"trace":{"capability_results":[{"schema_version":1,"status":"error","capability":"catalog.collect","action":"collect","data":{},"error":{"code":"verification_required","message_key":"catalog.verification.required","retryable":true},"retry":{"retryable":true}}]}}}"#,
+        ],
     )
     .expect("failed task");
     let conversation_state = crate::conversation_state::ConversationState {
@@ -169,7 +173,17 @@ fn failed_followup_suppresses_stale_primary_and_execution_anchors_in_full_bundle
     let execution = bundle.execution_view.expect("execution view");
 
     assert_eq!(execution.active_task_context, "<none>");
-    assert_eq!(execution.recent_execution_anchor, "<none>");
+    assert!(execution
+        .recent_execution_anchor
+        .contains("### PRIOR_TASK_ATTEMPT_ANCHOR"));
+    assert!(execution
+        .recent_execution_anchor
+        .contains("prior_capability=catalog.collect"));
+    assert!(execution
+        .recent_execution_anchor
+        .contains("prior_error_code=verification_required"));
+    assert!(execution.recent_execution_anchor.contains("newer-target"));
+    assert!(!execution.recent_execution_anchor.contains("older-target"));
     assert!(execution.recent_turns_full.contains("newer-target"));
     assert!(execution
         .recent_execution_context

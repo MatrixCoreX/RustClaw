@@ -751,29 +751,6 @@ fn latest_successful_output_satisfies_structured_selector(
         })
 }
 
-fn prior_structured_observation_satisfies_read_only_action(
-    state: &AppState,
-    agent_run_context: Option<&AgentRunContext>,
-    loop_state: &LoopState,
-    action: &AgentAction,
-) -> bool {
-    if loop_state.execution_recipe.needs_validation()
-        || loop_state.execution_recipe.is_active()
-            && !matches!(
-                loop_state.execution_recipe.phase,
-                crate::execution_recipe::ExecutionRecipePhase::Done
-            )
-    {
-        return false;
-    }
-    let Some(effect) = action_effect_for_repeat_guard(state, loop_state, action) else {
-        return false;
-    };
-    !effect.mutates
-        && (effect.observes || effect.validates)
-        && latest_successful_output_satisfies_structured_selector(agent_run_context, loop_state)
-}
-
 #[allow(clippy::too_many_arguments)]
 async fn try_execute_independent_read_batch(
     state: &AppState,
@@ -809,17 +786,6 @@ async fn try_execute_independent_read_batch(
     }) {
         return Ok(None);
     }
-    if actions[..batch_len].iter().any(|action| {
-        prior_structured_observation_satisfies_read_only_action(
-            state,
-            agent_run_context,
-            loop_state,
-            action,
-        )
-    }) {
-        return Ok(None);
-    }
-
     let fingerprints = actions[..batch_len]
         .iter()
         .map(|action| {
@@ -1051,22 +1017,6 @@ pub(super) async fn execute_actions_once(
                 plan_step_label(action)
             );
             stop_signal = Some("task_budget_admin_tool_ceiling".to_string());
-            break;
-        }
-        if prior_structured_observation_satisfies_read_only_action(
-            state,
-            agent_run_context,
-            loop_state,
-            action,
-        ) {
-            info!(
-                "executor_structured_observation_skip_redundant_read task_id={} round={} step={} action={}",
-                task.task_id,
-                loop_state.round_no,
-                step_in_round,
-                plan_step_label(action)
-            );
-            stop_signal = Some("structured_observation_already_ready".to_string());
             break;
         }
         if let Some(reason) = check_repeat_action_guard(
