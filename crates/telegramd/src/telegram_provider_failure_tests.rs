@@ -1,5 +1,5 @@
 use super::*;
-use std::time::Duration;
+use teloxide::types::Seconds;
 
 #[test]
 fn typed_telegram_api_errors_map_without_description_matching() {
@@ -19,6 +19,11 @@ fn typed_telegram_api_errors_map_without_description_matching() {
             ChannelProviderFailureClass::PermissionDenied,
             "not_enough_rights_to_post",
         ),
+        (
+            RequestError::Api(ApiError::InvalidToken),
+            ChannelProviderFailureClass::Authentication,
+            "invalid_bot_token",
+        ),
     ];
     for (input, expected_class, expected_code) in cases {
         let error = telegram_request_error("send_text", &input);
@@ -33,7 +38,7 @@ fn typed_telegram_api_errors_map_without_description_matching() {
 fn typed_retry_after_preserves_bounded_backoff() {
     let error = telegram_request_error(
         "send_text",
-        &RequestError::RetryAfter(Duration::from_secs(23)),
+        &RequestError::RetryAfter(Seconds::from_seconds(23)),
     );
     assert_eq!(
         error.failure_class,
@@ -41,12 +46,21 @@ fn typed_retry_after_preserves_bounded_backoff() {
     );
     assert_eq!(error.retry_after_seconds, Some(23));
     assert!(error.retryable);
+
+    let zero = telegram_request_error(
+        "send_text",
+        &RequestError::RetryAfter(Seconds::from_seconds(0)),
+    );
+    assert_eq!(zero.retry_after_seconds, Some(1));
+    assert!(zero.is_valid());
 }
 
 #[test]
 fn invalid_json_remains_a_redacted_machine_failure() {
     let invalid_json = RequestError::InvalidJson {
-        source: serde_json::from_str::<serde_json::Value>("{").unwrap_err(),
+        source: serde_json::from_str::<serde_json::Value>("{")
+            .unwrap_err()
+            .into(),
         raw: "private provider body".into(),
     };
     let error = telegram_request_error("send_text", &invalid_json);

@@ -2,6 +2,7 @@ use crate::error::{OfficeError, OfficeResult};
 use crate::model::{CellEvidence, WorkbookEvidence, WorksheetEvidence};
 use crate::package::OfficePackage;
 use crate::xml::{attr_value, attr_value_qualified, collect_text, local_name, relationship_map};
+use crate::xml_text::{decode_text, TextReader};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use serde_json::{json, Number, Value};
@@ -111,8 +112,7 @@ fn parse_worksheet(
         .map(relationship_map)
         .unwrap_or_default();
     let comments = load_comments(package, &sheet.path, &relationships);
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(false);
+    let mut reader = TextReader::new(xml, false);
     let mut cells = Vec::new();
     let mut merged_ranges = Vec::new();
     let mut tables = Vec::new();
@@ -154,7 +154,7 @@ fn parse_worksheet(
                 _ => {}
             },
             Ok(Event::Text(text)) if current_cell.is_some() => {
-                let value = text.unescape().map_err(|error| {
+                let value = decode_text(&text).map_err(|error| {
                     OfficeError::new(
                         "malformed_xml",
                         format!("invalid worksheet text: {error}"),
@@ -301,8 +301,7 @@ impl CellBuilder {
 }
 
 fn parse_shared_strings(xml: &str) -> Vec<String> {
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(false);
+    let mut reader = TextReader::new(xml, false);
     let mut strings = Vec::new();
     let mut current = String::new();
     let mut in_item = false;
@@ -313,7 +312,7 @@ fn parse_shared_strings(xml: &str) -> Vec<String> {
                 current.clear();
             }
             Ok(Event::Text(text)) if in_item => {
-                if let Ok(value) = text.unescape() {
+                if let Ok(value) = decode_text(&text) {
                     current.push_str(&value);
                 }
             }
@@ -393,8 +392,7 @@ fn looks_like_date_format(format: &str) -> bool {
 }
 
 fn parse_named_ranges(xml: &str) -> Vec<String> {
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
+    let mut reader = TextReader::new(xml, true);
     let mut ranges = Vec::new();
     let mut current_name = None;
     loop {
@@ -403,10 +401,7 @@ fn parse_named_ranges(xml: &str) -> Vec<String> {
                 current_name = attr_value(&element, b"name");
             }
             Ok(Event::Text(text)) if current_name.is_some() => {
-                let value = text
-                    .unescape()
-                    .map(|value| value.into_owned())
-                    .unwrap_or_default();
+                let value = decode_text(&text).unwrap_or_default();
                 ranges.push(format!(
                     "{}={}",
                     current_name.take().unwrap_or_default(),
@@ -463,8 +458,7 @@ fn load_comments(
     let Ok(xml) = std::str::from_utf8(bytes) else {
         return BTreeMap::new();
     };
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(false);
+    let mut reader = TextReader::new(xml, false);
     let mut comments = BTreeMap::new();
     let mut reference = None;
     let mut text = String::new();
@@ -475,7 +469,7 @@ fn load_comments(
                 text.clear();
             }
             Ok(Event::Text(value)) if reference.is_some() => {
-                if let Ok(value) = value.unescape() {
+                if let Ok(value) = decode_text(&value) {
                     text.push_str(&value);
                 }
             }

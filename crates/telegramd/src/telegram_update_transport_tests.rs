@@ -29,6 +29,15 @@ fn webhook_requires_https_loopback_listener_and_environment_secret() {
     assert!(webhook.listen.ip().is_loopback());
     assert_eq!(webhook.public_url.scheme(), "https");
     assert_eq!(webhook.secret_token, "secret_123");
+    let options = teloxide::update_listeners::webhooks::Options::new(
+        webhook.listen,
+        webhook.public_url.clone(),
+    )
+    .secret_token(webhook.secret_token);
+    assert_eq!(options.address, webhook.listen);
+    assert_eq!(options.url, webhook.public_url);
+    assert_eq!(options.path, "/telegram/update");
+    assert_eq!(options.secret_token.as_deref(), Some("secret_123"));
 }
 
 #[test]

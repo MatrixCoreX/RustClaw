@@ -105,14 +105,21 @@ impl OfficePackage {
                     json!({"member_index": index}),
                 )
             })?;
+            let member_name = member.name().map_err(|error| {
+                OfficeError::new(
+                    "malformed_package",
+                    format!("cannot decode ZIP member name: {error}"),
+                    json!({"member_index": index}),
+                )
+            })?;
             if member.encrypted() {
                 return Err(OfficeError::new(
                     "encrypted_package",
                     "encrypted Office packages are not supported",
-                    json!({"member": member.name()}),
+                    json!({"member": member_name}),
                 ));
             }
-            let name = canonical_member_name(member.name())?;
+            let name = canonical_member_name(&member_name)?;
             if member.is_dir() {
                 continue;
             }

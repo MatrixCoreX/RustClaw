@@ -4,6 +4,31 @@ use crate::package::OfficePackage;
 use crate::test_support::{docx_fixture, temp_path, write_package};
 
 #[test]
+fn docx_references_keep_text_runs_and_table_cells_intact() {
+    let mut blocks = Vec::new();
+    let mut tables = Vec::new();
+    parse_part(
+        "<document><tbl><tr><tc><p><r><t>A &amp; B &#x1F642; &amp;lt;</t></r></p></tc></tr></tbl></document>",
+        "word/document.xml",
+        &mut blocks,
+        &mut tables,
+    )
+    .expect("DOCX reference text");
+    assert_eq!(blocks[0].text, "A & B 🙂 &lt;");
+    assert_eq!(blocks[0].runs[0].text, "A & B 🙂 &lt;");
+    assert_eq!(tables[0].rows[0][0], "A & B 🙂 &lt;");
+
+    let error = parse_part(
+        "<document><p><r><t>A &unknown; B</t></r></p></document>",
+        "word/document.xml",
+        &mut Vec::new(),
+        &mut Vec::new(),
+    )
+    .expect_err("unknown entities remain errors");
+    assert_eq!(error.code, "malformed_xml");
+}
+
+#[test]
 fn reads_multilingual_docx_blocks_and_table() {
     let path = temp_path("docx");
     docx_fixture(&path);

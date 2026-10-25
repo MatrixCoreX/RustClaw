@@ -2,6 +2,7 @@ use crate::error::{OfficeError, OfficeResult};
 use crate::model::{OfficeTable, PresentationEvidence, SlideEvidence};
 use crate::package::OfficePackage;
 use crate::xml::{attr_value, attr_value_qualified, local_name, relationship_map};
+use crate::xml_text::{decode_text, TextReader};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use serde_json::json;
@@ -73,8 +74,7 @@ fn parse_slide(
         .and_then(|bytes| std::str::from_utf8(bytes).ok())
         .map(relationship_map)
         .unwrap_or_default();
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(false);
+    let mut reader = TextReader::new(xml, false);
     let mut text = Vec::new();
     let mut paragraph = String::new();
     let mut in_paragraph = false;
@@ -135,7 +135,7 @@ fn parse_slide(
                 _ => {}
             },
             Ok(Event::Text(value)) if in_paragraph => {
-                let value = value.unescape().map_err(|error| {
+                let value = decode_text(&value).map_err(|error| {
                     OfficeError::new(
                         "malformed_xml",
                         format!("invalid slide text: {error}"),
@@ -247,13 +247,12 @@ fn stable_slide_id(part: &str) -> String {
 }
 
 fn plain_text(xml: &str) -> Vec<String> {
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
+    let mut reader = TextReader::new(xml, true);
     let mut values = Vec::new();
     loop {
         match reader.read_event() {
             Ok(Event::Text(text)) => {
-                if let Ok(value) = text.unescape() {
+                if let Ok(value) = decode_text(&text) {
                     let value = value.trim();
                     if !value.is_empty() {
                         values.push(value.to_string());

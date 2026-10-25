@@ -1,7 +1,7 @@
 use super::*;
 use crate::task_result_retention::test_support::Fixture;
 use k256::ecdsa::{signature::Signer, Signature, SigningKey};
-use k256::elliptic_curve::rand_core::OsRng;
+use k256::elliptic_curve::Generate;
 
 fn local(fixture: &mut Fixture) -> NniLocalWorkState {
     let payload = json!({"capability":fixture.enrollment.capability,"args":{"action":"download"},"artifact_delivery":{
@@ -180,8 +180,8 @@ fn signed_control_is_required_and_success_ack_uses_the_actual_poll_report() {
     // These environment keys are process-local to this deterministic test.
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _lock = LOCK.lock().unwrap();
-    let key = SigningKey::random(&mut OsRng);
-    let public = key.verifying_key().to_encoded_point(true);
+    let key = SigningKey::generate();
+    let public = key.verifying_key().to_sec1_point(true);
     let old = std::env::var_os(NNI_WORK_ASSIGNMENT_VERIFY_KEYS_ENV);
     std::env::set_var(
         NNI_WORK_ASSIGNMENT_VERIFY_KEYS_ENV,

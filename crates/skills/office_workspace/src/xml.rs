@@ -1,3 +1,4 @@
+use crate::xml_text::{decode_text, TextReader};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
 use std::collections::BTreeMap;
@@ -25,13 +26,12 @@ pub fn attr_value_qualified(element: &BytesStart<'_>, qualified: &[u8]) -> Optio
 }
 
 pub fn collect_text(xml: &str) -> Vec<String> {
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
+    let mut reader = TextReader::new(xml, true);
     let mut values = Vec::new();
     loop {
         match reader.read_event() {
             Ok(Event::Text(text)) => {
-                if let Ok(value) = text.unescape() {
+                if let Ok(value) = decode_text(&text) {
                     let value = value.trim();
                     if !value.is_empty() {
                         values.push(value.to_string());

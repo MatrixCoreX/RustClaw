@@ -640,7 +640,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         "secrets.optional.tavily_api_key",
         "secrets.optional.you_search_api_key",
     ];
-    let main_expected_with_caps: &[(&str, &[&str])] = &[
+    let expected_with_caps: &[(&str, &[&str])] = &[
         // 主配置中 image_edit / image_vision 可复用同厂商全局 key，不声明专用
         // secrets capability；image_generate 仍显式要求专用生成 key。
         ("audio_synthesize", &["fs.write", "llm", "net"]),
@@ -739,102 +739,6 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         ("workspace_patch", &["fs.read", "fs.write"]),
         ("write_file", &["fs.write"]),
     ];
-    let docker_expected_with_caps: &[(&str, &[&str])] = &[
-        // Docker 与主配置都通过 provider-neutral 主模型桥注入 image_edit /
-        // image_vision 凭据；只有 image_generate 保留独立生成凭据。
-        ("audio_synthesize", &["fs.write", "llm", "net"]),
-        ("audio_transcribe", AUDIO_TRANSCRIBE_CAPABILITIES),
-        ("browser_session", &["exec", "fs.write", "net"]),
-        ("browser_web", &["fs.write", "net"]),
-        ("code_index", &["fs.read"]),
-        ("config_guard", &["fs.read"]),
-        ("config_edit", &["fs.read", "fs.write"]),
-        ("doc_parse", &["fs.read"]),
-        ("extension_manager", &["llm"]),
-        ("config_basic", &["fs.read"]),
-        ("crypto", &["net"]),
-        ("fs_basic", &["fs.read", "fs.write"]),
-        ("fs_search", &["fs.read"]),
-        ("git_basic", &["fs.read", "fs.write"]),
-        (
-            "git_forge",
-            &[
-                "exec",
-                "fs.read",
-                "net",
-                "secrets.github_api_token",
-                "secrets.github_git_token",
-            ],
-        ),
-        (
-            "git_remote_publish",
-            &[
-                "exec",
-                "fs.read",
-                "fs.write",
-                "net",
-                "secrets.github_git_token",
-            ],
-        ),
-        (
-            "git_remote_read",
-            &[
-                "exec",
-                "fs.read",
-                "fs.write",
-                "net",
-                "secrets.github_git_token",
-            ],
-        ),
-        ("http_basic", &["net"]),
-        ("image_edit", &["fs.write", "llm", "net"]),
-        (
-            "image_generate",
-            &[
-                "fs.write",
-                "llm",
-                "llm.credential_fallback.image_generation_minimax_api_key",
-                "net",
-                "secrets.image_generation_minimax_api_key",
-            ],
-        ),
-        ("image_vision", &["fs.read", "fs.write", "llm", "net"]),
-        ("invest_copy", &["llm"]),
-        ("kb", &["fs.read", "fs.write"]),
-        ("list_dir", &["fs.read"]),
-        ("log_analyze", &["fs.read"]),
-        (
-            "map_merchant",
-            &[
-                "net",
-                "secrets.amap_api_key",
-                "secrets.google_maps_api_key",
-                "secrets.google_places_api_key",
-            ],
-        ),
-        ("make_dir", &["fs.write"]),
-        (
-            "media_download",
-            &["exec", "fs.read", "fs.write", "llm", "net"],
-        ),
-        ("local_asr", &["exec", "fs.read", "fs.write"]),
-        ("media_discovery", &["exec", "fs.write", "net"]),
-        ("music_generate", &["fs.write", "llm", "net"]),
-        ("nni", &["net"]),
-        ("office_workspace", &["fs.read", "fs.write"]),
-        ("read_file", &["fs.read"]),
-        ("remove_file", &["fs.write"]),
-        ("rss_fetch", &["fs.write", "net"]),
-        ("stock", &["llm", "net"]),
-        ("task_control", &["net"]),
-        ("video_generate", &["fs.read", "fs.write", "llm", "net"]),
-        ("video_transcribe", &["exec", "fs.read", "fs.write"]),
-        ("weather", &["net"]),
-        ("web_search_extract", WEB_SEARCH_CAPABILITIES),
-        ("workspace_patch", &["fs.read", "fs.write"]),
-        ("write_file", &["fs.write"]),
-    ];
-
     let registry_paths = [
         workspace_root().join("configs/skills_registry.toml"),
         workspace_root().join("docker/config/skills_registry.toml"),
@@ -842,11 +746,6 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
 
     for path in registry_paths.iter() {
         let registry = SkillsRegistry::load_from_path(path).expect("load registry");
-        let expected_with_caps = if path.to_string_lossy().contains("/docker/config/") {
-            docker_expected_with_caps
-        } else {
-            main_expected_with_caps
-        };
 
         for (skill, expected) in expected_with_caps {
             let actual: Vec<String> = registry

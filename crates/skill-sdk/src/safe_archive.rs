@@ -371,7 +371,9 @@ fn validate_relative_path(path: &Path, max_depth: usize) -> SkillSdkResult<()> {
     Ok(())
 }
 
-fn zip_entry_kind(entry: &zip::read::ZipFile<'_>) -> SkillSdkResult<&'static str> {
+fn zip_entry_kind<R: Read + ?Sized>(
+    entry: &zip::read::ZipFile<'_, R>,
+) -> SkillSdkResult<&'static str> {
     if entry.is_dir() {
         return Ok("directory");
     }

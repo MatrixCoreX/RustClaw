@@ -90,6 +90,64 @@ fn archive_traversal_and_links_are_rejected() {
 }
 
 #[test]
+fn zip_symlink_cannot_escape_or_replace_an_existing_file() {
+    let root = tempdir().expect("tempdir");
+    let archive_path = root.path().join("link.zip");
+    let outside = root.path().join("outside");
+    std::fs::write(&outside, b"unchanged").unwrap();
+    let mut writer = zip::ZipWriter::new(std::fs::File::create(&archive_path).unwrap());
+    writer
+        .add_symlink(
+            "runtime/link",
+            "../../outside",
+            zip::write::SimpleFileOptions::default(),
+        )
+        .expect("link entry");
+    writer.finish().unwrap();
+    let destination = root.path().join("unpacked");
+    std::fs::create_dir(&destination).unwrap();
+    let error = extract_zip(&archive_path, &destination).expect_err("ZIP links must fail");
+    assert_eq!(error.code, "prebuilt_archive_link_forbidden");
+    assert!(!destination.join("runtime/link").exists());
+    assert_eq!(std::fs::read(outside).unwrap(), b"unchanged");
+}
+
+#[cfg(unix)]
+#[test]
+fn prebuilt_zip_does_not_restore_setuid_or_setgid() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = tempdir().expect("tempdir");
+    let archive_path = root.path().join("mode.zip");
+    let mut writer = zip::ZipWriter::new(std::fs::File::create(&archive_path).unwrap());
+    writer
+        .start_file("runtime/file", zip::write::SimpleFileOptions::default())
+        .unwrap();
+    writer.write_all(b"safe").unwrap();
+    writer.finish().unwrap();
+    let mut bytes = std::fs::read(&archive_path).unwrap();
+    let central = bytes.windows(4).position(|b| b == b"PK\x01\x02").unwrap();
+    bytes[central + 5] = 3; // Unix origin
+    bytes[central + 38..central + 42].copy_from_slice(&(0o106755_u32 << 16).to_le_bytes());
+    std::fs::write(&archive_path, bytes).unwrap();
+    let mut archive = zip::ZipArchive::new(std::fs::File::open(&archive_path).unwrap()).unwrap();
+    let entry = archive.by_index(0).unwrap();
+    assert_eq!(entry.system(), zip::System::Unix);
+    // Check the raw fixture, since the patched reader already strips these bits.
+    assert_eq!((entry.external_attributes() >> 16) & 0o7000, 0o6000);
+    assert_eq!(entry.unix_mode().unwrap() & 0o7000, 0);
+
+    let destination = root.path().join("unpacked");
+    std::fs::create_dir(&destination).unwrap();
+    extract_zip(&archive_path, &destination).expect("extract");
+    let mode = std::fs::metadata(destination.join("runtime/file"))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o7000, 0);
+}
+
+#[test]
 fn tar_gz_links_are_rejected_before_extraction() {
     let root = tempdir().expect("tempdir");
     let archive_path = root.path().join("malicious.tar.gz");

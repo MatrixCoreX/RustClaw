@@ -1,7 +1,7 @@
 #[cfg(test)]
 use k256::ecdsa::{signature::Signer, Signature, SigningKey};
 #[cfg(test)]
-use k256::elliptic_curve::rand_core::OsRng;
+use k256::elliptic_curve::Generate;
 use k256::PublicKey;
 use ripemd::Ripemd160;
 #[cfg(test)]
@@ -62,12 +62,12 @@ fn decode_nni_owner_payload(
 
 #[cfg(test)]
 fn nni_owner_public_key_from_signing_key(signing_key: &SigningKey) -> String {
-    encode_nni_owner_payload(signing_key.verifying_key().to_encoded_point(true).as_bytes())
+    encode_nni_owner_payload(signing_key.verifying_key().to_sec1_point(true).as_bytes())
 }
 
 #[cfg(test)]
 fn generate_nni_owner_key_pair() -> NniOwnerKeyPairResponse {
-    let signing_key = SigningKey::random(&mut OsRng);
+    let signing_key = SigningKey::generate();
     NniOwnerKeyPairResponse {
         public_key: nni_owner_public_key_from_signing_key(&signing_key),
         private_key: encode_nni_owner_payload(signing_key.to_bytes().as_slice()),

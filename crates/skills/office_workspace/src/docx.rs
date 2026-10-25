@@ -2,8 +2,8 @@ use crate::error::{OfficeError, OfficeResult};
 use crate::model::{DocumentBlock, OfficeTable, TextRun};
 use crate::package::OfficePackage;
 use crate::xml::{attr_value, attr_value_qualified, local_name};
+use crate::xml_text::{decode_text, TextReader};
 use quick_xml::events::Event;
-use quick_xml::Reader;
 use serde_json::json;
 
 pub struct DocxEvidence {
@@ -48,8 +48,7 @@ fn parse_part(
     blocks: &mut Vec<DocumentBlock>,
     tables: &mut Vec<OfficeTable>,
 ) -> OfficeResult<()> {
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(false);
+    let mut reader = TextReader::new(xml, false);
     let mut paragraph_depth = 0usize;
     let mut paragraph_text = String::new();
     let mut runs = Vec::new();
@@ -146,7 +145,7 @@ fn parse_part(
                 _ => {}
             },
             Ok(Event::Text(text)) if paragraph_depth > 0 => {
-                let value = text.unescape().map_err(|error| {
+                let value = decode_text(&text).map_err(|error| {
                     OfficeError::new(
                         "malformed_xml",
                         format!("invalid DOCX text: {error}"),

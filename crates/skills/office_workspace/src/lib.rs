@@ -17,6 +17,7 @@ mod xlsx;
 mod xlsx_edit;
 mod xlsx_write;
 mod xml;
+mod xml_text;
 
 #[cfg(test)]
 mod test_support;

@@ -14,7 +14,7 @@ pub(super) fn telegram_request_error(
             ChannelProviderFailureClass::RateLimited,
             Some(429),
             Some("retry_after"),
-            Some(duration.as_secs().max(1)),
+            Some(u64::from(duration.seconds()).max(1)),
             "telegram:retry_after",
         ),
         RequestError::Api(api_error) => telegram_api_error(operation, api_error),
@@ -89,7 +89,7 @@ fn telegram_api_error(operation: &str, error: &ApiError) -> ChannelProviderError
             400,
             "group_deactivated",
         ),
-        ApiError::NotFound => (
+        ApiError::InvalidToken => (
             ChannelProviderFailureClass::Authentication,
             401,
             "invalid_bot_token",

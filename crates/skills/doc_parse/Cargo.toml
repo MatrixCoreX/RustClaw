@@ -20,4 +20,4 @@ serde_json.workspace = true
 sha2.workspace = true
 skill-sdk = { package = "agent-skill-sdk", path = "../../skill-sdk" }
 office_workspace = { package = "office-workspace-skill", path = "../office_workspace" }
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9.0.1", default-features = false, features = ["deflate"] }

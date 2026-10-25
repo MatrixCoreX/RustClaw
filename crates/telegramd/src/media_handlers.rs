@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "media_handler_tests.rs"]
+mod tests;
+
 pub(super) async fn handle_callback_query(
     bot: Bot,
     q: CallbackQuery,

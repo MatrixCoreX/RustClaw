@@ -87,7 +87,7 @@ libc = "0.2"
 proc-macro2 = { version = "1", features = ["span-locations"] }
 portable-pty = "0.9"
 regex = "1"
-quick-xml = "0.37"
+quick-xml = "0.41"
 # 使用 rustls 替代 native-tls，交叉编译 aarch64 时无需目标平台 OpenSSL
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 reqwest-mcp = { package = "reqwest", version = "0.13", default-features = false, features = ["rustls"] }
@@ -99,11 +99,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 ripemd = "0.1"
-k256 = { version = "0.13", features = ["ecdsa"] }
+k256 = { version = "0.14", features = ["ecdsa"] }
 zeroize = "1"
 syn = { version = "2", features = ["full", "visit"] }
 # default-features = false + rustls 便于交叉编译 aarch64（无需 OpenSSL）
-teloxide = { version = "0.12", default-features = false, features = ["rustls", "ctrlc_handler", "webhooks-axum"] }
+teloxide = { version = "0.14", default-features = false, features = ["rustls", "ctrlc_handler", "webhooks-axum"] }
 thiserror = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }

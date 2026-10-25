@@ -1,6 +1,6 @@
 use super::*;
 use k256::ecdsa::{signature::Signer, Signature, SigningKey};
-use k256::elliptic_curve::rand_core::OsRng;
+use k256::elliptic_curve::Generate;
 
 fn assignment(task_type: &str, payload: Value) -> NniWorkAssignment {
     let payload_canonical = serde_json::to_string(&payload).unwrap();
@@ -35,8 +35,8 @@ fn program_validation_rejects_shells_and_paths() {
 fn signed_assignment_rejects_tampering_unknown_keys_and_heartbeat_replay() {
     use sha2::{Digest, Sha256};
 
-    let signing_key = SigningKey::random(&mut OsRng);
-    let public_key = signing_key.verifying_key().to_encoded_point(true);
+    let signing_key = SigningKey::generate();
+    let public_key = signing_key.verifying_key().to_sec1_point(true);
     let public_key_hex = hex::encode(public_key.as_bytes());
     let keys =
         nni_parse_work_assignment_verifying_keys(&public_key_hex).expect("parse verifying key");
@@ -85,8 +85,8 @@ fn signed_assignment_rejects_tampering_unknown_keys_and_heartbeat_replay() {
         "assignment_binding_invalid"
     );
 
-    let other_key = SigningKey::random(&mut OsRng);
-    let other_hex = hex::encode(other_key.verifying_key().to_encoded_point(true).as_bytes());
+    let other_key = SigningKey::generate();
+    let other_hex = hex::encode(other_key.verifying_key().to_sec1_point(true).as_bytes());
     let other_keys =
         nni_parse_work_assignment_verifying_keys(&other_hex).expect("parse other verifying key");
     assert_eq!(
@@ -165,6 +165,49 @@ fn verifies_node_crypto_assignment_signature_fixture() {
     assert_eq!(
         verified.task_id,
         "nni-work-22222222222222222222222222222222"
+    );
+    let signature = Signature::from_slice(
+        &hex::decode(&envelope.signature).expect("fixture signature bytes"),
+    )
+    .expect("P1363 fixture signature");
+    let mut der = envelope.clone();
+    der.signature = hex::encode(signature.to_der().as_bytes());
+    assert_eq!(
+        nni_verify_work_assignment_envelope(
+            &der,
+            "nni-heartbeat-11111111111111111111111111111111",
+            &keys,
+        )
+        .expect_err("DER is not the work signature wire format"),
+        "assignment_envelope_invalid"
+    );
+    let mut high_s = envelope.clone();
+    high_s.signature = hex::encode(
+        Signature::from_scalars(signature.r().to_bytes(), (-signature.s()).to_bytes())
+            .expect("equivalent high-S signature")
+            .to_bytes(),
+    );
+    assert_eq!(
+        nni_verify_work_assignment_envelope(
+            &high_s,
+            "nni-heartbeat-11111111111111111111111111111111",
+            &keys,
+        )
+        .expect_err("high-S signatures must remain rejected"),
+        "assignment_signature_invalid"
+    );
+    let mut tampered = envelope;
+    let mut signature = hex::decode(&tampered.signature).expect("fixture signature bytes");
+    signature[0] ^= 1;
+    tampered.signature = hex::encode(signature);
+    assert_eq!(
+        nni_verify_work_assignment_envelope(
+            &tampered,
+            "nni-heartbeat-11111111111111111111111111111111",
+            &keys,
+        )
+        .expect_err("altered Node.js signature must fail"),
+        "assignment_signature_invalid"
     );
 }
 
