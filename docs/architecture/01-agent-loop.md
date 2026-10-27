@@ -73,6 +73,9 @@ read a known file directly without listing/searching for the same locator first;
 discovery remains appropriate for missing, ambiguous or failed locators. Existing
 current-task plans still require reconciliation, and complex work retains planning
 and recovery. These are model instructions, not runtime natural-language branches.
+Plan writes pass the expected current `plan_revision`, not a desired next value.
+Initial creation expects zero; successful writes return the runtime-incremented
+revision to reuse unchanged. Conflicts require a fresh snapshot, not an overwrite.
 Alternative summary/detail tools are not automatically independent evidence.
 Answer-only verification corrections reuse current observations unless evidence
 is missing or stale; they do not require another plan read or tool replay.

@@ -1956,3 +1956,6 @@ fn native_leaf_accepts_required_argument_when_its_schema_allows_null() {
 
 #[path = "planning_native_contract_recovery_tests.rs"]
 mod contract_recovery;
+
+#[path = "planning/native_coordination_contract_tests.rs"]
+mod coordination_contracts;

@@ -38,6 +38,9 @@ For the original request and invocation parameters, select `/request` and the
 known `args_ref`; do not fetch `data_ref` unless the user needs recorded outputs.
 Keep source identity, digest, scope and authority metadata as internal grounding
 unless the user explicitly requests them in the visible answer.
+Report only fields actually returned by that selected historical observation.
+Preserve literal values, relative locators and opaque references exactly; do not
+reconstruct references or add absent details from the environment or other turns.
 
 When projecting a `call_capability` result into `respond.observed_fields`, recall
 values live under `data.extra.fields`, for example `data.extra.fields./request`

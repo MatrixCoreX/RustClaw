@@ -7,6 +7,9 @@ use thiserror::Error;
 
 pub const CAPABILITY_RESULT_SCHEMA_VERSION: u16 = 1;
 
+/// Canonical transport tokens for the `is_machine_ref` decoder contract.
+pub const MACHINE_REFERENCE_PATTERN: &str = "^[a-z0-9_.:-]+$";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityResultStatus {

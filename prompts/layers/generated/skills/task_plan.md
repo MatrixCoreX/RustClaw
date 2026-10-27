@@ -10,6 +10,9 @@ task-scoped and cannot read or modify another task.
 - `task.plan_update`: update existing steps by stable `step_id`, passing the
   latest returned `plan_revision`.
 - `task.plan_read`: read the latest snapshot without changing it.
+- `plan_revision` always means the expected current version, never the desired
+  next version. Initial creation expects 0 (or omits it); the runtime alone
+  increments it. Reuse the latest returned version unchanged for the next write.
 - Before the terminal response, reconcile every step in an existing plan using `task.plan_update`. Complete only evidenced work, keep blocked work unfinished, and cancel only withdrawn work. Do not replay effects for bookkeeping. `task_plan_reconciliation_required` supplies the current snapshot for at most two attempts; the second requires fewer unfinished steps. With `candidate_response_prepared=true`, answer preparation already has a candidate and can be completed if its requirements are met; transport delivery belongs to runtime and need not keep that preparation step running.
 
 ## Contract

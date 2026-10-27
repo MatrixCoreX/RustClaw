@@ -8,6 +8,11 @@ configure_platform_command_path
 BINARY="${1:-$ROOT/target/debug/clawd}"
 SKILL_BINARY_DIR="${2:-$ROOT/target/debug}"
 CASE_FILE="${NL_CASE_FILE:-scripts/nl_tests/cases/nl_cases_correctness_continuity_20261027.txt}"
+if [[ -n "${NL_CASE_NAME:-}" ]]; then
+  set -- --case-name "$NL_CASE_NAME"
+else
+  set --
+fi
 [[ -x "$BINARY" && -x "$SKILL_BINARY_DIR/task-control-skill" ]] || {
   echo 'Build clawd and task-control-skill before running this isolated suite.' >&2
   exit 1
@@ -73,4 +78,5 @@ done
 echo "run_id=correctness-continuity-$PORT suite=correctness-continuity provider=selected_config model=selected_config dry_run=false isolation=$STATE"
 bash scripts/nl_tests/run_manual_test.sh --base-url "http://127.0.0.1:$PORT" \
   --case-file "$CASE_FILE" \
+  "$@" \
   --log-root "$STATE/results" --wait-seconds 900 --provider-retries 0 --fail-fast 1 --full-text

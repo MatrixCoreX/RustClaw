@@ -116,3 +116,36 @@ fn task_plan_builtin_returns_structured_revision_conflict() {
         true
     );
 }
+
+#[test]
+fn expected_revision_never_means_desired_next_revision() {
+    let (state, task) = active_task();
+    let mut args = json!({"action":"set_plan","plan_revision":1,"steps":[{"step_id":"one","title":"One","status":"in_progress"}]});
+    let error = execute_task_plan(&state, &task, args.as_object().unwrap()).unwrap_err();
+    let error = crate::skills::parse_structured_skill_error(&error).unwrap();
+    let extra = error.extra.unwrap();
+    assert_eq!(extra["error_code"], "task_plan_revision_conflict");
+    assert_eq!(extra["current_plan_revision"], 0);
+    assert_eq!(extra["expected_plan_revision"], 1);
+    assert_eq!(
+        crate::repo::read_task_plan(&state, &task.task_id, "read_plan").unwrap()["plan_revision"],
+        0
+    );
+    args["plan_revision"] = json!(0);
+    let created: Value =
+        serde_json::from_str(&execute_task_plan(&state, &task, args.as_object().unwrap()).unwrap())
+            .unwrap();
+    assert_eq!(created["plan_revision"], 1);
+    let mut update =
+        json!({"action":"update_steps","updates":[{"step_id":"one","status":"completed"}]});
+    assert!(execute_task_plan(&state, &task, update.as_object().unwrap()).is_err());
+    update["plan_revision"] = json!(2);
+    assert!(execute_task_plan(&state, &task, update.as_object().unwrap()).is_err());
+    update["plan_revision"] = created["plan_revision"].clone();
+    let committed: Value = serde_json::from_str(
+        &execute_task_plan(&state, &task, update.as_object().unwrap()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(committed["plan_revision"], 2);
+    assert_eq!(committed["steps"][0]["status"], "completed");
+}

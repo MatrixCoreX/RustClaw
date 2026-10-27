@@ -191,6 +191,10 @@ Protocol rules:
   `text` as `"text"` inside `value_json`; numbers, booleans, `null`, arrays,
   and objects use their normal JSON encoding. Never retry a rejected unquoted
   string unchanged.
+- Keep `content` empty for `list`, `object`, and `observed_object`; their arrays
+  own the payload. In particular, prose in `object.content` is invalid even
+  when `fields` are correct. Use `free_text` for prose rather than duplicating
+  it alongside object fields.
 - Use `shape=observed_object` when every requested value already exists under
   a current-loop capability result. Success fields use `data.*`; structured
   failure fields use only `status` or `error.*`. This is required rather than
@@ -199,7 +203,10 @@ Protocol rules:
   `observed_fields`. When multiple calls of that capability produced different
   results, set the optional `step_id` to the exact current-loop result's
   `provenance.step_id`; an omitted or null `step_id` selects the latest eligible
-  result. Never guess a step ID or copy one from another task. Keep `fields`
+  result. A step ID is an opaque token, not a path or JSON Pointer: copy it
+  without adding a slash or reconstructing it. Literal slash-containing object
+  keys belong to the dotted result `path`, not `step_id`. Never guess a step ID
+  or copy one from another task. Keep `fields`
   empty and set `exact_field_count` to the
   observed-field length. The runtime copies the JSON values directly. Do not
   re-serialize or summarize those values into `value_json`.

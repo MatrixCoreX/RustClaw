@@ -113,7 +113,7 @@ pub(super) fn native_planner_request(
                 },
                 "content": {
                     "type": "string",
-                    "description": "free_text_content_or_empty_list_content"
+                    "description": "free_text=answer; canonical_list_or_object_or_observed_object=empty_string; object_values=fields.value_json; observed_values=observed_fields; object_prose=invalid"
                 },
                 "items": {
                     "type": "array",
@@ -169,13 +169,15 @@ pub(super) fn native_planner_request(
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": MAX_NATIVE_RESPONSE_SOURCE_PATH,
+                                "pattern": claw_core::capability_result::MACHINE_REFERENCE_PATTERN,
                                 "description": "source=current_loop_outcome; selector=exact_capability_token"
                             },
                             "step_id": {
                                 "type": ["string", "null"],
                                 "minLength": 1,
                                 "maxLength": MAX_NATIVE_RESPONSE_SOURCE_PATH,
-                                "description": "optional_exact_provenance.step_id_from_current_loop; unknown_or_ambiguous=rejected; null=latest_eligible_result"
+                                "pattern": claw_core::capability_result::MACHINE_REFERENCE_PATTERN,
+                                "description": "selector=exact_provenance.step_id_from_current_loop; token=opaque_machine_id_not_json_pointer_or_path; copy_without_prefix_or_reconstruction; unknown_or_ambiguous=rejected; omitted_or_null=latest_eligible_result"
                             },
                             "path": {
                                 "type": "string",
@@ -191,7 +193,8 @@ pub(super) fn native_planner_request(
                 "exact_field_count": {
                     "type": "integer",
                     "minimum": 0,
-                    "maximum": MAX_NATIVE_RESPONSE_FIELDS
+                    "maximum": MAX_NATIVE_RESPONSE_FIELDS,
+                    "description": "object=fields.length; observed_object=observed_fields.length; observed_zero=derive_from_observed_fields; free_text_or_list=0"
                 }
             },
             "additionalProperties": false

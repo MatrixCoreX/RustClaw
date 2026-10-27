@@ -140,7 +140,7 @@ async fn cleanup_tick(state: AppState) -> anyhow::Result<()> {
 }
 
 async fn schedule_tick(state: AppState) -> anyhow::Result<()> {
-    run_blocking_tick("schedule", move || schedule_once(&state)).await
+    run_blocking_tick("scheduled_job_tick", move || schedule_once(&state)).await
 }
 
 async fn task_heartbeat_tick(
