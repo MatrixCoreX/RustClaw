@@ -1,6 +1,97 @@
 use super::*;
 use crate::AppState;
 
+#[test]
+fn batch_parts_preserve_order_missing_entries_and_receipt_integrity() {
+    let (state, _, _) = fixture();
+    let db = state.core.db.get().unwrap();
+    let original = part(&db, "part-0".into()).unwrap().receipt.unwrap();
+    let keys = (0..128)
+        .rev()
+        .map(|index| format!("batch-{index}"))
+        .collect::<Vec<_>>();
+    for key in keys.iter().skip(1) {
+        let mut receipt = original.clone();
+        receipt.idempotency_key = key.clone();
+        receipt.delivery_id = format!("delivery-part:{key}");
+        save_receipt(&db, &receipt).unwrap();
+    }
+    let batch = parts(&db, &keys).unwrap();
+    assert_eq!(batch.len(), 128);
+    for (index, entry) in batch.iter().enumerate() {
+        assert_eq!(
+            serde_json::to_value(entry).unwrap(),
+            serde_json::to_value(part(&db, keys[index].clone()).unwrap()).unwrap()
+        );
+    }
+    assert!(batch[0].receipt.is_none());
+    assert!(parts(&db, &[String::new()]).is_err());
+    db.execute(
+        "UPDATE channel_delivery_receipts SET receipt_digest='corrupt' WHERE idempotency_key=?1",
+        [&keys[1]],
+    )
+    .unwrap();
+    assert!(parts(&db, &keys)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("integrity_mismatch"));
+}
+
+#[test]
+fn inspection_reuses_read_snapshot_across_concurrent_wal_callback() {
+    let (state, id, _) = fixture();
+    struct TestDirectory(std::path::PathBuf);
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let dir = TestDirectory(
+        std::env::temp_dir().join(format!("delivery-snapshot-{}", uuid::Uuid::new_v4())),
+    );
+    std::fs::create_dir_all(&dir.0).unwrap();
+    let path = dir.0.join("receipts.db");
+    state
+        .core
+        .db
+        .get()
+        .unwrap()
+        .execute("VACUUM INTO ?1", [path.to_str().unwrap()])
+        .unwrap();
+    let db = Connection::open(&path).unwrap();
+    db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA query_only=ON;")
+        .unwrap();
+    let before = inspect(&db, &id, 10).unwrap();
+    let tx = db.unchecked_transaction().unwrap();
+    let previous_parent = part(&tx, "parent".into()).unwrap();
+    let mut next_parent = previous_parent.receipt.unwrap();
+    let mut next_child = part(&tx, "part-1".into()).unwrap().receipt.unwrap();
+    std::thread::spawn(move || {
+        let mut writer = Connection::open(path).unwrap();
+        let update = writer.transaction().unwrap();
+        for receipt in [&mut next_parent, &mut next_child] {
+            receipt.status = ChannelDeliveryStatus::Read;
+            receipt.provider_message_ids = vec![format!("provider:{}", receipt.idempotency_key)];
+            receipt.parts.clear();
+            receipt.error_code = None;
+            receipt.message_key = None;
+            receipt.diagnostic_id = None;
+            receipt.updated_at_ts = 20;
+            save_receipt(&update, receipt).unwrap();
+        }
+        update.commit().unwrap();
+    })
+    .join()
+    .unwrap();
+    assert_eq!(inspect(&tx, &id, 20).unwrap(), before);
+    tx.commit().unwrap();
+    let after = inspect(&db, &id, 20).unwrap();
+    assert_eq!(after["status"], "read");
+    assert_ne!(after["snapshot_digest"], before["snapshot_digest"]);
+    assert!(db.is_autocommit());
+}
+
 fn fixture() -> (AppState, String, claw_core::types::AuthIdentity) {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     state.seed_test_auth_identity("delivery-owner", "admin");

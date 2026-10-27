@@ -40,6 +40,26 @@ fn debug_entry(mode: &str, request_payload: Option<Value>) -> TaskDebugEntry {
 }
 
 #[test]
+fn compressed_teaching_requests_expand_before_redaction_and_keep_the_original_shape() {
+    let payload = json!({"messages":[{"role":"system","content":"fixture ".repeat(4000)}],
+        "headers":{"authorization":"Bearer fixture-secret-token"}});
+    let mut stored = serde_json::to_value(debug_entry("verbose", None)).unwrap();
+    stored["request_payload"] = crate::providers::model_log_payload::encode(&payload);
+    assert_eq!(
+        stored["request_payload"]["model_log_encoding"],
+        "gzip-base64-v1"
+    );
+    let mut decoded: Vec<TaskDebugEntry> = vec![serde_json::from_value(stored.clone()).unwrap()];
+    assert_eq!(decoded[0].request_payload, Some(payload));
+    assert!(redact_task_debug_entries(&mut decoded) > 0);
+    let public = serde_json::to_value(&decoded[0]).unwrap();
+    assert!(public["request_payload"]["messages"].is_array());
+    assert!(!public.to_string().contains("fixture-secret-token"));
+    stored["request_payload"]["sha256"] = json!("corrupt");
+    assert!(serde_json::from_value::<TaskDebugEntry>(stored).is_err());
+}
+
+#[test]
 fn teaching_trace_requires_explicit_opt_in_and_exact_owner_or_admin() {
     let owner = identity("owner-key", "user");
     let other = identity("other-key", "user");

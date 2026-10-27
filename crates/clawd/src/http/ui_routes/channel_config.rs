@@ -1532,6 +1532,10 @@ struct TaskDebugEntry {
     prompt_hash: Option<String>,
     prompt_file: Option<String>,
     prompt: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "crate::providers::model_log_payload::deserialize_optional"
+    )]
     request_payload: Option<Value>,
     response: Option<String>,
     raw_response: Option<String>,

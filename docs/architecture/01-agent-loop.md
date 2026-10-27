@@ -59,6 +59,15 @@ that stale request; inputs that arrive during a tool call are consumed at the
 next safe execution boundary. The runtime never infers stop or amendment from
 user-language tokens.
 
+The always-on skill index contains one discovery entry per authorized capability:
+purpose, semantic tags, required fields, contract digest and expansion reference.
+Detailed policy/argument/output contracts are available through catalog expansion
+and selected playbooks; callable native tools retain their exact input schemas.
+Catalog compaction does not grant permissions or select tools from user phrases.
+For exact observed JSON answers, `observed_fields[].step_id` may select one
+current-loop result by its `provenance.step_id`. Omission/null selects the latest
+eligible result; unknown, ambiguous or incompatible references are rejected.
+
 Each planner decision records the covered input sequence, instruction revision,
 and execution epoch. A tool or skill action must atomically claim that exact
 version immediately before dispatch. Terminal presentation uses the same

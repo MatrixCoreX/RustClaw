@@ -14,7 +14,7 @@ const t = (zh: string, en: string) => lang === "zh" ? zh : en;
 createRoot(document.getElementById("root")!).render(
   <UiDialogProvider>
     <main className="theme-shell min-h-screen p-4 xl:pl-60">
-      <AippPage lang={lang} t={t} apiFetch={apiFetch} onOpenAgent={() => {}} onOpenSkillStore={() => {}} />
+      <AippPage requestScope="browser-collection-fixture" lang={lang} t={t} apiFetch={apiFetch} onOpenAgent={() => {}} onOpenSkillStore={() => {}} />
     </main>
   </UiDialogProvider>,
 );

@@ -23,6 +23,7 @@ export function conversationHistoryScope(
   authMode: "key" | "webd" | null,
   userId: number | null | undefined,
   chatId: number | null | undefined,
+  apiBase = "",
 ): string {
   if (!authReady || !authMode || userId == null || chatId == null) return "";
   // Runtime identities are signed 64-bit values. JSON parses them as finite
@@ -30,7 +31,8 @@ export function conversationHistoryScope(
   // still stable enough to isolate this browser-local cache across refreshes.
   if (!Number.isFinite(userId) || !Number.isInteger(userId)) return "";
   if (!Number.isFinite(chatId) || !Number.isInteger(chatId)) return "";
-  return `${authMode}:${userId}:${chatId}`;
+  const identity = `${authMode}:${userId}:${chatId}`;
+  return apiBase.trim() ? JSON.stringify([apiBase.trim(), identity]) : identity;
 }
 
 export function conversationHistoryStorageKey(scope: string): string {

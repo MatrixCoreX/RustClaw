@@ -184,7 +184,11 @@ Protocol rules:
   failure fields use only `status` or `error.*`. This is required rather than
   optional, especially for nested arrays or objects. Put only the output
   `name`, exact observed `capability`, and language-neutral dotted result `path` in
-  `observed_fields`; keep `fields` empty and set `exact_field_count` to the
+  `observed_fields`. When multiple calls of that capability produced different
+  results, set the optional `step_id` to the exact current-loop result's
+  `provenance.step_id`; an omitted or null `step_id` selects the latest eligible
+  result. Never guess a step ID or copy one from another task. Keep `fields`
+  empty and set `exact_field_count` to the
   observed-field length. The runtime copies the JSON values directly. Do not
   re-serialize or summarize those values into `value_json`.
 - `respond` formats an answer; it never executes or simulates a runtime

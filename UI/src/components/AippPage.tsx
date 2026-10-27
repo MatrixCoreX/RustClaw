@@ -33,6 +33,7 @@ import {
 import { formatUiError } from "../lib/ui-error";
 import { newRequestUuid } from "../lib/request-id";
 import { PageRequestLifecycle } from "../lib/page-request-lifecycle";
+import { useRequestOwner } from "../hooks/useRequestOwner";
 import { AippSkillRemovalError, removeAippAndSkill } from "../lib/aipp-skill-removal";
 import { skillStoreErrorMessage } from "../lib/skill-store";
 import { AIPP_PAGE_SIZE, collectionGroupKey, completeCollectionPage, groupCollectionItems } from "../lib/aipp-collection";
@@ -120,6 +121,7 @@ function isCachedAippCatalogItem(value: unknown): value is AippCatalogItem {
 export function readCachedAippCatalog(
   storage: AippCatalogStorage | undefined,
   nowMs = Date.now(),
+  scope = "",
 ): AippCatalogItem[] {
   if (!storage) return [];
   try {
@@ -129,9 +131,11 @@ export function readCachedAippCatalog(
       schema_version?: unknown;
       cached_at_ms?: unknown;
       apps?: unknown;
+      scope?: unknown;
     };
     if (
       cached.schema_version !== 1
+      || (cached.scope ?? "") !== scope
       || typeof cached.cached_at_ms !== "number"
       || cached.cached_at_ms > nowMs
       || nowMs - cached.cached_at_ms > AIPP_CATALOG_CACHE_TTL_MS
@@ -153,11 +157,13 @@ export function writeCachedAippCatalog(
   storage: AippCatalogStorage | undefined,
   apps: AippCatalogItem[],
   nowMs = Date.now(),
+  scope = "",
 ): void {
   if (!storage || apps.length > 256 || !apps.every(isCachedAippCatalogItem)) return;
   try {
     storage.setItem(AIPP_CATALOG_CACHE_KEY, JSON.stringify({
       schema_version: 1,
+      scope,
       cached_at_ms: nowMs,
       apps,
     }));
@@ -167,6 +173,7 @@ export function writeCachedAippCatalog(
 }
 
 export interface AippPageProps {
+  requestScope: string;
   lang: "zh" | "en";
   t: Translate;
   apiFetch: ApiFetch;
@@ -259,11 +266,13 @@ interface AippBridgeRequest {
   args?: Record<string, unknown>;
 }
 
-async function waitForAippTask(apiFetch: ApiFetch, taskId: string): Promise<unknown> {
+async function waitForAippTask(apiFetch: ApiFetch, taskId: string, signal: AbortSignal): Promise<unknown> {
   const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
-    const response = await apiFetch(`/v1/tasks/${encodeURIComponent(taskId)}`);
+    signal.throwIfAborted();
+    const response = await apiFetch(`/v1/tasks/${encodeURIComponent(taskId)}`, { signal });
     const body = (await response.json()) as ApiResponse<import("../types/api").TaskQueryResponse>;
+    signal.throwIfAborted();
     if (!response.ok || !body.ok || !body.data) throw new Error(body.error || `aipp_task_http_${response.status}`);
     if (["succeeded", "failed", "canceled", "timeout"].includes(body.data.status)) {
       return {
@@ -273,7 +282,12 @@ async function waitForAippTask(apiFetch: ApiFetch, taskId: string): Promise<unkn
         error_text: body.data.error_text ?? null,
       };
     }
-    await new Promise((resolve) => window.setTimeout(resolve, 500));
+    await new Promise<void>((resolve, reject) => {
+      const abort = () => { window.clearTimeout(timer); reject(signal.reason); };
+      const timer = window.setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, 500);
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) abort();
+    });
   }
   throw new Error("aipp_task_wait_timeout");
 }
@@ -282,13 +296,17 @@ export function SandboxedAipp({
   app,
   lang,
   apiFetch,
+  requestScope,
 }: {
   app: AippCatalogItem;
   lang: "zh" | "en";
   apiFetch: ApiFetch;
+  requestScope: string;
 }) {
+  const isCurrent = useRequestOwner(requestScope);
+  const apiFetchRef = useRef(apiFetch);
+  apiFetchRef.current = apiFetch;
   const frameRef = useRef<HTMLIFrameElement | null>(null);
-  const pendingRequests = useRef(new Set<string>());
   const allowedCapabilities = useMemo(() => new Set(app.bridge_capabilities), [app.bridge_capabilities]);
   const post = useCallback((payload: unknown) => frameRef.current?.contentWindow?.postMessage(payload, "*"), []);
   const postContext = useCallback(() => post({
@@ -301,7 +319,10 @@ export function SandboxedAipp({
   }), [allowedCapabilities, app.package_version, app.skill_name, lang, post]);
 
   useEffect(() => {
+    let disposed = false;
+    const pendingRequests = new Map<string, AbortController>();
     const receive = (event: MessageEvent) => {
+      if (disposed || !isCurrent()) return;
       if (event.source !== frameRef.current?.contentWindow || !event.data || typeof event.data !== "object") return;
       const request = event.data as Partial<AippBridgeRequest>;
       if (request.schema_version === 1 && (request as { type?: string }).type === "aipp.ready") {
@@ -316,14 +337,19 @@ export function SandboxedAipp({
         || request.request_id.length > 128
         || typeof request.capability !== "string"
       ) return;
-      const respond = (ok: boolean, data?: unknown, error_code?: string) => post({
+      const frame = frameRef.current;
+      const target = frame?.contentWindow;
+      const respond = (ok: boolean, data?: unknown, error_code?: string) => {
+        if (disposed || !isCurrent() || frameRef.current !== frame || frame?.contentWindow !== target) return;
+        target?.postMessage({
         schema_version: 1,
         type: "aipp.capability.result",
         request_id: request.request_id,
         ok,
         data,
         error_code,
-      });
+        }, "*");
+      };
       if (!allowedCapabilities.has(request.capability)) {
         respond(false, undefined, "aipp_bridge_capability_denied");
         return;
@@ -337,8 +363,8 @@ export function SandboxedAipp({
         return;
       }
       if (
-        pendingRequests.current.has(request.request_id)
-        || pendingRequests.current.size >= AIPP_BRIDGE_MAX_IN_FLIGHT
+        pendingRequests.has(request.request_id)
+        || pendingRequests.size >= AIPP_BRIDGE_MAX_IN_FLIGHT
       ) {
         respond(false, undefined, "aipp_bridge_busy");
         return;
@@ -347,10 +373,13 @@ export function SandboxedAipp({
         respond(false, undefined, "aipp_bridge_args_too_large");
         return;
       }
-      pendingRequests.current.add(request.request_id);
+      const controller = new AbortController();
+      const requestApiFetch = apiFetchRef.current;
+      pendingRequests.set(request.request_id, controller);
       void (async () => {
         try {
-          const response = await apiFetch("/v1/tasks", {
+          const response = await requestApiFetch("/v1/tasks", {
+            signal: controller.signal,
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -365,18 +394,24 @@ export function SandboxedAipp({
             }),
           });
           const body = (await response.json()) as ApiResponse<{ task_id: string }>;
+          controller.signal.throwIfAborted();
           if (!response.ok || !body.ok || !body.data?.task_id) throw new Error(body.error || `aipp_submit_http_${response.status}`);
-          respond(true, await waitForAippTask(apiFetch, body.data.task_id));
+          respond(true, await waitForAippTask(requestApiFetch, body.data.task_id, controller.signal));
         } catch (error) {
-          respond(false, undefined, error instanceof Error ? error.message : "aipp_bridge_request_failed");
+          if (!controller.signal.aborted) respond(false, undefined, error instanceof Error ? error.message : "aipp_bridge_request_failed");
         } finally {
-          pendingRequests.current.delete(request.request_id as string);
+          pendingRequests.delete(request.request_id as string);
         }
       })();
     };
     window.addEventListener("message", receive);
-    return () => window.removeEventListener("message", receive);
-  }, [allowedCapabilities, apiFetch, post, postContext]);
+    return () => {
+      disposed = true;
+      window.removeEventListener("message", receive);
+      for (const controller of pendingRequests.values()) controller.abort();
+      pendingRequests.clear();
+    };
+  }, [allowedCapabilities, isCurrent, postContext]);
 
   const entrypoint = app.entrypoint || "";
   return (
@@ -1005,10 +1040,11 @@ export function AippMediaItemCard({
   );
 }
 
-export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onSkillsChanged }: AippPageProps) {
+export function AippPage({ lang, t, apiFetch, requestScope, onOpenAgent, onOpenSkillStore, onSkillsChanged }: AippPageProps) {
+  const isCurrent = useRequestOwner(requestScope);
   const { confirm, choose } = useUiDialog();
   const initialCatalog = useRef(
-    readCachedAippCatalog(typeof window === "undefined" ? undefined : window.sessionStorage),
+    readCachedAippCatalog(typeof window === "undefined" ? undefined : window.sessionStorage, Date.now(), requestScope),
   );
   const [catalog, setCatalog] = useState<AippCatalogItem[]>(initialCatalog.current);
   const catalogRef = useRef(initialCatalog.current);
@@ -1055,15 +1091,18 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
     : (["ui", "wechat", "telegram", "whatsapp", "feishu", "lark"] as const);
 
   const applyCatalog = useCallback((apps: AippCatalogItem[]) => {
+    if (!isCurrent()) return;
     catalogRef.current = apps;
     setCatalog(apps);
     writeCachedAippCatalog(
       typeof window === "undefined" ? undefined : window.sessionStorage,
       apps,
+      Date.now(), requestScope,
     );
-  }, []);
+  }, [isCurrent, requestScope]);
 
   const fetchCatalog = useCallback(async (silent = false) => {
+    if (!isCurrent()) return;
     const currentRequest = ++catalogRequestSequence.current;
     if (!silent) {
       setCatalogLoading(true);
@@ -1090,9 +1129,10 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
     } finally {
       if (!silent && currentRequest === catalogRequestSequence.current) setCatalogLoading(false);
     }
-  }, [applyCatalog]);
+  }, [applyCatalog, isCurrent]);
 
   const updateAippInstallState = useCallback(async (app: AippCatalogItem, installed: boolean) => {
+    if (!isCurrent()) return;
     if (!installed) {
       const accepted = await confirm({
         title: t("卸载应用和技能", "Uninstall app and skill"),
@@ -1104,7 +1144,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
         cancelLabel: t("取消", "Cancel"),
         tone: "danger",
       });
-      if (!accepted) return;
+      if (!accepted || !isCurrent()) return;
       const finalAccepted = await confirm({
         title: t("最后确认", "Final confirmation"),
         message: t(
@@ -1115,7 +1155,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
         cancelLabel: t("返回", "Go back"),
         tone: "danger",
       });
-      if (!finalAccepted) return;
+      if (!finalAccepted || !isCurrent()) return;
     }
     setInstallActionSkill(app.skill_name);
     const controller = new AbortController();
@@ -1131,7 +1171,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
       } else {
         await removeAippAndSkill((path, init) => apiFetchRef.current(path, init), app.skill_name, { signal: controller.signal });
       }
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || !isCurrent()) return;
       // Commit the acknowledged state before refreshing; stale reads must not restore removed apps.
       catalogRequestSequence.current += 1;
       applyCatalog(installed
@@ -1142,17 +1182,17 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
       if (!installed) onSkillsChanged?.();
       await fetchCatalog();
     } catch (cause) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || !isCurrent()) return;
       setError(cause instanceof AippSkillRemovalError
         ? cause.pending
           ? t("卸载仍在后台处理中，请到 Skill Store 查看进度。", "Removal is still running in the background. Check progress in Skill Store.")
           : skillStoreErrorMessage(cause.code, t)
         : formatUiError(cause, t, "Ai APP 状态更新失败。", "Could not update the Ai APP."));
     } finally {
-      if (!controller.signal.aborted) setInstallActionSkill(null);
+      if (!controller.signal.aborted && isCurrent()) setInstallActionSkill(null);
       if (installAbortRef.current === controller) installAbortRef.current = null;
     }
-  }, [applyCatalog, confirm, fetchCatalog, lang, onSkillsChanged, selectedSkill, t]);
+  }, [applyCatalog, confirm, fetchCatalog, isCurrent, lang, onSkillsChanged, selectedSkill, t]);
 
   const chooseAppToInstall = async () => {
     const skill = await choose({
@@ -1170,6 +1210,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
   };
 
   const fetchPage = useCallback(async (silent = false) => {
+    if (!isCurrent()) return;
     const currentRequest = pageRequests.current.begin(silent);
     if (currentRequest === null) return;
     if (showGuide) { pageRequests.current.invalidate(); setLoading(false); return; }
@@ -1203,6 +1244,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
         `/v1/aipps/${encodeURIComponent(selectedSkill)}/items?${params.toString()}`,
       );
       const body = (await response.json()) as ApiResponse<AippMediaPageResponse | AippTaskActivityPageResponse>;
+      if (!isCurrent()) return;
       if (!response.ok || !body.ok || !body.data) {
         throw new Error(body.error || `aipp_items_http_${response.status}`);
       }
@@ -1215,8 +1257,8 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
             const nextBody = await nextResponse.json() as ApiResponse<AippMediaPageResponse>;
             if (!nextResponse.ok || !nextBody.ok || !nextBody.data) throw new Error(nextBody.error || `aipp_items_http_${nextResponse.status}`);
             return nextBody.data;
-          }, () => pageRequests.current.isCurrent(currentRequest));
-          if (!pageRequests.current.isCurrent(currentRequest)) return;
+          }, () => isCurrent() && pageRequests.current.isCurrent(currentRequest));
+          if (!isCurrent() || !pageRequests.current.isCurrent(currentRequest)) return;
           setPage(complete);
           setActivityPage(null);
         } else {
@@ -1225,15 +1267,16 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
         }
       }
     } catch (cause) {
-      if (!silent && pageRequests.current.isCurrent(currentRequest)) {
+      if (isCurrent() && !silent && pageRequests.current.isCurrent(currentRequest)) {
         setError(formatUiError(cause, translateRef.current, "Ai APP 内容读取失败。", "Could not load Ai APP content."));
       }
     } finally {
-      if (pageRequests.current.finish(currentRequest)) setLoading(false);
+      if (isCurrent() && pageRequests.current.finish(currentRequest)) setLoading(false);
     }
-  }, [activityChannel, activityStatus, cursor, kind, platform, searchQuery, selectedApp?.installed, selectedApp?.renderer, selectedSkill, sortOrder, showGuide]);
+  }, [activityChannel, activityStatus, cursor, isCurrent, kind, platform, searchQuery, selectedApp?.installed, selectedApp?.renderer, selectedSkill, sortOrder, showGuide]);
 
   const removeActivityItems = useCallback(async (taskIds: string[]) => {
+    if (!isCurrent()) return;
     const uniqueIds = [...new Set(taskIds.filter(Boolean))];
     if (!selectedSkill || uniqueIds.length === 0 || removingTaskIds.length > 0) return;
     const accepted = await confirm({
@@ -1246,7 +1289,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
       cancelLabel: t("取消", "Cancel"),
       tone: "danger",
     });
-    if (!accepted) return;
+    if (!accepted || !isCurrent()) return;
     setRemovingTaskIds(uniqueIds);
     setError(null);
     try {
@@ -1256,17 +1299,20 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
         body: JSON.stringify({ task_ids: uniqueIds }),
       });
       const body = (await response.json()) as ApiResponse<{ removed_count: number; source_records_preserved: boolean }>;
+      if (!isCurrent()) return;
       if (!response.ok || !body.ok) throw new Error(body.error || `aipp_items_remove_http_${response.status}`);
       setSelectedTaskIds((current) => current.filter((taskId) => !uniqueIds.includes(taskId)));
       await fetchPage();
     } catch (cause) {
+      if (!isCurrent()) return;
       setError(formatUiError(cause, t, "记录删除失败。", "Could not delete the records."));
     } finally {
-      setRemovingTaskIds([]);
+      if (isCurrent()) setRemovingTaskIds([]);
     }
-  }, [confirm, fetchPage, removingTaskIds.length, selectedSkill, t]);
+  }, [confirm, fetchPage, isCurrent, removingTaskIds.length, selectedSkill, t]);
 
   const removeCollectionItems = useCallback(async (sequences: number[]) => {
+    if (!isCurrent()) return;
     const uniqueIds = [...new Set(sequences.filter((sequence) => Number.isSafeInteger(sequence) && sequence > 0))];
     if (!selectedSkill || uniqueIds.length === 0 || removingCollectionSequences.length > 0) return;
     const accepted = await confirm({
@@ -1279,7 +1325,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
       cancelLabel: t("取消", "Cancel"),
       tone: "danger",
     });
-    if (!accepted) return;
+    if (!accepted || !isCurrent()) return;
     setRemovingCollectionSequences(uniqueIds);
     setError(null);
     try {
@@ -1289,15 +1335,17 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
         body: JSON.stringify({ global_sequences: uniqueIds }),
       });
       const body = (await response.json()) as ApiResponse<{ removed_count: number; source_records_preserved: boolean }>;
+      if (!isCurrent()) return;
       if (!response.ok || !body.ok) throw new Error(body.error || `aipp_items_remove_http_${response.status}`);
       setSelectedCollectionSequences((current) => current.filter((sequence) => !uniqueIds.includes(sequence)));
       await fetchPage();
     } catch (cause) {
+      if (!isCurrent()) return;
       setError(formatUiError(cause, t, "记录删除失败。", "Could not delete the records."));
     } finally {
-      setRemovingCollectionSequences([]);
+      if (isCurrent()) setRemovingCollectionSequences([]);
     }
-  }, [confirm, fetchPage, removingCollectionSequences.length, selectedSkill, t]);
+  }, [confirm, fetchPage, isCurrent, removingCollectionSequences.length, selectedSkill, t]);
 
   useEffect(() => {
     void fetchCatalog(initialCatalog.current.length > 0);
@@ -1490,7 +1538,7 @@ export function AippPage({ lang, t, apiFetch, onOpenAgent, onOpenSkillStore, onS
         description={localizedAippCopy(selectedApp.descriptions, lang, selectedApp.default_locale)}
         platforms={platforms} t={t} onOpenAgent={onOpenAgent} /> : <>
       {selectedApp.renderer === "sandbox_bundle_v1" ? (
-        <SandboxedAipp app={selectedApp} lang={lang} apiFetch={apiFetch} />
+        <SandboxedAipp app={selectedApp} lang={lang} apiFetch={apiFetch} requestScope={requestScope} />
       ) : null}
 
       {selectedApp.renderer === "task_activity_v1" ? <>

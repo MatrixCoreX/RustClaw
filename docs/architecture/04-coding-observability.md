@@ -14,6 +14,14 @@ Coding changes use explicit path ownership, patch preconditions, compensation
 snapshots, and observed verification. A failed check becomes a structured loop
 observation, not a hardcoded user reply.
 
+Verbose model logs encode large, compressible request payloads as self-contained
+`gzip-base64-v1` values with byte length and SHA-256. Teaching queries and NL
+trace/replay readers restore the original JSON before secret redaction or display.
+Decoding is bounded to 16 MiB and rejects corruption; small/non-compressible
+payloads and existing plain records remain readable. This is lossless storage,
+not encryption or a retention change. Existing append locks, provider-response
+sanitization and access checks remain in force; no sidecar is needed on restart.
+
 ```mermaid
 flowchart TD
     A[Coding request or goal] --> B[Inspect workspace and evidence]

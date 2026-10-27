@@ -783,6 +783,7 @@ dependencies = [
  "chrono",
  "chrono-tz 0.10.4",
  "claw-core",
+ "flate2",
  "fs-discovery",
  "fs2",
  "futures-util",

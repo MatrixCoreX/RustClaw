@@ -7,9 +7,7 @@ const CATALOG_PROMPT_SHARE_PERCENT: usize = 25;
 use crate::{AppState, ClaimedTask};
 
 use super::skill_quick_index::{
-    output_contract as quick_index_output_contract,
     output_contract_metadata as quick_index_output_contract_metadata,
-    planner_capabilities as quick_index_planner_capabilities,
     planner_capabilities_metadata as quick_index_planner_capabilities_metadata,
 };
 
@@ -200,7 +198,6 @@ pub(super) fn build_skill_quick_index_text_scoped(
         };
         eager(right).cmp(&eager(left)).then_with(|| left.cmp(right))
     });
-    let mut detail_lines = Vec::new();
     let mut catalog_lines = Vec::new();
     for skill in &enabled {
         let Some(manifest) = state.skill_manifest(skill) else {
@@ -226,47 +223,23 @@ pub(super) fn build_skill_quick_index_text_scoped(
                     SKILL_PROMPT_FILE_MISSING_TOKEN.to_string()
                 }
             });
-        let detailed_capabilities = quick_index_planner_capabilities(&manifest)
-            .strip_prefix("; planner_capabilities: ")
-            .unwrap_or_default()
-            .to_string();
         let capability_entries = catalog_entries
             .iter()
             .filter(|entry| entry.skill_id == *skill)
-            .map(super::capability_catalog::compact_catalog_line)
+            .map(super::capability_catalog::discovery_catalog_line)
             .collect::<Vec<_>>();
         if !capability_entries.is_empty() {
             catalog_lines.push(format!(
-                "- catalog_skill={skill}; capabilities={}",
+                "- catalog_skill={skill}; summary={summary}; capabilities={}",
                 capability_entries.join("|")
             ));
         }
-        if detailed_capabilities.is_empty() {
-            warn!(
-                "planner skill quick index omitted skill without callable capability: skill={}",
-                skill
-            );
-            continue;
-        }
-        detail_lines.push(format!(
-            "- callable_capabilities={detailed_capabilities}; summary={summary}; planner_layer={}{}",
-            manifest.planner_kind.as_token(),
-            quick_index_output_contract(&manifest)
-        ));
     }
-    let mut sections = vec![format!(
-        "capability_catalog_v1 complete=true skill_count={}\n{}",
+    format!(
+        "capability_catalog_v1 complete=true skill_count={} contract_details=load_capability_groups(op=expand)\n{}",
         catalog_lines.len(),
         catalog_lines.join("\n")
-    )];
-    if !detail_lines.is_empty() {
-        sections.push(format!(
-            "capability_detail_views_v1 complete=true skill_count={}\n{}",
-            detail_lines.len(),
-            detail_lines.join("\n")
-        ));
-    }
-    sections.join("\n\n")
+    )
 }
 
 fn candidate_skill_scope_from_loop_state(

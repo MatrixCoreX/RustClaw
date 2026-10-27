@@ -106,7 +106,7 @@ fn first_round_uses_complete_compact_index_without_playbooks() {
     assert!(context
         .quick_index_text
         .contains("capability_catalog_v1 complete=true"));
-    assert!(context
+    assert!(!context
         .quick_index_text
         .contains("capability_detail_views_v1"));
     assert_eq!(context.playbook_chars, 0);
@@ -197,6 +197,54 @@ fn first_round_uses_complete_compact_index_without_playbooks() {
             "deferred_skill={deferred_skill}; loadable_groups={loadable_groups:?}"
         );
     }
+}
+
+#[test]
+fn discovery_index_retains_every_authorized_reference_without_duplicating_policy_details() {
+    let state = state_with_all_bundled_skills_enabled();
+    let task = task();
+    let context = build_planner_skill_context(&state, &task, &super::super::LoopState::default());
+    let entries = super::super::capability_catalog::catalog_entries_for_task(&state, &task);
+    let mut previous_chars = 0;
+    for skill in state.planner_available_skills_for_task(&task) {
+        let manifest = state.skill_manifest(&skill).unwrap();
+        previous_chars += super::super::skill_quick_index::planner_capabilities(&manifest)
+            .chars()
+            .count();
+    }
+    for entry in &entries {
+        assert!(
+            context.quick_index_text.contains(&entry.capability_ref),
+            "missing {}",
+            entry.capability_ref
+        );
+        assert!(context.quick_index_text.contains(&entry.contract_sha256));
+        assert_eq!(
+            context
+                .quick_index_text
+                .matches(&format!("expand_ref={})", entry.capability_ref))
+                .count(),
+            1
+        );
+        previous_chars += entry.capability_id.chars().count()
+            + entry.contract_sha256.len()
+            + entry.capability_ref.len()
+            + 32;
+    }
+    assert!(!context
+        .quick_index_text
+        .contains("capability_detail_views_v1"));
+    assert!(!context.quick_index_text.contains("credential_access="));
+    assert!(
+        context.quick_index_chars < previous_chars,
+        "new={} previous={previous_chars}",
+        context.quick_index_chars
+    );
+    println!(
+        "DISCOVERY_INDEX_CHARS new={} previous_contract_sections={previous_chars} capabilities={}",
+        context.quick_index_chars,
+        entries.len()
+    );
 }
 
 #[test]

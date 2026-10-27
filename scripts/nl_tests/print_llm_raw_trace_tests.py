@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Raw model metadata tests, including streamed provider responses."""
 import json
+import base64
+import gzip
+import hashlib
 import io
 import unittest
 from contextlib import redirect_stdout
@@ -17,6 +20,25 @@ from print_llm_raw_trace import (
 
 
 class RawResponseMetadataTests(unittest.TestCase):
+    def test_compressed_payload_is_printed_losslessly_and_corruption_is_explicit(self):
+        from model_log_payload import decode_model_log_payload, MAX_BYTES
+        payload = {"messages": [{"role": "user", "content": "fixture " * 1000}]}
+        raw = json.dumps(payload).encode()
+        encoded = {"model_log_encoding": "gzip-base64-v1", "uncompressed_bytes": len(raw),
+                   "sha256": hashlib.sha256(raw).hexdigest(),
+                   "data": base64.b64encode(gzip.compress(raw)).decode()}
+        self.assertEqual(decode_model_log_payload(encoded), payload)
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_row({"request_payload": encoded}, 1, Path("model_io.log"), 0, 20000, "")
+        self.assertIn('"messages"', output.getvalue())
+        self.assertNotIn('"model_log_encoding"', output.getvalue())
+        for field, value in [("sha256", "bad"), ("uncompressed_bytes", 1),
+                             ("uncompressed_bytes", MAX_BYTES + 1), ("data", "bad")]:
+            with self.assertRaises(ValueError):
+                decode_model_log_payload({**encoded, field: value})
+        self.assertEqual(decode_model_log_payload(payload), payload)
+
     def test_numbered_trace_preserves_parent_child_attribution(self):
         output = io.StringIO()
         with redirect_stdout(output):

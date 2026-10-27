@@ -731,7 +731,9 @@ export default function App() {
     authMode,
     authIdentity?.user_id,
     authIdentity?.chat_id,
+    apiBase,
   );
+  const activeUiRequestScope = activeConversationHistoryScope ? JSON.stringify([activeConversationHistoryScope, authFlowEpochRef.current]) : "";
   const {
     taskId,
     setTaskId,
@@ -890,6 +892,7 @@ export default function App() {
     activeUserKey,
     activeIdentityIds,
     conversationHistoryScope: activeConversationHistoryScope,
+    requestEpoch: authFlowEpochRef.current,
     interactionExternalUserId,
     interactionExternalChatId,
     availableAgents,
@@ -2562,6 +2565,8 @@ export default function App() {
 
           {currentPage === "aipps" ? (
             <AippPage
+              key={activeUiRequestScope}
+              requestScope={activeUiRequestScope}
               lang={lang}
               t={t}
               apiFetch={apiFetch}

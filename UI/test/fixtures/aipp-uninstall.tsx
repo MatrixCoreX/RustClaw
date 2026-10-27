@@ -9,7 +9,7 @@ document.documentElement.lang = lang;
 document.documentElement.dataset.theme = params.get("theme") || "light";
 createRoot(document.getElementById("root")!).render(
   <UiDialogProvider><main className="theme-shell min-h-screen p-4">
-    <AippPage lang={lang} t={(zh, en) => lang === "zh" ? zh : en}
+    <AippPage requestScope="browser-uninstall-fixture" lang={lang} t={(zh, en) => lang === "zh" ? zh : en}
       apiFetch={(url, init) => fetch(url, init)} onOpenAgent={() => {}}
       onOpenSkillStore={() => { document.documentElement.dataset.storeOpened = "true"; }}
       onSkillsChanged={() => { document.documentElement.dataset.skillsChanged = "true"; }} />

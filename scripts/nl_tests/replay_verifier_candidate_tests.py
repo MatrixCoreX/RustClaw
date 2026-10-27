@@ -76,13 +76,16 @@ class ReplayVerifierTests(unittest.TestCase):
     def test_schema_failure_is_not_an_accepted_verdict(self):
         schema = json.loads((Path(__file__).resolve().parents[2] /
                              "prompts/schemas/answer_verifier.schema.json").read_text())
-        valid = {"operation_checks":[], "pass":True,"missing_evidence_fields":[],
+        valid = {"operation_checks":[], "output_field_checks":[], "pass":True,"missing_evidence_fields":[],
                  "answer_incomplete_reason":"","should_retry":False,
                  "retry_instruction":"","confidence":0.9}
         self.assertTrue(matches_expectation(valid, True, None, schema))
         missing = dict(valid)
         del missing["operation_checks"]
         self.assertFalse(matches_expectation(missing, True, None, schema))
+        missing_output_fields = dict(valid)
+        del missing_output_fields["output_field_checks"]
+        self.assertFalse(matches_expectation(missing_output_fields, True, None, schema))
         valid["operation_checks"] = [{"requested_operation":"fixture", "evidence_step_ids":["s1"],
                                       "method_observed":True,"result_observed":True,"notes":"unallowed"}]
         self.assertFalse(matches_expectation(valid, True, None, schema))

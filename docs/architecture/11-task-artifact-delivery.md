@@ -81,6 +81,10 @@ an ambiguous in-flight claim remains `query_required`, not an exactly-once claim
 Task/parent receipt removal cleans the part plan and child receipts.
 
 Authorized task queries expose bounded delivery facts and a snapshot digest.
+Inspection reads parent, part plan, receipts, claims and manual confirmations in
+one SQLite snapshot. At most 128 parts are fetched in a single ordered batch,
+with receipt digest verification preserved. Reconciliation reuses its existing
+transaction; inspection creates no schema and schedules no delivery work.
 The current channel owner can submit an explicit decision through
 `POST /v1/tasks/:task_id/delivery/reconcile`. The UI asks for confirmation before
 retrying an unknown send and warns about duplicates. Confirmation that the user
@@ -101,7 +105,12 @@ when child send receipts remain `accepted`; genuine delivery/read evidence takes
 precedence over an earlier manual confirmation without deleting that audit.
 
 Task details, teaching pages, lists, and grant views are bound to the current
-API endpoint, authenticated identity, and latest request. Switching identity or
+API endpoint, authenticated identity, and latest request. Login epochs also
+invalidate old chat history, teaching, control and recording callbacks. AiAPP
+request scopes are explicit rather than inferred from a fetch function's identity;
+normal renders keep pending work alive. A scope change isolates catalog caches,
+stops obsolete polling and prevents replies reaching a replacement frame. The
+server task itself is not canceled by stopping a page read. Switching identity or
 endpoint clears the old view and discards late responses, including an identity
 roundtrip or an old live stream's final query. Periodic refreshes do not overlap
 while a slow refresh is pending. Request identifiers use secure random bytes on

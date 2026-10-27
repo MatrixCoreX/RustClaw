@@ -222,7 +222,7 @@ pub(crate) fn append_model_io_log(
             // 本来就没 prompt，没法回放）。
             "prompt_hash": crate::providers::fixture_replay::fnv1a_64_hex(prompt),
             "prompt": truncate_for_log(prompt),
-            "request_payload": request_payload,
+            "request_payload": super::model_log_payload::encode(request_payload),
             "response": clean_response.map(truncate_for_log),
             "raw_response": safe_raw_response.as_deref().map(bounded_raw_log_response),
             "clean_response": clean_response.map(truncate_for_log),

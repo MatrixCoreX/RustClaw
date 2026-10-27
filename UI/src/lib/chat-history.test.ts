@@ -187,6 +187,7 @@ test("builds a credential-free history scope only after authentication is ready"
   assert.equal(conversationHistoryScope(true, "key", null, 7), "");
   assert.equal(conversationHistoryScope(true, "webd", 42, 7), "webd:42:7");
   assert.equal(conversationHistoryScope(true, "key", 42, 7), "key:42:7");
+  assert.notEqual(conversationHistoryScope(true, "webd", 42, 7, "http://node-one.invalid"), conversationHistoryScope(true, "webd", 42, 7, "http://node-two.invalid"));
   const runtimeUserId = 2_403_753_217_836_067_397;
   const runtimeChatId = 2_640_685_665_509_587_865;
   assert.equal(

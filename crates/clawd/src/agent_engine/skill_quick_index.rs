@@ -141,6 +141,7 @@ pub(super) fn output_contract_metadata(manifest: &SkillManifest) -> String {
     format!("output_contract: {}", attrs.join(","))
 }
 
+#[cfg(test)]
 pub(super) fn output_contract(manifest: &SkillManifest) -> String {
     format!("; {}", output_contract_metadata(manifest))
 }
@@ -261,6 +262,7 @@ pub(super) fn planner_capabilities_metadata(manifest: &SkillManifest) -> Option<
     (!tokens.is_empty()).then(|| format!("planner_capabilities: {}", tokens.join("; ")))
 }
 
+#[cfg(test)]
 pub(super) fn planner_capabilities(manifest: &SkillManifest) -> String {
     planner_capabilities_metadata(manifest)
         .map(|metadata| format!("; {metadata}"))

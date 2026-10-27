@@ -55,8 +55,6 @@ import type {
   ConversationInputPage,
   ConversationInputReceipt,
   SubmitTaskResponse,
-  ConversationArchiveUpdate,
-  ConversationTitleUpdate,
   TaskLlmDebugResponse,
   TaskEventEnvelope,
   TaskQueryResponse,
@@ -115,6 +113,8 @@ import type {
   ChatThreadState,
 } from "../types/chat-runtime";
 import { useDeferredChatInputs } from "./useDeferredChatInputs";
+import { createChatHistoryControls } from "./chat-history-controls";
+import { useRequestOwner } from "./useRequestOwner";
 export type { ChatDeferredInputSummary, ChatThreadRecord, ChatThreadState, ChatThreadSummary, ChatTeachingRunRecord, ChatTeachingRunSummary } from "../types/chat-runtime";
 export { loadChatThreadState, persistChatThreadState, mergeServerConversationHistory, retainLocalDraftsForPagedRestore, threadHasPendingTask } from "../lib/chat-thread-state";
 
@@ -127,6 +127,7 @@ export interface UseChatRuntimeParams {
   activeUserKey: string;
   activeIdentityIds: Record<string, unknown>;
   conversationHistoryScope: string;
+  requestEpoch?: number;
   interactionExternalUserId: string;
   interactionExternalChatId: string;
   availableAgents?: Array<{ id: string; name: string }>;
@@ -145,6 +146,7 @@ export function useChatRuntime({
   activeUserKey,
   activeIdentityIds,
   conversationHistoryScope,
+  requestEpoch = 0,
   interactionExternalUserId,
   interactionExternalChatId,
   availableAgents = [],
@@ -153,6 +155,7 @@ export function useChatRuntime({
   onTaskSubmitted,
   onTaskResult,
 }: UseChatRuntimeParams) {
+  const isCurrent = useRequestOwner(conversationHistoryScope, JSON.stringify([activeUserKey, requestEpoch]));
   const { confirm: showConfirm } = useUiDialog();
   const [chatThreadState, setChatThreadState] = useState<ChatThreadState>(() =>
     emptyChatThreadState(t, defaultAgentId),
@@ -225,6 +228,7 @@ export function useChatRuntime({
   const conversationHistoryScopeRef = useRef("");
   const chatHistoryLoadingRef = useRef(false);
   const teachingTraceAutoLoadKeysRef = useRef<Set<string>>(new Set());
+  const teachingRequestRef = useRef(0);
   const liveChatTaskIdsRef = useRef<Set<string>>(new Set());
   const suspendedChatTaskIdsRef = useRef<Set<string>>(new Set());
   const conversationInputTaskIdsRef = useRef<Set<string>>(new Set());
@@ -232,6 +236,7 @@ export function useChatRuntime({
   const submissionAbortControllersRef = useRef<
     Map<string, { threadId: string; controller: AbortController }>
   >(new Map());
+  const compactionAbortRef = useRef<AbortController | null>(null);
   const voiceStopRequestedRef = useRef(false);
 
   chatInputValueRef.current = chatInput;
@@ -243,11 +248,11 @@ export function useChatRuntime({
   apiFetchRef.current = apiFetch;
 
   const beginLiveThread = (threadId: string) => {
-    if (conversationHistoryScopeRef.current !== conversationHistoryScope.trim()) return;
+    if (!isCurrent()) return;
     setLiveThreads(current => ({ ...current, [threadId]: { working: true, activity: emptyChatActivity() } }));
   };
   const finishLiveThread = (threadId: string) => {
-    if (conversationHistoryScopeRef.current !== conversationHistoryScope.trim()) return;
+    if (!isCurrent()) return;
     setLiveThreads(current => {
       const next = { ...current };
       delete next[threadId];
@@ -255,7 +260,7 @@ export function useChatRuntime({
     });
   };
   const updateLiveThread = (threadId: string, update: (value: { working: boolean; activity: ReturnType<typeof emptyChatActivity> }) => { working: boolean; activity: ReturnType<typeof emptyChatActivity> }) => {
-    if (conversationHistoryScopeRef.current !== conversationHistoryScope.trim()) return;
+    if (!isCurrent()) return;
     setLiveThreads(current => current[threadId] ? { ...current, [threadId]: update(current[threadId]) } : current);
   };
 
@@ -263,6 +268,18 @@ export function useChatRuntime({
     setLiveThreads({});
     setChatAttachments([]);
     setChatError(null);
+    setChatStopping(false);
+    setChatCompacting(false);
+    setCompactingThreadId(null);
+    setChatTeachingLlmDebugLoading(false);
+    setChatBodyLoadingMessageId(null);
+    const recorder = chatVoiceRecorderRef.current;
+    chatVoiceRecorderRef.current = null;
+    if (recorder) void recorder.cancel().catch(() => undefined);
+    chatRecordingValueRef.current = false;
+    setChatRecording(false);
+    teachingTraceAutoLoadKeysRef.current.clear();
+    chatHistoryLoadingRef.current = false;
     suspendedChatTaskIdsRef.current.clear();
     for (const controller of recoveryAbortControllersRef.current.values()) controller.abort();
     recoveryAbortControllersRef.current.clear();
@@ -270,9 +287,10 @@ export function useChatRuntime({
       submission.controller.abort();
     }
     submissionAbortControllersRef.current.clear();
+    compactionAbortRef.current?.abort();
     liveChatTaskIdsRef.current.clear();
     conversationInputTaskIdsRef.current.clear();
-  }, [conversationHistoryScope]);
+  }, [conversationHistoryScope, activeUserKey, requestEpoch]);
 
   useEffect(
     () => () => {
@@ -287,6 +305,7 @@ export function useChatRuntime({
         submission.controller.abort();
       }
       submissionAbortControllersRef.current.clear();
+      compactionAbortRef.current?.abort();
     },
     [],
   );
@@ -339,7 +358,7 @@ export function useChatRuntime({
       setChatHistoryLoading(true);
       try {
         const page = await fetchConversationHistoryPage(apiFetchRef.current);
-        if (cancelled) return;
+        if (cancelled || !isCurrent()) return;
         const restored = projectConversationHistory([page], t);
         setChatThreadState((current) =>
           mergeServerConversationHistory(
@@ -351,7 +370,7 @@ export function useChatRuntime({
         );
         setChatHistoryCursor(page.truncated ? page.next_cursor?.trim() || null : null);
       } catch (error) {
-        if (!cancelled) {
+        if (!cancelled && isCurrent()) {
           console.warn(
             "conversation_history_restore_failed",
             error instanceof Error ? error.message : "unknown",
@@ -359,15 +378,17 @@ export function useChatRuntime({
         }
       }
       finally {
-        if (!cancelled) setChatHistoryLoading(false);
-        chatHistoryLoadingRef.current = false;
+        if (!cancelled && isCurrent()) {
+          setChatHistoryLoading(false);
+          chatHistoryLoadingRef.current = false;
+        }
       }
     };
     void restore();
     return () => {
       cancelled = true;
     };
-  }, [conversationHistoryScope, lang, defaultAgentId]);
+  }, [conversationHistoryScope, lang, defaultAgentId, isCurrent]);
 
   useEffect(() => {
     if (!conversationHistoryScope.trim()) return;
@@ -385,12 +406,14 @@ export function useChatRuntime({
   }, [conversationHistoryScope]);
 
   const loadEarlierConversationHistory = async () => {
+    if (!isCurrent()) return;
     const cursor = chatHistoryCursor?.trim();
     if (!cursor || chatHistoryLoadingRef.current) return;
     chatHistoryLoadingRef.current = true;
     setChatHistoryLoading(true);
     try {
       const page = await fetchConversationHistoryPage(apiFetchRef.current, cursor);
+      if (!isCurrent()) return;
       const restored = projectConversationHistory([page], t);
       setChatThreadState((current) =>
         mergeServerConversationHistory(current, restored, t, defaultAgentId),
@@ -398,14 +421,18 @@ export function useChatRuntime({
       setChatHistoryCursor(page.truncated ? page.next_cursor?.trim() || null : null);
       setChatError(null);
     } catch (error) {
+      if (!isCurrent()) return;
       setChatError(formatUiError(error, t, "加载更早的任务失败。", "Failed to load earlier tasks."));
     } finally {
-      chatHistoryLoadingRef.current = false;
-      setChatHistoryLoading(false);
+      if (isCurrent()) {
+        chatHistoryLoadingRef.current = false;
+        setChatHistoryLoading(false);
+      }
     }
   };
 
   const loadNextChatMessageBody = async (messageId: string) => {
+    if (!isCurrent()) return;
     if (chatBodyLoadingMessageId) return;
     const thread = activeChatThreadRef.current;
     const message = thread.messages.find((item) => item.id === messageId);
@@ -414,6 +441,7 @@ export function useChatRuntime({
     setChatBodyLoadingMessageId(messageId);
     try {
       const page = await fetchNextConversationBodyPage(apiFetchRef.current, descriptor);
+      if (!isCurrent()) return;
       const text = `${message.text}${page.text}`;
       const bodyResult = advanceConversationBodyDescriptor(descriptor, page);
       updateChatThreadById(thread.id, (current) => ({
@@ -429,9 +457,10 @@ export function useChatRuntime({
       }));
       setChatError(null);
     } catch (error) {
+      if (!isCurrent()) return;
       setChatError(formatUiError(error, t, "继续读取完整内容失败。", "Failed to load more of this message."));
     } finally {
-      setChatBodyLoadingMessageId(null);
+      if (isCurrent()) setChatBodyLoadingMessageId(null);
     }
   };
 
@@ -470,7 +499,7 @@ export function useChatRuntime({
     threadId: string,
     updater: (thread: ChatThreadRecord) => ChatThreadRecord,
   ) => {
-    if (conversationHistoryScopeRef.current !== conversationHistoryScope.trim()) return;
+    if (!isCurrent()) return;
     setChatThreadState((prev) => ({
       ...prev,
       threads: prev.threads.map((thread) =>
@@ -499,6 +528,9 @@ export function useChatRuntime({
   };
 
   const selectChatTeachingRun = (runId: string) => {
+    if (!isCurrent()) return;
+    teachingRequestRef.current += 1;
+    setChatTeachingLlmDebugLoading(false);
     const selected = (activeChatThreadRef.current.teachingRuns ?? []).find(
       (item) => item.id === runId,
     );
@@ -527,6 +559,8 @@ export function useChatRuntime({
   };
 
   const selectChatThread = (threadId: string) => {
+    if (!isCurrent()) return;
+    teachingRequestRef.current += 1;
     if (!chatThreadState.threads.some((thread) => thread.id === threadId)) return;
     setChatThreadState((prev) => ({ ...prev, activeThreadId: threadId }));
     chatAttachmentsValueRef.current = [];
@@ -535,6 +569,8 @@ export function useChatRuntime({
   };
 
   const createNewChatThread = () => {
+    if (!isCurrent()) return;
+    teachingRequestRef.current += 1;
     const nextThread = createChatThread(t, defaultAgentId);
     setChatThreadState((prev) => ({
       activeThreadId: nextThread.id,
@@ -586,110 +622,12 @@ export function useChatRuntime({
     setChatError(null);
   };
 
-  const archiveChatThreadOnServer = async (thread: ChatThreadRecord) => {
-    if (!threadHasServerHistory(thread)) return;
-    const response = await apiFetch(
-      `/v1/tasks/conversations/${encodeURIComponent(thread.id)}`,
-      { method: "DELETE" },
-    );
-    const body = (await response.json()) as ApiResponse<ConversationArchiveUpdate>;
-    if (
-      !response.ok ||
-      !body.ok ||
-      !body.data ||
-      body.data.status !== "ok" ||
-      body.data.conversation_id !== thread.id
-    ) {
-      throw new Error(body.error || `conversation_archive_http_${response.status}`);
-    }
-  };
-
-  const deleteChatThread = async (threadId: string): Promise<boolean> => {
-    const thread = chatThreadState.threads.find((candidate) => candidate.id === threadId);
-    if (!thread) return false;
-    if (
-      !(await showConfirm({
-        title: t("删除任务记录", "Remove task history"),
-        message: t(
-          "删除这个任务及其对话记录？任务执行证据会安全保留，但不会再显示在对话列表中。",
-          "Remove this task and its conversation history? Execution evidence will be retained safely but hidden from the conversation list.",
-        ),
-        confirmLabel: t("删除", "Remove"),
-        tone: "danger",
-      }))
-    ) {
-      return false;
-    }
-    try {
-      await archiveChatThreadOnServer(thread);
-      removeChatThreadLocally(threadId);
-      setChatError(null);
-      return true;
-    } catch {
-      setChatError(
-        t(
-          "任务记录删除失败，请检查连接后重试。",
-          "The task history could not be removed. Check the connection and try again.",
-        ),
-      );
-      return false;
-    }
-  };
-
-  const renameChatThread = async (threadId: string, rawTitle: string): Promise<boolean> => {
-    const title = rawTitle.trim();
-    if (!title || Array.from(title).length > 120) {
-      setChatError(
-        t(
-          "任务名称需要填写，并且不能超过 120 个字符。",
-          "Enter a task name of no more than 120 characters.",
-        ),
-      );
-      return false;
-    }
-    try {
-      const thread = chatThreadState.threads.find((candidate) => candidate.id === threadId);
-      let persistedTitle = title;
-      if (thread && threadHasServerHistory(thread)) {
-        const response = await apiFetch(
-          `/v1/tasks/conversations/${encodeURIComponent(threadId)}/title`,
-          {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title }),
-          },
-        );
-        const body = (await response.json()) as ApiResponse<ConversationTitleUpdate>;
-        if (
-          !response.ok ||
-          !body.ok ||
-          !body.data ||
-          body.data.status !== "ok" ||
-          body.data.conversation_id !== threadId
-        ) {
-          throw new Error(body.error || `conversation_title_http_${response.status}`);
-        }
-        persistedTitle = body.data.title;
-      }
-      updateChatThreadById(threadId, (thread) => ({
-        ...thread,
-        title: persistedTitle,
-        updatedAt: Date.now(),
-      }));
-      setChatError(null);
-      return true;
-    } catch {
-      setChatError(
-        t(
-          "任务名称保存失败，请检查连接后重试。",
-          "The task name could not be saved. Check the connection and try again.",
-        ),
-      );
-      return false;
-    }
-  };
+  const { archiveChatThreadOnServer, deleteChatThread, renameChatThread } = createChatHistoryControls({
+    apiFetch, chatThreadState, t, showConfirm, removeChatThreadLocally, setChatError, updateChatThreadById, isCurrent,
+  });
 
   const clearChatMessages = async (): Promise<boolean> => {
+    if (!isCurrent()) return false;
     const thread = activeChatThreadRef.current;
     if (
       !(await showConfirm({
@@ -705,7 +643,9 @@ export function useChatRuntime({
       return false;
     }
     try {
+      if (!isCurrent()) return false;
       await archiveChatThreadOnServer(thread);
+      if (!isCurrent()) return false;
       const replacement = createChatThread(t, defaultAgentId);
       for (const [runId, submission] of submissionAbortControllersRef.current) {
         if (submission.threadId !== thread.id) continue;
@@ -725,6 +665,7 @@ export function useChatRuntime({
       setChatError(null);
       return true;
     } catch {
+      if (!isCurrent()) return false;
       setChatError(
         t(
           "当前对话清空失败，请检查连接后重试。",
@@ -739,6 +680,7 @@ export function useChatRuntime({
     id: string,
     offset = 0,
   ): Promise<TaskLlmDebugResponse> => {
+    if (!isCurrent()) throw new Error("chat_scope_obsolete");
     const normalizedId = encodeURIComponent(id.trim());
     const res = await apiFetch(
       `/v1/debug/tasks/${normalizedId}?teaching=true&limit=20&offset=${Math.max(0, Math.floor(offset))}`,
@@ -751,6 +693,9 @@ export function useChatRuntime({
   };
 
   const queryChatTeachingLlmDebug = async (taskId?: string, offset = 0) => {
+    if (!isCurrent()) return null;
+    const request = ++teachingRequestRef.current;
+    const current = () => isCurrent() && request === teachingRequestRef.current;
     const threadAtQuery = activeChatThreadRef.current;
     const targetTaskId = (
       taskId ??
@@ -766,6 +711,7 @@ export function useChatRuntime({
     }));
     try {
       const result = await fetchChatTeachingLlmDebugById(targetTaskId, offset);
+      if (!current()) return null;
       updateChatThreadById(threadAtQuery.id, (thread) => ({
         ...thread,
         lastTaskId: targetTaskId,
@@ -781,6 +727,7 @@ export function useChatRuntime({
       }));
       return result;
     } catch (err) {
+      if (!current()) return null;
       const message = formatUiError(err, t, "教学过程暂时无法读取。", "The teaching trace is temporarily unavailable.");
       updateChatThreadById(threadAtQuery.id, (thread) => ({
         ...thread,
@@ -796,7 +743,7 @@ export function useChatRuntime({
       }));
       return null;
     } finally {
-      setChatTeachingLlmDebugLoading(false);
+      if (current()) setChatTeachingLlmDebugLoading(false);
     }
   };
 
@@ -838,6 +785,7 @@ export function useChatRuntime({
     taskId: string,
   ) => {
     if (
+      !isCurrent() ||
       liveChatTaskIdsRef.current.has(taskId) ||
       suspendedChatTaskIdsRef.current.has(taskId)
     ) {
@@ -854,7 +802,7 @@ export function useChatRuntime({
         apiFetch,
         taskId,
         async (event) => {
-          if (controller.signal.aborted) return;
+          if (controller.signal.aborted || !isCurrent()) return;
           updateLiveThread(threadId, current => ({ ...current, activity: reduceChatActivity(current.activity, event) }));
           const replyMessage = conversationReplyMessage(event);
           if (replyMessage) {
@@ -899,9 +847,9 @@ export function useChatRuntime({
         },
         controller.signal,
       );
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || !isCurrent()) return;
       const result = await fetchTaskById(taskId);
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || !isCurrent()) return;
       onTaskResult(taskId, result);
       const terminal = terminalTaskStatus(result.status);
       const resultText = terminal ? extractTaskText(result) : "";
@@ -938,15 +886,17 @@ export function useChatRuntime({
       }));
       if (!terminal) suspendedChatTaskIdsRef.current.add(taskId);
     } catch (error) {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && isCurrent()) {
         if (activeChatThreadRef.current.id === threadId) {
           setChatError(formatUiError(error, t, "恢复未完成任务失败。", "Failed to resume the unfinished task."));
         }
         suspendedChatTaskIdsRef.current.add(taskId);
       }
     } finally {
-      recoveryAbortControllersRef.current.delete(taskId);
-      liveChatTaskIdsRef.current.delete(taskId);
+      if (recoveryAbortControllersRef.current.get(taskId) === controller) {
+        recoveryAbortControllersRef.current.delete(taskId);
+        liveChatTaskIdsRef.current.delete(taskId);
+      }
       finishLiveThread(threadId);
     }
   };
@@ -960,8 +910,9 @@ export function useChatRuntime({
       agentId: activeChatThread.agentId,
       externalChatId: activeChatThread.externalChatId,
     },
-    onError: setChatError,
+    onError: (error) => { if (isCurrent()) setChatError(error); },
     onActivated: (input, receipt, taskId) => {
+      if (!isCurrent()) return;
       const thread = activeChatThreadRef.current;
       const teachingRunId = `teach-${input.inputId}`;
       conversationInputTaskIdsRef.current.add(taskId);
@@ -1020,6 +971,7 @@ export function useChatRuntime({
   }, [chatThreadState]);
 
   const handleChatAttachmentSelection = async (fileList: FileList | null) => {
+    if (!isCurrent()) return;
     if (!fileList || fileList.length === 0) return;
     try {
       const selected = Array.from(fileList);
@@ -1033,6 +985,7 @@ export function useChatRuntime({
       const nextAttachments = await Promise.all(
         selected.map((file) => fileToChatAttachment(file, undefined, chatAttachmentConstraints)),
       );
+      if (!isCurrent()) return;
       setChatAttachments((prev) => {
         const merged = [...prev, ...nextAttachments];
         setChatError(null);
@@ -1043,6 +996,7 @@ export function useChatRuntime({
         chatAttachmentInputRef.current.value = "";
       }
     } catch (err) {
+      if (!isCurrent()) return;
       setChatError(
         formatChatAttachmentError(err, chatAttachmentConstraints, t),
       );
@@ -1058,6 +1012,7 @@ export function useChatRuntime({
   };
 
   const startChatVoiceRecording = async () => {
+    if (!isCurrent()) return;
     if (chatRecordingValueRef.current) return;
     const availability = voiceRecordingAvailability();
     if (availability !== "available") {
@@ -1085,11 +1040,16 @@ export function useChatRuntime({
           audio: voiceAudioTrackConstraints(selectedDeviceId),
         });
       } catch (error) {
+        if (!isCurrent()) return;
         if (!selectedDeviceId || !shouldRetryVoiceCaptureWithDefault(error)) throw error;
         setChatAudioInputDeviceId("");
         stream = await navigator.mediaDevices.getUserMedia({
           audio: voiceAudioTrackConstraints(),
         });
+      }
+      if (!isCurrent()) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
       }
       if (voiceStopRequestedRef.current) {
         stream.getTracks().forEach((track) => track.stop());
@@ -1107,16 +1067,18 @@ export function useChatRuntime({
       if (navigator.mediaDevices.enumerateDevices) {
         void navigator.mediaDevices
           .enumerateDevices()
-          .then((devices) => setChatAudioInputDevices(voiceInputDeviceOptions(devices)))
+          .then((devices) => { if (isCurrent()) setChatAudioInputDevices(voiceInputDeviceOptions(devices)); })
           .catch(() => undefined);
       }
       const recorder = await startPcmWavRecording(stream);
+      if (!isCurrent()) { await recorder.cancel(); return; }
       chatVoiceRecorderRef.current = recorder;
       if (voiceStopRequestedRef.current) {
         void finishChatVoiceRecording(recorder);
       }
       setChatError(null);
     } catch (err) {
+      if (!isCurrent()) return;
       chatRecordingValueRef.current = false;
       setChatRecording(false);
       setChatError(
@@ -1145,14 +1107,16 @@ export function useChatRuntime({
   };
 
   const finishChatVoiceRecording = async (recorder: PcmWavRecordingSession) => {
-    if (chatVoiceRecorderRef.current !== recorder) return;
+    if (!isCurrent() || chatVoiceRecorderRef.current !== recorder) return;
     chatVoiceRecorderRef.current = null;
     chatRecordingValueRef.current = false;
     setChatRecording(false);
     try {
       const blob = await recorder.stop();
+      if (!isCurrent()) return;
       const file = new File([blob], `voice-${Date.now()}.wav`, { type: "audio/wav" });
       const attachment = await fileToChatAttachment(file, "audio", chatAttachmentConstraints);
+      if (!isCurrent()) return;
       const attached = [...chatAttachmentsValueRef.current, attachment];
       assertChatAttachmentConstraints(attached, chatAttachmentConstraints);
       setChatError(null);
@@ -1161,6 +1125,7 @@ export function useChatRuntime({
         clearAttachments: true,
       });
     } catch (err) {
+      if (!isCurrent()) return;
       setChatError(
         err instanceof PcmWavRecordingError && err.code === "empty"
           ? t("没有录到声音，请重新尝试。", "No audio was recorded. Please try again.")
@@ -1176,6 +1141,7 @@ export function useChatRuntime({
     rawAttachments: ChatAttachment[],
     options: { clearInput: boolean; clearAttachments: boolean },
   ) => {
+    if (!isCurrent()) return;
     const text = rawText.trim();
     try {
       assertChatAttachmentConstraints(rawAttachments, chatAttachmentConstraints);
@@ -1240,6 +1206,7 @@ export function useChatRuntime({
     activeTaskId: string | undefined,
     deliveryMode: "auto" | "defer",
   ) => {
+    if (!isCurrent()) return;
     const submittedAt = Date.now();
     const clientMessageId = `ui:${threadAtSubmit.id}:${teachingRunId}`;
     const attachedImages = attached.filter(attachmentIsImage);
@@ -1367,12 +1334,14 @@ export function useChatRuntime({
         }
         if (!activeTaskId) throw error;
         const latestTarget = await fetchTaskById(activeTaskId);
+        if (!isCurrent()) return;
         if (!terminalTaskStatus(latestTarget.status)) throw error;
         receipt = await submitConversationClientTaskWithRecovery(
           { ...submission, expected_task_id: undefined },
           task,
         );
       }
+      if (!isCurrent()) return;
       if (deliveryMode === "defer") {
         const deferredUserMessage = { ...userMsg, id: `u-${receipt.input_id}` };
         updateChatThreadById(threadAtSubmit.id, (thread) => ({
@@ -1419,6 +1388,7 @@ export function useChatRuntime({
         void recoverPendingChatTask(threadAtSubmit.id, teachingRunId, acceptedTaskId);
       }
     } catch (error) {
+      if (!isCurrent()) return;
       const message = formatUiError(
         error,
         t,
@@ -1470,6 +1440,7 @@ export function useChatRuntime({
     clientMessageId: string,
     signal?: AbortSignal,
   ): Promise<ConversationInputReceipt | null> => {
+    if (!isCurrent()) throw new Error("chat_scope_obsolete");
     const query = new URLSearchParams({
       conversation_id: scope.conversation_id,
       agent_id: scope.agent_id,
@@ -1479,6 +1450,7 @@ export function useChatRuntime({
     });
     const response = await apiFetch(`/v1/conversation-inputs?${query.toString()}`, { signal });
     const body = (await response.json()) as ApiResponse<ConversationInputPage>;
+    if (!isCurrent()) throw new Error("chat_scope_obsolete");
     if (response.status === 404) return null;
     if (!response.ok || !body.ok || !body.data) {
       throw new Error(body.error || `conversation_input_recovery_http_${response.status}`);
@@ -1505,6 +1477,7 @@ export function useChatRuntime({
     signal?: AbortSignal,
   ): Promise<ConversationInputReceipt> => {
     const submit = async () => {
+      if (!isCurrent()) throw new Error("chat_scope_obsolete");
       const response = await apiFetch("/v1/conversation-inputs/client-task", {
         method: "POST",
         signal,
@@ -1515,6 +1488,7 @@ export function useChatRuntime({
         body: JSON.stringify({ input: submission, task }),
       });
       const body = (await response.json()) as ApiResponse<ConversationInputClientTaskReceipt>;
+      if (!isCurrent()) throw new Error("chat_scope_obsolete");
       if (!response.ok || !body.ok || !body.data) {
         throw new Error(body.error || `conversation_input_submit_http_${response.status}`);
       }
@@ -1523,7 +1497,7 @@ export function useChatRuntime({
     try {
       return await submit();
     } catch (submitError) {
-      if (signal?.aborted) throw submitError;
+      if (signal?.aborted || !isCurrent()) throw submitError;
       try {
         const recovered = await recoverConversationInputReceipt(
           submission.scope,
@@ -1549,7 +1523,7 @@ export function useChatRuntime({
     teachingRunId: string,
     signal: AbortSignal,
   ): Promise<boolean | "waiting"> => {
-    if (signal.aborted || conversationHistoryScopeRef.current !== conversationHistoryScope.trim()) return false;
+    if (signal.aborted || !isCurrent()) return false;
     const attachedImages = attached.filter(attachmentIsImage);
     const attachedAudios = attached.filter(attachmentIsAudio);
     const attachedFiles = attached.filter(
@@ -1684,7 +1658,7 @@ export function useChatRuntime({
         submitBody,
         signal,
       );
-      if (signal.aborted) return false;
+      if (signal.aborted || !isCurrent()) return false;
       const taskId = receipt.target_task_id?.trim();
       if (!taskId) throw new Error("conversation_input_task_binding_missing");
       submittedTaskId = taskId;
@@ -1742,7 +1716,7 @@ export function useChatRuntime({
       let streamedAssistantMessageId: string | null = null;
       let completedPresentationText: string | null = null;
       await followTaskEventStream(apiFetch, submittedTaskId, async (event) => {
-        if (signal.aborted) return;
+        if (signal.aborted || !isCurrent()) return;
         updateLiveThread(submitThreadId, current => ({ ...current, activity: reduceChatActivity(current.activity, event) }));
         const replyMessage = conversationReplyMessage(event);
         if (replyMessage) {
@@ -1785,9 +1759,9 @@ export function useChatRuntime({
           updatedAt: Date.now(),
         }));
       }, signal);
-      if (signal.aborted) return false;
+      if (signal.aborted || !isCurrent()) return false;
       const finalResult = await fetchTaskById(submittedTaskId);
-      if (signal.aborted) return false;
+      if (signal.aborted || !isCurrent()) return false;
       const terminal = terminalTaskStatus(finalResult.status);
       if (!terminal) suspendedChatTaskIdsRef.current.add(submittedTaskId);
       const finalTaskText = terminal ? extractTaskText(finalResult) : "";
@@ -1840,7 +1814,7 @@ export function useChatRuntime({
       }
       return terminal ? finalResult.status === "succeeded" : "waiting";
     } catch (err) {
-      if (signal.aborted) return false;
+      if (signal.aborted || !isCurrent()) return false;
       if (submittedTaskId) suspendedChatTaskIdsRef.current.add(submittedTaskId);
       const message = formatUiError(err, t, "连接中断，请检查任务记录后再继续。", "The connection was interrupted. Check the task history before continuing.");
       setTurnError(message);
@@ -1889,6 +1863,7 @@ export function useChatRuntime({
   };
 
   const stopActiveChatTask = async () => {
+    if (!isCurrent()) return;
     const thread = activeChatThreadRef.current;
     const taskId = [...(thread.teachingRuns ?? [])]
       .reverse()
@@ -1918,6 +1893,7 @@ export function useChatRuntime({
         status?: string;
         task_id?: string | null;
       }>;
+      if (!isCurrent()) return;
       if (!response.ok || !body.ok) {
         throw new Error(body.error || `conversation_cancel_http_${response.status}`);
       }
@@ -1937,6 +1913,7 @@ export function useChatRuntime({
         }),
       }));
     } catch (error) {
+      if (!isCurrent()) return;
       setChatError(formatUiError(
         error,
         t,
@@ -1944,11 +1921,12 @@ export function useChatRuntime({
         "The stop request could not be submitted. Try again shortly.",
       ));
     } finally {
-      setChatStopping(false);
+      if (isCurrent()) setChatStopping(false);
     }
   };
 
   const compactChatContext = async (focus?: string) => {
+    if (!isCurrent()) return false;
     if (chatSending || chatCompacting) return false;
     const thread = activeChatThreadRef.current;
     const normalizedFocus = focus?.trim() ?? "";
@@ -1957,6 +1935,8 @@ export function useChatRuntime({
       return false;
     }
     setChatCompacting(true);
+    const controller = new AbortController();
+    compactionAbortRef.current = controller;
     setCompactingThreadId(thread.id);
     setChatError(null);
     let submittedTaskId: string | null = null;
@@ -1972,6 +1952,7 @@ export function useChatRuntime({
         ...(normalizedFocus ? { compaction_focus: normalizedFocus } : {}),
       };
       const submitRes = await apiFetch("/v1/tasks", {
+        signal: controller.signal,
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1993,13 +1974,16 @@ export function useChatRuntime({
         }),
       });
       const submitted = (await submitRes.json()) as ApiResponse<SubmitTaskResponse>;
+      if (!isCurrent()) return false;
       if (!submitRes.ok || !submitted.ok || !submitted.data?.task_id) {
         throw new Error(submitted.error || `context_compaction_submit_http_${submitRes.status}`);
       }
       submittedTaskId = submitted.data.task_id;
       onTaskSubmitted(submittedTaskId);
-      await followTaskEventStream(apiFetch, submittedTaskId, async () => undefined);
+      await followTaskEventStream(apiFetch, submittedTaskId, async () => undefined, controller.signal);
+      if (!isCurrent()) return false;
       const finalResult = await fetchTaskById(submittedTaskId);
+      if (!isCurrent()) return false;
       onTaskResult(submittedTaskId, finalResult);
       if (finalResult.status !== "succeeded") {
         throw new Error(finalResult.error_text || t("压缩没有完成。", "Compaction did not complete."));
@@ -2020,11 +2004,14 @@ export function useChatRuntime({
       }));
       return true;
     } catch (error) {
+      if (!isCurrent()) return false;
       setChatError(formatUiError(error, t, "压缩上下文失败。", "Failed to compact context."));
       return false;
     } finally {
-      setChatCompacting(false);
-      setCompactingThreadId(null);
+      if (isCurrent()) {
+        setChatCompacting(false);
+        setCompactingThreadId(null);
+      }
     }
   };
 

@@ -182,11 +182,30 @@ pub(super) fn expand_catalog(
     ))
 }
 
-pub(super) fn compact_catalog_line(entry: &CapabilityCatalogEntry) -> String {
-    format!(
-        "{}(contract_sha256={},expand_ref={})",
-        entry.capability_id, entry.contract_sha256, entry.capability_ref
-    )
+pub(super) fn discovery_catalog_line(entry: &CapabilityCatalogEntry) -> String {
+    let mut attrs = Vec::new();
+    if let Some(action) = &entry.action {
+        attrs.push(format!("action={action}"));
+    }
+    attrs.push(format!("purpose={}", entry.purpose));
+    if !entry.semantic_tags.is_empty() {
+        attrs.push(format!("semantic_tags={}", entry.semantic_tags.join("|")));
+    }
+    if let Some(required) = entry.contract.get("required").and_then(Value::as_array) {
+        if !required.is_empty() {
+            attrs.push(format!(
+                "required={}",
+                required
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join("|")
+            ));
+        }
+    }
+    attrs.push(format!("contract_sha256={}", entry.contract_sha256));
+    attrs.push(format!("expand_ref={}", entry.capability_ref));
+    format!("{}({})", entry.capability_id, attrs.join(","))
 }
 
 fn capability_ref(skill: &str, capability: &str) -> String {

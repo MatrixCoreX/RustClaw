@@ -64,6 +64,45 @@ fn part(db: &Connection, key: String) -> anyhow::Result<Part> {
     })
 }
 
+fn parts(db: &Connection, keys: &[String]) -> anyhow::Result<Vec<Part>> {
+    for key in keys {
+        required_idempotency_key(key)?;
+    }
+    let mut query = db.prepare(
+        "SELECT k.value,r.receipt_json,r.receipt_digest,c.delivery_id,c.channel,c.adapter,c.state,c.lease_expires_at_ts
+         FROM json_each(?1) k
+         LEFT JOIN channel_delivery_receipts r ON r.idempotency_key=k.value
+         LEFT JOIN channel_delivery_dispatch_claims c ON c.idempotency_key=k.value
+         ORDER BY CAST(k.key AS INTEGER)",
+    )?;
+    let mut rows = query.query([serde_json::to_string(keys)?])?;
+    let mut parts = Vec::with_capacity(keys.len());
+    while let Some(row) = rows.next()? {
+        let receipt = row
+            .get::<_, Option<String>>(1)?
+            .map(|raw| decode_stored_receipt(&raw, &row.get::<_, String>(2)?))
+            .transpose()?;
+        let claim = row
+            .get::<_, Option<String>>(3)?
+            .map(|delivery_id| -> rusqlite::Result<Claim> {
+                Ok(Claim {
+                    delivery_id,
+                    channel: row.get(4)?,
+                    adapter: row.get(5)?,
+                    state: row.get(6)?,
+                    expires_at: row.get(7)?,
+                })
+            })
+            .transpose()?;
+        parts.push(Part {
+            key: row.get(0)?,
+            receipt,
+            claim,
+        });
+    }
+    Ok(parts)
+}
+
 fn snapshot(db: &Connection, task_id: &str) -> anyhow::Result<Option<Snapshot>> {
     if !exists(db, "channel_delivery_dispatch_claims")? {
         return Ok(None);
@@ -86,10 +125,11 @@ fn snapshot(db: &Connection, task_id: &str) -> anyhow::Result<Option<Snapshot>> 
     if keys.is_empty() || keys.len() > 128 {
         anyhow::bail!("delivery_part_plan_invalid");
     }
-    let parts = keys
-        .into_iter()
-        .map(|key| part(db, key))
-        .collect::<anyhow::Result<Vec<_>>>()?;
+    let parts = if keys == [parent.key.clone()] {
+        vec![parent.clone()]
+    } else {
+        parts(db, &keys)?
+    };
     Ok(Some(Snapshot { parent, parts }))
 }
 
@@ -204,6 +244,18 @@ fn provider_proof_status(s: &Snapshot) -> Option<&'static str> {
 }
 
 pub(crate) fn inspect(db: &Connection, task_id: &str, now: i64) -> anyhow::Result<Value> {
+    if !db.is_autocommit() {
+        return inspect_snapshot(db, task_id, now);
+    }
+    // Reconciliation already owns an immediate transaction; standalone reads
+    // need their own deferred snapshot so callbacks cannot mix receipt versions.
+    let tx = db.unchecked_transaction()?;
+    let result = inspect_snapshot(&tx, task_id, now)?;
+    tx.commit()?;
+    Ok(result)
+}
+
+fn inspect_snapshot(db: &Connection, task_id: &str, now: i64) -> anyhow::Result<Value> {
     let Some(s) = snapshot(db, task_id)? else {
         return Ok(
             json!({"schema_version":1,"status":status_without_dispatch(db, task_id, now)?,"can_reconcile":false}),

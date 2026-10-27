@@ -211,17 +211,31 @@ pub(super) fn action_from_native_respond_call(
                     "native_respond_observed_capability_invalid",
                 )?;
                 let path = machine_observation_path(field.get("path"))?;
-                let result = loop_state
-                    .capability_results
-                    .iter()
-                    .rev()
-                    .find(|result| {
-                        result.capability == capability
-                            && observed_projection_path_allowed(result.status, path)
-                    })
-                    .ok_or_else(|| {
-                        "native_respond_observed_capability_result_missing".to_string()
-                    })?;
+                let step_id = match field.get("step_id") {
+                    None | Some(Value::Null) => None,
+                    value => Some(machine_observation_reference(
+                        value,
+                        "native_respond_observed_step_id_invalid",
+                    )?),
+                };
+                let mut candidates = loop_state.capability_results.iter().rev().filter(|result| {
+                    result.capability == capability
+                        && step_id.is_none_or(|step_id| {
+                            result.provenance.get("step_id").and_then(Value::as_str)
+                                == Some(step_id)
+                        })
+                        && (step_id.is_some()
+                            || observed_projection_path_allowed(result.status, path))
+                });
+                let result = candidates.next().ok_or_else(|| {
+                    "native_respond_observed_capability_result_missing".to_string()
+                })?;
+                if step_id.is_some() && candidates.next().is_some() {
+                    return Err("native_respond_observed_step_id_ambiguous".to_string());
+                }
+                if !observed_projection_path_allowed(result.status, path) {
+                    return Err("native_respond_observed_path_invalid".to_string());
+                }
                 let value = crate::capability_result::selected_result_machine_value(result, path)
                     .ok_or_else(|| "native_respond_observed_path_missing".to_string())?;
                 if object.insert(name.to_string(), value).is_some() {

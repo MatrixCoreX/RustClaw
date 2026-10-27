@@ -24,7 +24,7 @@ test("AiAPP polling cannot leave a slow foreground request permanently loading",
     entrypoint: null, bridge_capabilities: [], task_channel_scope: "all",
   };
   storage.setItem(appStorageKey("monitor.aipp.selectedSkill"), "fixture");
-  writeCachedAippCatalog(storage, [app]);
+  writeCachedAippCatalog(storage, [app], Date.now(), "fixture");
   let poll: (() => void) | undefined;
   const pending: Array<(response: Response) => void> = [];
   Object.defineProperty(globalThis, "window", { configurable: true, value: {
@@ -39,7 +39,7 @@ test("AiAPP polling cannot leave a slow foreground request permanently loading",
   let root: ReactTestRenderer | undefined;
   try {
     await act(async () => {
-      root = create(<UiDialogProvider><AippPage lang="en" t={(_zh, en) => en}
+      root = create(<UiDialogProvider><AippPage requestScope="fixture" lang="en" t={(_zh, en) => en}
         apiFetch={(path) => path === "/v1/aipps"
           ? Promise.resolve(response({ apps: [app] }))
           : new Promise(resolve => pending.push(resolve))}

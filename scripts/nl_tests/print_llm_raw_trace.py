@@ -16,6 +16,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any
+from model_log_payload import decode_model_log_payload
 
 
 DEFAULT_MAX_CHARS = 2400
@@ -275,7 +276,11 @@ def print_row(
 
     print_field("  response_text", response_text, max_chars, indent)
     print_field("  raw_response", row.get("raw_response"), max_chars, indent)
-    print_field("  request_payload", row.get("request_payload"), max_chars, indent)
+    try:
+        request_payload = decode_model_log_payload(row.get("request_payload"))
+    except (ValueError, TypeError, OSError) as error:
+        request_payload = {"decode_error": str(error), "encoded_payload": row.get("request_payload")}
+    print_field("  request_payload", request_payload, max_chars, indent)
 
 
 def init_state(log_path: Path, state_file: Path | None) -> int:

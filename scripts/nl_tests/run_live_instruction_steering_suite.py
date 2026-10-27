@@ -13,6 +13,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 from typing import Any, Iterator
+from model_log_payload import decode_model_log_payload
 
 
 TERMINAL_STATUSES = {"succeeded", "failed", "canceled", "cancelled"}
@@ -607,7 +608,7 @@ def merged_llm_calls(task: dict[str, Any], rows: list[dict[str, Any]], max_chars
                 "parsed_json_fields": parsed_response_fields(row),
                 "response_text": compact_field(row.get("clean_response"), max_chars),
                 "raw_response": compact_field(row.get("raw_response"), max_chars),
-                "request_payload": compact_field(row.get("request_payload"), max_chars),
+                "request_payload": compact_field(decode_model_log_payload(row.get("request_payload")), max_chars),
                 "log_offset": row.get("_log_offset"),
             }
         )

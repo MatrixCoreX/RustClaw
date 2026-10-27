@@ -64,6 +64,11 @@ test("reuses only a fresh validated AiAPP catalog while refreshing in the backgr
   const key = [...values.keys()][0];
   values.set(key, JSON.stringify({ schema_version: 1, cached_at_ms: 2_000, apps: [{ ...app, installed: "yes" }] }));
   assert.deepEqual(readCachedAippCatalog(storage, 2_001), []);
+  writeCachedAippCatalog(storage, [app], 3_000, "node-one:owner-one");
+  assert.deepEqual(readCachedAippCatalog(storage, 3_001, "node-one:owner-one"), [app]);
+  assert.deepEqual(readCachedAippCatalog(storage, 3_001, "node-two:owner-one"), []);
+  writeCachedAippCatalog(storage, [app], 3_000, "node-one:owner-one");
+  assert.deepEqual(readCachedAippCatalog(storage, 3_001, "node-one:owner-two"), []);
 });
 
 test("keeps media collection automatically refreshed and sortable by collection time", () => {
@@ -194,7 +199,7 @@ test("warns that Ai APP removal also uninstalls its skill while retaining user d
   assert.match(source, /配置和已采集数据会保留/);
   assert.match(source, /最后确认/);
   assert.match(source, /再次确认卸载/);
-  assert.match(source, /if \(!finalAccepted\) return/);
+  assert.match(source, /if \(!finalAccepted \|\| !isCurrent\(\)\) return/);
   assert.doesNotMatch(source, /method:.*"DELETE"/);
   assert.match(source, /安装 Ai APP/);
 });

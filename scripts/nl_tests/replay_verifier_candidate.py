@@ -10,6 +10,7 @@ import tomllib
 import urllib.request
 import urllib.error
 from jsonschema import Draft202012Validator
+from model_log_payload import decode_model_log_payload
 
 
 def parse_verdict(content):
@@ -200,6 +201,7 @@ def load_source(source_log, offset, source_replay, task_id):
         with source_log.open("rb") as handle:
             handle.seek(offset)
             record = json.loads(handle.readline())
+    record["request_payload"] = decode_model_log_payload(record.get("request_payload"))
     if (record.get("task_id") != task_id
             or "answer_verifier_prompt.md" not in (record.get("prompt_source") or "")
             or not isinstance(record.get("request_payload"), dict)):
