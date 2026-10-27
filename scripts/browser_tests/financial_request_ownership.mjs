@@ -56,6 +56,38 @@ try {
     await page.screenshot({ path: `${output}/${name}.png`, fullPage: true });
     await page.close();
     console.log(`FINANCIAL_REQUEST_OWNERSHIP_BROWSER ${name} ok`);
+
+    const mutation = await browser.newPage({ viewport: { width, height } });
+    const mutationErrors = [];
+    mutation.on('pageerror', error => mutationErrors.push(error.message));
+    await mutation.goto(`${base}/test/financial-mutation-freshness.html`);
+    await mutation.evaluate(value => { document.documentElement.dataset.theme = value; document.body.classList.add('theme-shell'); }, theme);
+    await mutation.getByRole('button', { name: 'Prepare quote', exact: true }).click();
+    await mutation.waitForFunction(() => document.querySelector('[data-testid="quote"]').textContent === '1');
+    await mutation.getByRole('button', { name: 'Slow observations', exact: true }).click();
+    await mutation.getByRole('button', { name: 'Complete mock trade', exact: true }).click();
+    await mutation.getByRole('button', { name: 'Late preview', exact: true }).click();
+    await mutation.getByRole('button', { name: 'Release trade', exact: true }).click();
+    await mutation.waitForFunction(() => document.querySelector('[data-testid="trade"]').textContent === 'committed-1'
+      && document.querySelector('[data-testid="loading"]').textContent === 'false');
+    await mutation.waitForTimeout(750);
+    assert.equal(await mutation.getByTestId('market').textContent(), '1');
+    assert.equal(await mutation.getByTestId('candles').textContent(), '1');
+    assert.equal(await mutation.getByTestId('balance').textContent(), '900');
+    assert.equal(await mutation.getByTestId('quote').textContent(), 'none');
+    await mutation.getByRole('button', { name: 'Prepare quote', exact: true }).click();
+    await mutation.waitForFunction(() => document.querySelector('[data-testid="quote"]').textContent === '1');
+    await mutation.getByRole('button', { name: 'Fail refresh', exact: true }).click();
+    await mutation.getByRole('button', { name: 'Complete mock trade', exact: true }).click();
+    await mutation.getByRole('button', { name: 'Release trade', exact: true }).click();
+    await mutation.waitForFunction(() => document.querySelector('[data-testid="message"]').textContent.includes('some data could not be refreshed'));
+    assert.equal(await mutation.getByTestId('trade').textContent(), 'committed-2');
+    assert.equal(await mutation.getByTestId('error').textContent(), '');
+    assert.deepEqual(mutationErrors, []);
+    assert.ok(await mutation.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await mutation.screenshot({ path: `${output}/mutation-${name}.png`, fullPage: true });
+    await mutation.close();
+    console.log(`FINANCIAL_MUTATION_FRESHNESS_BROWSER ${name} ok`);
   }
   for (const width of [1440, 390]) {
     const page = await browser.newPage({ viewport: { width, height: 1000 } });
@@ -104,4 +136,10 @@ try {
     await page.close();
     console.log(`FINANCIAL_REQUEST_OWNERSHIP_BROWSER app-${width} ok`);
   }
+} catch (error) {
+  for (const [index, page] of browser.contexts().flatMap(context => context.pages()).entries()) {
+    console.log(JSON.stringify({ failure_page: page.url(), body: (await page.locator('body').innerText()).slice(0, 2400) }));
+    await page.screenshot({ path: `${output}/failure-${index}.png`, fullPage: true });
+  }
+  throw error;
 } finally { await browser.close(); }

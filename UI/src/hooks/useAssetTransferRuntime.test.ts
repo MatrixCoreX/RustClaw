@@ -108,7 +108,7 @@ test("asset transfer runtime sends one-time authorization and refreshes after su
     assert.equal(Object.hasOwn(request.body, "owner_private_key"), false);
   }
   assert.equal(refreshCount, 1);
-  assert.equal(runtime!.message, "转账已完成，余额和资产浏览器记录已经更新。");
+  assert.equal(runtime!.message, "转账已完成。");
   assert.equal(runtime!.error, null);
   await act(async () => renderer!.unmount());
 });

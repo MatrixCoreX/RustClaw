@@ -87,6 +87,14 @@ late challenges cannot trigger signing, verification, a queued follow-up save, o
 reopen the dialog. Repeated confirmation of one challenge sends only one verify
 request. Loading and errors belong to the active operation, not an older reply.
 
+A confirmed trade advances the observation revision before refreshing market,
+account, trade history and candles. These refreshes cannot share pre-trade
+requests; earlier results, errors, loading completion and quote previews cannot
+replace post-trade state. Asset transfer balance refreshes use the same barrier.
+Confirmation of the signed transaction is separate from follow-up read success:
+an unavailable refresh keeps the completed transaction and asks for a later data
+refresh, never automatically resubmitting the signed write.
+
 These are presentation and continuation fences, not authorization or rollback.
 Already-dispatched signed writes may still complete on the server after navigation;
 the server ledger remains authoritative. Server permissions, signature verification,

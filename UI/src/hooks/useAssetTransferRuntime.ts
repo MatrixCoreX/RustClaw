@@ -176,11 +176,19 @@ export function useAssetTransferRuntime({
       }
       const result = body.data as NniAssetTransferResponse;
       setLastTransfer(result);
-      setMessage(t("转账已完成，余额和资产浏览器记录已经更新。", "Transfer completed. The balance and asset explorer are updated."));
+      setMessage(t("转账已完成。", "Transfer completed."));
+      const refreshWarning = () => {
+        if (isCurrent()) setMessage(t(
+          "转账已完成，余额暂未刷新，请稍后刷新资产。",
+          "Transfer completed, but the balance could not be refreshed. Refresh assets shortly.",
+        ));
+      };
       try {
-        await onCompleted?.();
+        const refreshed = await onCompleted?.();
+        if (refreshed === null || refreshed === false) refreshWarning();
       } catch {
         // The signed transfer is final even when the follow-up balance refresh is unavailable.
+        refreshWarning();
       }
       return isCurrent() ? result : null;
     } catch (cause) {

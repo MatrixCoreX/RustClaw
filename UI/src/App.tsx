@@ -441,7 +441,7 @@ export default function App() {
   });
   const assetTransferRuntime = useAssetTransferRuntime({
     apiFetch, t, requestScope: assetRequestScope,
-    onCompleted: () => assetOverviewRuntime.fetchAccount(1),
+    onCompleted: () => assetOverviewRuntime.refreshAccountAfterMutation(),
   });
   const assetTransferHistoryRuntime = useAssetTransferHistoryRuntime({
     apiFetch, t, requestScope: assetRequestScope,

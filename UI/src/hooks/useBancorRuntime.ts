@@ -443,6 +443,7 @@ export function useBancorRuntime({
   }>(), [isCurrent]);
   const candleRequests = useMemo(() => new Map<string, Promise<NniBancorCandlesResponse | null>>(), [isCurrent]);
   const readRequests = useMemo(() => new Map<string, Promise<unknown>>(), [isCurrent]);
+  const overviewReads = useMemo(() => ({ revision: 0 }), [isCurrent]);
   const quoteSequence = useRef(0);
   const quoteOwner = useRef<{ owner: () => boolean; value: NniBancorQuoteResponse } | null>(null);
   const tradeInFlight = useRef<(() => boolean) | null>(null);
@@ -492,26 +493,53 @@ export function useBancorRuntime({
     return new BancorApiError(code, formatBancorApiError(code, t, fallback));
   };
 
+  const captureOverviewRead = () => {
+    const revision = overviewReads.revision;
+    return () => isCurrent() && overviewReads.revision === revision;
+  };
+
+  const fetchOverviewRead = (ownsRead: () => boolean, path: string, init?: RequestInit) =>
+    fetchResilientRead((readPath, readInit) => ownsRead()
+      ? ownedApiFetch(readPath, readInit)
+      : Promise.reject(new DOMException("request_observation_changed", "AbortError")), path, init);
+
+  const invalidateOverviewAfterMutation = () => {
+    if (!isCurrent()) return;
+    overviewReads.revision++;
+    readRequests.clear();
+    candleRequests.clear();
+    quoteSequence.current++;
+    quoteOwner.current = null;
+    setQuote(null);
+    setQuoteLoading(false);
+    setMarketLoading(false);
+    setAccountLoading(false);
+    setMarketTradesLoading(false);
+    setCandlesLoading(false);
+    setCandlesOlderLoading(false);
+  };
+
   const fetchMarket = (silent = false) => runCoalescedRead(
     readRequests,
-    "market",
+    `market:${overviewReads.revision}`,
     async () => {
-    if (!isCurrent()) return null;
+    const ownsRead = captureOverviewRead();
+    if (!ownsRead()) return null;
     if (!silent) setMarketLoading(true);
     try {
-      const response = await fetchResilientRead(ownedApiFetch, `${overviewRoutePrefix}/market`);
+      const response = await fetchOverviewRead(ownsRead, `${overviewRoutePrefix}/market`);
       const body = (await response.json()) as ApiResponse<NniBancorMarketResponse>;
-      if (!isCurrent()) return null;
+      if (!ownsRead()) return null;
       if (!response.ok || !body.ok || !body.data) throw readError(body, t("市场数据读取失败。", "Market data could not be loaded."));
       setMarket(body.data);
       setError(null);
       return body.data;
     } catch (cause) {
-      if (!isCurrent()) return null;
+      if (!ownsRead()) return null;
       if (!silent) setError(formatBancorApiError(cause instanceof Error ? cause.message : null, t, t("市场读取失败。", "Market load failed.")));
       return null;
     } finally {
-      if (isCurrent() && !silent) setMarketLoading(false);
+      if (ownsRead() && !silent) setMarketLoading(false);
     }
     },
   );
@@ -545,18 +573,19 @@ export function useBancorRuntime({
 
   const fetchAccount = (page = account?.page ?? 1, silent = false) => {
     if (!isCurrent()) return Promise.resolve(null);
+    const ownsRead = captureOverviewRead();
     const safePage = Math.max(1, Math.floor(page));
     accountPage.current = safePage;
-    const isCurrentPage = () => isCurrent() && accountPage.current === safePage;
+    const isCurrentPage = () => ownsRead() && accountPage.current === safePage;
     return runCoalescedRead(
     readRequests,
-    `account:${safePage}`,
+    `account:${overviewReads.revision}:${safePage}`,
     async () => {
     if (!isCurrentPage()) return null;
     if (!silent) setAccountLoading(true);
     try {
-      const response = await fetchResilientRead(
-        ownedApiFetch,
+      const response = await fetchOverviewRead(
+        isCurrentPage,
         buildBancorAccountPath(safePage, overviewRoutePrefix),
       );
       const body = (await response.json()) as ApiResponse<NniBancorAccountResponse>;
@@ -585,16 +614,23 @@ export function useBancorRuntime({
   );
   };
 
+  const refreshAccountAfterMutation = () => {
+    if (!isCurrent()) return Promise.resolve(null);
+    invalidateOverviewAfterMutation();
+    return fetchAccount(1);
+  };
+
   const fetchMarketTrades = (silent = false) => runCoalescedRead(
     readRequests,
-    "market-trades",
+    `market-trades:${overviewReads.revision}`,
     async () => {
-    if (!isCurrent()) return null;
+    const ownsRead = captureOverviewRead();
+    if (!ownsRead()) return null;
     if (!silent) setMarketTradesLoading(true);
     try {
-      const response = await fetchResilientRead(ownedApiFetch, "/v1/nni/bancor/trades");
+      const response = await fetchOverviewRead(ownsRead, "/v1/nni/bancor/trades");
       const body = (await response.json()) as ApiResponse<NniBancorMarketTradesResponse>;
-      if (!isCurrent()) return null;
+      if (!ownsRead()) return null;
       if (!response.ok || !body.ok || !body.data) {
         throw readError(body, t("市场成交记录读取失败。", "Market trades could not be loaded."));
       }
@@ -602,7 +638,7 @@ export function useBancorRuntime({
       setMarketTradesError(null);
       return body.data;
     } catch (cause) {
-      if (!isCurrent()) return null;
+      if (!ownsRead()) return null;
       if (!silent) {
         setMarketTradesError(
           formatBancorApiError(cause instanceof Error ? cause.message : null, t, t("市场成交记录读取失败。", "Market trades could not be loaded.")),
@@ -610,7 +646,7 @@ export function useBancorRuntime({
       }
       return null;
     } finally {
-      if (isCurrent() && !silent) setMarketTradesLoading(false);
+      if (ownsRead() && !silent) setMarketTradesLoading(false);
     }
     },
   );
@@ -622,14 +658,15 @@ export function useBancorRuntime({
     endTimeUnix?: number,
   ): Promise<NniBancorCandlesResponse | null> => {
     if (!isCurrent()) return Promise.resolve(null);
+    const ownsRead = captureOverviewRead();
     const requestScope = cacheScope;
     const cacheKey = `${requestScope}\n${intervalSeconds}`;
-    const requestKey = `${cacheKey}\n${endTimeUnix ?? "latest"}`;
+    const requestKey = `${cacheKey}\n${overviewReads.revision}\n${endTimeUnix ?? "latest"}`;
     const inFlight = candleRequests.get(requestKey);
     if (inFlight) {
       if (!forceRefresh) return inFlight;
       return inFlight.then(() => {
-        if (!isCurrent()) return null;
+        if (!ownsRead()) return null;
         if (candleRequests.get(requestKey) === inFlight) {
           candleRequests.delete(requestKey);
         }
@@ -643,7 +680,7 @@ export function useBancorRuntime({
       let cachedSnapshot = candleCache.get(cacheKey) ?? null;
       if (!cachedSnapshot) {
         const persistent = await readBancorCandleCache(requestScope, intervalSeconds);
-        if (!isCurrent()) return null;
+        if (!ownsRead()) return null;
         if (persistent) {
           cachedSnapshot = {
             response: persistent.response,
@@ -678,11 +715,11 @@ export function useBancorRuntime({
       }
 
       try {
-        const response = await fetchResilientRead(ownedApiFetch, buildBancorCandlesPath(intervalSeconds, refreshLimit, endTimeUnix), {
+        const response = await fetchOverviewRead(ownsRead, buildBancorCandlesPath(intervalSeconds, refreshLimit, endTimeUnix), {
           cache: "no-store",
           headers: requestHeaders,
         });
-        if (!isCurrent()) return null;
+        if (!ownsRead()) return null;
         if (response.status === 304) {
           if (!cachedSnapshot) throw new Error("nni_bancor_candle_cache_miss");
           const validatedSnapshot = {
@@ -709,7 +746,7 @@ export function useBancorRuntime({
         }
 
         const body = (await response.json()) as ApiResponse<NniBancorCandlesResponse>;
-        if (!isCurrent()) return null;
+        if (!ownsRead()) return null;
         if (!response.ok || !body.ok || !body.data) {
           throw readError(body, t("K 线数据读取失败。", "Candlestick data could not be loaded."));
         }
@@ -754,7 +791,7 @@ export function useBancorRuntime({
         }
         return merged;
       } catch (cause) {
-        if (!isCurrent()) return null;
+        if (!ownsRead()) return null;
         if (
           !silent
           && candleCacheScopeRef.current === requestScope
@@ -776,7 +813,7 @@ export function useBancorRuntime({
       } finally {
         if (
           loadingLatest
-          && isCurrent()
+          && ownsRead()
           && candleCacheScopeRef.current === requestScope
           && candleIntervalRef.current === intervalSeconds
         ) {
@@ -808,6 +845,7 @@ export function useBancorRuntime({
 
   const loadOlderCandles = async () => {
     if (!isCurrent()) return null;
+    const ownsRead = captureOverviewRead();
     const intervalSeconds = candleIntervalRef.current;
     const snapshot = candleCache.get(`${cacheScope}\n${intervalSeconds}`)?.response;
     const current = snapshot?.interval_seconds === intervalSeconds ? snapshot : candles;
@@ -821,7 +859,7 @@ export function useBancorRuntime({
       const result = await fetchCandles(intervalSeconds, false, false, oldestBucketStart - 1);
       return result;
     } finally {
-      if (isCurrent() && candleIntervalRef.current === intervalSeconds) setCandlesOlderLoading(false);
+      if (ownsRead() && candleIntervalRef.current === intervalSeconds) setCandlesOlderLoading(false);
     }
   };
 
@@ -956,19 +994,17 @@ export function useBancorRuntime({
       if (!response.ok || !body.ok || !body.data) throw readError(body, t("交易没有完成。", "The trade was not completed."));
       if (!("trade" in body.data)) throw new Error(t("交易结果格式不完整，请刷新后重试。", "The trade result is incomplete. Refresh and try again."));
       setLastTrade(body.data);
-      setQuote(null);
-      quoteOwner.current = null;
-      await Promise.allSettled([
+      invalidateOverviewAfterMutation();
+      const refreshed = await Promise.allSettled([
         fetchMarket(true),
         fetchAccount(1, true),
         fetchMarketTrades(true),
         fetchCandles(candleIntervalRef.current, true, true),
       ]);
       if (!isCurrent()) return null;
-      setMessage(t(
-        "交易已完成，余额和市场储备已经更新。",
-        "Trade completed. Balances and market reserves are updated.",
-      ));
+      setMessage(refreshed.every(result => result.status === "fulfilled" && result.value != null)
+        ? t("交易已完成，余额和市场储备已经更新。", "Trade completed. Balances and market reserves are updated.")
+        : t("交易已完成，部分数据暂未刷新，请稍后刷新页面。", "Trade completed, but some data could not be refreshed. Refresh the page shortly."));
       return body.data;
     } catch (cause) {
       if (!isCurrent()) return null;
@@ -1020,6 +1056,7 @@ export function useBancorRuntime({
     changeCandleInterval,
     loadOlderCandles,
     fetchAccount,
+    refreshAccountAfterMutation,
     fetchMarketTrades,
     preview,
     trade,
