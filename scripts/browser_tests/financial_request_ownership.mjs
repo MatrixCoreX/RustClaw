@@ -29,6 +29,20 @@ try {
     assert.equal(await page.getByTestId('market').textContent(), 'A');
     assert.equal(await page.getByTestId('history').textContent(), 'owner');
     assert.equal(await page.getByTestId('binding').textContent(), 'owner');
+    await page.getByRole('button', { name: 'Prepare signer', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="signer-ready"]').textContent === 'true');
+    await page.getByRole('button', { name: 'Slow authorization', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="owner-action"]').textContent === 'custom');
+    await page.getByRole('button', { name: 'Cancel authorization', exact: true }).click();
+    await page.waitForTimeout(600);
+    assert.equal(await page.getByTestId('owner-action').textContent(), 'none');
+    assert.equal(await page.getByTestId('authorization').textContent(), 'none');
+    assert.equal(await page.getByTestId('signatures').textContent(), '0');
+    await page.getByRole('button', { name: 'Save service nodes', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="bancor-node"]').textContent === 'https://other-node.example.test'
+      && document.querySelector('[data-testid="saving-nodes"]').textContent === 'false');
+    assert.equal(await page.getByTestId('asset-node').textContent(), 'https://other-node.example.test');
+    assert.equal(await page.getByTestId('peak-writes').textContent(), '1');
     await page.getByRole('button', { name: 'Sign out', exact: true }).click();
     const requests = await page.getByTestId('requests').textContent();
     await page.getByRole('button', { name: 'Fresh requests', exact: true }).click();

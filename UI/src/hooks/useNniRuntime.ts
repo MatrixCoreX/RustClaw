@@ -47,6 +47,9 @@ export const NNI_REWARDS_PAGE_SIZE = 100;
 
 type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
+type NniConfigPatch = Partial<Pick<NniConfigResponse,
+  "joined" | "remote_nodes" | "selected_node_url" | "bancor_service_node_url" | "asset_service_node_url"
+>>;
 
 function nniPrivateKeyErrorMessage(cause: unknown, t: Translate): string {
   const code = cause instanceof Error ? cause.message : null;
@@ -84,16 +87,25 @@ export interface UseNniRuntimeParams {
 
 export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "local" }: UseNniRuntimeParams) {
   const isCurrent = useRequestOwner(requestScope);
-  const configRequests = useMemo(() => ({ revision: 0, pendingWrites: 0 }), [isCurrent]);
+  const configRequests = useMemo(() => ({
+    revision: 0,
+    pendingWrites: 0,
+    tail: Promise.resolve(),
+    confirmed: null as NniConfigResponse | null,
+    serviceWrites: new Map<string, number>(),
+  }), [isCurrent]);
   const apiFetch: ApiFetch = (path, init) => {
     if (!isCurrent()) return Promise.reject(new DOMException("request_owner_changed", "AbortError"));
-    if (path !== "/v1/nni/config" || init?.method !== "POST") return fetchApi(path, init);
-    configRequests.revision++;
-    configRequests.pendingWrites++;
-    return fetchApi(path, init).finally(() => { configRequests.pendingWrites--; });
+    return fetchApi(path, init);
   };
   const { confirm: showConfirm } = useUiDialog();
   const readRequests = useMemo(() => new Map<string, Promise<unknown>>(), [isCurrent]);
+  const ownerOperations = useMemo(() => ({
+    revision: 0,
+    challenge: null as NniOwnerAuthorizationChallenge | null,
+    verifying: false,
+  }), [isCurrent]);
+  const deviceActions = useMemo(() => ({ revision: 0 }), [isCurrent]);
   const [nniStatus, setNniStatus] = useState<NniDeviceStatusResponse | null>(null);
   const [nniStatusLoading, setNniStatusLoading] = useState(false);
   const [nniStatusError, setNniStatusError] = useState<string | null>(null);
@@ -233,8 +245,38 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
     return selectedNniNodeUrl();
   };
 
+  // Compare each render's draft to its own baseline, including after long awaits.
+  const confirmedConfigAtRender = configRequests.confirmed;
+  const nniNodeConfigPatch = (): NniConfigPatch => {
+    const draft = {
+      remote_nodes: nniRemoteNodeUrls(),
+      selected_node_url: selectedNniNodeUrl(),
+      bancor_service_node_url: selectedNniBancorServiceNodeUrl(),
+      asset_service_node_url: selectedNniAssetServiceNodeUrl(),
+    };
+    const confirmed = confirmedConfigAtRender;
+    if (!confirmed) return draft;
+    const patch: NniConfigPatch = {};
+    if (draft.remote_nodes.length !== confirmed.remote_nodes.length
+      || draft.remote_nodes.some((node, index) => node !== confirmed.remote_nodes[index])) {
+      patch.remote_nodes = draft.remote_nodes;
+    }
+    for (const field of ["selected_node_url", "bancor_service_node_url", "asset_service_node_url"] as const) {
+      const persisted = confirmed[field] ?? confirmed.selected_node_url ?? confirmed.remote_nodes[0] ?? "";
+      if (draft[field] !== persisted) patch[field] = draft[field];
+    }
+    return patch;
+  };
+
+  const beginServiceNodeWrite = (service: "assets" | "bancor") => {
+    const revision = (configRequests.serviceWrites.get(service) ?? 0) + 1;
+    configRequests.serviceWrites.set(service, revision);
+    return () => isCurrent() && configRequests.serviceWrites.get(service) === revision;
+  };
+
   const applyNniConfigResponse = (config: NniConfigResponse) => {
     if (!isCurrent()) return;
+    configRequests.confirmed = config;
     setNniActiveNodeUrl(config.selected_node_url ?? config.remote_nodes[0] ?? "");
     setNniJoined(config.joined);
     setNniAssetOwnerPubkey(config.asset_owner_pubkey ?? null);
@@ -259,39 +301,64 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
     setNniLastHeartbeatNetworkFailures(config.last_heartbeat_network_failures ?? 0);
   };
 
-  const setNniJoinedPersisted = async (joined: boolean, options?: { persistRemoteNodes?: boolean }) => {
-    if (!isCurrent()) return false;
-    setNniJoined(joined);
-    try {
-      const payload: {
-        joined: boolean;
-        remote_nodes?: string[];
-        selected_node_url?: string;
-        bancor_service_node_url?: string;
-        asset_service_node_url?: string;
-      } = { joined };
-      if (options?.persistRemoteNodes) {
-        payload.remote_nodes = nniRemoteNodeUrls();
-        payload.selected_node_url = selectedNniNodeUrl();
-        payload.bancor_service_node_url = selectedNniBancorServiceNodeUrl();
-        payload.asset_service_node_url = selectedNniAssetServiceNodeUrl();
-      }
+  const beginOwnerOperation = () => {
+    const revision = ++ownerOperations.revision;
+    ownerOperations.challenge = null;
+    ownerOperations.verifying = false;
+    setNniOwnerAuthorizationChallenge(null);
+    setNniOwnerActionLoading(null);
+    setNniActionMessage(null);
+    setNniActionError(null);
+    return () => isCurrent() && ownerOperations.revision === revision;
+  };
+
+  const postNniConfig = (
+    patch: NniConfigPatch | (() => NniConfigPatch),
+    errorCode: string,
+    ownsOperation = isCurrent,
+  ): Promise<NniConfigResponse | null> => {
+    if (!ownsOperation()) return Promise.resolve(null);
+    configRequests.revision++;
+    configRequests.pendingWrites++;
+    // Keep ordering through response parsing and application, not just fetch headers.
+    const pending = configRequests.tail.then(async () => {
+      if (!ownsOperation()) return null;
       const res = await apiFetch(`/v1/nni/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(typeof patch === "function" ? patch() : patch),
       });
-      if (!isCurrent()) return false;
+      if (!ownsOperation()) return null;
       const body = (await res.json()) as ApiResponse<NniConfigResponse>;
-      if (!isCurrent()) return false;
+      if (!ownsOperation()) return null;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `nni_config_update_http_${res.status}`);
+        throw new Error(body.error || `${errorCode}_${res.status}`);
       }
       applyNniConfigResponse(body.data);
+      return body.data;
+    }).finally(() => { configRequests.pendingWrites--; });
+    configRequests.tail = pending.then(() => undefined, () => undefined);
+    return pending;
+  };
+
+  const setNniJoinedPersisted = async (
+    joined: boolean,
+    options?: { persistRemoteNodes?: boolean; ownsOperation?: () => boolean },
+  ) => {
+    const ownsOperation = options?.ownsOperation ?? isCurrent;
+    if (!ownsOperation()) return false;
+    setNniJoined(joined);
+    try {
+      const payload: NniConfigPatch = {
+        ...(options?.persistRemoteNodes ? nniNodeConfigPatch() : {}),
+        joined,
+      };
+      const saved = await postNniConfig(payload, "nni_config_update_http", ownsOperation);
+      if (!ownsOperation() || !saved) return false;
       setNniConfigError(null);
       return true;
     } catch (err) {
-      if (!isCurrent()) return false;
+      if (!ownsOperation()) return false;
       const message = formatNniErrorCause(err, t, t("NNI 配置更新失败。", "NNI configuration update failed."));
       setNniConfigError(message);
       return false;
@@ -340,8 +407,14 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
     nniStatus ? Promise.resolve(nniStatus) : readNniDeviceStatus(silent, false)
   );
 
-  const runNniDeviceAction = async (action: string, options?: { challenge?: string }) => {
-    if (!isCurrent()) return null;
+  const runNniDeviceAction = async (
+    action: string,
+    options?: { challenge?: string; ownsOperation?: () => boolean },
+  ) => {
+    const parentOwnsOperation = options?.ownsOperation ?? isCurrent;
+    if (!parentOwnsOperation()) return null;
+    const revision = ++deviceActions.revision;
+    const ownsOperation = () => parentOwnsOperation() && deviceActions.revision === revision;
     setNniActionLoading(action);
     setNniActionError(null);
     setNniActionMessage(null);
@@ -351,9 +424,9 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, challenge: options?.challenge }),
       });
-      if (!isCurrent()) return null;
+      if (!ownsOperation()) return null;
       const body = (await res.json()) as ApiResponse<NniDeviceActionResponse>;
-      if (!isCurrent()) return null;
+      if (!ownsOperation()) return null;
       if (!res.ok || !body.ok || !body.data) {
         const actionData = body.data;
         if (actionData?.signature_chip_present === false) {
@@ -421,12 +494,12 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
       }
       return body.data;
     } catch (err) {
-      if (!isCurrent()) return null;
+      if (!ownsOperation()) return null;
       const message = formatNniErrorCause(err, t, t("NNI 操作未完成。", "The NNI operation did not complete."));
       setNniActionError(message);
       return null;
     } finally {
-      if (isCurrent()) {
+      if (isCurrent() && deviceActions.revision === revision) {
         setNniActionLoading(null);
       }
     }
@@ -443,8 +516,9 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
   const requestNniJoinTask = async (
     assetOwnerPubkey?: string | null,
     replaceExistingOwner = false,
+    ownsOperation = isCurrent,
   ): Promise<NniJoinTaskResponse | null> => {
-    if (!isCurrent()) return null;
+    if (!ownsOperation()) return null;
     const nodeUrl = selectedNniNodeUrl();
     if (!nodeUrl) {
       throw new Error(t("请先填写至少一个远程 NNI 节点地址。", "Enter at least one remote NNI node URL first."));
@@ -458,9 +532,9 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
         replace_existing_owner: replaceExistingOwner,
       }),
     });
-    if (!isCurrent()) return null;
+    if (!ownsOperation()) return null;
     const body = (await res.json()) as ApiResponse<NniJoinTaskResponse>;
-    if (!isCurrent()) return null;
+    if (!ownsOperation()) return null;
     if (!res.ok || !body.ok || !body.data) {
       if (nniJoinRejectsDevicePublicKey(body.error, body.data)) {
         setNniDeviceAuthorizationDenied(true);
@@ -481,9 +555,11 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
     options?: {
       ownerSignature?: string;
       replaceExistingOwner?: boolean;
+      ownsOperation?: () => boolean;
     },
   ): Promise<NniJoinVerifyResponse | null> => {
-    if (!isCurrent()) return null;
+    const ownsOperation = options?.ownsOperation ?? isCurrent;
+    if (!ownsOperation()) return null;
     const res = await apiFetch(`/v1/nni/join/verify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -495,9 +571,9 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
         replace_existing_owner: options?.replaceExistingOwner === true,
       }),
     });
-    if (!isCurrent()) return null;
+    if (!ownsOperation()) return null;
     const body = (await res.json()) as ApiResponse<NniJoinVerifyResponse>;
-    if (!isCurrent()) return null;
+    if (!ownsOperation()) return null;
     if (!res.ok || !body.ok || !body.data) {
       if (nniJoinRejectsDevicePublicKey(body.error, body.data)) {
         setNniDeviceAuthorizationDenied(true);
@@ -509,6 +585,7 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
 
   const generateNniOwnerKeyPair = async () => {
     if (!isCurrent()) return null;
+    const ownsOperation = beginOwnerOperation();
     setNniOwnerActionLoading("generate");
     setNniActionError(null);
     setNniActionMessage(null);
@@ -521,11 +598,11 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
       ));
       return keyPair;
     } catch (err) {
-      if (!isCurrent()) return null;
+      if (!ownsOperation()) return null;
       setNniActionError(nniPrivateKeyErrorMessage(err, t));
       return null;
     } finally {
-      if (isCurrent()) {
+      if (ownsOperation()) {
         setNniOwnerActionLoading(null);
       }
     }
@@ -535,6 +612,7 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
 
   const recoverNniOwner = async (ownerPrivateKey: string) => {
     if (!isCurrent()) return null;
+    const ownsOperation = beginOwnerOperation();
     const nodeUrl = selectedNniNodeUrl();
     if (!nodeUrl) {
       setNniActionError(t("请先填写至少一个远程 NNI 节点地址。", "Enter at least one remote NNI node URL first."));
@@ -557,9 +635,9 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
           asset_owner_pubkey: validation.publicKey,
         }),
       });
-      if (!isCurrent()) return null;
+      if (!ownsOperation()) return null;
       const challengeBody = (await challengeResponse.json()) as ApiResponse<NniOwnerRecoveryChallengeResponse>;
-      if (!isCurrent()) return null;
+      if (!ownsOperation()) return null;
       if (!challengeResponse.ok || !challengeBody.ok || !challengeBody.data) {
         throw new Error(nniJoinErrorMessage(
           challengeBody.error,
@@ -584,9 +662,9 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
           owner_signature: signed.signature,
         }),
       });
-      if (!isCurrent()) return null;
+      if (!ownsOperation()) return null;
       const body = (await verifyResponse.json()) as ApiResponse<NniOwnerRecoveryResponse>;
-      if (!isCurrent()) return null;
+      if (!ownsOperation()) return null;
       if (!verifyResponse.ok || !body.ok || !body.data) {
         throw new Error(nniJoinErrorMessage(
           body.error,
@@ -597,19 +675,19 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
       }
       setNniAssetOwnerPubkey(body.data.asset_owner_pubkey);
       setNniOwnerKeyPair(null);
-      await setNniJoinedPersisted(false, { persistRemoteNodes: true });
-      if (!isCurrent()) return null;
+      await setNniJoinedPersisted(false, { persistRemoteNodes: true, ownsOperation });
+      if (!ownsOperation()) return null;
       setNniActionMessage(t(
         "资产账户已恢复到当前设备，旧设备授权已撤销。心跳尚未开启，请点击加入后启动。",
         "The asset account was recovered to this device and the old device authorization was revoked. Heartbeats remain off until you select Join.",
       ));
       return body.data;
     } catch (err) {
-      if (!isCurrent()) return null;
+      if (!ownsOperation()) return null;
       setNniActionError(nniPrivateKeyErrorMessage(err, t));
       return null;
     } finally {
-      if (isCurrent()) {
+      if (ownsOperation()) {
         setNniOwnerActionLoading(null);
       }
     }
@@ -617,6 +695,7 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
 
   const startNniCustomOwnerAuthorization = async (ownerPublicKey: string) => {
     if (!isCurrent()) return null;
+    const ownsOperation = beginOwnerOperation();
     const validation = validateNniOwnerPublicKey(ownerPublicKey);
     if (!validation.ok) {
       setNniActionError(t("资产公钥格式无效。", "The asset public key format is invalid."));
@@ -630,7 +709,7 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
       return null;
     }
     const status = nniStatus ?? (await fetchNniDeviceStatus(false));
-    if (!isCurrent()) return null;
+    if (!ownsOperation()) return null;
     if (!status?.signature_chip_present) {
       setNniActionError(t(
         "当前设备没有可用的签名芯片，不能修改资产授权。",
@@ -642,13 +721,14 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
     setNniActionError(null);
     setNniActionMessage(null);
     try {
-      const task = await requestNniJoinTask(validation.normalized, replaceExistingOwner);
-      if (!isCurrent()) return null;
+      const task = await requestNniJoinTask(validation.normalized, replaceExistingOwner, ownsOperation);
+      if (!ownsOperation()) return null;
       if (!task?.challenge) throw new Error("nni_join_challenge_missing");
       const signatureResult = await runNniDeviceAction("sign_challenge", {
         challenge: task.challenge,
+        ownsOperation,
       });
-      if (!isCurrent()) return null;
+      if (!ownsOperation()) return null;
       const deviceSignature = signatureResult?.payload?.signature;
       if (!deviceSignature) throw new Error("nni_join_signature_missing");
       if (task.owner_signature_required !== true) {
@@ -663,6 +743,7 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
         targetOwnerPublicKey: validation.normalized,
         replaceExistingOwner,
       };
+      ownerOperations.challenge = challenge;
       setNniOwnerAuthorizationChallenge(challenge);
       setNniActionMessage(t(
         "设备签名已完成。请使用目标资产密钥签名下方数据。",
@@ -670,11 +751,11 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
       ));
       return challenge;
     } catch (err) {
-      if (!isCurrent()) return null;
+      if (!ownsOperation()) return null;
       setNniActionError(formatNniErrorCause(err, t, t("资产绑定请求失败。", "Asset binding request failed.")));
       return null;
     } finally {
-      if (isCurrent()) {
+      if (ownsOperation()) {
         setNniOwnerActionLoading(null);
       }
     }
@@ -682,12 +763,13 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
 
   const startNniOwnerUnbind = async () => {
     if (!isCurrent()) return null;
+    const ownsOperation = beginOwnerOperation();
     if (!nniAssetOwnerPubkey) {
       setNniActionError(t("当前设备没有已绑定的资产公钥。", "This device has no bound asset public key."));
       return null;
     }
     const status = nniStatus ?? (await fetchNniDeviceStatus(false));
-    if (!isCurrent()) return null;
+    if (!ownsOperation()) return null;
     if (!status?.signature_chip_present) {
       setNniActionError(t(
         "当前设备没有可用的签名芯片，不能解绑资产密钥。",
@@ -704,7 +786,7 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
       confirmLabel: t("继续解绑", "Continue"),
       tone: "danger",
     });
-    if (!isCurrent()) return null;
+    if (!ownsOperation()) return null;
     if (!confirmed) return null;
     setNniAssetOwnerPubkey(null);
     setNniJoined(false);
@@ -719,16 +801,17 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ node_url: nodeUrl }),
       });
-      if (!isCurrent()) return null;
+      if (!ownsOperation()) return null;
       const body = (await res.json()) as ApiResponse<NniOwnerUnbindTaskResponse>;
-      if (!isCurrent()) return null;
+      if (!ownsOperation()) return null;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(nniJoinErrorMessage(body.error, body.data, t("资产解绑请求未完成。", "The asset unbind request did not complete."), lang));
       }
       const signatureResult = await runNniDeviceAction("sign_challenge", {
         challenge: body.data.signing_payload,
+        ownsOperation,
       });
-      if (!isCurrent()) return null;
+      if (!ownsOperation()) return null;
       const deviceSignature = signatureResult?.payload?.signature;
       if (!deviceSignature) throw new Error("nni_asset_unbind_device_signature_missing");
       const verifyRes = await apiFetch(`/v1/nni/owner/unbind/verify`, {
@@ -740,9 +823,9 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
           device_signature: deviceSignature,
         }),
       });
-      if (!isCurrent()) return null;
+      if (!ownsOperation()) return null;
       const verifyBody = (await verifyRes.json()) as ApiResponse<NniOwnerUnbindVerifyResponse>;
-      if (!isCurrent()) return null;
+      if (!ownsOperation()) return null;
       if (!verifyRes.ok || !verifyBody.ok || !verifyBody.data) {
         throw new Error(nniJoinErrorMessage(
           verifyBody.error,
@@ -759,14 +842,14 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
       ));
       return verifyBody.data;
     } catch {
-      if (!isCurrent()) return null;
+      if (!ownsOperation()) return null;
       setNniActionError(t(
         "本机保存的资产公钥已清除，心跳已停止；远端解绑尚未确认，请在网络恢复后重新绑定或检查远端记录。",
         "The locally stored asset public key was cleared and heartbeats stopped. Remote unbinding is not confirmed; reconnect or review the remote record after network recovery.",
       ));
       return null;
     } finally {
-      if (isCurrent()) {
+      if (ownsOperation()) {
         setNniOwnerActionLoading(null);
       }
     }
@@ -777,11 +860,15 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
     ownerSignatureInput: string,
   ) => {
     if (!isCurrent()) return null;
+    if (ownerOperations.challenge !== challenge || ownerOperations.verifying) return null;
+    const revision = ownerOperations.revision;
+    const ownsOperation = () => isCurrent() && ownerOperations.revision === revision;
     const ownerSignature = normalizeNniOwnerSignature(ownerSignatureInput);
     if (!ownerSignature) {
       setNniActionError(t("资产签名必须是 128 位十六进制。", "The asset signature must be 128 hexadecimal characters."));
       return null;
     }
+    ownerOperations.verifying = true;
     setNniOwnerActionLoading("custom");
     setNniActionError(null);
     try {
@@ -792,14 +879,16 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
         {
           ownerSignature,
           replaceExistingOwner: challenge.replaceExistingOwner,
+          ownsOperation,
         },
       );
-      if (!isCurrent()) return null;
+      if (!ownsOperation()) return null;
       if (!verified?.joined || !verified.compliant) throw new Error("nni_join_verify_rejected");
-      await setNniJoinedPersisted(false, { persistRemoteNodes: true });
-      if (!isCurrent()) return null;
+      await setNniJoinedPersisted(false, { persistRemoteNodes: true, ownsOperation });
+      if (!ownsOperation()) return null;
       setNniAssetOwnerPubkey(verified.asset_owner_pubkey ?? challenge.targetOwnerPublicKey);
       setNniOwnerKeyPair(null);
+      ownerOperations.challenge = null;
       setNniOwnerAuthorizationChallenge(null);
       setNniActionMessage(t(
         challenge.replaceExistingOwner
@@ -811,11 +900,12 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
       ));
       return verified;
     } catch (err) {
-      if (!isCurrent()) return null;
+      if (!ownsOperation()) return null;
       setNniActionError(formatNniErrorCause(err, t, t("资产授权失败。", "Asset authorization failed.")));
       return null;
     } finally {
-      if (isCurrent()) {
+      if (ownsOperation()) {
+        ownerOperations.verifying = false;
         setNniOwnerActionLoading(null);
       }
     }
@@ -823,7 +913,7 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
 
   const completeNniOwnerAuthorization = async (ownerSignatureInput: string) => {
     if (!isCurrent()) return null;
-    const challenge = nniOwnerAuthorizationChallenge;
+    const challenge = ownerOperations.challenge;
     if (!challenge) {
       setNniActionError(t("当前没有待签名的资产操作。", "There is no pending asset authorization."));
       return null;
@@ -851,7 +941,9 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
 
     const challenge = await startNniCustomOwnerAuthorization(validation.publicKey);
     if (!isCurrent()) return null;
-    if (!challenge) return null;
+    if (!challenge || ownerOperations.challenge !== challenge) return null;
+    const revision = ownerOperations.revision;
+    const ownsOperation = () => isCurrent() && ownerOperations.revision === revision;
     try {
       const signed = signNniOwnerChallenge(validation.normalized, challenge.signingPayload);
       if (signed.publicKey !== challenge.targetOwnerPublicKey) {
@@ -859,7 +951,7 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
       }
       return await verifyNniOwnerAuthorization(challenge, signed.signature);
     } catch (err) {
-      if (!isCurrent()) return null;
+      if (!ownsOperation()) return null;
       setNniActionError(nniPrivateKeyErrorMessage(err, t));
       return null;
     }
@@ -867,8 +959,7 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
 
   const cancelNniOwnerAuthorization = () => {
     if (!isCurrent()) return;
-    setNniOwnerAuthorizationChallenge(null);
-    setNniActionError(null);
+    beginOwnerOperation();
   };
 
   const fetchNniConfig = (silent = false) => runCoalescedRead(
@@ -1192,23 +1283,8 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
     setNniConfigError(null);
     setNniConfigMessage(null);
     try {
-      const res = await apiFetch(`/v1/nni/config`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          remote_nodes: nniRemoteNodeUrls(),
-          selected_node_url: selectedNniNodeUrl(),
-          bancor_service_node_url: selectedNniBancorServiceNodeUrl(),
-          asset_service_node_url: selectedNniAssetServiceNodeUrl(),
-        }),
-      });
-      if (!isCurrent()) return null;
-      const body = (await res.json()) as ApiResponse<NniConfigResponse>;
-      if (!isCurrent()) return null;
-      if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `nni_config_save_http_${res.status}`);
-      }
-      applyNniConfigResponse(body.data);
+      const saved = await postNniConfig(nniNodeConfigPatch(), "nni_config_save_http");
+      if (!isCurrent() || !saved) return null;
       setNniConfigMessage(
         t(
           "远程 NNI 节点已保存到独立运行数据，不会修改主配置文件。",
@@ -1326,25 +1402,15 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
       setNniAssetServiceNodeError(t("请选择已配置的节点。", "Select a configured node."));
       return false;
     }
-    if (value === selectedNniAssetServiceNodeUrl()) return true;
+    if (!configRequests.pendingWrites && value === selectedNniAssetServiceNodeUrl()) return true;
+    const ownsWrite = beginServiceNodeWrite("assets");
     setNniAssetServiceNodeSaving(true);
     setNniAssetServiceNodeError(null);
     try {
-      const res = await apiFetch(`/v1/nni/config`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ asset_service_node_url: value }),
-      });
-      if (!isCurrent()) return false;
-      const body = (await res.json()) as ApiResponse<NniConfigResponse>;
-      if (!isCurrent()) return false;
-      if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `nni_asset_service_node_update_http_${res.status}`);
-      }
-      applyNniConfigResponse(body.data);
-      return true;
+      const saved = await postNniConfig({ asset_service_node_url: value }, "nni_asset_service_node_update_http");
+      return isCurrent() && Boolean(saved);
     } catch (err) {
-      if (!isCurrent()) return false;
+      if (!ownsWrite()) return false;
       setNniAssetServiceNodeError(formatNniErrorCause(
         err,
         t,
@@ -1352,7 +1418,7 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
       ));
       return false;
     } finally {
-      if (isCurrent()) {
+      if (ownsWrite()) {
         setNniAssetServiceNodeSaving(false);
       }
     }
@@ -1364,25 +1430,15 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
       setNniBancorServiceNodeError(t("请选择已配置的节点。", "Select a configured node."));
       return false;
     }
-    if (value === selectedNniBancorServiceNodeUrl()) return true;
+    if (!configRequests.pendingWrites && value === selectedNniBancorServiceNodeUrl()) return true;
+    const ownsWrite = beginServiceNodeWrite("bancor");
     setNniBancorServiceNodeSaving(true);
     setNniBancorServiceNodeError(null);
     try {
-      const res = await apiFetch(`/v1/nni/config`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bancor_service_node_url: value }),
-      });
-      if (!isCurrent()) return false;
-      const body = (await res.json()) as ApiResponse<NniConfigResponse>;
-      if (!isCurrent()) return false;
-      if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `nni_bancor_service_node_update_http_${res.status}`);
-      }
-      applyNniConfigResponse(body.data);
-      return true;
+      const saved = await postNniConfig({ bancor_service_node_url: value }, "nni_bancor_service_node_update_http");
+      return isCurrent() && Boolean(saved);
     } catch (err) {
-      if (!isCurrent()) return false;
+      if (!ownsWrite()) return false;
       setNniBancorServiceNodeError(formatNniErrorCause(
         err,
         t,
@@ -1390,7 +1446,7 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
       ));
       return false;
     } finally {
-      if (isCurrent()) {
+      if (ownsWrite()) {
         setNniBancorServiceNodeSaving(false);
       }
     }
@@ -1407,6 +1463,7 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
         ? updateNniAssetServiceNodeUrl(value)
         : updateNniBancorServiceNodeUrl(value);
     }
+    const ownsWrite = beginServiceNodeWrite(service);
     const setSaving = service === "assets"
       ? setNniAssetServiceNodeSaving
       : setNniBancorServiceNodeSaving;
@@ -1416,37 +1473,20 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
     setSaving(true);
     setError(null);
     try {
-      const selectedHeartbeatNode = selectedNniNodeUrl();
-      const payload: {
-        remote_nodes: string[];
-        selected_node_url?: string;
-        bancor_service_node_url: string;
-        asset_service_node_url: string;
-      } = {
-        remote_nodes: [...currentNodes, value],
-        bancor_service_node_url: service === "bancor"
-          ? value
-          : selectedNniBancorServiceNodeUrl(),
-        asset_service_node_url: service === "assets"
-          ? value
-          : selectedNniAssetServiceNodeUrl(),
-      };
-      if (selectedHeartbeatNode) payload.selected_node_url = selectedHeartbeatNode;
-      const res = await apiFetch(`/v1/nni/config`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!isCurrent()) return false;
-      const body = (await res.json()) as ApiResponse<NniConfigResponse>;
-      if (!isCurrent()) return false;
-      if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `nni_financial_service_node_update_http_${res.status}`);
-      }
-      applyNniConfigResponse(body.data);
-      return true;
+      const saved = await postNniConfig(() => {
+        const confirmed = configRequests.confirmed;
+        return {
+          remote_nodes: [...new Set([...(confirmed?.remote_nodes ?? currentNodes), value])],
+          selected_node_url: confirmed?.selected_node_url ?? (selectedNniNodeUrl() || undefined),
+          bancor_service_node_url: service === "bancor"
+            ? value : confirmed?.bancor_service_node_url ?? selectedNniBancorServiceNodeUrl(),
+          asset_service_node_url: service === "assets"
+            ? value : confirmed?.asset_service_node_url ?? selectedNniAssetServiceNodeUrl(),
+        };
+      }, "nni_financial_service_node_update_http");
+      return isCurrent() && Boolean(saved);
     } catch (err) {
-      if (!isCurrent()) return false;
+      if (!ownsWrite()) return false;
       setError(formatNniErrorCause(
         err,
         t,
@@ -1454,7 +1494,7 @@ export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "loc
       ));
       return false;
     } finally {
-      if (isCurrent()) {
+      if (ownsWrite()) {
         setSaving(false);
       }
     }

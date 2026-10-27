@@ -78,6 +78,15 @@ duplicate trade/transfer submissions are suppressed. A late authentication failu
 cannot sign out a newer session. Configuration reads begun before a local write
 cannot overwrite that write's acknowledged state.
 
+NNI configuration writes share one per-session queue through JSON parsing and
+state application. A failed save releases the next queued write; custom-node
+additions merge with the last confirmed node directory. Heartbeat saves include
+only edited node settings, preserving an independently pending service selection.
+Cancelling or replacing asset authorization invalidates its operation revision:
+late challenges cannot trigger signing, verification, a queued follow-up save, or
+reopen the dialog. Repeated confirmation of one challenge sends only one verify
+request. Loading and errors belong to the active operation, not an older reply.
+
 These are presentation and continuation fences, not authorization or rollback.
 Already-dispatched signed writes may still complete on the server after navigation;
 the server ledger remains authoritative. Server permissions, signature verification,
