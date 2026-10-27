@@ -55,6 +55,7 @@ import {
 import { useBancorRuntime } from "./hooks/useBancorRuntime";
 import { useAssetTransferRuntime } from "./hooks/useAssetTransferRuntime";
 import { useAssetTransferHistoryRuntime } from "./hooks/useAssetTransferHistoryRuntime";
+import { useRequestOwner } from "./hooks/useRequestOwner";
 import { useMemoryRuntime } from "./hooks/useMemoryRuntime";
 import { useLogsRuntime } from "./hooks/useLogsRuntime";
 import { useFactoryResetRuntime } from "./hooks/useFactoryResetRuntime";
@@ -254,7 +255,17 @@ export default function App() {
     );
   };
 
+  const activeConversationHistoryScope = conversationHistoryScope(
+    uiAuthReady,
+    authMode,
+    authIdentity?.user_id,
+    authIdentity?.chat_id,
+    apiBase,
+  );
+  const activeUiRequestScope = activeConversationHistoryScope ? JSON.stringify([activeConversationHistoryScope, authFlowEpochRef.current, authIdentity?.role]) : "";
+  const isCurrentApiRequest = useRequestOwner(apiBase, JSON.stringify([authMode, uiKey, authFlowEpochRef.current]));
   const safeFetch = async (path: string, init?: RequestInit, withAuth = true) => {
+    const requestAuthEpoch = authFlowEpochRef.current;
     const targetUrl = `${apiBase.replace(/\/$/, "")}${path}`;
     const credentials = runtimeRequestCredentials(withAuth, authMode, init?.credentials);
     try {
@@ -273,7 +284,9 @@ export default function App() {
       if (
         withAuth &&
         authMode &&
-        (await responseIndicatesExpiredAuthentication(response))
+        (await responseIndicatesExpiredAuthentication(response)) &&
+        requestAuthEpoch === authFlowEpochRef.current &&
+        isCurrentApiRequest()
       ) {
         authFlowEpochRef.current += 1;
         window.localStorage.removeItem(STORAGE_KEYS.userKey);
@@ -310,19 +323,6 @@ export default function App() {
     );
   };
   const publicApiFetch = (path: string, init?: RequestInit) => safeFetch(path, init, false);
-  const bancorRuntime = useBancorRuntime({ apiFetch, cacheScope: apiBase, t });
-  const assetOverviewRuntime = useBancorRuntime({
-    apiFetch,
-    cacheScope: `${apiBase}\nassets`,
-    overviewRoutePrefix: "/v1/nni/assets",
-    t,
-  });
-  const assetTransferRuntime = useAssetTransferRuntime({
-    apiFetch,
-    t,
-    onCompleted: () => assetOverviewRuntime.fetchAccount(1),
-  });
-  const assetTransferHistoryRuntime = useAssetTransferHistoryRuntime({ apiFetch, t });
   const {
     agentConfig,
     agentConfigLoading,
@@ -356,6 +356,7 @@ export default function App() {
     nniRemoteNodes,
     nniRemoteNodeUrls,
     nniSelectedNodeUrl,
+    nniActiveNodeUrl,
     nniBancorServiceNodeUrl,
     nniBancorServiceNodeSaving,
     nniBancorServiceNodeError,
@@ -424,7 +425,27 @@ export default function App() {
     fetchNniNetworkStats,
     runNniDeviceAction,
     setNniDeviceSimulation,
-  } = useNniRuntime({ apiFetch, t, lang });
+  } = useNniRuntime({ apiFetch, t, lang, requestScope: activeUiRequestScope });
+  const assetRequestScope = activeUiRequestScope && !nniAssetServiceNodeSaving
+    ? JSON.stringify([activeUiRequestScope, nniAssetServiceNodeUrl, nniAssetOwnerPubkey]) : "";
+  const bancorRequestScope = activeUiRequestScope && !nniBancorServiceNodeSaving
+    ? JSON.stringify([activeUiRequestScope, nniBancorServiceNodeUrl, nniAssetOwnerPubkey]) : "";
+  const bancorRuntime = useBancorRuntime({
+    apiFetch, t, requestScope: bancorRequestScope,
+    cacheScope: JSON.stringify([apiBase, nniBancorServiceNodeUrl]),
+  });
+  const assetOverviewRuntime = useBancorRuntime({
+    apiFetch, t, requestScope: assetRequestScope,
+    cacheScope: JSON.stringify([apiBase, nniAssetServiceNodeUrl, "assets"]),
+    overviewRoutePrefix: "/v1/nni/assets",
+  });
+  const assetTransferRuntime = useAssetTransferRuntime({
+    apiFetch, t, requestScope: assetRequestScope,
+    onCompleted: () => assetOverviewRuntime.fetchAccount(1),
+  });
+  const assetTransferHistoryRuntime = useAssetTransferHistoryRuntime({
+    apiFetch, t, requestScope: assetRequestScope,
+  });
   const {
     memoryOverview,
     memorySettings,
@@ -726,14 +747,6 @@ export default function App() {
     activeUserKey || interactionUserId == null || interactionChatId == null
       ? {}
       : { user_id: interactionUserId, chat_id: interactionChatId };
-  const activeConversationHistoryScope = conversationHistoryScope(
-    uiAuthReady,
-    authMode,
-    authIdentity?.user_id,
-    authIdentity?.chat_id,
-    apiBase,
-  );
-  const activeUiRequestScope = activeConversationHistoryScope ? JSON.stringify([activeConversationHistoryScope, authFlowEpochRef.current]) : "";
   const {
     taskId,
     setTaskId,
@@ -1686,7 +1699,7 @@ export default function App() {
     if (isAdminIdentity) void fetchNniConfig();
     void fetchLocalInteractionContext();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiBase, uiAuthReady, isAdminIdentity]);
+  }, [apiBase, uiAuthReady, isAdminIdentity, activeUiRequestScope]);
 
   useEffect(() => {
     if (!uiAuthReady) return;
@@ -1737,7 +1750,7 @@ export default function App() {
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, nniHeartbeatErrorsPage, nniHeartbeatRecordsPage]);
+  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, nniHeartbeatErrorsPage, nniHeartbeatRecordsPage, activeUiRequestScope, nniActiveNodeUrl]);
 
   useEffect(() => {
     if (!uiAuthReady || !isAdminIdentity || currentPage !== "nni" || !nniJoined) return;
@@ -1745,18 +1758,18 @@ export default function App() {
     // Reward reads require a fresh device signature, so load on page entry/join
     // and leave subsequent refreshes or pagination to an explicit user action.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, nniJoined]);
+  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, nniJoined, activeUiRequestScope, nniActiveNodeUrl]);
 
   useEffect(() => {
-    if (!uiAuthReady || !isAdminIdentity || currentPage !== "nni" || !nniJoined || !nniStatus?.signature_chip_present) return;
+    if (!assetRequestScope || !uiAuthReady || !isAdminIdentity || currentPage !== "nni" || !nniJoined || !nniStatus?.signature_chip_present) return;
     void assetOverviewRuntime.fetchAccount(1);
     // Current holdings are private account data and require a fresh device
     // signature. Load them independently from the public reward ledger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, nniJoined, nniStatus?.signature_chip_present]);
+  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, nniJoined, nniStatus?.signature_chip_present, assetRequestScope]);
 
   useEffect(() => {
-    if (!uiAuthReady || !isAdminIdentity || currentPage !== "nni_apr") return;
+    if (!bancorRequestScope || !uiAuthReady || !isAdminIdentity || currentPage !== "nni_apr") return;
     void ensureNniDeviceStatus(true);
     void fetchNniConfig(true);
 
@@ -1777,10 +1790,10 @@ export default function App() {
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, nniJoined]);
+  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, nniJoined, bancorRequestScope]);
 
   useEffect(() => {
-    if (!uiAuthReady || !isAdminIdentity || currentPage !== "bancor") return;
+    if (!bancorRequestScope || !uiAuthReady || !isAdminIdentity || currentPage !== "bancor") return;
     void bancorRuntime.fetchMarket();
     void bancorRuntime.fetchCandles(bancorRuntime.candleIntervalSeconds);
     void bancorRuntime.fetchMarketTrades();
@@ -1814,18 +1827,18 @@ export default function App() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, bancorRuntime.candleIntervalSeconds]);
+  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, bancorRuntime.candleIntervalSeconds, bancorRequestScope]);
 
   useEffect(() => {
-    if (!uiAuthReady || !isAdminIdentity || currentPage !== "assets") return;
+    if (!assetRequestScope || !uiAuthReady || !isAdminIdentity || currentPage !== "assets") return;
     void ensureNniDeviceStatus(true);
     void fetchNniConfig(true);
     void assetOverviewRuntime.fetchMarket();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity]);
+  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, assetRequestScope]);
 
   useEffect(() => {
-    if (!uiAuthReady || !isAdminIdentity || !nniStatus?.signature_chip_present) return;
+    if (!activeUiRequestScope || !uiAuthReady || !isAdminIdentity || !nniStatus?.signature_chip_present) return;
     if (currentPage === "bancor") {
       void bancorRuntime.fetchAccount(1);
     } else if (currentPage === "assets") {
@@ -1836,7 +1849,7 @@ export default function App() {
     // Private account reads require a fresh device signature, but Bancor
     // access is independent from participation in NNI heartbeat rewards.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, nniStatus?.signature_chip_present]);
+  }, [currentPage, apiBase, uiAuthReady, isAdminIdentity, nniStatus?.signature_chip_present, assetRequestScope, bancorRequestScope]);
 
   useEffect(() => {
     if (!uiAuthReady) return;
@@ -2105,6 +2118,7 @@ export default function App() {
 
           {isAdminIdentity && currentPage === "nni" ? (
             <NniPage
+              key={activeUiRequestScope}
               lang={lang}
               t={t}
               nniStatus={nniStatus}
@@ -2218,6 +2232,7 @@ export default function App() {
 
           {isAdminIdentity && currentPage === "bancor" ? (
             <BancorPage
+              key={bancorRequestScope}
               t={t}
               runtime={bancorRuntime}
               formatUnixDateTime={formatUnixDateTime}
@@ -2237,6 +2252,7 @@ export default function App() {
 
           {isAdminIdentity && currentPage === "assets" ? (
             <AssetsPage
+              key={assetRequestScope}
               t={t}
               account={nniAssetOwnerPubkey ? assetOverviewRuntime.account : null}
               market={assetOverviewRuntime.market}

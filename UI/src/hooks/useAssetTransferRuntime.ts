@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRequestOwner } from "./useRequestOwner";
 
 import type { ApiResponse, NniAssetTransferResponse } from "../types/api";
 import type { AssetTransferAsset } from "../lib/asset-transfer";
@@ -92,20 +93,30 @@ export function useAssetTransferRuntime({
   apiFetch,
   t,
   onCompleted,
+  requestScope = "local",
 }: {
   apiFetch: ApiFetch;
   t: Translate;
   onCompleted?: () => void | Promise<unknown>;
+  requestScope?: string;
 }) {
+  const isCurrent = useRequestOwner(requestScope);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [lastTransfer, setLastTransfer] = useState<NniAssetTransferResponse | null>(null);
-  const transferInFlight = useRef(false);
+  const transferInFlight = useRef<(() => boolean) | null>(null);
+
+  useEffect(() => {
+    setLoading(false);
+    setError(null);
+    setMessage(null);
+    setLastTransfer(null);
+  }, [isCurrent]);
 
   const transfer = async (input: AssetTransferInput) => {
-    if (transferInFlight.current) return null;
-    transferInFlight.current = true;
+    if (!isCurrent() || transferInFlight.current === isCurrent) return null;
+    transferInFlight.current = isCurrent;
     setLoading(true);
     setError(null);
     setMessage(null);
@@ -135,6 +146,7 @@ export function useAssetTransferRuntime({
       let body = (await response.json()) as ApiResponse<
         NniAssetTransferResponse | AssetTransferChallengeData | AssetTransferFailureData
       >;
+      if (!isCurrent()) return null;
       if (ownerValidation?.ok && response.ok && body.ok && body.data && "signing_payload" in body.data) {
         const challenge = body.data as AssetTransferChallengeData;
         const signed = signNniOwnerChallenge(ownerValidation.normalized, challenge.signing_payload);
@@ -157,6 +169,7 @@ export function useAssetTransferRuntime({
         body = (await response.json()) as ApiResponse<
           NniAssetTransferResponse | AssetTransferFailureData
         >;
+        if (!isCurrent()) return null;
       }
       if (!response.ok || !body.ok || !body.data || !("transfer" in body.data)) {
         throw new Error(transferErrorMessage(transferErrorCode(body), t));
@@ -169,16 +182,17 @@ export function useAssetTransferRuntime({
       } catch {
         // The signed transfer is final even when the follow-up balance refresh is unavailable.
       }
-      return result;
+      return isCurrent() ? result : null;
     } catch (cause) {
+      if (!isCurrent()) return null;
       const code = cause instanceof Error ? cause.message : null;
       setError(code === NNI_PRIVATE_KEY_INSECURE_TRANSPORT_ERROR
         ? transferErrorMessage(code, t)
         : code ?? t("转账未完成。", "The transfer was not completed."));
       return null;
     } finally {
-      transferInFlight.current = false;
-      setLoading(false);
+      if (transferInFlight.current === isCurrent) transferInFlight.current = null;
+      if (isCurrent()) setLoading(false);
     }
   };
 
@@ -189,6 +203,7 @@ export function useAssetTransferRuntime({
     lastTransfer,
     transfer,
     clearFeedback: () => {
+      if (!isCurrent()) return;
       setError(null);
       setMessage(null);
     },

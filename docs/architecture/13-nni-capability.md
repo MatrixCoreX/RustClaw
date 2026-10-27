@@ -47,10 +47,11 @@ returns only bounded structured observations.
 
 ## Node Selection and Remote API
 
-The UI stores a directory of bound node endpoints plus one explicit active node. Heartbeat,
-rewards, Bancor UI routes, and agent-invoked `nni.*` capabilities all use that same active node for
-the complete request. They do not silently fail over to another bound node because account,
-market, authorization, and signature context must not be mixed across nodes.
+The UI stores a directory of node endpoints. NNI participation has a selected node;
+Bancor and Assets can each select their own service node or use the NNI selection.
+The local API owns candidate selection and any permitted fallback. Each signed operation
+retains the actual node and its challenge: account, authorization and signature context
+must not be mixed across nodes or replayed against another node.
 
 Browsers and skills never call a node directly. They use the local versioned API, while one
 central remote-API boundary in `clawd` constructs `/v1/nni/server/*` endpoints and owns the bounded
@@ -60,6 +61,27 @@ without changing NNI/Bancor contracts. Changing the active node remains an expli
 decision.
 An active runtime must be stopped before its selected node can change, keeping heartbeat and
 authorization state tied to one node for the entire participation session.
+
+## Console Request Ownership
+
+Financial views bind asynchronous results to the authenticated session, endpoint,
+role, service node and asset owner. A scope change clears in-memory views, history
+caches and pending quotes; even A -> B -> A creates a new owner epoch. Old replies,
+errors, loading completion and signature challenges cannot update the new scope or
+start its next signing request. Public candle disk caches remain scoped to endpoint
+and service node, not secret credentials. Unsaved NNI node drafts are separate from
+the confirmed node used to fence remote reward and network-statistic reads.
+
+History pagination keeps only the selected page's result, and quote revisions
+prevent an earlier preview from replacing a newer or cleared quote. Same-scope
+duplicate trade/transfer submissions are suppressed. A late authentication failure
+cannot sign out a newer session. Configuration reads begun before a local write
+cannot overwrite that write's acknowledged state.
+
+These are presentation and continuation fences, not authorization or rollback.
+Already-dispatched signed writes may still complete on the server after navigation;
+the server ledger remains authoritative. Server permissions, signature verification,
+idempotency and private-key transport checks remain mandatory.
 
 ## Available Actions
 

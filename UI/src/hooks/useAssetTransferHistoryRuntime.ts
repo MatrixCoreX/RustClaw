@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRequestOwner } from "./useRequestOwner";
 
 import {
   ASSET_HISTORY_REMOTE_BATCH_SIZE,
@@ -31,10 +32,13 @@ function assetHistoryCacheKey(
 export function useAssetTransferHistoryRuntime({
   apiFetch,
   t,
+  requestScope = "local",
 }: {
   apiFetch: ApiFetch;
   t: Translate;
+  requestScope?: string;
 }) {
+  const isCurrent = useRequestOwner(requestScope);
   const apiFetchRef = useRef(apiFetch);
   const translateRef = useRef(t);
   const requestSequence = useRef(0);
@@ -45,10 +49,19 @@ export function useAssetTransferHistoryRuntime({
   apiFetchRef.current = apiFetch;
   translateRef.current = t;
 
+  useEffect(() => {
+    requestSequence.current++;
+    cacheRef.current.clear();
+    setHistory(null);
+    setLoading(false);
+    setError(null);
+  }, [isCurrent]);
+
   const load = useCallback(async (
     ownerPublicKey: string,
     options: AssetHistoryLoadOptions = {},
   ) => {
+    if (!isCurrent()) return null;
     const normalizedOwner = ownerPublicKey.trim();
     const source = options.source ?? "all";
     const direction = options.direction ?? "all";
@@ -79,6 +92,7 @@ export function useAssetTransferHistoryRuntime({
       const body = (await response.json()) as ApiResponse<
         NniAssetTransferHistoryResponse | AssetTransferHistoryFailureData
       >;
+      if (!isCurrent() || sequence !== requestSequence.current) return null;
       if (
         !response.ok
         || !body.ok
@@ -103,7 +117,7 @@ export function useAssetTransferHistoryRuntime({
       if (sequence === requestSequence.current) setHistory(result);
       return result;
     } catch {
-      if (sequence === requestSequence.current) {
+      if (isCurrent() && sequence === requestSequence.current) {
         setError(translateRef.current(
           "资产流水暂时无法读取，请稍后重试。",
           "Asset activity is temporarily unavailable. Try again later.",
@@ -111,9 +125,9 @@ export function useAssetTransferHistoryRuntime({
       }
       return null;
     } finally {
-      if (sequence === requestSequence.current) setLoading(false);
+      if (isCurrent() && sequence === requestSequence.current) setLoading(false);
     }
-  }, []);
+  }, [isCurrent]);
 
   return { history, loading, error, load };
 }

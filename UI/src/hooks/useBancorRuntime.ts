@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRequestOwner } from "./useRequestOwner";
 
 import type {
   ApiResponse,
@@ -397,14 +398,20 @@ export function formatBancorApiError(
 export function useBancorRuntime({
   apiFetch,
   cacheScope,
+  requestScope = cacheScope,
   overviewRoutePrefix = "/v1/nni/bancor",
   t,
 }: {
   apiFetch: ApiFetch;
   cacheScope: string;
+  requestScope?: string;
   overviewRoutePrefix?: "/v1/nni/bancor" | "/v1/nni/assets";
   t: Translate;
 }) {
+  const isCurrent = useRequestOwner(requestScope, overviewRoutePrefix);
+  const ownedApiFetch: ApiFetch = (path, init) => isCurrent()
+    ? apiFetch(path, init)
+    : Promise.reject(new DOMException("request_owner_changed", "AbortError"));
   const initialCandleInterval = readBancorCandleInterval(browserPreferenceStorage());
   const [market, setMarket] = useState<NniBancorMarketResponse | null>(null);
   const [candles, setCandles] = useState<NniBancorCandlesResponse | null>(null);
@@ -429,15 +436,45 @@ export function useBancorRuntime({
   const [hardwareAccountAccessUnavailable, setHardwareAccountAccessUnavailable] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const candleIntervalRef = useRef(initialCandleInterval);
-  const candleCacheRef = useRef(new Map<string, {
+  const candleCache = useMemo(() => new Map<string, {
     response: NniBancorCandlesResponse;
     etag: string | null;
     etagRequestLimit: number | null;
-  }>());
-  const candleRequestsRef = useRef(new Map<string, Promise<NniBancorCandlesResponse | null>>());
-  const readRequestsRef = useRef(new Map<string, Promise<unknown>>());
+  }>(), [isCurrent]);
+  const candleRequests = useMemo(() => new Map<string, Promise<NniBancorCandlesResponse | null>>(), [isCurrent]);
+  const readRequests = useMemo(() => new Map<string, Promise<unknown>>(), [isCurrent]);
+  const quoteSequence = useRef(0);
+  const quoteOwner = useRef<{ owner: () => boolean; value: NniBancorQuoteResponse } | null>(null);
+  const tradeInFlight = useRef<(() => boolean) | null>(null);
+  const accountPage = useRef(1);
   const candleCacheScopeRef = useRef(cacheScope);
   candleCacheScopeRef.current = cacheScope;
+
+  useEffect(() => {
+    quoteSequence.current++;
+    quoteOwner.current = null;
+    setMarket(null);
+    setAccount(null);
+    setMarketTrades(null);
+    setCandles(null);
+    setQuote(null);
+    setLastTrade(null);
+    setMarketLoading(false);
+    setAccountLoading(false);
+    setMarketTradesLoading(false);
+    setCandlesLoading(false);
+    setCandlesOlderLoading(false);
+    setCandlesHasOlder(false);
+    setQuoteLoading(false);
+    setTradeLoading(false);
+    setCandlesError(null);
+    setMarketTradesError(null);
+    setError(null);
+    setMessage(null);
+    setAssetOwnerRequired(false);
+    setAssetOwnerAccessErrorCode(null);
+    setHardwareAccountAccessUnavailable(false);
+  }, [isCurrent]);
 
   useEffect(() => {
     if (!message) return undefined;
@@ -456,22 +493,25 @@ export function useBancorRuntime({
   };
 
   const fetchMarket = (silent = false) => runCoalescedRead(
-    readRequestsRef.current,
+    readRequests,
     "market",
     async () => {
+    if (!isCurrent()) return null;
     if (!silent) setMarketLoading(true);
     try {
-      const response = await fetchResilientRead(apiFetch, `${overviewRoutePrefix}/market`);
+      const response = await fetchResilientRead(ownedApiFetch, `${overviewRoutePrefix}/market`);
       const body = (await response.json()) as ApiResponse<NniBancorMarketResponse>;
+      if (!isCurrent()) return null;
       if (!response.ok || !body.ok || !body.data) throw readError(body, t("市场数据读取失败。", "Market data could not be loaded."));
       setMarket(body.data);
       setError(null);
       return body.data;
     } catch (cause) {
+      if (!isCurrent()) return null;
       if (!silent) setError(formatBancorApiError(cause instanceof Error ? cause.message : null, t, t("市场读取失败。", "Market load failed.")));
       return null;
     } finally {
-      if (!silent) setMarketLoading(false);
+      if (isCurrent() && !silent) setMarketLoading(false);
     }
     },
   );
@@ -479,11 +519,13 @@ export function useBancorRuntime({
   const refreshDynamicMinimumError = async (
     cause: unknown,
     side: "buy" | "sell",
+    isCurrentRequest = isCurrent,
   ): Promise<boolean> => {
     if (!(cause instanceof BancorApiError) || cause.code !== "nni_bancor_trade_below_minimum") {
       return false;
     }
     const refreshedMarket = await fetchMarket(true);
+    if (!isCurrentRequest()) return true;
     const minimumAmount = refreshedMarket
       ? side === "buy" ? refreshedMarket.min_trade_usd : refreshedMarket.min_trade_aic
       : null;
@@ -501,17 +543,24 @@ export function useBancorRuntime({
     return true;
   };
 
-  const fetchAccount = (page = account?.page ?? 1, silent = false) => runCoalescedRead(
-    readRequestsRef.current,
-    `account:${Math.max(1, Math.floor(page))}`,
+  const fetchAccount = (page = account?.page ?? 1, silent = false) => {
+    if (!isCurrent()) return Promise.resolve(null);
+    const safePage = Math.max(1, Math.floor(page));
+    accountPage.current = safePage;
+    const isCurrentPage = () => isCurrent() && accountPage.current === safePage;
+    return runCoalescedRead(
+    readRequests,
+    `account:${safePage}`,
     async () => {
+    if (!isCurrentPage()) return null;
     if (!silent) setAccountLoading(true);
     try {
       const response = await fetchResilientRead(
-        apiFetch,
-        buildBancorAccountPath(page, overviewRoutePrefix),
+        ownedApiFetch,
+        buildBancorAccountPath(safePage, overviewRoutePrefix),
       );
       const body = (await response.json()) as ApiResponse<NniBancorAccountResponse>;
+      if (!isCurrentPage()) return null;
       if (!response.ok || !body.ok || !body.data) throw readError(body, t("账户余额读取失败。", "Account balances could not be loaded."));
       setAccount(body.data);
       setAssetOwnerRequired(false);
@@ -520,6 +569,7 @@ export function useBancorRuntime({
       setError(null);
       return body.data;
     } catch (cause) {
+      if (!isCurrentPage()) return null;
       if (cause instanceof BancorApiError && isBancorNniDeviceAdmissionCode(cause.code)) {
         setAccount(null);
         setHardwareAccountAccessUnavailable(true);
@@ -529,19 +579,22 @@ export function useBancorRuntime({
       }
       return null;
     } finally {
-      if (!silent) setAccountLoading(false);
+      if (isCurrentPage() && !silent) setAccountLoading(false);
     }
     },
   );
+  };
 
   const fetchMarketTrades = (silent = false) => runCoalescedRead(
-    readRequestsRef.current,
+    readRequests,
     "market-trades",
     async () => {
+    if (!isCurrent()) return null;
     if (!silent) setMarketTradesLoading(true);
     try {
-      const response = await fetchResilientRead(apiFetch, "/v1/nni/bancor/trades");
+      const response = await fetchResilientRead(ownedApiFetch, "/v1/nni/bancor/trades");
       const body = (await response.json()) as ApiResponse<NniBancorMarketTradesResponse>;
+      if (!isCurrent()) return null;
       if (!response.ok || !body.ok || !body.data) {
         throw readError(body, t("市场成交记录读取失败。", "Market trades could not be loaded."));
       }
@@ -549,6 +602,7 @@ export function useBancorRuntime({
       setMarketTradesError(null);
       return body.data;
     } catch (cause) {
+      if (!isCurrent()) return null;
       if (!silent) {
         setMarketTradesError(
           formatBancorApiError(cause instanceof Error ? cause.message : null, t, t("市场成交记录读取失败。", "Market trades could not be loaded.")),
@@ -556,7 +610,7 @@ export function useBancorRuntime({
       }
       return null;
     } finally {
-      if (!silent) setMarketTradesLoading(false);
+      if (isCurrent() && !silent) setMarketTradesLoading(false);
     }
     },
   );
@@ -567,15 +621,17 @@ export function useBancorRuntime({
     forceRefresh = false,
     endTimeUnix?: number,
   ): Promise<NniBancorCandlesResponse | null> => {
+    if (!isCurrent()) return Promise.resolve(null);
     const requestScope = cacheScope;
     const cacheKey = `${requestScope}\n${intervalSeconds}`;
     const requestKey = `${cacheKey}\n${endTimeUnix ?? "latest"}`;
-    const inFlight = candleRequestsRef.current.get(requestKey);
+    const inFlight = candleRequests.get(requestKey);
     if (inFlight) {
       if (!forceRefresh) return inFlight;
       return inFlight.then(() => {
-        if (candleRequestsRef.current.get(requestKey) === inFlight) {
-          candleRequestsRef.current.delete(requestKey);
+        if (!isCurrent()) return null;
+        if (candleRequests.get(requestKey) === inFlight) {
+          candleRequests.delete(requestKey);
         }
         return fetchCandles(intervalSeconds, silent, true, endTimeUnix);
       });
@@ -584,16 +640,17 @@ export function useBancorRuntime({
     if (loadingLatest && candleIntervalRef.current === intervalSeconds) setCandlesLoading(true);
 
     const request = (async () => {
-      let cachedSnapshot = candleCacheRef.current.get(cacheKey) ?? null;
+      let cachedSnapshot = candleCache.get(cacheKey) ?? null;
       if (!cachedSnapshot) {
         const persistent = await readBancorCandleCache(requestScope, intervalSeconds);
+        if (!isCurrent()) return null;
         if (persistent) {
           cachedSnapshot = {
             response: persistent.response,
             etag: persistent.etag,
             etagRequestLimit: persistent.etagRequestLimit,
           };
-          candleCacheRef.current.set(cacheKey, cachedSnapshot);
+          candleCache.set(cacheKey, cachedSnapshot);
           if (
             candleCacheScopeRef.current === requestScope
             && candleIntervalRef.current === intervalSeconds
@@ -621,10 +678,11 @@ export function useBancorRuntime({
       }
 
       try {
-        const response = await fetchResilientRead(apiFetch, buildBancorCandlesPath(intervalSeconds, refreshLimit, endTimeUnix), {
+        const response = await fetchResilientRead(ownedApiFetch, buildBancorCandlesPath(intervalSeconds, refreshLimit, endTimeUnix), {
           cache: "no-store",
           headers: requestHeaders,
         });
+        if (!isCurrent()) return null;
         if (response.status === 304) {
           if (!cachedSnapshot) throw new Error("nni_bancor_candle_cache_miss");
           const validatedSnapshot = {
@@ -632,7 +690,7 @@ export function useBancorRuntime({
             etag: response.headers.get("etag") || cachedSnapshot.etag,
             etagRequestLimit: refreshLimit,
           };
-          candleCacheRef.current.set(cacheKey, validatedSnapshot);
+          candleCache.set(cacheKey, validatedSnapshot);
           void writeBancorCandleCache({
             scope: requestScope,
             intervalSeconds,
@@ -651,6 +709,7 @@ export function useBancorRuntime({
         }
 
         const body = (await response.json()) as ApiResponse<NniBancorCandlesResponse>;
+        if (!isCurrent()) return null;
         if (!response.ok || !body.ok || !body.data) {
           throw readError(body, t("K 线数据读取失败。", "Candlestick data could not be loaded."));
         }
@@ -670,7 +729,7 @@ export function useBancorRuntime({
             ? refreshLimit
             : cachedSnapshot?.etagRequestLimit ?? null,
         };
-        candleCacheRef.current.set(cacheKey, updatedSnapshot);
+        candleCache.set(cacheKey, updatedSnapshot);
         void writeBancorCandleCache({
           scope: requestScope,
           intervalSeconds,
@@ -695,6 +754,7 @@ export function useBancorRuntime({
         }
         return merged;
       } catch (cause) {
+        if (!isCurrent()) return null;
         if (
           !silent
           && candleCacheScopeRef.current === requestScope
@@ -716,6 +776,7 @@ export function useBancorRuntime({
       } finally {
         if (
           loadingLatest
+          && isCurrent()
           && candleCacheScopeRef.current === requestScope
           && candleIntervalRef.current === intervalSeconds
         ) {
@@ -724,17 +785,18 @@ export function useBancorRuntime({
       }
     })();
 
-    candleRequestsRef.current.set(requestKey, request);
+    candleRequests.set(requestKey, request);
     void request.finally(() => {
-      if (candleRequestsRef.current.get(requestKey) === request) {
-        candleRequestsRef.current.delete(requestKey);
+      if (candleRequests.get(requestKey) === request) {
+        candleRequests.delete(requestKey);
       }
     });
     return request;
   };
 
   const changeCandleInterval = async (intervalSeconds: number) => {
-    const cached = candleCacheRef.current.get(`${cacheScope}\n${intervalSeconds}`)?.response ?? null;
+    if (!isCurrent()) return null;
+    const cached = candleCache.get(`${cacheScope}\n${intervalSeconds}`)?.response ?? null;
     candleIntervalRef.current = intervalSeconds;
     setCandleIntervalSeconds(intervalSeconds);
     persistBancorCandleInterval(browserPreferenceStorage(), intervalSeconds);
@@ -745,8 +807,9 @@ export function useBancorRuntime({
   };
 
   const loadOlderCandles = async () => {
+    if (!isCurrent()) return null;
     const intervalSeconds = candleIntervalRef.current;
-    const snapshot = candleCacheRef.current.get(`${cacheScope}\n${intervalSeconds}`)?.response;
+    const snapshot = candleCache.get(`${cacheScope}\n${intervalSeconds}`)?.response;
     const current = snapshot?.interval_seconds === intervalSeconds ? snapshot : candles;
     const oldestBucketStart = current?.candles[0]?.bucket_start_unix;
     if (oldestBucketStart == null || oldestBucketStart <= current.market_created_at_unix) {
@@ -758,7 +821,7 @@ export function useBancorRuntime({
       const result = await fetchCandles(intervalSeconds, false, false, oldestBucketStart - 1);
       return result;
     } finally {
-      if (candleIntervalRef.current === intervalSeconds) setCandlesOlderLoading(false);
+      if (isCurrent() && candleIntervalRef.current === intervalSeconds) setCandlesOlderLoading(false);
     }
   };
 
@@ -768,6 +831,12 @@ export function useBancorRuntime({
     slippageBps = BANCOR_DEFAULT_SLIPPAGE_BPS,
     allowWithoutAccount = false,
   ) => {
+    if (!isCurrent()) return null;
+    const sequence = ++quoteSequence.current;
+    const isCurrentQuote = () => isCurrent() && quoteSequence.current === sequence;
+    quoteOwner.current = null;
+    setQuote(null);
+    setQuoteLoading(false);
     setError(null);
     setMessage(null);
     setLastTrade(null);
@@ -809,17 +878,20 @@ export function useBancorRuntime({
         body: JSON.stringify({ side, input_amount: inputAmount, slippage_bps: slippageBps }),
       });
       const body = (await response.json()) as ApiResponse<NniBancorQuoteResponse>;
+      if (!isCurrentQuote()) return null;
       if (!response.ok || !body.ok || !body.data) throw readError(body, t("报价失败。", "Quote failed."));
       setQuote(body.data);
+      quoteOwner.current = { owner: isCurrent, value: body.data };
       return body.data;
     } catch (cause) {
+      if (!isCurrentQuote()) return null;
       setQuote(null);
-      if (!(await refreshDynamicMinimumError(cause, side))) {
+      if (!(await refreshDynamicMinimumError(cause, side, isCurrentQuote)) && isCurrentQuote()) {
         setError(formatBancorApiError(cause instanceof Error ? cause.message : null, t, t("报价失败。", "Quote failed.")));
       }
       return null;
     } finally {
-      setQuoteLoading(false);
+      if (isCurrentQuote()) setQuoteLoading(false);
     }
   };
 
@@ -827,7 +899,9 @@ export function useBancorRuntime({
     authorizationMode = "delegated_hardware",
     ownerPrivateKey,
   }: BancorTradeAuthorization = {}) => {
-    if (!quote) return null;
+    if (!isCurrent() || !quote || quoteOwner.current?.owner !== isCurrent
+      || quoteOwner.current.value !== quote || tradeInFlight.current === isCurrent) return null;
+    tradeInFlight.current = isCurrent;
     setTradeLoading(true);
     setError(null);
     setMessage(null);
@@ -857,6 +931,7 @@ export function useBancorRuntime({
       let body = (await response.json()) as ApiResponse<
         NniBancorTradeResponse | NniBancorTradeChallengeResponse
       >;
+      if (!isCurrent()) return null;
       if (ownerValidation?.ok && response.ok && body.ok && body.data && "signing_payload" in body.data) {
         const challenge = body.data as NniBancorTradeChallengeResponse;
         const signed = signNniOwnerChallenge(ownerValidation.normalized, challenge.signing_payload);
@@ -876,34 +951,43 @@ export function useBancorRuntime({
           }),
         });
         body = (await response.json()) as ApiResponse<NniBancorTradeResponse>;
+        if (!isCurrent()) return null;
       }
       if (!response.ok || !body.ok || !body.data) throw readError(body, t("交易没有完成。", "The trade was not completed."));
       if (!("trade" in body.data)) throw new Error(t("交易结果格式不完整，请刷新后重试。", "The trade result is incomplete. Refresh and try again."));
       setLastTrade(body.data);
       setQuote(null);
+      quoteOwner.current = null;
       await Promise.allSettled([
         fetchMarket(true),
         fetchAccount(1, true),
         fetchMarketTrades(true),
         fetchCandles(candleIntervalRef.current, true, true),
       ]);
+      if (!isCurrent()) return null;
       setMessage(t(
         "交易已完成，余额和市场储备已经更新。",
         "Trade completed. Balances and market reserves are updated.",
       ));
       return body.data;
     } catch (cause) {
-      if (!(await refreshDynamicMinimumError(cause, quote.side))) {
+      if (!isCurrent()) return null;
+      if (!(await refreshDynamicMinimumError(cause, quote.side)) && isCurrent()) {
         const code = cause instanceof Error ? cause.message : null;
         setError(formatBancorApiError(code, t, t("交易没有完成。", "The trade was not completed.")));
       }
       return null;
     } finally {
-      setTradeLoading(false);
+      if (tradeInFlight.current === isCurrent) tradeInFlight.current = null;
+      if (isCurrent()) setTradeLoading(false);
     }
   };
 
   const clearQuote = () => {
+    if (!isCurrent()) return;
+    quoteSequence.current++;
+    quoteOwner.current = null;
+    setQuoteLoading(false);
     setQuote(null);
     setMessage(null);
   };

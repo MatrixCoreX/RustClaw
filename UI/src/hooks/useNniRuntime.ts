@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRequestOwner } from "./useRequestOwner";
 
 import { useUiDialog } from "../components/UiDialogProvider";
 import {
@@ -78,11 +79,21 @@ export interface UseNniRuntimeParams {
   apiFetch: ApiFetch;
   t: Translate;
   lang: UiLanguage;
+  requestScope?: string;
 }
 
-export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
+export function useNniRuntime({ apiFetch: fetchApi, t, lang, requestScope = "local" }: UseNniRuntimeParams) {
+  const isCurrent = useRequestOwner(requestScope);
+  const configRequests = useMemo(() => ({ revision: 0, pendingWrites: 0 }), [isCurrent]);
+  const apiFetch: ApiFetch = (path, init) => {
+    if (!isCurrent()) return Promise.reject(new DOMException("request_owner_changed", "AbortError"));
+    if (path !== "/v1/nni/config" || init?.method !== "POST") return fetchApi(path, init);
+    configRequests.revision++;
+    configRequests.pendingWrites++;
+    return fetchApi(path, init).finally(() => { configRequests.pendingWrites--; });
+  };
   const { confirm: showConfirm } = useUiDialog();
-  const readRequestsRef = useRef(new Map<string, Promise<unknown>>());
+  const readRequests = useMemo(() => new Map<string, Promise<unknown>>(), [isCurrent]);
   const [nniStatus, setNniStatus] = useState<NniDeviceStatusResponse | null>(null);
   const [nniStatusLoading, setNniStatusLoading] = useState(false);
   const [nniStatusError, setNniStatusError] = useState<string | null>(null);
@@ -99,6 +110,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     useState<NniOwnerAuthorizationChallenge | null>(null);
   const [nniRemoteNodes, setNniRemoteNodes] = useState("");
   const [nniSelectedNodeUrl, setNniSelectedNodeUrl] = useState("");
+  const [nniActiveNodeUrl, setNniActiveNodeUrl] = useState("");
   const [nniBancorServiceNodeUrl, setNniBancorServiceNodeUrl] = useState("");
   const [nniBancorServiceNodeSaving, setNniBancorServiceNodeSaving] = useState(false);
   const [nniBancorServiceNodeError, setNniBancorServiceNodeError] = useState<string | null>(null);
@@ -136,6 +148,74 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   const [nniConfigSaving, setNniConfigSaving] = useState(false);
   const [nniConfigError, setNniConfigError] = useState<string | null>(null);
   const [nniConfigMessage, setNniConfigMessage] = useState<string | null>(null);
+  const isCurrentNode = useRequestOwner(requestScope, nniActiveNodeUrl);
+  const remoteReads = useMemo(() => new Map<string, Promise<unknown>>(), [isCurrentNode]);
+  const selectedReadPages = useMemo(() => new Map<string, number>(), [isCurrent]);
+
+  useEffect(() => {
+    setNniRewards(null);
+    setNniRewardsLoading(false);
+    setNniRewardsError(null);
+    setNniNetworkStats(null);
+    setNniNetworkStatsLoading(false);
+    setNniNetworkStatsError(null);
+  }, [isCurrentNode]);
+
+  useEffect(() => {
+    setNniStatus(null);
+    setNniStatusLoading(false);
+    setNniStatusError(null);
+    setNniActionLoading(null);
+    setNniActionResult(null);
+    setNniActionError(null);
+    setNniActionMessage(null);
+    setNniDeviceAuthorizationDenied(false);
+    setNniJoined(false);
+    setNniAssetOwnerPubkey(null);
+    setNniOwnerKeyPair(null);
+    setNniOwnerActionLoading(null);
+    setNniOwnerAuthorizationChallenge(null);
+    setNniRemoteNodes("");
+    setNniSelectedNodeUrl("");
+    setNniActiveNodeUrl("");
+    setNniBancorServiceNodeUrl("");
+    setNniBancorServiceNodeSaving(false);
+    setNniBancorServiceNodeError(null);
+    setNniAssetServiceNodeUrl("");
+    setNniAssetServiceNodeSaving(false);
+    setNniAssetServiceNodeError(null);
+    setNniHeartbeatIntervalSeconds(null);
+    setNniHeartbeatRequestCount(0);
+    setNniHeartbeatRetryLimit(3);
+    setNniLastHeartbeatAtTs(null);
+    setNniLastHeartbeatNetworkFailures(0);
+    setNniHeartbeatRecords([]);
+    setNniHeartbeatRecordsPage(1);
+    setNniHeartbeatRecordsTotal(0);
+    setNniHeartbeatRecordsTotalPages(1);
+    setNniHeartbeatRecordsLoading(false);
+    setNniHeartbeatRecordsClearing(false);
+    setNniHeartbeatRecordsError(null);
+    setNniHeartbeatRecordsMessage(null);
+    setNniHeartbeatErrors([]);
+    setNniHeartbeatErrorsPage(1);
+    setNniHeartbeatErrorsTotal(0);
+    setNniHeartbeatErrorsTotalPages(1);
+    setNniHeartbeatErrorsLoading(false);
+    setNniHeartbeatErrorsClearing(false);
+    setNniHeartbeatErrorsError(null);
+    setNniHeartbeatErrorsMessage(null);
+    setNniRewards(null);
+    setNniRewardsLoading(false);
+    setNniRewardsError(null);
+    setNniNetworkStats(null);
+    setNniNetworkStatsLoading(false);
+    setNniNetworkStatsError(null);
+    setNniConfigLoading(false);
+    setNniConfigSaving(false);
+    setNniConfigError(null);
+    setNniConfigMessage(null);
+  }, [isCurrent]);
 
   const nniRemoteNodeUrls = () => parseNniRemoteNodeUrls(nniRemoteNodes);
   const selectedNniNodeUrl = () => {
@@ -154,6 +234,8 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   };
 
   const applyNniConfigResponse = (config: NniConfigResponse) => {
+    if (!isCurrent()) return;
+    setNniActiveNodeUrl(config.selected_node_url ?? config.remote_nodes[0] ?? "");
     setNniJoined(config.joined);
     setNniAssetOwnerPubkey(config.asset_owner_pubkey ?? null);
     setNniRemoteNodes(config.remote_nodes.join("\n"));
@@ -178,6 +260,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   };
 
   const setNniJoinedPersisted = async (joined: boolean, options?: { persistRemoteNodes?: boolean }) => {
+    if (!isCurrent()) return false;
     setNniJoined(joined);
     try {
       const payload: {
@@ -198,7 +281,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+      if (!isCurrent()) return false;
       const body = (await res.json()) as ApiResponse<NniConfigResponse>;
+      if (!isCurrent()) return false;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `nni_config_update_http_${res.status}`);
       }
@@ -206,6 +291,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       setNniConfigError(null);
       return true;
     } catch (err) {
+      if (!isCurrent()) return false;
       const message = formatNniErrorCause(err, t, t("NNI 配置更新失败。", "NNI configuration update failed."));
       setNniConfigError(message);
       return false;
@@ -213,9 +299,10 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   };
 
   const readNniDeviceStatus = (silent: boolean, forceRefresh: boolean) => runCoalescedRead(
-    readRequestsRef.current,
+    readRequests,
     forceRefresh ? "device-status-refresh" : "device-status",
     async () => {
+    if (!isCurrent()) return null;
     if (!silent) {
       setNniStatusLoading(true);
       setNniStatusError(null);
@@ -223,7 +310,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     try {
       const path = forceRefresh ? `/v1/nni/device/status?refresh=true` : `/v1/nni/device/status`;
       const res = await fetchResilientRead(apiFetch, path);
+      if (!isCurrent()) return null;
       const body = (await res.json()) as ApiResponse<NniDeviceStatusResponse>;
+      if (!isCurrent()) return null;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `nni_status_fetch_http_${res.status}`);
       }
@@ -231,12 +320,15 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       setNniStatusError(null);
       return body.data;
     } catch (err) {
+      if (!isCurrent()) return null;
       const message = formatNniErrorCause(err, t, t("NNI 状态暂时无法读取。", "NNI status is temporarily unavailable."));
       if (!silent) setNniStatusError(message);
       return null;
     } finally {
-      if (!silent) {
-        setNniStatusLoading(false);
+      if (isCurrent()) {
+        if (!silent) {
+          setNniStatusLoading(false);
+        }
       }
     }
     },
@@ -249,6 +341,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   );
 
   const runNniDeviceAction = async (action: string, options?: { challenge?: string }) => {
+    if (!isCurrent()) return null;
     setNniActionLoading(action);
     setNniActionError(null);
     setNniActionMessage(null);
@@ -258,7 +351,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, challenge: options?.challenge }),
       });
+      if (!isCurrent()) return null;
       const body = (await res.json()) as ApiResponse<NniDeviceActionResponse>;
+      if (!isCurrent()) return null;
       if (!res.ok || !body.ok || !body.data) {
         const actionData = body.data;
         if (actionData?.signature_chip_present === false) {
@@ -326,16 +421,21 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       }
       return body.data;
     } catch (err) {
+      if (!isCurrent()) return null;
       const message = formatNniErrorCause(err, t, t("NNI 操作未完成。", "The NNI operation did not complete."));
       setNniActionError(message);
       return null;
     } finally {
-      setNniActionLoading(null);
+      if (isCurrent()) {
+        setNniActionLoading(null);
+      }
     }
   };
 
   const setNniDeviceSimulation = async (enabled: boolean) => {
+    if (!isCurrent()) return null;
     const result = await runNniDeviceAction(enabled ? "simulation_enable" : "simulation_disable");
+    if (!isCurrent()) return null;
     if (!result) return null;
     return fetchNniDeviceStatus(false);
   };
@@ -344,6 +444,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     assetOwnerPubkey?: string | null,
     replaceExistingOwner = false,
   ): Promise<NniJoinTaskResponse | null> => {
+    if (!isCurrent()) return null;
     const nodeUrl = selectedNniNodeUrl();
     if (!nodeUrl) {
       throw new Error(t("请先填写至少一个远程 NNI 节点地址。", "Enter at least one remote NNI node URL first."));
@@ -357,7 +458,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         replace_existing_owner: replaceExistingOwner,
       }),
     });
+    if (!isCurrent()) return null;
     const body = (await res.json()) as ApiResponse<NniJoinTaskResponse>;
+    if (!isCurrent()) return null;
     if (!res.ok || !body.ok || !body.data) {
       if (nniJoinRejectsDevicePublicKey(body.error, body.data)) {
         setNniDeviceAuthorizationDenied(true);
@@ -380,6 +483,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       replaceExistingOwner?: boolean;
     },
   ): Promise<NniJoinVerifyResponse | null> => {
+    if (!isCurrent()) return null;
     const res = await apiFetch(`/v1/nni/join/verify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -391,7 +495,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         replace_existing_owner: options?.replaceExistingOwner === true,
       }),
     });
+    if (!isCurrent()) return null;
     const body = (await res.json()) as ApiResponse<NniJoinVerifyResponse>;
+    if (!isCurrent()) return null;
     if (!res.ok || !body.ok || !body.data) {
       if (nniJoinRejectsDevicePublicKey(body.error, body.data)) {
         setNniDeviceAuthorizationDenied(true);
@@ -402,6 +508,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   };
 
   const generateNniOwnerKeyPair = async () => {
+    if (!isCurrent()) return null;
     setNniOwnerActionLoading("generate");
     setNniActionError(null);
     setNniActionMessage(null);
@@ -414,16 +521,20 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       ));
       return keyPair;
     } catch (err) {
+      if (!isCurrent()) return null;
       setNniActionError(nniPrivateKeyErrorMessage(err, t));
       return null;
     } finally {
-      setNniOwnerActionLoading(null);
+      if (isCurrent()) {
+        setNniOwnerActionLoading(null);
+      }
     }
   };
 
-  const clearNniOwnerKeyPair = () => setNniOwnerKeyPair(null);
+  const clearNniOwnerKeyPair = () => { if (isCurrent()) setNniOwnerKeyPair(null); };
 
   const recoverNniOwner = async (ownerPrivateKey: string) => {
+    if (!isCurrent()) return null;
     const nodeUrl = selectedNniNodeUrl();
     if (!nodeUrl) {
       setNniActionError(t("请先填写至少一个远程 NNI 节点地址。", "Enter at least one remote NNI node URL first."));
@@ -446,7 +557,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
           asset_owner_pubkey: validation.publicKey,
         }),
       });
+      if (!isCurrent()) return null;
       const challengeBody = (await challengeResponse.json()) as ApiResponse<NniOwnerRecoveryChallengeResponse>;
+      if (!isCurrent()) return null;
       if (!challengeResponse.ok || !challengeBody.ok || !challengeBody.data) {
         throw new Error(nniJoinErrorMessage(
           challengeBody.error,
@@ -471,7 +584,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
           owner_signature: signed.signature,
         }),
       });
+      if (!isCurrent()) return null;
       const body = (await verifyResponse.json()) as ApiResponse<NniOwnerRecoveryResponse>;
+      if (!isCurrent()) return null;
       if (!verifyResponse.ok || !body.ok || !body.data) {
         throw new Error(nniJoinErrorMessage(
           body.error,
@@ -483,20 +598,25 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       setNniAssetOwnerPubkey(body.data.asset_owner_pubkey);
       setNniOwnerKeyPair(null);
       await setNniJoinedPersisted(false, { persistRemoteNodes: true });
+      if (!isCurrent()) return null;
       setNniActionMessage(t(
         "资产账户已恢复到当前设备，旧设备授权已撤销。心跳尚未开启，请点击加入后启动。",
         "The asset account was recovered to this device and the old device authorization was revoked. Heartbeats remain off until you select Join.",
       ));
       return body.data;
     } catch (err) {
+      if (!isCurrent()) return null;
       setNniActionError(nniPrivateKeyErrorMessage(err, t));
       return null;
     } finally {
-      setNniOwnerActionLoading(null);
+      if (isCurrent()) {
+        setNniOwnerActionLoading(null);
+      }
     }
   };
 
   const startNniCustomOwnerAuthorization = async (ownerPublicKey: string) => {
+    if (!isCurrent()) return null;
     const validation = validateNniOwnerPublicKey(ownerPublicKey);
     if (!validation.ok) {
       setNniActionError(t("资产公钥格式无效。", "The asset public key format is invalid."));
@@ -510,6 +630,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       return null;
     }
     const status = nniStatus ?? (await fetchNniDeviceStatus(false));
+    if (!isCurrent()) return null;
     if (!status?.signature_chip_present) {
       setNniActionError(t(
         "当前设备没有可用的签名芯片，不能修改资产授权。",
@@ -522,10 +643,12 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     setNniActionMessage(null);
     try {
       const task = await requestNniJoinTask(validation.normalized, replaceExistingOwner);
+      if (!isCurrent()) return null;
       if (!task?.challenge) throw new Error("nni_join_challenge_missing");
       const signatureResult = await runNniDeviceAction("sign_challenge", {
         challenge: task.challenge,
       });
+      if (!isCurrent()) return null;
       const deviceSignature = signatureResult?.payload?.signature;
       if (!deviceSignature) throw new Error("nni_join_signature_missing");
       if (task.owner_signature_required !== true) {
@@ -547,19 +670,24 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       ));
       return challenge;
     } catch (err) {
+      if (!isCurrent()) return null;
       setNniActionError(formatNniErrorCause(err, t, t("资产绑定请求失败。", "Asset binding request failed.")));
       return null;
     } finally {
-      setNniOwnerActionLoading(null);
+      if (isCurrent()) {
+        setNniOwnerActionLoading(null);
+      }
     }
   };
 
   const startNniOwnerUnbind = async () => {
+    if (!isCurrent()) return null;
     if (!nniAssetOwnerPubkey) {
       setNniActionError(t("当前设备没有已绑定的资产公钥。", "This device has no bound asset public key."));
       return null;
     }
     const status = nniStatus ?? (await fetchNniDeviceStatus(false));
+    if (!isCurrent()) return null;
     if (!status?.signature_chip_present) {
       setNniActionError(t(
         "当前设备没有可用的签名芯片，不能解绑资产密钥。",
@@ -576,6 +704,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       confirmLabel: t("继续解绑", "Continue"),
       tone: "danger",
     });
+    if (!isCurrent()) return null;
     if (!confirmed) return null;
     setNniAssetOwnerPubkey(null);
     setNniJoined(false);
@@ -590,13 +719,16 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ node_url: nodeUrl }),
       });
+      if (!isCurrent()) return null;
       const body = (await res.json()) as ApiResponse<NniOwnerUnbindTaskResponse>;
+      if (!isCurrent()) return null;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(nniJoinErrorMessage(body.error, body.data, t("资产解绑请求未完成。", "The asset unbind request did not complete."), lang));
       }
       const signatureResult = await runNniDeviceAction("sign_challenge", {
         challenge: body.data.signing_payload,
       });
+      if (!isCurrent()) return null;
       const deviceSignature = signatureResult?.payload?.signature;
       if (!deviceSignature) throw new Error("nni_asset_unbind_device_signature_missing");
       const verifyRes = await apiFetch(`/v1/nni/owner/unbind/verify`, {
@@ -608,7 +740,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
           device_signature: deviceSignature,
         }),
       });
+      if (!isCurrent()) return null;
       const verifyBody = (await verifyRes.json()) as ApiResponse<NniOwnerUnbindVerifyResponse>;
+      if (!isCurrent()) return null;
       if (!verifyRes.ok || !verifyBody.ok || !verifyBody.data) {
         throw new Error(nniJoinErrorMessage(
           verifyBody.error,
@@ -625,13 +759,16 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       ));
       return verifyBody.data;
     } catch {
+      if (!isCurrent()) return null;
       setNniActionError(t(
         "本机保存的资产公钥已清除，心跳已停止；远端解绑尚未确认，请在网络恢复后重新绑定或检查远端记录。",
         "The locally stored asset public key was cleared and heartbeats stopped. Remote unbinding is not confirmed; reconnect or review the remote record after network recovery.",
       ));
       return null;
     } finally {
-      setNniOwnerActionLoading(null);
+      if (isCurrent()) {
+        setNniOwnerActionLoading(null);
+      }
     }
   };
 
@@ -639,6 +776,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     challenge: NniOwnerAuthorizationChallenge,
     ownerSignatureInput: string,
   ) => {
+    if (!isCurrent()) return null;
     const ownerSignature = normalizeNniOwnerSignature(ownerSignatureInput);
     if (!ownerSignature) {
       setNniActionError(t("资产签名必须是 128 位十六进制。", "The asset signature must be 128 hexadecimal characters."));
@@ -656,8 +794,10 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
           replaceExistingOwner: challenge.replaceExistingOwner,
         },
       );
+      if (!isCurrent()) return null;
       if (!verified?.joined || !verified.compliant) throw new Error("nni_join_verify_rejected");
       await setNniJoinedPersisted(false, { persistRemoteNodes: true });
+      if (!isCurrent()) return null;
       setNniAssetOwnerPubkey(verified.asset_owner_pubkey ?? challenge.targetOwnerPublicKey);
       setNniOwnerKeyPair(null);
       setNniOwnerAuthorizationChallenge(null);
@@ -671,14 +811,18 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       ));
       return verified;
     } catch (err) {
+      if (!isCurrent()) return null;
       setNniActionError(formatNniErrorCause(err, t, t("资产授权失败。", "Asset authorization failed.")));
       return null;
     } finally {
-      setNniOwnerActionLoading(null);
+      if (isCurrent()) {
+        setNniOwnerActionLoading(null);
+      }
     }
   };
 
   const completeNniOwnerAuthorization = async (ownerSignatureInput: string) => {
+    if (!isCurrent()) return null;
     const challenge = nniOwnerAuthorizationChallenge;
     if (!challenge) {
       setNniActionError(t("当前没有待签名的资产操作。", "There is no pending asset authorization."));
@@ -688,9 +832,11 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   };
 
   const authorizeNniOwnerWithPrivateKey = async (ownerPrivateKeyInput: string) => {
+    if (!isCurrent()) return null;
     try {
       assertNniPrivateKeyOperationsAllowed();
     } catch (err) {
+      if (!isCurrent()) return null;
       setNniActionError(nniPrivateKeyErrorMessage(err, t));
       return null;
     }
@@ -704,6 +850,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     }
 
     const challenge = await startNniCustomOwnerAuthorization(validation.publicKey);
+    if (!isCurrent()) return null;
     if (!challenge) return null;
     try {
       const signed = signNniOwnerChallenge(validation.normalized, challenge.signingPayload);
@@ -712,42 +859,58 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       }
       return await verifyNniOwnerAuthorization(challenge, signed.signature);
     } catch (err) {
+      if (!isCurrent()) return null;
       setNniActionError(nniPrivateKeyErrorMessage(err, t));
       return null;
     }
   };
 
   const cancelNniOwnerAuthorization = () => {
+    if (!isCurrent()) return;
     setNniOwnerAuthorizationChallenge(null);
     setNniActionError(null);
   };
 
   const fetchNniConfig = (silent = false) => runCoalescedRead(
-    readRequestsRef.current,
-    "config",
+    readRequests,
+    `config:${configRequests.revision}`,
     async () => {
+    if (!isCurrent()) return null;
+    if (configRequests.pendingWrites) return null;
+    const revision = configRequests.revision;
     if (!silent) setNniConfigLoading(true);
     if (!silent) setNniConfigError(null);
     try {
       const res = await fetchResilientRead(apiFetch, `/v1/nni/config`);
+      if (!isCurrent()) return null;
       const body = (await res.json()) as ApiResponse<NniConfigResponse>;
+      if (!isCurrent()) return null;
+      if (revision !== configRequests.revision) return null;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `nni_config_load_http_${res.status}`);
       }
       applyNniConfigResponse(body.data);
       if (!silent) setNniConfigMessage(null);
     } catch (err) {
+      if (!isCurrent()) return null;
+      if (revision !== configRequests.revision) return null;
       const message = formatNniErrorCause(err, t, t("NNI 配置暂时无法读取。", "NNI configuration is temporarily unavailable."));
       if (!silent) setNniConfigError(message);
     } finally {
-      if (!silent) setNniConfigLoading(false);
+      if (isCurrent()) {
+        if (!silent) setNniConfigLoading(false);
+      }
     }
     },
   );
 
   const fetchNniHeartbeatRecords = (page = nniHeartbeatRecordsPage, silent = false) => {
-    const safePage = Math.max(1, page);
-    return runCoalescedRead(readRequestsRef.current, `heartbeat-records:${safePage}`, async () => {
+    if (!isCurrent()) return Promise.resolve(null);
+    const safePage = Math.max(1, Math.floor(page));
+    selectedReadPages.set("fetchNniHeartbeatRecords", safePage);
+    const isCurrentPage = () => isCurrent() && selectedReadPages.get("fetchNniHeartbeatRecords") === safePage;
+    return runCoalescedRead(readRequests, `heartbeat-records:${safePage}`, async () => {
+    if (!isCurrentPage()) return null;
     if (!silent) {
       setNniHeartbeatRecordsLoading(true);
       setNniHeartbeatRecordsError(null);
@@ -759,7 +922,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         per_page: String(NNI_HEARTBEAT_RECORDS_PAGE_SIZE),
       });
       const res = await fetchResilientRead(apiFetch, `/v1/nni/records?${params.toString()}`);
+      if (!isCurrentPage()) return null;
       const body = (await res.json()) as ApiResponse<NniHeartbeatRecordsResponse>;
+      if (!isCurrentPage()) return null;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `nni_request_records_load_http_${res.status}`);
       }
@@ -769,15 +934,19 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       setNniHeartbeatRecordsTotalPages(Math.max(1, body.data.total_pages ?? 1));
       setNniHeartbeatRecordsError(null);
     } catch (err) {
+      if (!isCurrentPage()) return null;
       const message = formatNniErrorCause(err, t, t("NNI 请求记录暂时无法读取。", "NNI request history is temporarily unavailable."));
       if (!silent) setNniHeartbeatRecordsError(message);
     } finally {
-      if (!silent) setNniHeartbeatRecordsLoading(false);
+      if (isCurrentPage()) {
+        if (!silent) setNniHeartbeatRecordsLoading(false);
+      }
     }
     });
   };
 
   const clearNniHeartbeatRecords = async () => {
+    if (!isCurrent()) return null;
     const confirmed = await showConfirm({
       title: t("清理 NNI 请求记录", "Clear NNI request records"),
       message: t(
@@ -787,6 +956,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       confirmLabel: t("清理", "Clear"),
       tone: "danger",
     });
+    if (!isCurrent()) return null;
     if (!confirmed) return;
     setNniHeartbeatRecordsClearing(true);
     setNniHeartbeatRecordsError(null);
@@ -797,11 +967,14 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
+      if (!isCurrent()) return null;
       const rawText = await res.text();
+      if (!isCurrent()) return null;
       let body: ApiResponse<{ deleted_records?: number }>;
       try {
         body = JSON.parse(rawText) as ApiResponse<{ deleted_records?: number }>;
       } catch {
+      if (!isCurrent()) return null;
         throw new Error(t("NNI 请求记录清理接口返回了非 JSON 内容。", "The NNI request records clear endpoint returned non-JSON content."));
       }
       if (!res.ok || !body.ok) {
@@ -819,16 +992,23 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         ),
       );
     } catch (err) {
+      if (!isCurrent()) return null;
       const message = formatNniErrorCause(err, t, t("NNI 请求记录清理失败。", "NNI request history could not be cleared."));
       setNniHeartbeatRecordsError(message);
     } finally {
-      setNniHeartbeatRecordsClearing(false);
+      if (isCurrent()) {
+        setNniHeartbeatRecordsClearing(false);
+      }
     }
   };
 
   const fetchNniHeartbeatErrors = (page = nniHeartbeatErrorsPage, silent = false) => {
-    const safePage = Math.max(1, page);
-    return runCoalescedRead(readRequestsRef.current, `heartbeat-errors:${safePage}`, async () => {
+    if (!isCurrent()) return Promise.resolve(null);
+    const safePage = Math.max(1, Math.floor(page));
+    selectedReadPages.set("fetchNniHeartbeatErrors", safePage);
+    const isCurrentPage = () => isCurrent() && selectedReadPages.get("fetchNniHeartbeatErrors") === safePage;
+    return runCoalescedRead(readRequests, `heartbeat-errors:${safePage}`, async () => {
+    if (!isCurrentPage()) return null;
     if (!silent) {
       setNniHeartbeatErrorsLoading(true);
       setNniHeartbeatErrorsError(null);
@@ -840,11 +1020,14 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         per_page: String(NNI_HEARTBEAT_ERRORS_PAGE_SIZE),
       });
       const res = await fetchResilientRead(apiFetch, `/v1/nni/heartbeat/errors?${params.toString()}`);
+      if (!isCurrentPage()) return null;
       const rawText = await res.text();
+      if (!isCurrentPage()) return null;
       let body: ApiResponse<NniHeartbeatErrorsResponse>;
       try {
         body = JSON.parse(rawText) as ApiResponse<NniHeartbeatErrorsResponse>;
       } catch {
+      if (!isCurrentPage()) return null;
         const trimmed = rawText.trim().toLowerCase();
         if (trimmed.startsWith("<!doctype") || trimmed.startsWith("<html")) {
           throw new Error(
@@ -865,15 +1048,19 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       setNniHeartbeatErrorsTotalPages(Math.max(1, body.data.total_pages ?? 1));
       setNniHeartbeatErrorsError(null);
     } catch (err) {
+      if (!isCurrentPage()) return null;
       const message = formatNniErrorCause(err, t, t("NNI 心跳错误暂时无法读取。", "NNI heartbeat errors are temporarily unavailable."));
       if (!silent) setNniHeartbeatErrorsError(message);
     } finally {
-      if (!silent) setNniHeartbeatErrorsLoading(false);
+      if (isCurrentPage()) {
+        if (!silent) setNniHeartbeatErrorsLoading(false);
+      }
     }
     });
   };
 
   const clearNniHeartbeatErrors = async () => {
+    if (!isCurrent()) return null;
     const confirmed = await showConfirm({
       title: t("清理心跳错误", "Clear heartbeat errors"),
       message: t(
@@ -883,6 +1070,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       confirmLabel: t("清理", "Clear"),
       tone: "danger",
     });
+    if (!isCurrent()) return null;
     if (!confirmed) return;
     setNniHeartbeatErrorsClearing(true);
     setNniHeartbeatErrorsError(null);
@@ -893,11 +1081,14 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
+      if (!isCurrent()) return null;
       const rawText = await res.text();
+      if (!isCurrent()) return null;
       let body: ApiResponse<{ deleted_records?: number }>;
       try {
         body = JSON.parse(rawText) as ApiResponse<{ deleted_records?: number }>;
       } catch {
+      if (!isCurrent()) return null;
         throw new Error(t("NNI 心跳错误清理接口返回了非 JSON 内容。", "The NNI heartbeat error clear endpoint returned non-JSON content."));
       }
       if (!res.ok || !body.ok) {
@@ -915,17 +1106,25 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         ),
       );
       await fetchNniConfig(true);
+      if (!isCurrent()) return null;
     } catch (err) {
+      if (!isCurrent()) return null;
       const message = formatNniErrorCause(err, t, t("NNI 心跳错误清理失败。", "NNI heartbeat errors could not be cleared."));
       setNniHeartbeatErrorsError(message);
     } finally {
-      setNniHeartbeatErrorsClearing(false);
+      if (isCurrent()) {
+        setNniHeartbeatErrorsClearing(false);
+      }
     }
   };
 
   const fetchNniRewards = (page = nniRewards?.page ?? 1, silent = false) => {
-    const safePage = Math.max(1, page);
-    return runCoalescedRead(readRequestsRef.current, `rewards:${safePage}`, async () => {
+    if (!isCurrentNode()) return Promise.resolve(null);
+    const safePage = Math.max(1, Math.floor(page));
+    selectedReadPages.set("fetchNniRewards", safePage);
+    const isCurrentPage = () => isCurrentNode() && selectedReadPages.get("fetchNniRewards") === safePage;
+    return runCoalescedRead(remoteReads, `rewards:${safePage}`, async () => {
+    if (!isCurrentPage()) return null;
     if (!silent) {
       setNniRewardsLoading(true);
       setNniRewardsError(null);
@@ -936,47 +1135,59 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         per_page: String(NNI_REWARDS_PAGE_SIZE),
       });
       const res = await fetchResilientRead(apiFetch, `/v1/nni/rewards?${params.toString()}`);
+      if (!isCurrentPage()) return null;
       const body = (await res.json()) as ApiResponse<NniRewardsResponse>;
+      if (!isCurrentPage()) return null;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `nni_reward_records_load_http_${res.status}`);
       }
       setNniRewards(body.data);
       setNniRewardsError(null);
     } catch (err) {
+      if (!isCurrentPage()) return null;
       const message = formatNniErrorCause(err, t, t("NNI 奖励记录暂时无法读取。", "NNI reward history is temporarily unavailable."));
       if (!silent) setNniRewardsError(message);
     } finally {
-      if (!silent) setNniRewardsLoading(false);
+      if (isCurrentPage()) {
+        if (!silent) setNniRewardsLoading(false);
+      }
     }
     });
   };
 
   const fetchNniNetworkStats = (silent = false) => runCoalescedRead(
-    readRequestsRef.current,
+    remoteReads,
     "network-stats",
     async () => {
+      if (!isCurrentNode()) return null;
       if (!silent) {
         setNniNetworkStatsLoading(true);
         setNniNetworkStatsError(null);
       }
       try {
         const res = await fetchResilientRead(apiFetch, "/v1/nni/network-stats");
+        if (!isCurrentNode()) return null;
         const body = (await res.json()) as ApiResponse<NniNetworkStatsResponse>;
+        if (!isCurrentNode()) return null;
         if (!res.ok || !body.ok || !body.data) {
           throw new Error(body.error || `nni_network_stats_load_http_${res.status}`);
         }
         setNniNetworkStats(body.data);
         setNniNetworkStatsError(null);
       } catch (err) {
+        if (!isCurrentNode()) return null;
         const message = formatNniErrorCause(err, t, t("NNI 网络状态暂时无法读取。", "NNI network status is temporarily unavailable."));
         if (!silent) setNniNetworkStatsError(message);
       } finally {
-        if (!silent) setNniNetworkStatsLoading(false);
+        if (isCurrentNode()) {
+          if (!silent) setNniNetworkStatsLoading(false);
+        }
       }
     },
   );
 
   const saveNniConfig = async () => {
+    if (!isCurrent()) return null;
     setNniConfigSaving(true);
     setNniConfigError(null);
     setNniConfigMessage(null);
@@ -991,7 +1202,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
           asset_service_node_url: selectedNniAssetServiceNodeUrl(),
         }),
       });
+      if (!isCurrent()) return null;
       const body = (await res.json()) as ApiResponse<NniConfigResponse>;
+      if (!isCurrent()) return null;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `nni_config_save_http_${res.status}`);
       }
@@ -1003,19 +1216,24 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         ),
       );
     } catch (err) {
+      if (!isCurrent()) return null;
       const message = formatNniErrorCause(err, t, t("NNI 配置保存失败。", "NNI configuration could not be saved."));
       setNniConfigError(message);
     } finally {
-      setNniConfigSaving(false);
+      if (isCurrent()) {
+        setNniConfigSaving(false);
+      }
     }
   };
 
   const joinNni = async () => {
+    if (!isCurrent()) return null;
     setNniActionLoading("join_nni");
     setNniActionError(null);
     setNniActionMessage(null);
     setNniDeviceAuthorizationDenied(false);
     const status = nniStatus ?? (await fetchNniDeviceStatus(false));
+    if (!isCurrent()) return null;
     if (!status?.signature_chip_present) {
       setNniActionError(
         nniDeviceMessage(status, lang) ||
@@ -1025,6 +1243,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
           ),
       );
       await setNniJoinedPersisted(false);
+      if (!isCurrent()) return null;
       setNniActionLoading(null);
       return;
     }
@@ -1032,13 +1251,16 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       const ownerKeyPair = nniOwnerKeyPair;
       if (!nniAssetOwnerPubkey && !ownerKeyPair) {
         await generateNniOwnerKeyPair();
+        if (!isCurrent()) return null;
         return;
       }
       if (!nniAssetOwnerPubkey && ownerKeyPair) {
         await authorizeNniOwnerWithPrivateKey(ownerKeyPair.private_key);
+        if (!isCurrent()) return null;
         return;
       }
       const enabled = await setNniJoinedPersisted(true, { persistRemoteNodes: true });
+      if (!isCurrent()) return null;
       if (!enabled) {
         throw new Error("nni_config_update_failed");
       }
@@ -1051,17 +1273,24 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         ),
       );
       await fetchNniHeartbeatRecords(1, true);
+      if (!isCurrent()) return null;
       await fetchNniRewards(1, true);
+      if (!isCurrent()) return null;
     } catch (err) {
+      if (!isCurrent()) return null;
       const message = formatNniErrorCause(err, t, t("加入 NNI 未完成。", "Joining NNI did not complete."));
       setNniActionError(message);
       await setNniJoinedPersisted(false);
+      if (!isCurrent()) return null;
     } finally {
-      setNniActionLoading(null);
+      if (isCurrent()) {
+        setNniActionLoading(null);
+      }
     }
   };
 
   const updateNniRemoteNodes = (value: string) => {
+    if (!isCurrent()) return;
     setNniRemoteNodes(value);
     const nodeUrls = parseNniRemoteNodeUrls(value);
     if (!nodeUrls.includes(nniSelectedNodeUrl)) {
@@ -1083,6 +1312,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   };
 
   const updateNniSelectedNodeUrl = (value: string) => {
+    if (!isCurrent()) return;
     if (!nniRemoteNodeUrls().includes(value)) return;
     setNniSelectedNodeUrl(value);
     setNniDeviceAuthorizationDenied(false);
@@ -1091,6 +1321,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
   };
 
   const updateNniAssetServiceNodeUrl = async (value: string): Promise<boolean> => {
+    if (!isCurrent()) return false;
     if (!nniRemoteNodeUrls().includes(value)) {
       setNniAssetServiceNodeError(t("请选择已配置的节点。", "Select a configured node."));
       return false;
@@ -1104,13 +1335,16 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ asset_service_node_url: value }),
       });
+      if (!isCurrent()) return false;
       const body = (await res.json()) as ApiResponse<NniConfigResponse>;
+      if (!isCurrent()) return false;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `nni_asset_service_node_update_http_${res.status}`);
       }
       applyNniConfigResponse(body.data);
       return true;
     } catch (err) {
+      if (!isCurrent()) return false;
       setNniAssetServiceNodeError(formatNniErrorCause(
         err,
         t,
@@ -1118,11 +1352,14 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       ));
       return false;
     } finally {
-      setNniAssetServiceNodeSaving(false);
+      if (isCurrent()) {
+        setNniAssetServiceNodeSaving(false);
+      }
     }
   };
 
   const updateNniBancorServiceNodeUrl = async (value: string): Promise<boolean> => {
+    if (!isCurrent()) return false;
     if (!nniRemoteNodeUrls().includes(value)) {
       setNniBancorServiceNodeError(t("请选择已配置的节点。", "Select a configured node."));
       return false;
@@ -1136,13 +1373,16 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ bancor_service_node_url: value }),
       });
+      if (!isCurrent()) return false;
       const body = (await res.json()) as ApiResponse<NniConfigResponse>;
+      if (!isCurrent()) return false;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `nni_bancor_service_node_update_http_${res.status}`);
       }
       applyNniConfigResponse(body.data);
       return true;
     } catch (err) {
+      if (!isCurrent()) return false;
       setNniBancorServiceNodeError(formatNniErrorCause(
         err,
         t,
@@ -1150,7 +1390,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       ));
       return false;
     } finally {
-      setNniBancorServiceNodeSaving(false);
+      if (isCurrent()) {
+        setNniBancorServiceNodeSaving(false);
+      }
     }
   };
 
@@ -1158,6 +1400,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     service: "assets" | "bancor",
     value: string,
   ): Promise<boolean> => {
+    if (!isCurrent()) return false;
     const currentNodes = nniRemoteNodeUrls();
     if (currentNodes.includes(value)) {
       return service === "assets"
@@ -1194,13 +1437,16 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+      if (!isCurrent()) return false;
       const body = (await res.json()) as ApiResponse<NniConfigResponse>;
+      if (!isCurrent()) return false;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `nni_financial_service_node_update_http_${res.status}`);
       }
       applyNniConfigResponse(body.data);
       return true;
     } catch (err) {
+      if (!isCurrent()) return false;
       setError(formatNniErrorCause(
         err,
         t,
@@ -1208,7 +1454,9 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
       ));
       return false;
     } finally {
-      setSaving(false);
+      if (isCurrent()) {
+        setSaving(false);
+      }
     }
   };
 
@@ -1234,6 +1482,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     nniRemoteNodes,
     nniRemoteNodeUrls: nniRemoteNodeUrls(),
     nniSelectedNodeUrl: selectedNniNodeUrl(),
+    nniActiveNodeUrl,
     nniBancorServiceNodeUrl: selectedNniBancorServiceNodeUrl(),
     nniBancorServiceNodeSaving,
     nniBancorServiceNodeError,
