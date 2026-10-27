@@ -3,6 +3,9 @@ use uuid::Uuid;
 
 use super::*;
 
+#[path = "background_blocking_tests.rs"]
+mod blocking;
+
 #[test]
 fn terminal_delivery_retry_delay_is_bounded_and_increases() {
     assert_eq!(channel_terminal_delivery_retry_delay(5, 1), 5);

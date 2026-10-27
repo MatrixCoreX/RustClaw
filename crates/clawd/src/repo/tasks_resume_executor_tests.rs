@@ -2,6 +2,9 @@ use serde_json::json;
 
 use super::*;
 
+#[path = "tasks_resume_scan_fairness_tests.rs"]
+mod scan_fairness;
+
 #[test]
 fn list_ready_paused_checkpoint_resume_executors_filters_machine_states() {
     let state = state_with_tasks_table();

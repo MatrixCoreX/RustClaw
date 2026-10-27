@@ -1,5 +1,6 @@
 use rusqlite::{params, OptionalExtension};
 use serde_json::Value;
+use std::sync::atomic::Ordering;
 
 use super::lifecycle_projection::{
     executing_resume_executor_state, expired_resume_claim_recovery_metadata,
@@ -619,10 +620,15 @@ pub(crate) fn list_ready_paused_checkpoint_resume_executors_internal(
     )?;
 
     let mut out = Vec::new();
-    let mut offset = 0usize;
-    while offset < scan_limit && out.len() < limit {
+    let scan_cursor = &state.worker.resume_executor_scan_offset;
+    let start_offset = scan_cursor.load(Ordering::Relaxed);
+    let mut offset = start_offset;
+    let mut scanned_total = 0usize;
+    let mut exhausted = false;
+    while scanned_total < scan_limit && out.len() < limit {
+        let batch = candidate_batch.min(scan_limit - scanned_total);
         let rows = stmt.query_map(
-            params![aging_cutoff, now_ts, candidate_batch as i64, offset as i64],
+            params![aging_cutoff, now_ts, batch as i64, offset as i64],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         )?;
         let mut scanned = 0usize;
@@ -644,11 +650,32 @@ pub(crate) fn list_ready_paused_checkpoint_resume_executors_internal(
                 break;
             }
         }
-        if scanned < candidate_batch {
+        scanned_total = scanned_total.saturating_add(scanned);
+        offset = offset.saturating_add(scanned);
+        if scanned < batch {
+            exhausted = true;
             break;
         }
-        offset = offset.saturating_add(scanned);
     }
+    // A rejected prefix must not consume every subsequent pass. Resume the
+    // bounded scan, then wrap at EOF; claims still recheck exact durable ownership.
+    let next_offset = if exhausted || out.len() >= limit {
+        0
+    } else {
+        offset
+    };
+    let _ = scan_cursor.compare_exchange(
+        start_offset,
+        next_offset,
+        Ordering::Relaxed,
+        Ordering::Relaxed,
+    );
+    tracing::debug!(
+        scanned_total,
+        returned = out.len(),
+        next_offset,
+        "resume_executor_scan_completed"
+    );
     Ok(out)
 }
 

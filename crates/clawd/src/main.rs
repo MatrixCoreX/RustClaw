@@ -1252,6 +1252,7 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
                 .running_recovery_check_interval_seconds
                 .max(10),
             last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
+            resume_executor_scan_offset: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             active_running_task_ids: Arc::new(Mutex::new(HashSet::new())),
             task_cancellation_tokens: Arc::new(Mutex::new(HashMap::new())),
             task_model_turn_interrupt_tokens: Arc::new(Mutex::new(HashMap::new())),

@@ -89,12 +89,18 @@ async fn renew_resume_execution_lease(
 ) -> anyhow::Result<bool> {
     let mut last_error = None;
     for attempt in 0..3 {
-        match repo::renew_claimed_dispatched_paused_checkpoint_resume_execution_lease_internal(
-            state,
-            claimed,
-            now_ts,
-            lease_seconds,
-        ) {
+        let tick_state = state.clone();
+        let tick_claim = claimed.clone();
+        match super::background_workers::run_blocking_tick("resume_lease", move || {
+            repo::renew_claimed_dispatched_paused_checkpoint_resume_execution_lease_internal(
+                &tick_state,
+                &tick_claim,
+                now_ts,
+                lease_seconds,
+            )
+        })
+        .await
+        {
             Ok(true) => return Ok(true),
             Ok(false) => last_error = None,
             Err(error) => last_error = Some(error),

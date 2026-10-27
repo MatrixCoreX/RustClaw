@@ -38,9 +38,7 @@ pub(crate) fn start_task_heartbeat(
         loop {
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {
-                    if let Err(err) =
-                        repo::touch_running_task(&state, &task_id, claim_attempt)
-                    {
+                    if let Err(err) = task_heartbeat_tick(state.clone(), task_id.clone(), claim_attempt).await {
                         warn!(
                             "task heartbeat update failed: worker_id={} task_id={} interval_secs={} err={}",
                             worker_id, task_id, interval_secs, err
@@ -104,7 +102,7 @@ pub(crate) fn spawn_cleanup_worker(state: AppState) {
                 }
                 continue;
             }
-            if let Err(err) = cleanup_once(&state) {
+            if let Err(err) = cleanup_tick(state.clone()).await {
                 error!("Cleanup task failed: {}", err);
             }
         }
@@ -114,7 +112,7 @@ pub(crate) fn spawn_cleanup_worker(state: AppState) {
 pub(crate) fn spawn_schedule_worker(state: AppState) {
     tokio::spawn(async move {
         loop {
-            if let Err(err) = schedule_once(&state) {
+            if let Err(err) = schedule_tick(state.clone()).await {
                 error!("Schedule worker tick failed: {}", err);
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
@@ -135,6 +133,50 @@ pub(crate) fn spawn_channel_terminal_delivery_worker(state: AppState) {
             }
         }
     });
+}
+
+async fn cleanup_tick(state: AppState) -> anyhow::Result<()> {
+    run_blocking_tick("cleanup", move || cleanup_once(&state)).await
+}
+
+async fn schedule_tick(state: AppState) -> anyhow::Result<()> {
+    run_blocking_tick("schedule", move || schedule_once(&state)).await
+}
+
+async fn task_heartbeat_tick(
+    state: AppState,
+    task_id: String,
+    claim_attempt: i64,
+) -> anyhow::Result<bool> {
+    run_blocking_tick("task_heartbeat", move || {
+        repo::touch_running_task(&state, &task_id, claim_attempt)
+    })
+    .await
+}
+
+pub(super) async fn run_blocking_tick<T: Send + 'static>(
+    stage: &'static str,
+    work: impl FnOnce() -> anyhow::Result<T> + Send + 'static,
+) -> anyhow::Result<T> {
+    // Each caller awaits completion before scheduling its next tick. Dropping the
+    // waiter cannot undo a started DB operation; repository claim/CAS fencing stays authoritative.
+    let queued_at = std::time::Instant::now();
+    let (result, queue_ms, execution_ms) = tokio::task::spawn_blocking(move || {
+        let started_at = std::time::Instant::now();
+        let queue_ms = queued_at.elapsed().as_millis();
+        let result = work();
+        (result, queue_ms, started_at.elapsed().as_millis())
+    })
+    .await
+    .map_err(|error| anyhow!("background_tick_join_failed stage={stage} error={error}"))?;
+    tracing::debug!(
+        stage,
+        queue_ms,
+        execution_ms,
+        success = result.is_ok(),
+        "background_tick_completed"
+    );
+    result
 }
 
 pub(crate) fn spawn_conversation_reply_delivery_worker(state: AppState) {

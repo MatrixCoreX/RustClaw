@@ -165,3 +165,21 @@ If all eligible providers are cooling down or already running a recovery trial,
 both model entrypoints record a structured `TaskProviderBlocker` with a bounded
 retry hint. The agent can checkpoint and wait; a temporarily withheld provider is
 not treated as proof that the requested capability or model is unsupported.
+
+### Resume Candidate Scanning
+
+Ready-executor scans have bounded candidate batches and per-pass scan budgets.
+When rejected checkpoint records consume that budget, the next pass continues
+from a process-local scan offset rather than repeatedly inspecting the same
+prefix. Reaching the end or filling the requested result count resets the scan
+to the queue head. Existing interactive priority and background aging remain.
+Queue changes can defer a candidate until the next wrap; a restart starts at the
+head again. The cursor is only a discovery hint, not execution authority or a
+persisted checkpoint. Each claim still rechecks task status, checkpoint identity,
+worker ownership, claim attempt and executor state against durable database data.
+
+Task heartbeats and active resume-lease renewals await synchronous database work
+on the blocking pool, keeping database waits off async executor threads. Each
+heartbeat/renewal loop waits for its current operation before scheduling another.
+An already-started database operation can finish after its async waiter is
+cancelled; durable claim fencing, not aborting a thread, rejects stale writes.

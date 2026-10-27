@@ -238,6 +238,12 @@ configured retention periods remain unchanged; age or row pressure is not an
 implicit cancellation command. Both retention policies use the same eligibility
 predicate and keep deletion batches bounded.
 
+The cleanup and schedule loops await their synchronous database/filesystem ticks
+on the blocking pool, with at most one in-flight tick per loop. Queue wait and
+execution time are separate structured debug fields (`queue_ms`, `execution_ms`,
+`stage`, `success`). This isolates async executor responsiveness; it does not
+remove SQLite locks, increase retention limits, or make a started write abortable.
+
 ```bash
 cargo test -p clawd task_artifact
 cargo test -p clawd conversation_history_projects_downloadable_task_artifacts

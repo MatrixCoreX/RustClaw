@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 
@@ -467,6 +468,8 @@ pub(crate) struct WorkerConfig {
     pub(crate) worker_running_no_progress_timeout_seconds: u64,
     pub(crate) worker_running_recovery_check_interval_seconds: u64,
     pub(crate) last_running_recovery_check_ts: Arc<Mutex<u64>>,
+    /// Non-authoritative continuation for budget-limited resume candidate scans.
+    pub(crate) resume_executor_scan_offset: Arc<AtomicUsize>,
     pub(crate) active_running_task_ids: Arc<Mutex<HashSet<String>>>,
     pub(crate) task_cancellation_tokens:
         Arc<Mutex<HashMap<String, tokio_util::sync::CancellationToken>>>,
@@ -594,6 +597,7 @@ impl WorkerConfig {
             worker_running_no_progress_timeout_seconds: 300,
             worker_running_recovery_check_interval_seconds: 30,
             last_running_recovery_check_ts: Arc::new(Mutex::new(0)),
+            resume_executor_scan_offset: Arc::new(AtomicUsize::new(0)),
             active_running_task_ids: Arc::new(Mutex::new(HashSet::new())),
             task_cancellation_tokens: Arc::new(Mutex::new(HashMap::new())),
             task_model_turn_interrupt_tokens: Arc::new(Mutex::new(HashMap::new())),
