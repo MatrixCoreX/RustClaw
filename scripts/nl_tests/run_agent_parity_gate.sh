@@ -468,6 +468,11 @@ echo "AGENT_PARITY_GATE_STEP maintainability_skill_contracts"
   python3 "${ROOT_DIR}/scripts/check_skill_registry_parity.py" --mode all --strict
   python3 "${ROOT_DIR}/scripts/check_skill_storage_ownership.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_skill_storage_ownership.py"
+  python3 "${ROOT_DIR}/scripts/check_aipp_decoupling.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_aipp_decoupling.py"
+  python3 "${ROOT_DIR}/scripts/check_rag_contracts.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_rag_contracts.py"
+  python3 "${ROOT_DIR}/scripts/check_github_action_pins.py"
   python3 "${ROOT_DIR}/scripts/check_mcp_runtime_contracts.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_mcp_runtime_contracts.py"
   python3 "${ROOT_DIR}/scripts/check_agent_hook_runtime_contracts.py" --self-test
@@ -548,6 +553,7 @@ echo "AGENT_PARITY_GATE_STEP nl_suite_checker_self_tests"
   python3 "${SCRIPT_DIR}/manual_case_lifecycle_tests.py"
   python3 "${SCRIPT_DIR}/live_suite_report_tests.py"
   python3 "${SCRIPT_DIR}/replay_verifier_candidate_tests.py"
+  python3 "${SCRIPT_DIR}/../agent_loop_trace_release_gate_tests.py" 2>&1
 } > "${OUT_DIR}/nl_suite_checker_self_tests.txt"
 
 echo "AGENT_PARITY_GATE_STEP suite_artifact_contract_self_test"

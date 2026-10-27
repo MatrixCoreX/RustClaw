@@ -140,6 +140,12 @@ def main() -> int:
             raise SystemExit(f"run dir not found: {run_dir}")
 
     summarizer = load_summarizer()
+    empty_run_dirs = [path for path in args.run_dirs if not summarizer.turn_json_paths(path)]
+    if empty_run_dirs:
+        print("AGENT_LOOP_TRACE_RELEASE_GATE failed")
+        for path in empty_run_dirs:
+            print(f"- missing_turn_files={path}")
+        return 1
     summary = summarizer.summarize_run_dirs(
         args.run_dirs,
         max(args.max_examples, 0),

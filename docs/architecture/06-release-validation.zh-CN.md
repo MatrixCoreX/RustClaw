@@ -52,3 +52,8 @@ Release-gate 等价子集根据机器 case metadata 生成，不分析 prompt �
 汇总；门禁记录通过率、LLM/工具调用分布、延迟、checkpoint、repair、provider
 错误、重复调用、prompt 字节、截断和语言覆盖。媒体生成保持 dry-run，
 X/Twitter live mutation 被排除；受影响的真实图片理解与音频输入合同另行验收。
+
+trace gate 要求传入的每个 run 目录都包含支持的 turn 产物。空目录、只有下层日期目录的
+父目录都会被拒绝，不能靠其他有效目录得到通过；应传入实际日期 run，而不是 results
+父目录。parity gate 同时运行这一拒绝路径自测，以及 AiAPP 解耦、RAG 合同与 GitHub
+Action 固定版本检查。

@@ -64,3 +64,9 @@ repairs, provider errors, duplicates, prompt bytes, truncation, and language
 coverage. Media generation remains dry-run, X/Twitter live mutation is
 excluded, and affected image-understanding/audio-input cases are accepted
 separately.
+
+The trace gate requires supported turn artifacts in every supplied run directory;
+an empty directory or a parent containing only nested dated runs is rejected even
+when other inputs are valid. Supply the actual dated run, not its results parent.
+The parity gate includes this rejection self-test together with AiAPP decoupling,
+RAG contracts and pinned GitHub Action checks.
