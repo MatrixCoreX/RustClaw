@@ -8,6 +8,17 @@ from manual_trace_evidence import restore_execution_streams, trace_hash
 
 
 class TraceEvidenceTests(unittest.TestCase):
+    def test_opt_in_wait_accepts_only_a_later_digest_matched_finalization(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path, streams, final, log = self.fixture(Path(directory))
+            log.write_text("")
+            def append_finalization(_):
+                log.write_text(self.line(streams))
+            with patch.dict("os.environ", {"NL_TRACE_FINALIZE_WAIT_SECONDS": "0.5"}), patch("manual_trace_evidence.time.sleep", side_effect=append_finalization):
+                restored, detail = restore_execution_streams(final, path, "task")
+            self.assertTrue(detail["ok"])
+            self.assertEqual(restored["data"]["result_json"]["task_journal"]["trace"]["step_results"], streams["step_results"])
+
     def fixture(self, root):
         path = root / "run/cases/date/case_sample/final.json"
         path.parent.mkdir(parents=True)

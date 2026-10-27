@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import time
 
 
 def trace_hash(value):
@@ -43,13 +44,21 @@ def restore_execution_streams(final, final_path, task_id):
     configured_log = os.environ.get("NL_RUNTIME_TRACE_LOG")
     if configured_log:
         logs.append(Path(configured_log))
-    for log in logs:
-        if not log.is_file() or log.is_symlink():
-            continue
-        restored, evidence = restore_from_log(final, task_id, log, hashes, names)
-        if evidence is not None:
-            return restored, evidence
-    return final, detail
+    try:
+        wait_seconds = min(5.0, max(0.0, float(os.environ.get("NL_TRACE_FINALIZE_WAIT_SECONDS", "0"))))
+    except ValueError:
+        wait_seconds = 0.0
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        for log in logs:
+            if not log.is_file() or log.is_symlink():
+                continue
+            restored, evidence = restore_from_log(final, task_id, log, hashes, names)
+            if evidence is not None:
+                return restored, evidence
+        if time.monotonic() >= deadline:
+            return final, detail
+        time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
 
 
 def restore_from_log(final, task_id, log, hashes, names):

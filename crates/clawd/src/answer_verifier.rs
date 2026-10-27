@@ -24,6 +24,11 @@ pub(crate) use answer_verifier_runtime::{
     post_write_content_evidence_missing_before_verifier, verify_answer_observe_only,
 };
 use answer_verifier_scalar::*;
+#[path = "answer_verification.rs"]
+mod answer_verification;
+pub(crate) use answer_verification::{
+    AnswerVerificationOutcome, AnswerVerificationRecord, AnswerVerificationStatus,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct AnswerContract {

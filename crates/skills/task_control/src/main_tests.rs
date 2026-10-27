@@ -1,6 +1,20 @@
 use super::*;
 
 #[test]
+fn recall_context_requires_bounded_machine_reference_and_explicit_field_paths() {
+    let parsed=parse_input(&json!({"action":"recall_context","context_ref":"task-context:v1:00000000-0000-0000-0000-000000000001","field_paths":["/capabilities/0/args"]})).unwrap();
+    assert_eq!(parsed.action, "recall_context");
+    assert_eq!(parsed.field_paths, vec!["/capabilities/0/args"]);
+    for value in [
+        json!({"action":"recall_context"}),
+        json!({"action":"recall_context","context_ref":"task-context:v1:x","field_paths":[12]}),
+        json!({"action":"recall_context","context_ref":"task-context:v1:x","field_paths":["args"]}),
+    ] {
+        assert!(parse_input(&value).is_err());
+    }
+}
+
+#[test]
 fn error_extra_exposes_machine_contract() {
     let extra = error_extra("execution_failed");
 

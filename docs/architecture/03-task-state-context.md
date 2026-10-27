@@ -14,6 +14,39 @@ A client or HTTP timeout does not by itself terminate a persisted task. Workers
 use fenced leases and heartbeats, while resumable work is represented by
 checkpoints and machine lifecycle fields.
 
+## Verification and Authorized Recall
+
+`task_journal.summary` and `trace` expose independent `execution_status` and
+`answer_verification` records. Verification has four states: `not_required`,
+`passed`, `failed`, and `unavailable`. The record is SHA-256-bound to the candidate
+answer. Missing prompts or provider failures are never treated as a pass.
+An unavailable provider preserves completed action fingerprints, observations,
+budgets and metrics in a verification-stage checkpoint; missing configuration
+requires user intervention. Recovery replans from that checkpoint without
+replaying the completed mutation. Rewritten answers require explicit acceptance.
+
+Recent execution anchors publish bounded `task-context:v1:<UUID>` references.
+The planner may use `task_control.recall_context` to read 1-8 explicit JSON
+pointer fields from a prior task's request or capability arguments/data.
+`POST /v1/tasks/:current_task_id/context-recall` rechecks the current enabled key,
+principal, channel, user/chat IDs, external recipient and conversation. Admin
+access does not bypass these conversation checks. Credentials are removed;
+missing fields, deleted results and responses above 24 KiB return machine errors.
+The result declares `instruction_authority=none` and
+`current_execution_evidence=false`: recalled content is not an instruction,
+permission grant, or proof that a new action executed.
+
+```mermaid
+flowchart LR
+    A[Bounded prior-task reference] --> B[Planner selects explicit fields]
+    B --> C[Current actor and conversation checks]
+    C -->|allowed| D[Redacted historical context]
+    C -->|denied or unavailable| E[Structured observation]
+    D --> F[Planner applies current user constraints]
+    F --> G[Normal resolver and permission checks]
+    E --> F
+```
+
 ```mermaid
 flowchart TD
     A[Conversation input accepted] --> A1[(input receipt + event)]

@@ -338,11 +338,12 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             task,
             &mut blocked_loop_state,
         )? {
-            return Ok(checkpoint_handoff_reply(
+            return Ok(checkpoint_handoff_reply_with_verification(
                 task,
                 &effective_user_text,
                 &blocked_loop_state,
                 agent_run_context,
+                &reply,
             ));
         }
         let answer_contract = answer_contract_for_reply(&effective_user_text, &reply);
@@ -366,11 +367,12 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             task,
             &mut pre_verifier_recovery_loop_state,
         )? {
-            return Ok(checkpoint_handoff_reply(
+            return Ok(checkpoint_handoff_reply_with_verification(
                 task,
                 &effective_user_text,
                 &pre_verifier_recovery_loop_state,
                 agent_run_context,
+                &reply,
             ));
         }
         if reserve_recovery? {
@@ -392,11 +394,12 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             task,
             &mut blocked_loop_state,
         )? {
-            return Ok(checkpoint_handoff_reply(
+            return Ok(checkpoint_handoff_reply_with_verification(
                 task,
                 &effective_user_text,
                 &blocked_loop_state,
                 agent_run_context,
+                &reply,
             ));
         }
         enforce_post_write_content_evidence_guard(&mut reply);
@@ -463,11 +466,12 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                 task,
                 &mut blocked_loop_state,
             )? {
-                return Ok(checkpoint_handoff_reply(
+                return Ok(checkpoint_handoff_reply_with_verification(
                     task,
                     &effective_user_text,
                     &blocked_loop_state,
                     agent_run_context,
+                    &reply,
                 ));
             }
             mark_reply_failed_after_answer_verifier_exhausted(

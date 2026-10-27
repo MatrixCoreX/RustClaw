@@ -38,10 +38,11 @@ pub(super) async fn attach_answer_verifier_if_missing(
     let Some(journal) = reply.task_journal.as_mut() else {
         return;
     };
-    if journal.answer_verifier_summary.is_some() {
+    if journal.answer_verifier_summary.is_some() || journal.has_answer_verification_for(&reply.text)
+    {
         return;
     }
-    if let Some(answer_verifier) = crate::answer_verifier::verify_answer_observe_only(
+    let outcome = crate::answer_verifier::verify_answer_observe_only(
         state,
         task,
         user_text,
@@ -49,10 +50,8 @@ pub(super) async fn attach_answer_verifier_if_missing(
         journal,
         &reply.text,
     )
-    .await
-    {
-        journal.record_answer_verifier_summary(answer_verifier);
-    }
+    .await;
+    journal.record_answer_verification(outcome, &reply.text);
 }
 
 pub(super) fn answer_contract_for_reply(
@@ -66,6 +65,25 @@ pub(super) fn answer_contract_for_reply(
             journal.output_contract.clone().unwrap_or_default(),
         )
     })
+}
+
+pub(super) fn checkpoint_handoff_reply_with_verification(
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    prior_reply: &AskReply,
+) -> AskReply {
+    let mut handoff =
+        super::checkpoint_handoff_reply(task, user_text, loop_state, agent_run_context);
+    if let (Some(source), Some(target)) = (
+        prior_reply.task_journal.as_ref(),
+        handoff.task_journal.as_mut(),
+    ) {
+        target.answer_verification = source.answer_verification.clone();
+        target.answer_verifier_summary = source.answer_verifier_summary.clone();
+    }
+    handoff
 }
 
 #[cfg(test)]

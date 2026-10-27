@@ -71,6 +71,13 @@ bash scripts/product_identity_tests.sh --with-ui
 
 Agent Runtime 主自然语言路径使用接近 Codex / Claude 的 agent loop。第一次 planner 调用前，front door 负责物化文本、语音转写与附件，绑定 task/session 身份，并构造机器拥有的 `TurnBoundaryEnvelope`，其中包含显式 API 字段、locator、权限/预算 profile 和安全上下文。每个普通 `ask` 随后进入 agent loop，由它决定回答、澄清还是执行。原生模型回合要么输出 `call_capability` 获取下一个观测或副作用，要么输出 `respond` 作为模型生成的终态回答；使用结构化 plan 协议的 provider 以等价的、经过验证的步骤表达同样的决策。可恢复失败通过 `RepairEnvelope` 机器字段、attempt history 和 checkpoint state 回到循环，而不是匹配用户语言短语。
 
+执行、答案验证和投送是分别记录的事实。Journal 暴露 `execution_status` 与
+`answer_verification.status`，验证状态分为 `not_required`、`passed`、`failed`、
+`unavailable`。验证服务不可用时保存已完成工作，不把未验证答案视为通过。
+同会话历史引用可通过 `task_control.recall_context` 重新鉴权回查；多部分通信端投送只重试
+明确可重试的拒绝项，不重复已接受部分或工具执行。详见[上下文与恢复](docs/architecture/03-task-state-context.zh-CN.md)
+和[投送恢复](docs/architecture/11-task-artifact-delivery.zh-CN.md)。
+
 ### 请求与 Agent Loop 流程
 
 ```mermaid
@@ -132,7 +139,10 @@ flowchart TD
     BD -->|terminal| X
     R --> Y[用户可见消息组装]
     X --> Y
-    Y --> Z[输出契约护栏 + 任务结果]
+    Y --> AV{答案验证状态}
+    AV -->|not_required / passed| Z[输出契约护栏 + 任务结果]
+    AV -->|failed| WR
+    AV -->|unavailable| BC
     Z --> AA[通道交付]
     Z --> AB[Journal + 会话更新]
     AB --> AD[Task event stream<br/>goal + 上下文 + 状态迁移 + checkpoint + 工具/coding/team 事件]

@@ -169,7 +169,10 @@ pub(super) fn suppress_answer_verifier_retry_if_structurally_satisfied(
         missing_evidence_fields = ?summary.missing_evidence_fields,
         "answer_verifier_retry_suppressed_structural_satisfaction"
     );
-    journal.answer_verifier_summary = None;
+    journal.record_answer_verification(
+        crate::answer_verifier::AnswerVerificationOutcome::Passed(None),
+        &reply.text,
+    );
     true
 }
 

@@ -521,6 +521,19 @@ fn record_whatsapp_cloud_provider_status_in_db(
     next.diagnostic_id = aggregate.diagnostic_id;
     next.provider_error_code = aggregate.provider_error_code;
     next.retryable = false;
+    // A delivered prefix cannot settle an aggregate that still has unsent parts.
+    if current_receipt.status == ChannelDeliveryStatus::Partial
+        && current_receipt
+            .parts
+            .iter()
+            .any(|part| part.status == ChannelDeliveryStatus::Failed)
+    {
+        next.status = ChannelDeliveryStatus::Partial;
+        next.error_code = current_receipt.error_code.clone();
+        next.message_key = current_receipt.message_key.clone();
+        next.diagnostic_id = current_receipt.diagnostic_id.clone();
+        next.retryable = current_receipt.retryable;
+    }
     if next == current_receipt {
         return Ok(RecordWhatsappProviderStatusOutcome::Unchanged);
     }

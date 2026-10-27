@@ -77,6 +77,15 @@ bash scripts/product_identity_tests.sh --with-ui
 
 Agent Runtime's main natural-language path uses a Codex / Claude style agent loop. Before the first planner call, the front door materializes text, audio transcripts, and attachments; binds task/session identity; and builds a machine-owned `TurnBoundaryEnvelope` containing explicit API fields, locators, permission/budget profiles, and safety context. Every ordinary `ask` then enters the agent loop, which decides whether to answer, clarify, or execute. A native model turn selects either `call_capability` for another observation/effect or `respond` for the terminal model-authored answer; providers using the structured plan protocol express equivalent verified steps. Recoverable failures return through `RepairEnvelope` machine fields, attempt history, and checkpoint state instead of user-language phrase matching.
 
+Execution, answer verification, and delivery are separate facts. Journals expose
+`execution_status` and `answer_verification.status` (`not_required`, `passed`,
+`failed`, or `unavailable`). Unavailable verification checkpoints completed work
+instead of accepting an unchecked answer. Same-conversation references can be
+recalled through `task_control.recall_context` after fresh ownership checks.
+Multi-part channel delivery retries explicitly retryable rejected parts without
+replaying accepted parts or tool execution. See [context and recovery](docs/architecture/03-task-state-context.md)
+and [delivery recovery](docs/architecture/11-task-artifact-delivery.md).
+
 ### Request and Agent Loop Flow
 
 ```mermaid
@@ -138,7 +147,10 @@ flowchart TD
     BD -->|terminal| X
     R --> Y[User-visible message assembly]
     X --> Y
-    Y --> Z[Output-contract guard + task result]
+    Y --> AV{Answer verification}
+    AV -->|not_required / passed| Z[Output-contract guard + task result]
+    AV -->|failed| WR
+    AV -->|unavailable| BC
     Z --> AA[Channel delivery]
     Z --> AB[Journal + session update]
     AB --> AD[Task event stream<br/>goal + context + transition + checkpoint + tool/coding/team events]

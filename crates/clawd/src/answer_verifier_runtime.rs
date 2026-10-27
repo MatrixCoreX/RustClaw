@@ -27,7 +27,7 @@ pub(crate) async fn verify_answer_observe_only(
     route_result: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
-) -> Option<AnswerVerifierOut> {
+) -> AnswerVerificationOutcome {
     if let Some(local_gap) =
         local_compacted_machine_ref_answer_verifier_gap(journal, candidate_answer)
     {
@@ -38,10 +38,10 @@ pub(crate) async fn verify_answer_observe_only(
             retry_instruction = %local_gap.retry_instruction,
             "answer_verifier_local_compacted_machine_ref_gap"
         );
-        return Some(local_gap);
+        return AnswerVerificationOutcome::from_verdict(local_gap);
     }
     if !should_verify_answer(route_result, journal, candidate_answer) {
-        return None;
+        return AnswerVerificationOutcome::NotRequired;
     }
     if let Some(local_gap) =
         local_missing_evidence_verifier_gap_for_answer(route_result, journal, candidate_answer)
@@ -53,14 +53,14 @@ pub(crate) async fn verify_answer_observe_only(
             retry_instruction = %local_gap.retry_instruction,
             "answer_verifier_local_missing_evidence_gap"
         );
-        return Some(local_gap);
+        return AnswerVerificationOutcome::from_verdict(local_gap);
     }
     if structural_satisfaction_can_skip_verifier(route_result, journal, candidate_answer) {
         tracing::info!(
             task_id = %task.task_id,
             "answer_verifier_skipped_structural_satisfaction"
         );
-        return None;
+        return AnswerVerificationOutcome::Passed(None);
     }
     let resolved = match crate::bootstrap::load_required_prompt_template_for_state_with_meta(
         state,
@@ -73,7 +73,10 @@ pub(crate) async fn verify_answer_observe_only(
                 task.task_id,
                 err
             );
-            return None;
+            return AnswerVerificationOutcome::Unavailable {
+                error_code: "answer_verifier_prompt_unavailable",
+                retryable: false,
+            };
         }
     };
     let evidence_policy_context_prompt = evidence_policy_context_prompt_block(route_result);
@@ -132,7 +135,10 @@ pub(crate) async fn verify_answer_observe_only(
                 task.task_id,
                 err
             );
-            return None;
+            return AnswerVerificationOutcome::Unavailable {
+                error_code: "answer_verifier_provider_unavailable",
+                retryable: true,
+            };
         }
     };
     let validation = match crate::prompt_utils::validate_against_schema::<
@@ -172,7 +178,10 @@ pub(crate) async fn verify_answer_observe_only(
                 task.task_id,
                 err
             );
-            return Some(operation_audit::invalid_operation_audit());
+            return AnswerVerificationOutcome::Unavailable {
+                error_code: "answer_verifier_response_invalid",
+                retryable: true,
+            };
         }
     };
     if validation.high_confidence_gap()
@@ -184,7 +193,7 @@ pub(crate) async fn verify_answer_observe_only(
             answer_incomplete_reason = %validation.answer_incomplete_reason,
             "answer_verifier_gap_suppressed_structural_satisfaction"
         );
-        return None;
+        return AnswerVerificationOutcome::Passed(None);
     }
     if validation.high_confidence_gap() {
         tracing::warn!(
@@ -197,7 +206,7 @@ pub(crate) async fn verify_answer_observe_only(
             "answer_verifier_observed_gap"
         );
     }
-    Some(validation)
+    AnswerVerificationOutcome::from_verdict(validation)
 }
 
 pub(super) fn structured_json_values_from_step_output(output: &str) -> Vec<serde_json::Value> {

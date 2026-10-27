@@ -21,6 +21,7 @@ use crate::repo::ClaimChannelDeliveryDispatchOutcome;
 use crate::{AppState, ClaimedTask, RuntimeChannel};
 
 mod failure_notice;
+mod parts;
 
 const DELIVERY_DISPATCH_LEASE_SECONDS: u64 = 120;
 const DELIVERY_DISPATCH_HEARTBEAT_SECONDS: u64 = 30;
@@ -312,7 +313,7 @@ pub(crate) async fn deliver_task_envelope(
     payload: &Value,
     envelope: &ChannelDeliveryEnvelope,
 ) -> anyhow::Result<ChannelDeliveryServiceResult> {
-    let result = deliver_task_envelope_once(state, task, payload, envelope).await?;
+    let result = parts::deliver(state, task, payload, envelope).await?;
     failure_notice::deliver(state, task, payload, envelope, &result).await?;
     Ok(result)
 }
@@ -322,6 +323,7 @@ async fn deliver_task_envelope_once(
     task: &ClaimedTask,
     payload: &Value,
     envelope: &ChannelDeliveryEnvelope,
+    index_provider_messages: bool,
 ) -> anyhow::Result<ChannelDeliveryServiceResult> {
     envelope
         .validate()
@@ -383,7 +385,7 @@ async fn deliver_task_envelope_once(
     let observed_provider_message_ids = observed_progress.provider_message_ids;
     let failed_parts = observed_progress.part_failures;
     let now = crate::now_ts_u64();
-    let receipt = match send_result {
+    let mut receipt = match send_result {
         Ok(mut outcome) => {
             for provider_message_id in observed_provider_message_ids {
                 if !outcome.provider_message_ids.contains(&provider_message_id) {
@@ -461,6 +463,11 @@ async fn deliver_task_envelope_once(
             }
         }
     };
+    if !index_provider_messages {
+        // The aggregate parent owns webhooks; child part receipts retain their
+        // exact provider IDs inside `parts` without claiming the global index.
+        receipt.provider_message_ids.clear();
+    }
     crate::repo::record_channel_delivery_receipt(&state.core.db, &receipt)?;
     if let Err(err) = crate::repo::complete_channel_delivery_dispatch(
         &state.core.db,
@@ -473,7 +480,7 @@ async fn deliver_task_envelope_once(
         );
     }
     Ok(ChannelDeliveryServiceResult {
-        status: receipt_status(receipt.status),
+        status: receipt_service_status(&receipt),
         error_code: receipt.error_code.clone(),
         message_key: receipt.message_key.clone(),
         retryable: receipt.retryable,
@@ -482,14 +489,14 @@ async fn deliver_task_envelope_once(
     })
 }
 
-async fn send_with_dispatch_lease<F>(
+async fn send_with_dispatch_lease<F, T>(
     state: &AppState,
     idempotency_key: &str,
     lease_token: &str,
     send_future: F,
-) -> Result<crate::channel_send::ChannelSendOutcome, String>
+) -> Result<T, String>
 where
-    F: std::future::Future<Output = Result<crate::channel_send::ChannelSendOutcome, String>>,
+    F: std::future::Future<Output = Result<T, String>>,
 {
     let heartbeat_period = std::time::Duration::from_secs(DELIVERY_DISPATCH_HEARTBEAT_SECONDS);
     let mut heartbeat = tokio::time::interval_at(
@@ -584,7 +591,13 @@ fn delivery_failure_fields(error_text: &str) -> (String, String, String, Option<
         .as_ref()
         .map(|error| error.diagnostic_id.clone())
         .unwrap_or_else(|| format!("delivery:{}", Uuid::new_v4().simple()));
-    let retryable = provider_error.as_ref().is_some_and(|error| error.retryable);
+    // A timeout or malformed acknowledgement does not prove that the provider
+    // rejected the send. Only an explicit rate-limit rejection is safe to replay.
+    let retryable = provider_error.as_ref().is_some_and(|error| {
+        error.retryable
+            && error.failure_class
+                == claw_core::channel_provider_error::ChannelProviderFailureClass::RateLimited
+    });
     let provider_error_code = provider_error.and_then(|error| error.provider_error_code);
     (
         error_code,
@@ -597,12 +610,31 @@ fn delivery_failure_fields(error_text: &str) -> (String, String, String, Option<
 
 fn result_from_existing_receipt(receipt: ChannelDeliveryReceipt) -> ChannelDeliveryServiceResult {
     ChannelDeliveryServiceResult {
-        status: receipt_status(receipt.status),
+        status: receipt_service_status(&receipt),
         error_code: receipt.error_code.clone(),
         message_key: receipt.message_key.clone(),
         retryable: receipt.retryable,
         receipt: Some(receipt),
         failed_parts: Vec::new(),
+    }
+}
+
+fn receipt_service_status(receipt: &ChannelDeliveryReceipt) -> ChannelDeliveryServiceStatus {
+    if matches!(
+        receipt.status,
+        ChannelDeliveryStatus::Failed | ChannelDeliveryStatus::Partial
+    ) && matches!(
+        receipt.error_code.as_deref(),
+        Some(
+            "channel.provider.transport"
+                | "channel.provider.invalid_response"
+                | "channel.provider.unknown"
+                | "channel_delivery_part_query_required"
+        )
+    ) {
+        ChannelDeliveryServiceStatus::QueryRequired
+    } else {
+        receipt_status(receipt.status)
     }
 }
 

@@ -76,6 +76,8 @@ struct SkillInput {
     new_constraints: Option<Value>,
     pause_seconds: Option<u64>,
     dry_run: bool,
+    context_ref: Option<String>,
+    field_paths: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -167,6 +169,7 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
             "list_with_first_detail"
         }
         "get" | "get_one" | "query_task" | "task_detail" | "detail" => "get",
+        "recall_context" => "recall_context",
         "cancel" | "cancel_all" | "stop" | "stop_all" => "cancel_all",
         "cancel_one" | "cancel_index" | "cancel_number" | "stop_one" | "stop_index" => "cancel_one",
         "preview_resume" | "resume_preview" => "preview_resume",
@@ -184,6 +187,37 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         .get("dry_run")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let context_ref = obj
+        .get("context_ref")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let field_paths = obj
+        .get("field_paths")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .map(|v| {
+                    v.as_str()
+                        .map(str::to_owned)
+                        .ok_or("context_fields_invalid".to_string())
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    if action == "recall_context"
+        && (context_ref
+            .as_ref()
+            .is_none_or(|v| !v.starts_with("task-context:v1:") || v.len() > 80)
+            || field_paths.is_empty()
+            || field_paths.len() > 8
+            || field_paths
+                .iter()
+                .any(|v| !v.starts_with('/') || v.len() > 256))
+    {
+        return Err("context_reference_invalid".into());
+    }
     let alias = obj
         .get("alias")
         .and_then(Value::as_str)
@@ -298,6 +332,8 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
             new_constraints,
             pause_seconds,
             dry_run,
+            context_ref,
+            field_paths,
         });
     }
     Ok(SkillInput {
@@ -315,6 +351,8 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         new_constraints,
         pause_seconds,
         dry_run,
+        context_ref,
+        field_paths,
     })
 }
 
@@ -330,10 +368,23 @@ fn execute(
     let user_key = effective_user_key(req);
     Ok(async move {
         let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(timeout_secs))
             .build()
             .map_err(|e| format!("build http client failed: {e}"))?;
         match input.action.as_str() {
+            "recall_context" => {
+                if !is_task_id_shape(&request_id) {
+                    return Err("context_current_task_invalid".into());
+                }
+                let key = user_key.as_deref().ok_or("context_auth_required")?;
+                let response = client.post(format!("{base_url}/v1/tasks/{request_id}/context-recall"))
+                    .header("x-agent-key", key)
+                    .json(&json!({"context_ref": input.context_ref, "field_paths": input.field_paths}))
+                    .send().await.map_err(|_| "context_recall_transport_failed".to_string())?;
+                let value = parse_api_response::<Value>(response).await?;
+                Ok(SkillOutput::structured(value.to_string(), value))
+            }
             "bind_session_alias" => {
                 let alias = input
                     .alias

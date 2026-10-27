@@ -70,6 +70,7 @@ pub(super) fn enforce_post_write_content_evidence_guard(reply: &mut AskReply) ->
     if !content_evidence_required {
         if existing_post_write_gap {
             journal.answer_verifier_summary = None;
+            journal.answer_verification = None;
         }
         return false;
     }
@@ -90,10 +91,11 @@ pub(super) fn enforce_post_write_content_evidence_guard(reply: &mut AskReply) ->
     if missing_paths.is_empty() {
         if existing_post_write_gap {
             journal.answer_verifier_summary = None;
+            journal.answer_verification = None;
         }
         return false;
     }
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+    let verdict = crate::answer_verifier::AnswerVerifierOut {
         pass: false,
         missing_evidence_fields: vec!["content_excerpt".to_string()],
         answer_incomplete_reason: format!(
@@ -105,7 +107,11 @@ pub(super) fn enforce_post_write_content_evidence_guard(reply: &mut AskReply) ->
             "collect bounded content excerpts for modified code/test files after the write with fs_basic.read_text_range or fs_basic.grep_text, then finalize from observed content and validation evidence"
                 .to_string(),
         confidence: 0.96,
-    });
+    };
+    journal.record_answer_verification(
+        crate::answer_verifier::AnswerVerificationOutcome::from_verdict(verdict),
+        &reply.text,
+    );
     true
 }
 
@@ -164,14 +170,19 @@ pub(super) fn enforce_workspace_mutation_validation_success_guard(reply: &mut As
     {
         return false;
     }
-    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
-        pass: false,
-        missing_evidence_fields,
-        answer_incomplete_reason,
-        should_retry: true,
-        retry_instruction,
-        confidence,
-    });
+    journal.record_answer_verification(
+        crate::answer_verifier::AnswerVerificationOutcome::from_verdict(
+            crate::answer_verifier::AnswerVerifierOut {
+                pass: false,
+                missing_evidence_fields,
+                answer_incomplete_reason,
+                should_retry: true,
+                retry_instruction,
+                confidence,
+            },
+        ),
+        &reply.text,
+    );
     true
 }
 

@@ -75,7 +75,7 @@ pub(super) async fn finalize_capability_synthesis(
     if let Some(output_contract) = agent_run_context.and_then(AgentRunContext::output_contract) {
         let answer_contract =
             crate::answer_verifier::AnswerContract::new(user_text, output_contract.clone());
-        if let Some(verifier) = crate::answer_verifier::verify_answer_observe_only(
+        let outcome = crate::answer_verifier::verify_answer_observe_only(
             state,
             task,
             user_text,
@@ -83,10 +83,8 @@ pub(super) async fn finalize_capability_synthesis(
             &journal,
             &answer,
         )
-        .await
-        {
-            journal.record_answer_verifier_summary(verifier);
-        }
+        .await;
+        journal.record_answer_verification(outcome, &answer);
     }
     info!(
         "final_result_source=capability_result_synthesis task_id={} result_count={} evidence_count={}",

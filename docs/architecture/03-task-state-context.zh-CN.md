@@ -12,6 +12,33 @@
 
 客户端或 HTTP 等待超时本身不会终止已经持久化的任务。Worker 使用带 fencing 语义的 lease 与 heartbeat；需要续跑的工作通过 checkpoint 和机器生命周期字段表达。
 
+## 验证状态与授权回查
+
+任务 journal 的 summary 与 trace 分别记录 `execution_status` 和 `answer_verification`。
+验证状态包括 `not_required`、`passed`、`failed`、`unavailable`，通过 SHA-256 绑定被验证的
+候选答案。缺少提示词或模型请求失败不等于验证通过。验证服务不可用时，已完成动作的指纹、
+观察、预算和调用统计会保存到验证阶段 checkpoint；配置缺失则等待用户处理。恢复时从证据
+继续规划，不重放已完成的修改动作。改写后的答案必须获得明确接受，才能替换原答案。
+
+近期执行锚点提供有限数量的 `task-context:v1:<UUID>` 引用。Planner 可以调用
+`task_control.recall_context`，用 1-8 个 JSON pointer 指定读取旧请求或能力参数、结果字段。
+`POST /v1/tasks/:current_task_id/context-recall` 每次重新核对有效 key、主体、通信端、
+用户/聊天 ID、外部接收方及会话。管理员也不能绕过会话隔离。凭据会被移除；字段缺失、
+结果已删除或响应超过 24 KiB 时，返回结构化错误，不静默截断后让模型猜测。
+结果明确标记 `instruction_authority=none`、`current_execution_evidence=false`：
+历史内容只补充上下文，不是新指令、权限授予或本轮执行证据。
+
+```mermaid
+flowchart LR
+    A[有界历史任务引用] --> B[Planner 选择明确字段]
+    B --> C[重新校验当前用户与会话]
+    C -->|允许| D[脱敏的历史上下文]
+    C -->|拒绝或不可用| E[结构化观察]
+    D --> F[Planner 应用本轮约束]
+    F --> G[正常能力解析与权限校验]
+    E --> F
+```
+
 ```mermaid
 flowchart TD
     A[会话输入已接收] --> A1[(输入收据 + 事件)]

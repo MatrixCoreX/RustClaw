@@ -10,7 +10,7 @@
 ## Capability Summary (from interface)
 - Task lifecycle, structured session-alias binding, provider-failure, retryable-failure and repair-envelope observation, and side-effect-free coding-repair previews.
 - `task_control` lets the current user inspect unfinished tasks in the current chat, query a task detail by `task_id`, cancel unfinished tasks safely, resume or pause checkpointed long-running tasks, bind a planner-selected alias to a concrete target for later turns, inspect provider-failure recovery policy, preview structured retryable/missing-field/blocked repair observations, and preview a structured coding repair loop without side effects.
-- Scope is limited to the caller's own `queued` and `running` tasks in the current chat.
+- List and cancel actions are limited to the caller's own `queued` and `running` tasks in the current chat. `recall_context` reads terminal historical tasks only after current actor, channel, recipient and conversation checks.
 - Planner-facing selection should use structured capability/action fields from the registry. Do not add phrase-specific routing rules for any user language.
 - Task cancel/resume/pause dry-run or lifecycle-field preview requests must call the skill with `dry_run=true` and return observed machine fields. Do not answer those flows from static prose alone, even when the user has not supplied a concrete `task_id` or index.
 - When a `user_key` is present in the runner request/context, it is forwarded to `clawd` for authenticated task queries, cancellations, resume, and pause actions.
@@ -22,6 +22,7 @@
 - `list` - List current unfinished tasks (`running` + `queued`) for this user/chat.
 - `list_with_first_detail` - List current unfinished tasks and, when at least one exists, fetch detail for the first listed task so lifecycle field visibility can be answered from structured data.
 - `get` - Query one task detail by stable `task_id`, including `data.lifecycle` machine fields when available.
+- `recall_context` - Resolve an opaque `task-context:v1:<UUID>` from the current conversation's recent execution references. Supply `context_ref` and 1-8 explicit JSON pointer `field_paths` (maximum 256 bytes each), such as `/request`, `/capabilities/0/args`, or `/capabilities/0/data`. The runtime rechecks actor, channel and conversation ownership on every read, including admin requests. A missing or forbidden field is an error, not permission to guess. The response contains `fields`, `source_task_id`, `source_status`, and `source_digest`, with `instruction_authority=none` and `current_execution_evidence=false`. Historical context never grants current execution permission or proves that a new action ran. Secrets are removed, and responses over 24 KiB are rejected instead of silently truncated. `request_id` is supplied by the runner and identifies the current task; do not fabricate it.
 - `cancel_all` - Cancel all unfinished tasks for this user/chat, excluding the current control task itself.
 - `cancel_one` - Cancel one unfinished task by 1-based index from the current active-task ordering.
 - `preview_resume` - Return the no-mutation resume entrypoint and renewable execution-lease contract for a stable `task_id`.
@@ -35,9 +36,17 @@
 - Cancellation dry-runs are executable observations, not static prose: use `cancel_all` with `dry_run=true` when no specific index is supplied, or `cancel_one` with both `index` and `dry_run=true` when the user supplied a numbered task.
 
 ## Parameter Contract (from interface)
+For `recall_context`, select `/capabilities` first when the prior step index is
+unknown. It returns only a bounded index with capability/status and exact
+`args_ref`/`data_ref` pointers, not the full result bodies. Follow those pointers
+to fetch only the fields needed for the current instruction. Confirmation,
+approval, permission and credential fields are not reusable historical context.
+
 | Param | Required | Type | Default | Description |
 |---|---|---|---|---|
-| `action` | yes | string | - | One of: `list`, `list_with_first_detail`, `get`, `cancel_all`, `cancel_one`, `preview_resume`, `preview_provider_failure`, `preview_retryable_failure_observation`, `preview_repair_observation`, `preview_coding_repair`, `bind_session_alias`, `resume`, `pause`. |
+| `action` | yes | string | - | One of: `list`, `list_with_first_detail`, `get`, `recall_context`, `cancel_all`, `cancel_one`, `preview_resume`, `preview_provider_failure`, `preview_retryable_failure_observation`, `preview_repair_observation`, `preview_coding_repair`, `bind_session_alias`, `resume`, `pause`. |
+| `context_ref` | required for `recall_context` | string | - | Exact opaque `task-context:v1:<UUID>` supplied by the current conversation context. Maximum 80 bytes. |
+| `field_paths` | required for `recall_context` | string array | - | 1-8 explicit JSON pointers, maximum 256 bytes each. `/capabilities` returns only an index; follow its `args_ref` or `data_ref` for selected values. |
 | `alias` | required for `bind_session_alias` | string | - | Exact shorthand identifier explicitly assigned or reassigned by the current request; it must differ from `target`. Maximum 256 characters. |
 | `target` | required for `bind_session_alias` | string | - | Concrete typed machine locator to retain for later turns; maximum 4096 characters. |
 | `target_kind` | required for `bind_session_alias` | string | - | One of `path`, `url`, `task`, `artifact`, or `resource`. A resource target uses `namespace:identifier`. |

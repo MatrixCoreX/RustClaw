@@ -1056,6 +1056,25 @@ async fn send_whatsapp_web_bridge_result(
 const FEISHU_LARK_TEXT_CHUNK_CHARS: usize = 3500;
 const WECHAT_TEXT_CHUNK_CHARS: usize = 1800;
 
+pub(crate) fn delivery_text_chunk_chars(
+    state: &AppState,
+    channel: claw_core::types::ChannelKind,
+) -> usize {
+    use claw_core::types::ChannelKind;
+    let limit = match channel {
+        ChannelKind::Wechat => resolve_wechat_send_config(state)
+            .map(|c| c.text_chunk_chars)
+            .unwrap_or(WECHAT_TEXT_CHUNK_CHARS)
+            .max(1)
+            .min(WECHAT_TEXT_CHUNK_CHARS),
+        ChannelKind::Telegram => TELEGRAM_TEXT_CHUNK_CHARS,
+        ChannelKind::Whatsapp => WHATSAPP_TEXT_CHUNK_CHARS,
+        ChannelKind::Feishu | ChannelKind::Lark => FEISHU_LARK_TEXT_CHUNK_CHARS,
+        _ => TELEGRAM_TEXT_CHUNK_CHARS,
+    };
+    limit.saturating_sub(SEGMENT_PREFIX_MAX_CHARS).max(1)
+}
+
 fn record_wechat_part_result<T>(
     first_error: &mut Option<String>,
     result: Result<T, String>,

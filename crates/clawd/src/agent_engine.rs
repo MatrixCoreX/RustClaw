@@ -148,6 +148,17 @@ fn ensure_task_running(state: &AppState, task: &ClaimedTask) -> Result<(), Strin
     }
 }
 
+pub(crate) fn verification_checkpoint_payload(task: &ClaimedTask, loop_state: &LoopState) -> Value {
+    let now = crate::now_ts_u64().min(i64::MAX as u64) as i64;
+    support::build_agent_loop_checkpoint_progress_payload(
+        task,
+        loop_state,
+        "answer_verification_unavailable",
+        now,
+        now.saturating_add(60),
+    )
+}
+
 #[derive(Debug, Deserialize)]
 struct SinglePlanEnvelope {
     #[serde(default)]

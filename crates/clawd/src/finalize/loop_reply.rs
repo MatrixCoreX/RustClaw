@@ -1220,7 +1220,7 @@ pub(crate) async fn finalize_loop_reply(
         if !defer_to_post_write_readback {
             let answer_contract =
                 crate::answer_verifier::AnswerContract::new(user_text, route_result.clone());
-            if let Some(answer_verifier) = crate::answer_verifier::verify_answer_observe_only(
+            let outcome = crate::answer_verifier::verify_answer_observe_only(
                 state,
                 task,
                 user_text,
@@ -1228,10 +1228,8 @@ pub(crate) async fn finalize_loop_reply(
                 &journal,
                 &final_text,
             )
-            .await
-            {
-                journal.record_answer_verifier_summary(answer_verifier);
-            }
+            .await;
+            journal.record_answer_verification(outcome, &final_text);
         }
     }
 

@@ -801,7 +801,6 @@ pub(super) fn refresh_agent_loop_checkpoint_snapshot(loop_state: &mut super::Loo
     );
 }
 
-#[cfg(test)]
 pub(super) fn build_agent_loop_checkpoint_progress_payload(
     task: &ClaimedTask,
     loop_state: &super::LoopState,

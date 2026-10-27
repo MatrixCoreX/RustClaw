@@ -62,6 +62,36 @@ and then read its structured final result and `deliver_to_user` preference. This
 keeps resumed media jobs downloadable without teaching channels to parse prose
 or guess checkpoint layouts.
 
+## Partial Channel Delivery Recovery
+
+Multi-part terminal delivery creates an immutable logical part plan: bounded text
+chunks and individual media references. The plan binds the original task, actor,
+adapter, recipient and content; local files carry streaming SHA-256 checksums.
+Each part uses the existing durable dispatch lease and receipt protocol with a
+stable part key. Retrying the original authorized delivery skips accepted,
+delivered and read parts, and sends only explicitly retryable rejected parts.
+Child part records retain provider IDs; only the aggregate parent owns the
+provider-message index. Delivery/read callbacks cannot settle an unsent remainder.
+
+A provider rate-limit rejection can be retried. A timeout, invalid acknowledgement,
+or expired dispatch lease requires reconciliation instead of blind resend.
+Changed/expired local files fail without transmission. These delivery operations
+never repeat the original skill or tool action. A service restart retains receipts;
+an ambiguous in-flight claim remains `query_required`, not an exactly-once claim.
+Task/parent receipt removal cleans the part plan and child receipts.
+
+```mermaid
+flowchart LR
+    A[Authorized terminal delivery] --> B[Immutable part plan]
+    B --> C[Per-part lease and receipt]
+    C -->|accepted| D[Skip on retry]
+    C -->|explicit retryable rejection| E[Retry this part only]
+    C -->|unknown acknowledgement| F[Reconcile without resend]
+    E --> C
+    D --> G[Aggregate delivery receipt]
+    F --> G
+```
+
 ## Browser Access
 
 The UI uses these authenticated core routes through `webd`:

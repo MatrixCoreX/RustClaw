@@ -3,6 +3,8 @@ pub(crate) mod conversation_input_events;
 pub(crate) mod conversation_inputs;
 pub(crate) mod memory_routes;
 pub(crate) mod task_artifacts;
+pub(crate) mod task_context;
+pub(crate) mod task_query;
 pub(crate) mod task_delivery;
 pub(crate) mod task_events;
 pub(crate) mod ui_attachment_constraints;

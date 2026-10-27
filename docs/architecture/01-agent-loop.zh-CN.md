@@ -38,7 +38,10 @@ flowchart TD
     R --> W[直接权限/变更检查<br/>+ 共享技能协议]
     W --> T
     Q --> S[输出合同守卫]
-    S --> TT{revision 与 epoch 是否仍有效}
+    S --> AV{答案验证状态}
+    AV -->|not_required / passed| TT{revision 与 epoch 是否仍有效}
+    AV -->|failed| O
+    AV -->|unavailable| U
     TT -->|是| T[保存结果 + 交付 + 写入 journal]
     TT -->|否| U
     V --> T

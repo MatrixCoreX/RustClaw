@@ -41,7 +41,10 @@ flowchart TD
     R --> W[Direct permission/mutation checks<br/>+ shared skill protocol]
     W --> T
     Q --> S[Output contract guard]
-    S --> TT{Current revision and epoch?}
+    S --> AV{Answer verification status}
+    AV -->|not_required / passed| TT{Current revision and epoch?}
+    AV -->|failed| O
+    AV -->|unavailable| U
     TT -->|yes| T[Persist result + deliver + journal]
     TT -->|no| U
     V --> T

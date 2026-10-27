@@ -525,36 +525,45 @@ async fn try_bounded_answer_verifier_synthesis_retry(
         &retried_answer,
     )
     .await;
+    if matches!(
+        retry_verifier,
+        crate::answer_verifier::AnswerVerificationOutcome::Unavailable { .. }
+    ) {
+        if let Some(journal) = reply.task_journal.as_mut() {
+            journal.record_answer_verification(retry_verifier, &retried_answer);
+        }
+        return false;
+    }
     if state.task_provider_blocker(&task.task_id).is_some()
         || state.task_cost_blocker(&task.task_id).is_some()
     {
         return false;
     }
-    if let Some(retry_verifier) = retry_verifier {
+    if let Some(verifier_out) = retry_verifier.verdict() {
         let execution_gap_drift =
             retry_verifier_introduced_execution_gap_after_synthesis_only_retry(
                 verifier,
-                &retry_verifier,
+                verifier_out,
             );
-        if !retry_verifier_accepts_rewritten_answer(&retry_verifier, &retried_answer)
-            && !execution_gap_drift
-        {
+        if !retry_verifier_accepts_rewritten_answer(verifier_out, &retried_answer) {
+            if execution_gap_drift {
+                info!(task_id = %task.task_id, "answer_verifier_retry_retained_execution_evidence_without_accepting_failed_verification");
+            }
             if let Some(journal) = reply.task_journal.as_mut() {
-                journal.record_answer_verifier_summary(retry_verifier);
+                journal.record_answer_verification(retry_verifier, &retried_answer);
             }
             return false;
-        }
-        if execution_gap_drift {
-            info!(
-                task_id = %task.task_id,
-                missing_evidence_fields = ?retry_verifier.missing_evidence_fields,
-                "answer_verifier_retry_suppressed_new_execution_gap"
-            );
         }
     } else if !retry_rewritten_answer_is_publishable(&retried_answer) {
         return false;
     }
-    commit_answer_verifier_retry_answer(reply, retried_answer)
+    let accepted = commit_answer_verifier_retry_answer(reply, retried_answer);
+    if accepted {
+        if let Some(journal) = reply.task_journal.as_mut() {
+            journal.record_answer_verification(retry_verifier, &reply.text);
+        }
+    }
+    accepted
 }
 
 async fn record_session_start_hooks(

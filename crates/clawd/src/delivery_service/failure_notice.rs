@@ -254,7 +254,7 @@ pub(super) async fn deliver(
         format: claw_core::channel_delivery::ChannelTextFormat::Plain,
     }];
     // The inner dispatch keeps its own receipt/lease and does not recursively create notices.
-    let notice_result = super::deliver_task_envelope_once(state, task, payload, &notice)
+    let notice_result = super::deliver_task_envelope_once(state, task, payload, &notice, true)
         .await
         .context("delivery_failure_notice_dispatch_failed")?;
     if matches!(

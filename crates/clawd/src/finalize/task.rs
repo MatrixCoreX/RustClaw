@@ -4,6 +4,8 @@ use tracing::{error, info};
 
 use crate::{repo, AppState};
 
+#[path = "task_answer_verification.rs"]
+mod task_answer_verification;
 #[path = "task_answer_verifier_failure.rs"]
 mod task_answer_verifier_failure;
 #[path = "task_content_evidence_delivery.rs"]
@@ -631,7 +633,10 @@ pub(crate) async fn finalize_ask_result(
             ) {
                 failure_reply = false;
                 semantic_clarify = true;
-                journal.answer_verifier_summary = None;
+                journal.record_answer_verification(
+                    crate::answer_verifier::AnswerVerificationOutcome::NotRequired,
+                    &answer_text,
+                );
                 journal.record_final_answer(&answer_text);
             }
             if apply_exact_observation_machine_field_delivery(
@@ -664,10 +669,14 @@ pub(crate) async fn finalize_ask_result(
             if !failure_reply
                 && !semantic_clarify
                 && journal.answer_verifier_summary.is_none()
+                && !journal.has_answer_verification_for(&answer_text)
+                && !journal.answer_verification.as_ref().is_some_and(|record| {
+                    record.status == crate::answer_verifier::AnswerVerificationStatus::Unavailable
+                })
                 && !answer_verifier_recovery_already_terminal(&journal)
             {
                 let answer_verifier = if answer_is_existing_file_delivery_token {
-                    None
+                    crate::answer_verifier::AnswerVerificationOutcome::Passed(None)
                 } else {
                     let answer_contract =
                         crate::answer_verifier::AnswerContract::new(prompt, route_result.clone());
@@ -681,7 +690,9 @@ pub(crate) async fn finalize_ask_result(
                     )
                     .await
                 };
-                if let Some(answer_verifier) = answer_verifier {
+                let verifier_out = answer_verifier.verdict().cloned();
+                journal.record_answer_verification(answer_verifier, &answer_text);
+                if let Some(answer_verifier) = verifier_out {
                     let answer_verifier_retry =
                         answer_verifier_retry_applicable(route_result, &journal, &answer_verifier);
                     let retry_verifier_input = answer_verifier.clone();
@@ -718,6 +729,17 @@ pub(crate) async fn finalize_ask_result(
                     }
                 }
             }
+            if task_answer_verification::checkpoint_unavailable_verification(
+                state,
+                task,
+                &mut journal,
+            ) {
+                journal.record_runtime_llm_metrics(state, &task.task_id);
+                journal.record_final_answer("");
+                finalize_ask_checkpointed(state, task, "", &[], None, &mut journal).await?;
+                state.clear_task_llm_call_count(&task.task_id);
+                return Ok(());
+            }
             if delivery_path_gap_should_finalize_as_clarify(
                 route_result,
                 &answer_text,
@@ -725,7 +747,10 @@ pub(crate) async fn finalize_ask_result(
                 &journal,
             ) {
                 semantic_clarify = true;
-                journal.answer_verifier_summary = None;
+                journal.record_answer_verification(
+                    crate::answer_verifier::AnswerVerificationOutcome::NotRequired,
+                    &answer_text,
+                );
             }
             if !semantic_clarify
                 && apply_verified_terminal_answer_after_verifier_pass(

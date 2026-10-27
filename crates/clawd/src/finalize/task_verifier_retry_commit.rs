@@ -31,13 +31,9 @@ pub(super) async fn try_commit_answer_verifier_retry_answer(
         &retried_answer,
     )
     .await;
-    let retry_verifier_accepts = retry_verifier
-        .as_ref()
-        .is_none_or(|verifier| verifier.pass && !verifier.high_confidence_gap());
+    let retry_verifier_accepts = retry_verifier.accepts_candidate();
     if !retry_verifier_accepts {
-        if let Some(retry_verifier) = retry_verifier {
-            journal.record_answer_verifier_summary(retry_verifier);
-        }
+        journal.record_answer_verification(retry_verifier, &retried_answer);
         return false;
     }
 
@@ -48,5 +44,6 @@ pub(super) async fn try_commit_answer_verifier_retry_answer(
     answer_messages.push(answer_text.clone());
     journal.record_final_answer(answer_text.as_str());
     journal.answer_verifier_summary = None;
+    journal.record_answer_verification(retry_verifier, answer_text);
     true
 }

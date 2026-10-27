@@ -2,6 +2,44 @@ use super::*;
 use crate::task_journal::{TaskJournal, TaskJournalAnswerVerifierSummary, TaskJournalStepTrace};
 
 #[test]
+fn provider_checkpoint_handoff_retains_unavailable_verification_instead_of_erasing_it() {
+    let task = ClaimedTask {
+        claim_attempt: 1,
+        task_id: "verification-handoff".into(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "ui".into(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".into(),
+        payload_json: "{}".into(),
+    };
+    let mut journal = TaskJournal::new("fixture");
+    journal.record_answer_verification(
+        crate::answer_verifier::AnswerVerificationOutcome::Unavailable {
+            error_code: "answer_verifier_provider_unavailable",
+            retryable: true,
+        },
+        "candidate",
+    );
+    let prior = AskReply::non_llm("candidate".into()).with_task_journal(journal);
+    let handoff = checkpoint_handoff_reply_with_verification(
+        &task,
+        "fixture",
+        &LoopState::default(),
+        None,
+        &prior,
+    );
+    let record = handoff.task_journal.unwrap().answer_verification.unwrap();
+    assert_eq!(
+        record.status,
+        crate::answer_verifier::AnswerVerificationStatus::Unavailable
+    );
+    assert!(record.matches("candidate"));
+}
+
+#[test]
 fn ordinary_tool_turn_verifies_inside_loop_without_frontdoor_contract() {
     let request = "write the requested bytes, verify them, then remove the test file";
     let mut journal = TaskJournal::for_task("loop-verifier", "ask", request);

@@ -41,6 +41,7 @@ fn query_recent_execution_rows(
     db: &rusqlite::Connection,
     user_id: i64,
     chat_id: i64,
+    channel: &str,
     user_key: Option<&str>,
     conversation_id: Option<&str>,
     limit: usize,
@@ -58,6 +59,7 @@ fn query_recent_execution_rows(
          FROM tasks
          WHERE user_id = ?1
            AND chat_id = ?2
+           AND channel = ?6
            AND status IN ('succeeded', 'failed', 'canceled', 'timeout')
            AND (
              (?3 IS NOT NULL AND user_key = ?3)
@@ -75,7 +77,14 @@ fn query_recent_execution_rows(
          LIMIT ?5",
     )?;
     let rows = stmt.query_map(
-        params![user_id, chat_id, user_key, conversation_id, limit as i64],
+        params![
+            user_id,
+            chat_id,
+            user_key,
+            conversation_id,
+            limit as i64,
+            channel
+        ],
         |row| {
             let task_id: String = row.get(0)?;
             let kind: String = row.get(1)?;
@@ -203,7 +212,17 @@ pub(crate) fn build_recent_execution_anchor_context(
     if rows.is_empty() {
         return "<none>".to_string();
     }
-    render_recent_execution_anchor_context(&rows)
+    let refs = rows
+        .iter()
+        .map(|row| crate::http::task_context::context_ref(&row.0))
+        .collect::<Vec<_>>();
+    format!(
+        "{}\n### AUTHORIZED_CONTEXT_REFERENCES\n{}",
+        render_recent_execution_anchor_context(&rows),
+        json!({"capability": "task_control.recall_context", "context_refs": refs,
+            "field_paths": ["/request", "/capabilities", "/capabilities/0/args", "/capabilities/0/data"],
+            "instruction_authority": "none", "current_execution_evidence": false})
+    )
 }
 
 fn load_recent_execution_rows(
@@ -229,6 +248,7 @@ fn load_recent_execution_rows(
         &db,
         task.user_id,
         task.chat_id,
+        &task.channel,
         user_key,
         conversation_id.as_deref(),
         limit,
@@ -246,6 +266,7 @@ fn load_recent_execution_rows(
             &db,
             task.user_id,
             legacy_chat_id,
+            &task.channel,
             user_key,
             conversation_id.as_deref(),
             limit,

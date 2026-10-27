@@ -654,6 +654,8 @@ pub(crate) struct TaskJournal {
     pub(crate) task_observations: Vec<Value>,
     pub(crate) finalizer_summary: Option<TaskJournalFinalizerSummary>,
     pub(crate) answer_verifier_summary: Option<TaskJournalAnswerVerifierSummary>,
+    pub(crate) answer_verification: Option<crate::answer_verifier::AnswerVerificationRecord>,
+    pub(crate) answer_verification_checkpoint: Option<Value>,
     pub(crate) task_metrics: TaskJournalTaskMetrics,
     pub(crate) task_lifecycle: Option<Value>,
     pub(crate) task_checkpoint: Option<Value>,
@@ -839,6 +841,57 @@ impl TaskJournal {
         });
     }
 
+    pub(crate) fn record_answer_verification(
+        &mut self,
+        outcome: crate::answer_verifier::AnswerVerificationOutcome,
+        candidate: &str,
+    ) {
+        self.answer_verification = Some(outcome.record(candidate));
+        if let Some(verdict) = outcome.verdict() {
+            self.record_answer_verifier_summary(verdict.clone());
+        } else {
+            self.answer_verifier_summary = None;
+        }
+    }
+
+    pub(crate) fn has_answer_verification_for(&self, candidate: &str) -> bool {
+        self.answer_verification
+            .as_ref()
+            .is_some_and(|record| record.matches(candidate))
+    }
+
+    fn execution_status(&self) -> &'static str {
+        use claw_core::capability_result::CapabilityResultStatus;
+        if self
+            .capability_results
+            .iter()
+            .any(|v| v.status == CapabilityResultStatus::NeedsUser)
+        {
+            return "needs_user";
+        }
+        if self
+            .capability_results
+            .iter()
+            .any(|v| v.status == CapabilityResultStatus::Waiting)
+        {
+            return "waiting";
+        }
+        let accepted = self
+            .capability_results
+            .iter()
+            .any(|v| v.status == claw_core::capability_result::CapabilityResultStatus::Ok);
+        let rejected = self
+            .capability_results
+            .iter()
+            .any(|v| v.status == claw_core::capability_result::CapabilityResultStatus::Error);
+        match (accepted, rejected) {
+            (true, true) => "partial",
+            (true, false) => "succeeded",
+            (false, true) => "failed",
+            (false, false) => "not_attempted",
+        }
+    }
+
     pub(crate) fn record_used_evidence_ids_count(&mut self, used_evidence_ids_count: usize) {
         self.task_metrics.used_evidence_ids_count = Some(used_evidence_ids_count);
     }
@@ -998,6 +1051,12 @@ impl TaskJournal {
         if self.answer_verifier_summary.is_none() {
             self.answer_verifier_summary = other.answer_verifier_summary.clone();
         }
+        if self.answer_verification.is_none() {
+            self.answer_verification = other.answer_verification.clone();
+        }
+        if self.answer_verification_checkpoint.is_none() {
+            self.answer_verification_checkpoint = other.answer_verification_checkpoint.clone();
+        }
         if self.task_metrics.used_evidence_ids_count.is_none() {
             self.task_metrics.used_evidence_ids_count = other.task_metrics.used_evidence_ids_count;
         }
@@ -1107,6 +1166,8 @@ impl TaskJournal {
                 .as_ref()
                 .map(|summary| finalizer_summary_json(summary, self.output_contract.as_ref(), self)),
             "answer_verifier_summary": self.answer_verifier_summary.as_ref().map(answer_verifier_summary_json),
+            "answer_verification": self.answer_verification,
+            "execution_status": self.execution_status(),
             "task_lifecycle": self.task_lifecycle.clone(),
             "task_checkpoint": self.task_checkpoint.clone(),
             "task_goal": task_goal_summary_json(self),
@@ -1238,6 +1299,8 @@ impl TaskJournal {
                 .as_ref()
                 .map(|summary| finalizer_summary_json(summary, self.output_contract.as_ref(), self)),
             "answer_verifier_summary": self.answer_verifier_summary.as_ref().map(answer_verifier_summary_json),
+            "answer_verification": self.answer_verification,
+            "execution_status": self.execution_status(),
             "task_lifecycle": self.task_lifecycle.clone(),
             "task_checkpoint": self.task_checkpoint.clone(),
             "task_goal": task_goal_summary_json(self),
