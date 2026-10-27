@@ -22,6 +22,35 @@ fn state() -> crate::AppState {
         .with_real_skill_registry()
 }
 
+#[test]
+fn task_list_defaults_do_not_promote_an_unrequested_detail_fetch() {
+    let state = state();
+    let registry = state.get_skills_registry().expect("registry");
+    let entry = registry.get("task_control").expect("task control");
+    let list = entry
+        .planner_capabilities
+        .iter()
+        .find(|item| item.name == "task_control.list")
+        .unwrap();
+    let detail = entry
+        .planner_capabilities
+        .iter()
+        .find(|item| item.name == "task_control.list_with_first_detail")
+        .unwrap();
+    assert!(list.preferred);
+    assert!(!detail.preferred);
+    assert!(list
+        .description
+        .as_deref()
+        .unwrap()
+        .starts_with("Default read"));
+    assert!(detail
+        .description
+        .as_deref()
+        .unwrap()
+        .starts_with("Optional combined read"));
+}
+
 fn state_with_all_bundled_skills_enabled() -> crate::AppState {
     let state =
         crate::AppState::test_default_with_fixture_provider().with_prompt_layers_installed();

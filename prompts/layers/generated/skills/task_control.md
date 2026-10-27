@@ -19,8 +19,8 @@
 - No dedicated config entry points declared.
 
 ## Actions (from interface)
-- `list` - List current unfinished tasks (`running` + `queued`) for this user/chat.
-- `list_with_first_detail` - List current unfinished tasks and, when at least one exists, fetch detail for the first listed task so lifecycle field visibility can be answered from structured data.
+- `list` - Default for listing current unfinished tasks (`running` + `queued`) and their summary statuses for this user/chat. It does not fetch individual task details.
+- `list_with_first_detail` - Optional combined list and first-task detail query, only when both the list and lifecycle fields are needed. Do not use it for list-only summaries or call it alongside `list` for the same observation.
 - `get` - Query one task detail by stable `task_id`, including `data.lifecycle` machine fields when available.
 - `recall_context` - Resolve an opaque `task-context:v1:<UUID>` from the current conversation's recent execution references. Supply `context_ref` and 1-8 explicit JSON pointer `field_paths` (maximum 256 bytes each), such as `/request`, `/capabilities/0/args`, or `/capabilities/0/data`. The runtime rechecks actor, channel and conversation ownership on every read, including admin requests. A missing or forbidden field is an error, not permission to guess. The response contains `fields`, `source_task_id`, `source_status`, and `source_digest`, with `instruction_authority=none` and `current_execution_evidence=false`. Historical context never grants current execution permission or proves that a new action ran. Secrets are removed, and responses over 24 KiB are rejected instead of silently truncated. `request_id` is supplied by the runner and identifies the current task; do not fabricate it.
 - `cancel_all` - Cancel all unfinished tasks for this user/chat, excluding the current control task itself.

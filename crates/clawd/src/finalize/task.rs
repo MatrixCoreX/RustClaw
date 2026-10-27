@@ -6,6 +6,7 @@ use crate::{repo, AppState};
 
 #[path = "task_answer_verification.rs"]
 mod task_answer_verification;
+use task_answer_verification::apply_exact_observation_machine_field_delivery;
 pub(crate) use task_answer_verification::checkpoint_unavailable_verification;
 #[path = "task_answer_verifier_failure.rs"]
 mod task_answer_verifier_failure;
@@ -15,8 +16,6 @@ mod task_content_evidence_delivery;
 mod task_cost_wait;
 #[path = "task_delivery_guards.rs"]
 mod task_delivery_guards;
-#[path = "task_exact_machine_delivery.rs"]
-mod task_exact_machine_delivery;
 #[path = "task_failure_lifecycle.rs"]
 mod task_failure_lifecycle;
 #[path = "task_memory.rs"]
@@ -56,7 +55,6 @@ use task_delivery_guards::{
 use task_delivery_guards::{
     journal_has_missing_file_search_evidence, should_use_missing_file_delivery_reply,
 };
-use task_exact_machine_delivery::apply_exact_observation_machine_field_delivery;
 use task_failure_lifecycle::failed_task_lifecycle_payload;
 #[cfg(test)]
 use task_memory::assistant_memory_source_text;

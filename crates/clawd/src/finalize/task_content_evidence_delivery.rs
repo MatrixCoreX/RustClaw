@@ -17,7 +17,6 @@ pub(super) fn has_any_delivery_file_token(text: &str, messages: &[String]) -> bo
 
 pub(super) fn route_has_file_delivery_contract(route_result: &crate::IntentOutputContract) -> bool {
     route_result.delivery_required
-        || route_result.delivery_required
         || matches!(
             route_result.response_shape,
             crate::OutputResponseShape::FileToken

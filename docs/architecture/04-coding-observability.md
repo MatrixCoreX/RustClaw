@@ -14,6 +14,11 @@ Coding changes use explicit path ownership, patch preconditions, compensation
 snapshots, and observed verification. A failed check becomes a structured loop
 observation, not a hardcoded user reply.
 
+Temporary-directory cleanup inference requires an observed write/archive strictly
+inside that directory, not a file whose name equals the proposed cleanup root.
+Explicit file-only or non-recursive arguments are never widened by that inference.
+Requested cleanup flags remain separate from observed before/after object kinds.
+
 Verbose model logs encode large, compressible request payloads as self-contained
 `gzip-base64-v1` values with byte length and SHA-256. Teaching queries and NL
 trace/replay readers restore the original JSON before secret redaction or display.

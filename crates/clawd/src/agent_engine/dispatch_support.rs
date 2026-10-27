@@ -640,7 +640,7 @@ pub(super) async fn handle_call_tool_action(
         normalized_skill = state.resolve_canonical_skill_name(&rewrite.runtime_tool);
         resolved_args = rewrite.runtime_args;
         if crate::agent_engine::enrich_scratch_filesystem_cleanup_runtime_args(
-            state,
+            &state.skill_rt.workspace_root,
             loop_state,
             &requested_virtual_skill,
             &requested_virtual_args,
@@ -917,7 +917,7 @@ pub(super) async fn handle_call_skill_action(
         normalized_skill = state.resolve_canonical_skill_name(&rewrite.runtime_tool);
         resolved_args = rewrite.runtime_args;
         if crate::agent_engine::enrich_scratch_filesystem_cleanup_runtime_args(
-            state,
+            &state.skill_rt.workspace_root,
             loop_state,
             &requested_virtual_skill,
             &requested_virtual_args,

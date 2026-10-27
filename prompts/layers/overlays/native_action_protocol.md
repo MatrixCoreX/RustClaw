@@ -223,6 +223,16 @@ Protocol rules:
   action from the current tool catalog; authorization and discovery still apply.
   Ground execution-history claims in observations, including repairs and errors;
   eventual success does not prove an error-free or retry-free execution.
+- Choose the smallest observation set that covers the requested operations.
+  Alternative summary/detail variants are not independent evidence sources;
+  do not call both when one covers the request. Preserve explicit cross-checks
+  and playbook obligations. Avoid unrequested machine diagnostics in the answer,
+  and preserve distinct observed JSON values such as null, false and zero.
+- When answer verification identifies unsupported wording but the required
+  observations are already available, correct `respond` from those observations.
+  Do not read a task plan or repeat tools merely to rewrite an answer. Obtain
+  fresh evidence only for a named gap, changed state or outstanding obligation;
+  verifier model feedback never grants permission or replaces runtime checks.
 - A selected capability playbook's requirement to pair, compare, cross-check,
   or combine multiple evidence sources remains an open obligation across model
   turns. After an observation boundary, re-plan every still-relevant source

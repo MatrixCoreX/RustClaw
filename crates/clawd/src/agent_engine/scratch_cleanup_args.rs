@@ -1,12 +1,10 @@
 use serde_json::Value;
 use std::path::{Component, Path};
 
-use crate::AppState;
-
 use super::LoopState;
 
 pub(crate) fn enrich_scratch_filesystem_cleanup_runtime_args(
-    state: &AppState,
+    workspace_root: &Path,
     loop_state: &LoopState,
     requested_skill: &str,
     requested_args: &Value,
@@ -19,28 +17,35 @@ pub(crate) fn enrich_scratch_filesystem_cleanup_runtime_args(
     {
         return false;
     }
-    let Some(root) = scratch_root_for_fs_args(&state.skill_rt.workspace_root, requested_args)
-    else {
+    let Some(root) = scratch_root_for_fs_args(workspace_root, requested_args) else {
         return false;
     };
-    if !fs_args_target_scratch_root(&state.skill_rt.workspace_root, requested_args, &root) {
+    if !fs_args_target_scratch_root(workspace_root, requested_args, &root) {
         return false;
     }
-    let recovery_allows = scratch_lifecycle_progress_has_write_in_root(
-        &state.skill_rt.workspace_root,
-        loop_state,
-        root.as_str(),
-    ) || scratch_lifecycle_progress_has_archive_pack_in_root(
-        &state.skill_rt.workspace_root,
-        loop_state,
-        root.as_str(),
-    );
+    let recovery_allows =
+        scratch_lifecycle_progress_has_write_in_root(workspace_root, loop_state, root.as_str())
+            || scratch_lifecycle_progress_has_archive_pack_in_root(
+                workspace_root,
+                loop_state,
+                root.as_str(),
+            );
     if !recovery_allows {
         return false;
     }
     let Some(obj) = runtime_args.as_object_mut() else {
         return false;
     };
+    if obj.get("recursive").and_then(Value::as_bool) == Some(false)
+        || obj
+            .get("target_kind")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| {
+                !kind.trim().is_empty() && !kind.trim().eq_ignore_ascii_case("directory")
+            })
+    {
+        return false;
+    }
     let mut changed = false;
     let missing_target_kind = obj
         .get("target_kind")
@@ -103,6 +108,16 @@ fn scratch_root_for_path(workspace_root: &Path, raw_path: &str) -> Option<String
     Some(format!("tmp/{scratch_name}"))
 }
 
+fn is_descendant_of_scratch_root(workspace_root: &Path, raw_path: &str, root: &str) -> bool {
+    relative_workspace_path(workspace_root, raw_path).is_some_and(|relative| {
+        Path::new(&relative).strip_prefix(root).is_ok_and(|suffix| {
+            suffix
+                .components()
+                .any(|part| matches!(part, Component::Normal(_)))
+        })
+    })
+}
+
 fn scratch_lifecycle_progress_has_write_in_root(
     workspace_root: &Path,
     loop_state: &LoopState,
@@ -126,7 +141,7 @@ fn scratch_lifecycle_progress_has_write_in_root(
             let Some(path) = extra.get("path").and_then(Value::as_str) else {
                 return false;
             };
-            scratch_root_for_path(workspace_root, path).as_deref() == Some(root)
+            is_descendant_of_scratch_root(workspace_root, path, root)
         })
 }
 
@@ -153,7 +168,7 @@ fn scratch_lifecycle_progress_has_archive_pack_in_root(
             let Some(path) = extra.get("archive").and_then(Value::as_str) else {
                 return false;
             };
-            scratch_root_for_path(workspace_root, path).as_deref() == Some(root)
+            is_descendant_of_scratch_root(workspace_root, path, root)
         })
 }
 
@@ -179,9 +194,9 @@ fn relative_workspace_path(workspace_root: &Path, raw_path: &str) -> Option<Stri
             .canonicalize()
             .unwrap_or_else(|_| workspace_root.to_path_buf());
         let stripped = raw.strip_prefix(root).ok()?;
-        return Some(stripped.to_string_lossy().replace('\\', "/"));
+        return Some(stripped.to_string_lossy().into_owned());
     }
-    Some(raw_path.replace('\\', "/"))
+    Some(raw_path.to_string())
 }
 
 #[cfg(test)]
