@@ -201,7 +201,7 @@ fn routing_uses_observed_latency_and_places_open_breaker_last() {
         Some(0.1),
     );
     for _ in 0..3 {
-        open_breaker.breaker.note_failure();
+        open_breaker.breaker.before_attempt().note_failure();
     }
 
     let plan = route_providers(

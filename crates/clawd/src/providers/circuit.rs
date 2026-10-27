@@ -35,6 +35,7 @@ const INITIAL_COOLDOWN_MS: u64 = 60_000;
 
 /// cooldown 上限（毫秒）。指数退避封顶，避免坏 provider 永远被屏蔽。
 const MAX_COOLDOWN_MS: u64 = 300_000;
+const TRIAL_RECHECK_MS: u64 = 5_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum State {
@@ -63,6 +64,7 @@ pub(crate) struct CircuitBreakerSnapshot {
 
 #[derive(Debug)]
 struct Inner {
+    generation: u64,
     state: State,
     consecutive_failures: u32,
     /// 当前应该等待的 cooldown 长度（指数退避后的值）。
@@ -85,13 +87,60 @@ pub(crate) enum AttemptDecision {
     AllowTrial,
     /// 当前 provider 处于 Open 状态且 cooldown 未到期，跳过。
     /// `remaining_ms` 是剩余冷却时间，便于 caller 打日志。
-    SkipCooldown { remaining_ms: u64 },
+    SkipCooldown {
+        remaining_ms: u64,
+    },
+    SkipTrialInFlight {
+        retry_after_ms: u64,
+    },
+}
+
+#[derive(Debug)]
+pub(crate) struct CircuitAttempt<'a> {
+    breaker: &'a CircuitBreaker,
+    generation: Option<u64>,
+    pub(crate) decision: AttemptDecision,
+}
+
+impl CircuitAttempt<'_> {
+    pub(crate) fn note_success(mut self) {
+        if let Some(generation) = self.generation.take() {
+            self.breaker.finish_attempt(generation, true);
+        }
+    }
+
+    pub(crate) fn note_failure(mut self) {
+        if let Some(generation) = self.generation.take() {
+            self.breaker.finish_attempt(generation, false);
+        }
+    }
+}
+
+impl Drop for CircuitAttempt<'_> {
+    fn drop(&mut self) {
+        if self.decision != AttemptDecision::AllowTrial {
+            return;
+        }
+        let Some(generation) = self.generation.take() else {
+            return;
+        };
+        let Ok(mut inner) = self.breaker.inner.lock() else {
+            return;
+        };
+        if inner.generation == generation && inner.state == State::HalfOpen {
+            // Cancellation is not a provider failure, but must release its only trial.
+            inner.state = State::Open;
+            inner.generation = inner.generation.wrapping_add(1);
+            inner.opened_at = Some(Instant::now());
+        }
+    }
 }
 
 impl CircuitBreaker {
     pub(crate) fn new() -> Self {
         Self {
             inner: Mutex::new(Inner {
+                generation: 0,
                 state: State::Closed,
                 consecutive_failures: 0,
                 current_cooldown_ms: INITIAL_COOLDOWN_MS,
@@ -102,12 +151,14 @@ impl CircuitBreaker {
 
     /// 在打 provider 之前调用：决定是否放行。
     /// 这一步可能有副作用：Open 且 cooldown 到期时会切到 HalfOpen。
-    pub(crate) fn before_attempt(&self) -> AttemptDecision {
+    pub(crate) fn before_attempt(&self) -> CircuitAttempt<'_> {
         let now = Instant::now();
         let mut inner = self.inner.lock().expect("circuit breaker mutex poisoned");
-        match inner.state {
+        let decision = match inner.state {
             State::Closed => AttemptDecision::Allow,
-            State::HalfOpen => AttemptDecision::AllowTrial,
+            State::HalfOpen => AttemptDecision::SkipTrialInFlight {
+                retry_after_ms: TRIAL_RECHECK_MS,
+            },
             State::Open => {
                 let cooldown = Duration::from_millis(inner.current_cooldown_ms);
                 let elapsed = inner
@@ -116,6 +167,7 @@ impl CircuitBreaker {
                     .unwrap_or(cooldown);
                 if elapsed >= cooldown {
                     inner.state = State::HalfOpen;
+                    inner.generation = inner.generation.wrapping_add(1);
                     inner.opened_at = None;
                     AttemptDecision::AllowTrial
                 } else {
@@ -123,24 +175,34 @@ impl CircuitBreaker {
                     AttemptDecision::SkipCooldown { remaining_ms }
                 }
             }
+        };
+        CircuitAttempt {
+            breaker: self,
+            generation: matches!(
+                decision,
+                AttemptDecision::Allow | AttemptDecision::AllowTrial
+            )
+            .then_some(inner.generation),
+            decision,
         }
     }
 
-    /// provider 调用成功（或被业务视为 OK，比如内容被清洗后非空）后调用。
-    /// 立刻清零失败计数 + 回到 Closed + 重置 cooldown。
-    pub(crate) fn note_success(&self) {
+    /// Apply only the current generation's completed attempt, never a late predecessor.
+    fn finish_attempt(&self, generation: u64, success: bool) {
         let mut inner = self.inner.lock().expect("circuit breaker mutex poisoned");
-        inner.state = State::Closed;
-        inner.consecutive_failures = 0;
-        inner.current_cooldown_ms = INITIAL_COOLDOWN_MS;
-        inner.opened_at = None;
-    }
-
-    /// provider 调用失败后调用。
-    /// 1) 累加 consecutive_failures；
-    /// 2) 若达阈值或处于 HalfOpen 失败，进入 Open；HalfOpen → Open 时 cooldown × 2。
-    pub(crate) fn note_failure(&self) {
-        let mut inner = self.inner.lock().expect("circuit breaker mutex poisoned");
+        if inner.generation != generation {
+            return;
+        }
+        if success {
+            if inner.state == State::HalfOpen {
+                inner.generation = inner.generation.wrapping_add(1);
+            }
+            inner.state = State::Closed;
+            inner.consecutive_failures = 0;
+            inner.current_cooldown_ms = INITIAL_COOLDOWN_MS;
+            inner.opened_at = None;
+            return;
+        }
         inner.consecutive_failures = inner.consecutive_failures.saturating_add(1);
         let was_half_open = inner.state == State::HalfOpen;
         let should_open = was_half_open || inner.consecutive_failures >= FAILURE_THRESHOLD;
@@ -153,6 +215,7 @@ impl CircuitBreaker {
                 inner.current_cooldown_ms = INITIAL_COOLDOWN_MS;
             }
             inner.state = State::Open;
+            inner.generation = inner.generation.wrapping_add(1);
             inner.opened_at = Some(Instant::now());
         }
     }

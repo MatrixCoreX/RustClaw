@@ -150,3 +150,18 @@ remain separate controls. A core restart adopts the persisted checkpoint and
 polls the existing job instead of repeating completed steps. A machine reboot
 or a service manager that kills the entire process group/cgroup can still end
 the job; the resulting process-loss observation goes through loop recovery.
+
+### Provider Recovery
+
+Text and native-tool model turns share provider circuit ownership. Three completed
+infrastructure failures open a circuit; cooldown starts at 60 seconds and a failed
+recovery trial doubles it up to 300 seconds. Normal healthy calls remain concurrent,
+but recovery admits only one owned half-open trial. Cancelling that future releases
+the trial into the existing cooldown without recording another provider failure.
+Outcomes from an older circuit generation cannot reset or extend a newer circuit.
+These transitions consume structured provider health, not user-language phrases.
+
+If all eligible providers are cooling down or already running a recovery trial,
+both model entrypoints record a structured `TaskProviderBlocker` with a bounded
+retry hint. The agent can checkpoint and wait; a temporarily withheld provider is
+not treated as proof that the requested capability or model is unsupported.

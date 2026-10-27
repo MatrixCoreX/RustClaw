@@ -230,6 +230,14 @@ Deleting a task removes its controlled delivery directory. A background cleanup
 pass also removes orphan task directories. Original workspace files remain
 owned by the tool or skill that created them.
 
+Automatic task retention applies only to terminal non-conversation tasks with no
+pending execution settlement or durable consumer. Queued/running work, unsettled
+cancellation, pending/dispatching delivery outboxes, scheduled resume anchors and
+child-graph owners/results retain their task rows. Conversation history and the
+configured retention periods remain unchanged; age or row pressure is not an
+implicit cancellation command. Both retention policies use the same eligibility
+predicate and keep deletion batches bounded.
+
 ```bash
 cargo test -p clawd task_artifact
 cargo test -p clawd conversation_history_projects_downloadable_task_artifacts

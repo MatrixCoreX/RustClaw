@@ -785,7 +785,8 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
         // Phase 2.1: 进入 provider 之前先问 circuit breaker。
         // Open + cooldown 未到期 → 直接跳到下一家，不浪费这次 fallback 的
         // retry / timeout 配额。也避免在 model_io.log 里反复刷同一个坏 provider。
-        let breaker_decision = provider.breaker.before_attempt();
+        let breaker_attempt = provider.breaker.before_attempt();
+        let breaker_decision = breaker_attempt.decision;
         match breaker_decision {
             crate::providers::AttemptDecision::Allow => {
                 selected_provider_count = selected_provider_count.saturating_add(1);
@@ -820,7 +821,10 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                     prompt_source
                 );
             }
-            crate::providers::AttemptDecision::SkipCooldown { remaining_ms } => {
+            crate::providers::AttemptDecision::SkipCooldown { remaining_ms }
+            | crate::providers::AttemptDecision::SkipTrialInFlight {
+                retry_after_ms: remaining_ms,
+            } => {
                 state.note_task_provider_route_with_label(
                     &task.task_id,
                     prompt_label,
@@ -832,7 +836,7 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                     provider.breaker.snapshot(),
                 );
                 warn!(
-                    "{} [LLM_CALL] stage=circuit_open_skip task_id={} provider={} prompt_source={} cooldown_remaining_ms={}",
+                    "{} [LLM_CALL] stage=circuit_skip task_id={} provider={} prompt_source={} retry_after_ms={}",
                     crate::highlight_tag("llm"),
                     task.task_id,
                     provider_name,
@@ -1039,7 +1043,7 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                     prompt_label,
                     call_started_at.elapsed().as_millis() as u64,
                 );
-                provider.breaker.note_success();
+                breaker_attempt.note_success();
                 state.note_task_provider_breaker_snapshot_with_label(
                     &task.task_id,
                     prompt_label,
@@ -1095,12 +1099,12 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                     Some(error_kind),
                 );
                 if err.should_trip_breaker() {
-                    provider.breaker.note_failure();
+                    breaker_attempt.note_failure();
                 } else if err.should_reset_breaker() {
                     // breaker 只跟踪 provider 基础设施健康。当前这次调用已经拿到了
                     // 有效 provider 响应（哪怕业务上是 4xx/429/blocked），说明
                     // 上游链路已恢复，不应继续维持 Open/HalfOpen。
-                    provider.breaker.note_success();
+                    breaker_attempt.note_success();
                 }
                 state.note_task_provider_breaker_snapshot_with_label(
                     &task.task_id,
@@ -1195,22 +1199,9 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
         // 全员被 breaker 拦下，所有 provider 当前都在 cooldown。
         // 这种情况要给一个**明确的可识别错误**，让上游日志/指标里能看见
         // "短时间集中失败"信号，而不是含糊的 "unknown llm error"。
-        let retry_after_seconds = skipped_providers
-            .iter()
-            .map(|(_, remaining_ms)| remaining_ms.saturating_add(999) / 1_000)
-            .min()
-            .unwrap_or(1)
-            .max(1);
-        state.note_task_provider_blocker(
-            &task.task_id,
-            TaskProviderBlocker {
-                provider: "provider_set".to_string(),
-                status_code: "provider_circuit_open".to_string(),
-                retry_after_seconds,
-                external_provider_blocked: true,
-                message_key: "provider.temporarily_unavailable".to_string(),
-            },
-        );
+        if let Some(blocker) = provider_circuit_wait_blocker(&skipped_providers) {
+            state.note_task_provider_blocker(&task.task_id, blocker);
+        }
         let detail = skipped_providers
             .iter()
             .map(|(provider, remaining_ms)| format!("{provider}(cooldown_ms={remaining_ms})"))
@@ -1237,6 +1228,21 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
         state.note_task_provider_blocker(&task.task_id, blocker);
     }
     Err(last_error)
+}
+
+fn provider_circuit_wait_blocker(skipped: &[(String, u64)]) -> Option<TaskProviderBlocker> {
+    let retry_after_seconds = skipped
+        .iter()
+        .map(|(_, milliseconds)| milliseconds.saturating_add(999) / 1_000)
+        .min()?
+        .max(1);
+    Some(TaskProviderBlocker {
+        provider: "provider_set".to_string(),
+        status_code: "provider_circuit_open".to_string(),
+        retry_after_seconds,
+        external_provider_blocked: true,
+        message_key: "provider.temporarily_unavailable".to_string(),
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

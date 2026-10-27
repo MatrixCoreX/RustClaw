@@ -19,6 +19,8 @@ fn test_state() -> crate::AppState {
         let db = state.core.db.get().expect("get db");
         crate::memory::indexing::ensure_retrieval_schema(&db)
             .expect("ensure memory retrieval schema");
+        crate::repo::ensure_channel_delivery_outbox_schema(&db).expect("ensure terminal outbox");
+        crate::repo::ensure_conversation_reply_item_schema(&db).expect("ensure reply outbox");
     }
     state
 }
@@ -251,6 +253,235 @@ fn cleanup_limits_each_expired_task_pass_to_a_fixed_batch() {
         )
         .expect("count remaining tasks");
     assert_eq!(remaining, 5);
+}
+
+#[test]
+fn cleanup_preserves_active_nonconversation_tasks_under_age_and_count_limits() {
+    for age_policy in [true, false] {
+        let mut state = test_state();
+        state.policy.maintenance.tasks_max_rows = if age_policy { 10_000 } else { 0 };
+        for status in ["queued", "running"] {
+            insert_task_with_kind(&state, status, "run_skill", status, Some(&json!({})));
+        }
+        insert_task_with_kind(
+            &state,
+            "finished",
+            "run_skill",
+            "succeeded",
+            Some(&json!({})),
+        );
+        if !age_policy {
+            state
+                .core
+                .db
+                .get()
+                .unwrap()
+                .execute(
+                    "UPDATE tasks SET created_at=?1, updated_at=?1",
+                    [crate::now_ts()],
+                )
+                .unwrap();
+        }
+        cleanup_once(&state).unwrap();
+        let db = state.core.db.get().unwrap();
+        let mut statement = db
+            .prepare("SELECT task_id FROM tasks ORDER BY task_id")
+            .unwrap();
+        let retained = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            retained,
+            vec!["queued", "running"],
+            "age_policy={age_policy}"
+        );
+    }
+}
+
+#[test]
+fn cleanup_preserves_cancellation_until_execution_settles() {
+    let state = test_state();
+    insert_task_with_kind(
+        &state,
+        "cancel-pending",
+        "run_skill",
+        "canceled",
+        Some(&json!({"task_lifecycle":{"state":"cancel_requested"}})),
+    );
+    insert_task_with_kind(
+        &state,
+        "cancel-settled",
+        "run_skill",
+        "canceled",
+        Some(&json!({"task_lifecycle":{"state":"cancelled"}})),
+    );
+    cleanup_once(&state).unwrap();
+    let db = state.core.db.get().unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT COUNT(*) FROM tasks WHERE task_id='cancel-pending'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT COUNT(*) FROM tasks WHERE task_id='cancel-settled'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn cleanup_preserves_unfinished_terminal_delivery_under_both_policies() {
+    for age_policy in [true, false] {
+        let mut state = test_state();
+        state.policy.maintenance.tasks_max_rows = if age_policy { 10_000 } else { 0 };
+        for status in ["pending", "dispatching", "completed", "failed"] {
+            insert_task_with_kind(&state, status, "run_skill", "succeeded", Some(&json!({})));
+            state.core.db.get().unwrap().execute(
+                "INSERT INTO channel_terminal_delivery_outbox(task_id,state,created_at_ts,updated_at_ts) VALUES (?1,?1,1,1)",
+                [status],
+            ).unwrap();
+        }
+        if !age_policy {
+            state
+                .core
+                .db
+                .get()
+                .unwrap()
+                .execute("UPDATE tasks SET created_at=?1", [crate::now_ts()])
+                .unwrap();
+        }
+        cleanup_once(&state).unwrap();
+        let db = state.core.db.get().unwrap();
+        let mut statement = db
+            .prepare("SELECT task_id FROM tasks ORDER BY task_id")
+            .unwrap();
+        let retained = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            retained,
+            vec!["dispatching", "pending"],
+            "age_policy={age_policy}"
+        );
+    }
+}
+
+#[test]
+fn cleanup_preserves_pending_conversation_replies_until_delivery_settles() {
+    let state = test_state();
+    for status in ["pending", "dispatching", "completed"] {
+        insert_task_with_kind(&state, status, "run_skill", "succeeded", Some(&json!({})));
+        let db = state.core.db.get().unwrap();
+        db.execute(
+            "INSERT INTO conversation_reply_items(reply_id,task_id,owner_principal_id,instruction_revision,
+             execution_epoch,relation,lifecycle_stage,text,content_digest,created_at_ts)
+             VALUES (?1,?1,'owner',1,1,'side_reply','settled','fixture',?1,1)", [status],
+        ).unwrap();
+        db.execute("INSERT INTO conversation_reply_delivery_outbox(reply_id,state,created_at_ts,updated_at_ts)
+                    VALUES (?1,?1,1,1)", [status]).unwrap();
+    }
+    cleanup_once(&state).unwrap();
+    let db = state.core.db.get().unwrap();
+    let retained: i64 = db
+        .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(retained, 2);
+    db.execute(
+        "UPDATE conversation_reply_delivery_outbox SET state='completed'",
+        [],
+    )
+    .unwrap();
+    drop(db);
+    cleanup_once(&state).unwrap();
+    assert_eq!(
+        state
+            .core
+            .db
+            .get()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn cleanup_preserves_scheduled_resume_anchors() {
+    let state = test_state();
+    insert_task_with_kind(
+        &state,
+        "thread-anchor",
+        "run_skill",
+        "succeeded",
+        Some(&json!({})),
+    );
+    insert_due_job(
+        &state,
+        "scheduled-thread",
+        "thread-anchor",
+        crate::now_ts_u64() as i64 + 3600,
+    );
+    cleanup_once(&state).unwrap();
+    let db = state.core.db.get().unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT COUNT(*) FROM tasks WHERE task_id='thread-anchor'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
+    db.execute("UPDATE scheduled_jobs SET last_thread_task_id=NULL", [])
+        .unwrap();
+    drop(db);
+    cleanup_once(&state).unwrap();
+    assert_eq!(
+        state
+            .core
+            .db
+            .get()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn cleanup_preserves_child_graph_owners_and_results() {
+    let state = test_state();
+    for task_id in ["graph-parent", "graph-child", "unreferenced"] {
+        insert_task_with_kind(&state, task_id, "run_skill", "succeeded", Some(&json!({})));
+    }
+    {
+        let db = state.core.db.get().unwrap();
+        db.execute("INSERT INTO child_task_graphs(parent_task_id,schema_version,status,max_parallel,created_at,updated_at)
+                    VALUES ('graph-parent',2,'completed',1,'1','1')", []).unwrap();
+        db.execute("INSERT INTO child_task_graph_nodes(parent_task_id,child_task_id,role,required,readiness,
+                    permission_profile,merge_policy,owned_paths_json,budget_json,model_policy_json,tool_policy_json,
+                    result_contract_json,created_at,updated_at)
+                    VALUES ('graph-parent','graph-child','reader',1,'completed','read_only','none','[]','{}','{}','{}','{}','1','1')", []).unwrap();
+    }
+    cleanup_once(&state).unwrap();
+    let db = state.core.db.get().unwrap();
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
 }
 
 #[test]

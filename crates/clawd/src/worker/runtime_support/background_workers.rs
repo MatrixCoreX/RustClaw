@@ -648,25 +648,52 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
 
     let now = now_ts_u64() as i64;
 
+    // Retention is not cancellation: active execution and durable consumers own
+    // their task rows until settled, even when an age or row limit is exceeded.
+    let eligible = "kind != 'ask'
+        AND status IN ('succeeded', 'failed', 'canceled', 'timeout')
+        AND (status != 'canceled' OR COALESCE(
+            CASE WHEN json_valid(result_json)
+                 THEN json_extract(result_json, '$.task_lifecycle.state') END, ''
+        ) != 'cancel_requested')
+        AND NOT EXISTS (
+            SELECT 1 FROM channel_terminal_delivery_outbox outbox
+            WHERE outbox.task_id = tasks.task_id AND outbox.state IN ('pending', 'dispatching')
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM conversation_reply_items item
+            JOIN conversation_reply_delivery_outbox outbox ON outbox.reply_id = item.reply_id
+            WHERE item.task_id = tasks.task_id AND outbox.state IN ('pending', 'dispatching')
+        )
+        AND task_id NOT IN (
+            SELECT last_thread_task_id FROM scheduled_jobs
+            WHERE thread_resume_enabled = 1 AND last_thread_task_id IS NOT NULL
+        )
+        AND NOT EXISTS (SELECT 1 FROM child_task_graphs graph WHERE graph.parent_task_id = tasks.task_id)
+        AND NOT EXISTS (SELECT 1 FROM child_task_graph_nodes node WHERE node.child_task_id = tasks.task_id)";
     let task_cutoff = now - (state.policy.maintenance.tasks_retention_days as i64 * 86400);
     db.execute(
-        "DELETE FROM tasks WHERE task_id IN (
+        &format!(
+            "DELETE FROM tasks WHERE task_id IN (
              SELECT task_id FROM tasks
-             WHERE kind != 'ask'
+             WHERE {eligible}
                AND CAST(created_at AS INTEGER) < ?1
              ORDER BY CAST(created_at AS INTEGER) ASC, task_id ASC
              LIMIT ?2
-         )",
+         )"
+        ),
         rusqlite::params![task_cutoff, MAINTENANCE_DELETE_BATCH_SIZE],
     )?;
 
     db.execute(
-        "DELETE FROM tasks WHERE task_id IN (
+        &format!(
+            "DELETE FROM tasks WHERE task_id IN (
              SELECT task_id FROM tasks
-             WHERE kind != 'ask'
-             ORDER BY CAST(created_at AS INTEGER) DESC
+             WHERE {eligible}
+             ORDER BY CAST(created_at AS INTEGER) DESC, task_id DESC
              LIMIT ?2 OFFSET ?1
-         )",
+         )"
+        ),
         rusqlite::params![
             state.policy.maintenance.tasks_max_rows as i64,
             MAINTENANCE_DELETE_BATCH_SIZE

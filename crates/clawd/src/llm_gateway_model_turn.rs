@@ -104,13 +104,21 @@ pub(crate) async fn run_native_model_turn_with_fallback(
     let mut recoverable_blocker = None;
     let mut attempted_provider_count = 0_u64;
     let mut context_length_error_count = 0_u64;
+    let mut skipped_providers = Vec::new();
     let model_event_index = Arc::new(AtomicU64::new(0));
     let conversation_interrupt = state.worker.model_turn_interrupt_token(&task.task_id);
 
     for provider in routing_plan.providers {
         let provider_name = format!("{}:{}", provider.config.name, provider.config.model);
-        match provider.breaker.before_attempt() {
-            crate::providers::AttemptDecision::SkipCooldown { .. } => continue,
+        let breaker_attempt = provider.breaker.before_attempt();
+        match breaker_attempt.decision {
+            crate::providers::AttemptDecision::SkipCooldown { remaining_ms }
+            | crate::providers::AttemptDecision::SkipTrialInFlight {
+                retry_after_ms: remaining_ms,
+            } => {
+                skipped_providers.push((provider_name, remaining_ms));
+                continue;
+            }
             crate::providers::AttemptDecision::Allow
             | crate::providers::AttemptDecision::AllowTrial => {}
         }
@@ -222,7 +230,7 @@ pub(crate) async fn run_native_model_turn_with_fallback(
                 provider
                     .latency
                     .note_sample(provider_started_at.elapsed().as_millis() as u64);
-                provider.breaker.note_success();
+                breaker_attempt.note_success();
                 state.note_task_provider_attempts_with_label(
                     &task.task_id,
                     prompt_label,
@@ -295,9 +303,9 @@ pub(crate) async fn run_native_model_turn_with_fallback(
                     .note_sample(provider_started_at.elapsed().as_millis() as u64);
                 let error_kind = err.observability_kind();
                 if err.should_trip_breaker() {
-                    provider.breaker.note_failure();
+                    breaker_attempt.note_failure();
                 } else if err.should_reset_breaker() {
-                    provider.breaker.note_success();
+                    breaker_attempt.note_success();
                 }
                 if let Some(retry_after_seconds) = err.background_wait_seconds() {
                     recoverable_blocker = Some(TaskProviderBlocker {
@@ -353,6 +361,9 @@ pub(crate) async fn run_native_model_turn_with_fallback(
         }
     }
 
+    if attempted_provider_count == 0 {
+        recoverable_blocker = super::provider_circuit_wait_blocker(&skipped_providers);
+    }
     if let Some(blocker) = recoverable_blocker {
         state.note_task_provider_blocker(&task.task_id, blocker);
     }
