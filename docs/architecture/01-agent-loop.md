@@ -68,6 +68,12 @@ For exact observed JSON answers, `observed_fields[].step_id` may select one
 current-loop result by its `provenance.step_id`. Omission/null selects the latest
 eligible result; unknown, ambiguous or incompatible references are rejected.
 
+Planning is optional for a short answer or a clear bounded read. The model can
+read a known file directly without listing/searching for the same locator first;
+discovery remains appropriate for missing, ambiguous or failed locators. Existing
+current-task plans still require reconciliation, and complex work retains planning
+and recovery. These are model instructions, not runtime natural-language branches.
+
 Each planner decision records the covered input sequence, instruction revision,
 and execution epoch. A tool or skill action must atomically claim that exact
 version immediately before dispatch. Terminal presentation uses the same
