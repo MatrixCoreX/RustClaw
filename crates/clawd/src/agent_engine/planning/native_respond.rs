@@ -210,10 +210,7 @@ pub(super) fn action_from_native_respond_call(
                     field.get("capability"),
                     "native_respond_observed_capability_invalid",
                 )?;
-                let path = machine_observation_reference(
-                    field.get("path"),
-                    "native_respond_observed_path_invalid",
-                )?;
+                let path = machine_observation_path(field.get("path"))?;
                 let result = loop_state
                     .capability_results
                     .iter()
@@ -486,3 +483,22 @@ fn machine_observation_reference<'a>(
         })
         .ok_or_else(|| error_code.to_string())
 }
+
+fn machine_observation_path(value: Option<&Value>) -> Result<&str, String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|path| {
+            !path.is_empty()
+                && path.len() <= MAX_NATIVE_RESPONSE_SOURCE_PATH
+                && path.split('.').all(|segment| !segment.is_empty())
+                && path.chars().all(|ch| {
+                    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':' | '/' | '~')
+                })
+        })
+        .ok_or_else(|| "native_respond_observed_path_invalid".to_string())
+}
+
+#[cfg(test)]
+#[path = "native_respond_path_tests.rs"]
+mod path_tests;

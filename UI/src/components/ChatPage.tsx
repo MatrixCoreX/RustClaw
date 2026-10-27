@@ -63,6 +63,8 @@ import type {
   VoiceRecordingAvailability,
 } from "../lib/voice-recording";
 import { TaskLlmTracePanel } from "./TaskLlmTracePanel";
+import { TaskStatusFacts } from "./TaskStatusFacts";
+import type { TaskLifecycleLang } from "../lib/task-lifecycle";
 
 type Translate = (zh: string, en: string) => string;
 type TranslateSlash = (text: string) => string;
@@ -97,6 +99,8 @@ interface ChatTeachingRunSummary {
 }
 
 export interface ChatPageProps {
+  lang?: TaskLifecycleLang;
+  chatTaskResults?: TaskQueryResponse[];
   t: Translate;
   tSlash: TranslateSlash;
   artifactFetch: ArtifactFetch;
@@ -164,6 +168,8 @@ export interface ChatPageProps {
 }
 
 export function ChatPage({
+  lang = "en",
+  chatTaskResults = [],
   t,
   tSlash,
   artifactFetch,
@@ -265,6 +271,7 @@ export function ChatPage({
     () => teachingRunByMessageId(chatTeachingRuns),
     [chatTeachingRuns],
   );
+  const taskResultsById = useMemo(() => new Map(chatTaskResults.map(result => [result.task_id, result])), [chatTaskResults]);
   const activeThread =
     chatThreads.find((thread) => thread.id === activeChatThreadId) ?? null;
 
@@ -733,6 +740,8 @@ export function ChatPage({
       >
         {chatMessages.map((message) => {
           const messageTeachingRun = teachingRunByMessage.get(message.id) ?? null;
+          const messageTaskResult = message.role === "assistant"
+            ? taskResultsById.get(messageTeachingRun?.taskId ?? "") : null;
           const messageTeachingEnabled = teachingMessageInteractive(chatTeachingMode, messageTeachingRun);
           const messageTeachingSelected = Boolean(
             messageTeachingEnabled &&
@@ -842,6 +851,7 @@ export function ChatPage({
                   </div>
                 ) : null}
               </div>
+              {messageTaskResult ? <TaskStatusFacts task={messageTaskResult} lang={lang} /> : null}
             </div>
           );
         })}

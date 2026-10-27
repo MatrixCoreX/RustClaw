@@ -4,6 +4,7 @@ import { followTaskEventStream } from "../lib/task-event-stream";
 import { shouldTrackTaskLive } from "../lib/task-lifecycle";
 import { appendLiveTaskEvent } from "../lib/task-result";
 import { formatUiError } from "../lib/ui-error";
+import { newRequestUuid } from "../lib/request-id";
 import type {
   ActiveTaskItem,
   ActiveTasksResponse,
@@ -78,6 +79,9 @@ export function useTaskRuntime({
   const [taskHistoryOffset, setTaskHistoryOffset] = useState(0);
   const [taskHistoryLimit, setTaskHistoryLimit] = useState(TASK_HISTORY_PAGE_SIZE);
   const taskHistoryRequestEpoch = useRef(0);
+  const deliveryOwnerRef = useRef(activeUserKey);
+  const deliveryFlightRef = useRef<object | null>(null);
+  deliveryOwnerRef.current = JSON.stringify([activeUserKey, interactionUserId, interactionChatId, uiAuthReady]);
   const [resumeDrafts, setResumeDrafts] = useState<Record<string, string>>({});
   const [resumeSubmittingTaskId, setResumeSubmittingTaskId] = useState<string | null>(null);
   const [resumeTaskMessage, setResumeTaskMessage] = useState<string | null>(null);
@@ -98,6 +102,35 @@ export function useTaskRuntime({
   const [interactionExternalUserId, setInteractionExternalUserId] = useState("");
   const [interactionExternalChatId, setInteractionExternalChatId] = useState("");
   const [interactionAdapter, setInteractionAdapter] = useState("");
+
+  async function reconcileTaskDelivery(taskId: string, operation: "confirm_received" | "retry_unknown" | "retry_failed", snapshotDigest: string) {
+    if (taskControlSubmittingId || deliveryFlightRef.current) return;
+    const flight = {};
+    deliveryFlightRef.current = flight;
+    setTaskControlSubmittingId(`delivery:${taskId}`);
+    setTaskControlError(null);
+    setTaskControlMessage(null);
+    const owner = deliveryOwnerRef.current;
+    try {
+      const response = await apiFetch(`/v1/tasks/${encodeURIComponent(taskId)}/delivery/reconcile`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operation, snapshot_digest: snapshotDigest, decision_id: newRequestUuid(), confirmed_duplicate_risk: operation === "retry_unknown" }),
+      });
+      const body = await response.json() as ApiResponse<unknown>;
+      if (deliveryOwnerRef.current !== owner) return;
+      if (!response.ok || !body.ok) throw new Error(body.error || "task_delivery_reconciliation_failed");
+      setTaskControlMessage(operation === "confirm_received"
+        ? t("已记录你的收取确认。", "Your receipt confirmation was recorded.")
+        : t("补发已授权，后台将处理可补发部分；请刷新查看投送状态。", "Retry is authorized. The worker will process eligible parts; refresh to inspect delivery status."));
+      const refreshed = await fetchTaskById(taskId);
+      if (deliveryOwnerRef.current === owner) setTaskResult(refreshed);
+    } catch (error) {
+      if (deliveryOwnerRef.current === owner) setTaskControlError(formatUiError(error, t, "投送核查未完成，请刷新状态后重试。", "Reconciliation did not complete. Refresh the status before retrying."));
+    } finally {
+      if (deliveryFlightRef.current === flight) deliveryFlightRef.current = null;
+      if (deliveryOwnerRef.current === owner) setTaskControlSubmittingId(null);
+    }
+  }
   const [interactionAskText, setInteractionAskText] = useState("你好，请汇报当前系统状态");
   const [interactionIndependentWorkspace, setInteractionIndependentWorkspace] = useState(false);
   const [interactionSkillName, setInteractionSkillName] = useState("health_check");
@@ -372,7 +405,7 @@ export function useTaskRuntime({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           task_id: item.task_id,
-          idempotency_key: `ui-cancel-${crypto.randomUUID()}`,
+          idempotency_key: `ui-cancel-${newRequestUuid()}`,
         }),
       });
       const body = (await res.json()) as ApiResponse<{ canceled?: number }>;
@@ -754,7 +787,11 @@ export function useTaskRuntime({
     setTaskHistoryTotal(0);
     setTaskHistoryOffset(0);
     setTaskHistoryLimit(TASK_HISTORY_PAGE_SIZE);
-  }, [activeUserKey, interactionUserId, interactionChatId]);
+    setTaskControlSubmittingId(null);
+    setTaskControlMessage(null);
+    setTaskControlError(null);
+    deliveryFlightRef.current = null;
+  }, [activeUserKey, interactionUserId, interactionChatId, uiAuthReady]);
 
   useEffect(() => {
     if (!uiAuthReady) return;
@@ -837,6 +874,7 @@ export function useTaskRuntime({
   ]);
 
   return {
+    reconcileTaskDelivery,
     taskId,
     setTaskId,
     taskLoading,

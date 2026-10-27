@@ -285,13 +285,30 @@ pub(super) fn task_outcome_summary_json(journal: &TaskJournal) -> Value {
         .map(|contract| evidence_coverage_for_output_contract(contract, journal).missing_evidence)
         .unwrap_or_default();
     let missing_count = missing_evidence.len();
-    let state = match journal.final_status {
-        Some(TaskJournalFinalStatus::Success) if missing_count == 0 => "completed",
-        Some(TaskJournalFinalStatus::Success) => "needs_attention",
-        Some(TaskJournalFinalStatus::Clarify) => "needs_input",
-        Some(TaskJournalFinalStatus::Failure | TaskJournalFinalStatus::ResumeFailure) => "failed",
-        None => "in_progress",
-    };
+    let state =
+        if journal.answer_verification.as_ref().is_some_and(|v| {
+            v.status == crate::answer_verifier::AnswerVerificationStatus::Unavailable
+        }) {
+            if journal
+                .answer_verification
+                .as_ref()
+                .is_some_and(|v| v.retryable)
+            {
+                "in_progress"
+            } else {
+                "needs_input"
+            }
+        } else {
+            match journal.final_status {
+                Some(TaskJournalFinalStatus::Success) if missing_count == 0 => "completed",
+                Some(TaskJournalFinalStatus::Success) => "needs_attention",
+                Some(TaskJournalFinalStatus::Clarify) => "needs_input",
+                Some(TaskJournalFinalStatus::Failure | TaskJournalFinalStatus::ResumeFailure) => {
+                    "failed"
+                }
+                None => "in_progress",
+            }
+        };
     let (message_key, next_action_kind) = match state {
         "completed" => ("clawd.task_outcome.completed", "review_result"),
         "needs_attention" => (

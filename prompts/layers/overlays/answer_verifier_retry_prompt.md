@@ -96,8 +96,14 @@ including parenthetical arithmetic, while preserving the observed values,
 units and completed-action results. A correct number elsewhere is not a reason
 to retain an incorrect explanation. Do not repeat completed actions to fix prose.
 Bind each cited identifier or hash to its observed owning operation and entity.
-Remove unrequested internal identifiers when they add no useful result detail;
-never copy another operation's identifier to fill a missing or uncertain value.
+When the verifier identifies unrequested metadata, identifiers, or sections,
+remove them even if they seem useful for provenance or auditing. Evidence stays
+in the internal trace; displaying that evidence is not required to keep the
+answer grounded. Do not reintroduce rejected content in a heading, preface,
+footer, parenthetical, or renamed field. Keep it visible only if the effective
+user request explicitly asks for it. Before returning, check the rewritten
+answer against every removal requested by the verifier; do not print that
+checklist. Never copy another operation's identifier to fill a missing value.
 Do not present a missing execution postcondition as resolved by a wording rewrite.
 Cleanup does not prove that previously written literal content met the request;
 preserve any unresolved mismatch instead of claiming successful verification.

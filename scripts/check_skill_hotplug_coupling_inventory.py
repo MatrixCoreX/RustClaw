@@ -34,6 +34,7 @@ CONTRACT_AUTHORITY_PATHS = {
 SURFACE_EXCLUSIONS = {
     "receipt_resolution_or_pin": {
         "crates/clawd/src/repo/channel_delivery_receipt.rs",
+        "crates/clawd/src/repo/channel_delivery_reconciliation.rs",
     },
     # The NNI internal gateway authenticates a scoped core-domain token. This
     # is an authorization boundary, not planner-side skill selection.
@@ -295,6 +296,12 @@ def self_test() -> None:
             item["path"] == delivery_receipt.relative_to(root).as_posix()
             for item in inventory["coupling_surfaces"]
         )
+        reconciliation = delivery_receipt.with_name("channel_delivery_reconciliation.rs")
+        reconciliation.write_text("fn reconcile(receipt_digest: &str) {}\n", encoding="utf-8")
+        inventory, findings = scan(root)
+        assert not findings
+        assert not any(item["path"] == reconciliation.relative_to(root).as_posix()
+                       for item in inventory["coupling_surfaces"])
         baseline = snapshot(inventory)
         assert not check_baseline(inventory, baseline)
         source.write_text(source.read_text() + 'const EXTRA: &str = "crypto";\n')

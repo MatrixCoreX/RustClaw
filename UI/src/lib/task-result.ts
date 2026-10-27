@@ -1,6 +1,7 @@
 import type { TaskApprovalDecision, TaskEventEnvelope, TaskQueryResponse } from "../types/api";
 import { productCopy } from "./product-identity";
 import type { TaskLifecycleLang } from "./task-lifecycle";
+import { taskStatusSource } from "./task-status-facts";
 
 export interface TaskOutcomeView {
   title: string;
@@ -1573,6 +1574,20 @@ export function buildTaskOutcome(result: TaskQueryResponse, lang: TaskLifecycleL
     ...codingOutcomeMeta(codingSummary, ["next_step"]),
     ...missingEvidence.map((item) => `missing_evidence=${item}`),
   ];
+
+  const facts = taskStatusSource(result);
+  const answerVerification = asRecord(facts.answer_verification);
+  if (result.status === "running" && facts.execution_status === "succeeded" && answerVerification?.status === "unavailable") {
+    const automatic = answerVerification.retryable === true && result.lifecycle?.state !== "needs_user";
+    return {
+      title: tLocal("执行已完成，等待答案验证", "Execution completed; verification pending"),
+      tone: automatic ? "running" : "attention",
+      nextStep: automatic
+        ? tLocal("已保存进度，将继续验证；不会因此重新执行已完成操作。", "Progress is saved. Verification will continue without replaying completed operations.")
+        : tLocal("已保存执行结果，请检查模型配置后继续验证。", "Execution results are saved. Check model configuration before continuing verification."),
+      finalShape, missingEvidence, doneConditions, constraints, verification, currentProgress, remainingWork,
+    };
+  }
 
   if (result.status === "queued" || result.status === "running") {
     return {

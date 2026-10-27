@@ -365,6 +365,85 @@ fn whatsapp_wamid_statuses_advance_receipt_without_out_of_order_regression() {
 }
 
 #[test]
+fn provider_callbacks_cannot_promote_a_part_without_provider_proof() {
+    use claw_core::channel_delivery::ChannelDeliveryPartReceipt;
+    for missing_id in [false, true] {
+        let pool = pool();
+        let mut accepted = receipt(ChannelDeliveryStatus::Accepted, 10);
+        accepted.channel = ChannelKind::Whatsapp;
+        accepted.adapter = "whatsapp_cloud".into();
+        accepted.provider_message_ids = if missing_id {
+            vec!["wamid.prefix".into()]
+        } else {
+            vec!["wamid.prefix".into(), "wamid.remainder".into()]
+        };
+        accepted.parts = vec![
+            ChannelDeliveryPartReceipt {
+                part_index: 0,
+                status: ChannelDeliveryStatus::Accepted,
+                provider_message_id: Some("wamid.prefix".into()),
+                error_code: None,
+            },
+            ChannelDeliveryPartReceipt {
+                part_index: 1,
+                status: ChannelDeliveryStatus::Accepted,
+                provider_message_id: (!missing_id).then(|| "wamid.remainder".into()),
+                error_code: None,
+            },
+        ];
+        record_channel_delivery_receipt(&pool, &accepted).unwrap();
+        record_whatsapp_cloud_provider_status(
+            &pool,
+            "wamid.prefix",
+            WhatsappDeliveryEventStatus::Delivered,
+            20,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            load_channel_delivery_receipt_from_db(&pool.get().unwrap(), &accepted.idempotency_key)
+                .unwrap()
+                .unwrap()
+                .status,
+            ChannelDeliveryStatus::Accepted
+        );
+        if !missing_id {
+            record_whatsapp_cloud_provider_status(
+                &pool,
+                "wamid.remainder",
+                WhatsappDeliveryEventStatus::Delivered,
+                21,
+                None,
+            )
+            .unwrap();
+            assert_eq!(
+                load_channel_delivery_receipt_from_db(&pool.get().unwrap(), &accepted.idempotency_key)
+                    .unwrap()
+                    .unwrap()
+                    .status,
+                ChannelDeliveryStatus::Delivered
+            );
+        } else {
+            record_whatsapp_cloud_provider_status(
+                &pool,
+                "wamid.prefix",
+                WhatsappDeliveryEventStatus::Read,
+                21,
+                None,
+            )
+            .unwrap();
+            assert_eq!(
+                load_channel_delivery_receipt_from_db(&pool.get().unwrap(), &accepted.idempotency_key)
+                    .unwrap()
+                    .unwrap()
+                    .status,
+                ChannelDeliveryStatus::Accepted
+            );
+        }
+    }
+}
+
+#[test]
 fn whatsapp_failed_status_retains_provider_code_and_diagnostic_id() {
     let pool = pool();
     let mut accepted = receipt(ChannelDeliveryStatus::Accepted, 10);

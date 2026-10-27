@@ -47,6 +47,8 @@ import { buildTaskCostGovernance, formatUsdNanos } from "../lib/task-cost";
 import { formatUiError } from "../lib/ui-error";
 import type { TaskApprovalDecision, TaskLlmDebugResponse, TaskQueryResponse } from "../types/api";
 import { TaskLlmTracePanel } from "./TaskLlmTracePanel";
+import { TaskStatusFacts } from "./TaskStatusFacts";
+import { TaskDeliveryRecovery, type DeliveryAction } from "./TaskDeliveryRecovery";
 
 type Translate = (zh: string, en: string) => string;
 type TranslateSlash = (text: string) => string;
@@ -70,6 +72,7 @@ export interface TaskResultPanelProps {
   taskControlError: string | null;
   onTaskIdChange: (value: string) => void;
   onQueryTask: () => unknown | Promise<unknown>;
+  onReconcileDelivery?: DeliveryAction;
   onQueryTaskLlmDebug: (taskId?: string, offset?: number) => unknown | Promise<unknown>;
   onResumeDraftChange: (taskId: string, value: string) => void;
   onSubmitResume: (taskId: string) => unknown | Promise<unknown>;
@@ -351,6 +354,7 @@ export function TaskResultPanel({
   onControlSubagent,
   onViewTask,
   onControlTaskGoal,
+  onReconcileDelivery,
 }: TaskResultPanelProps) {
   const taskOutcome = taskResult ? buildTaskOutcome(taskResult, lang) : null;
   const taskGoalView = taskResult ? buildTaskGoalView(taskResult, lang) : null;
@@ -951,6 +955,8 @@ export function TaskResultPanel({
             <div className={`mt-4 rounded-xl border px-3 py-3 ${toneClassName(taskOutcome.tone)}`}>
               <p className="font-semibold">{taskOutcome.title}</p>
               <p className="mt-1 text-sm opacity-80">{taskOutcome.nextStep}</p>
+              <TaskStatusFacts task={taskResult!} lang={lang} />
+              <TaskDeliveryRecovery task={taskResult!} lang={lang} busy={taskControlSubmittingId !== null} onAction={onReconcileDelivery} />
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
                 {taskOutcome.finalShape ? (
                   <span className="rounded-md border border-white/10 bg-black/20 px-2 py-1">

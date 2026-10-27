@@ -800,6 +800,7 @@ export default function App() {
     setResumeDraftValue,
     submitResumeForTask,
     decideTaskApprovalById,
+    reconcileTaskDelivery,
     fetchApprovalScopeGrants,
     revokeApprovalScopeGrant,
     cancelActiveTask,
@@ -828,6 +829,7 @@ export default function App() {
     chatAttachments,
     chatTeachingMode,
     chatTeachingTaskResult,
+    chatTaskResults,
     chatTeachingLlmDebug,
     chatTeachingLlmDebugLoading,
     chatTeachingLlmDebugError,
@@ -2022,6 +2024,7 @@ export default function App() {
 
           {currentPage === "chat" ? (
             <ChatPage
+              lang={lang}
               t={t}
               tSlash={tSlash}
               artifactFetch={apiFetch}
@@ -2035,6 +2038,7 @@ export default function App() {
               chatAttachments={chatAttachments}
               chatTeachingMode={chatTeachingMode}
               chatTeachingTaskResult={chatTeachingTaskResult}
+              chatTaskResults={chatTaskResults}
               chatTeachingLlmDebug={chatTeachingLlmDebug}
               chatTeachingLlmDebugLoading={chatTeachingLlmDebugLoading}
               chatTeachingLlmDebugError={chatTeachingLlmDebugError}
@@ -2688,6 +2692,7 @@ export default function App() {
               onResumeDraftChange={setResumeDraftValue}
               onSubmitResume={submitResumeForTask}
               onDecideTaskApproval={decideTaskApprovalById}
+              onReconcileDelivery={reconcileTaskDelivery}
               grants={approvalScopeGrants}
               loading={approvalScopeGrantsLoading}
               error={approvalScopeGrantsError}

@@ -367,13 +367,17 @@ pub(super) fn classify_request(method: &Method, path: &str) -> RequestClass {
                 | "/v1/conversation-inputs/client-task"
                 | "/v1/conversation-inputs/cancel-current"
         ) || path
-            .strip_prefix("/v1/conversation-inputs/")
-            .and_then(|suffix| {
-                suffix
-                    .strip_suffix("/withdraw")
-                    .or_else(|| suffix.strip_suffix("/activate"))
-            })
-            .is_some_and(|input_id| !input_id.is_empty() && !input_id.contains('/')))
+            .strip_prefix("/v1/tasks/")
+            .and_then(|suffix| suffix.strip_suffix("/delivery/reconcile"))
+            .is_some_and(|id| !id.is_empty() && !id.contains('/'))
+            || path
+                .strip_prefix("/v1/conversation-inputs/")
+                .and_then(|suffix| {
+                    suffix
+                        .strip_suffix("/withdraw")
+                        .or_else(|| suffix.strip_suffix("/activate"))
+                })
+                .is_some_and(|input_id| !input_id.is_empty() && !input_id.contains('/')))
     {
         return RequestClass::TaskSubmit;
     }

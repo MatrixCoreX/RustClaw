@@ -83,7 +83,10 @@ Execution, answer verification, and delivery are separate facts. Journals expose
 instead of accepting an unchecked answer. Same-conversation references can be
 recalled through `task_control.recall_context` after fresh ownership checks.
 Multi-part channel delivery retries explicitly retryable rejected parts without
-replaying accepted parts or tool execution. See [context and recovery](docs/architecture/03-task-state-context.md)
+replaying accepted parts or tool execution. Unchanged verification checkpoints
+resume verification only. UI/CLI display the three facts separately; ambiguous
+sends require an owner decision and snapshot check before retry, with manual
+confirmation distinct from provider proof. See [context and recovery](docs/architecture/03-task-state-context.md)
 and [delivery recovery](docs/architecture/11-task-artifact-delivery.md).
 
 ### Request and Agent Loop Flow

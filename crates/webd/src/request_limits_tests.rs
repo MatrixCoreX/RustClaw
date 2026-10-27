@@ -28,6 +28,18 @@ fn rejection(result: Result<RequestLease, LimitRejection>) -> LimitRejection {
 #[test]
 fn route_classes_are_machine_paths_not_natural_language() {
     assert_eq!(
+        classify_request(&Method::POST, "/v1/tasks/task-1/delivery/reconcile"),
+        RequestClass::TaskSubmit
+    );
+    assert_eq!(
+        classify_request(&Method::GET, "/v1/tasks/task-1/delivery/reconcile"),
+        RequestClass::General
+    );
+    assert_eq!(
+        classify_request(&Method::POST, "/v1/tasks/not/an/id/delivery/reconcile"),
+        RequestClass::General
+    );
+    assert_eq!(
         classify_request(&Method::POST, "/v1/tasks"),
         RequestClass::TaskSubmit
     );

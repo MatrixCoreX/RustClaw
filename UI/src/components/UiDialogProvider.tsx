@@ -138,7 +138,7 @@ export function UiDialogProvider({ children }: { children: ReactNode }) {
         aria-modal="true"
         aria-labelledby="ui-dialog-title"
         aria-describedby="ui-dialog-message"
-        className="theme-card w-full max-w-md border p-0 shadow-2xl"
+        className="theme-dialog-panel w-full max-w-md p-0"
       >
         <div className="flex items-start gap-3 border-b border-white/10 px-5 py-4">
           <span className={active.tone === "danger" ? "mt-0.5 text-red-300" : "mt-0.5 text-sky-300"}>

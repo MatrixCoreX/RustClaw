@@ -93,6 +93,20 @@ test("renders task rename and delete as directly operable controls", () => {
   assert.match(markup, /整理上下文/);
 });
 
+test("history outcome facts follow the matching assistant even when teaching is off", () => {
+  const page = props();
+  page.lang = "zh";
+  page.chatMessages = [{ id: "user-one", role: "user", text: "检查文件", ts: 1 }, { id: "assistant-one", role: "assistant", text: "完成", ts: 2 }];
+  page.chatTeachingRuns = [{ id: "run-one", taskId: "task-one", userMessageId: "user-one", assistantMessageId: "assistant-one", userText: "检查文件", assistantText: "完成", status: "succeeded", startedAt: 1, completedAt: 2, callCount: 1, hasTrace: false, traceError: null, selected: false }];
+  page.chatTaskResults = [{ task_id: "task-one", status: "succeeded", error_text: null, result_json: { task_journal: { summary: { execution_status: "succeeded", answer_verification: { status: "passed" }, delivery: { status: "not_required" } } } } }];
+  const markup = renderToStaticMarkup(<ChatPage {...page} />);
+  assert.equal((markup.match(/aria-label="任务状态"/g) ?? []).length, 1);
+  assert.match(markup, /答案验证/);
+  assert.match(markup, /已通过/);
+  page.chatTaskResults[0].task_id = "another-task";
+  assert.doesNotMatch(renderToStaticMarkup(<ChatPage {...page} />), /aria-label="任务状态"/);
+});
+
 test("renders progressive controls for older history and long messages", () => {
   const pageProps = props();
   pageProps.chatHistoryHasMore = true;

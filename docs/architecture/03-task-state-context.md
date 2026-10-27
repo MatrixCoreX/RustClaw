@@ -22,8 +22,17 @@ checkpoints and machine lifecycle fields.
 answer. Missing prompts or provider failures are never treated as a pass.
 An unavailable provider preserves completed action fingerprints, observations,
 budgets and metrics in a verification-stage checkpoint; missing configuration
-requires user intervention. Recovery replans from that checkpoint without
-replaying the completed mutation. Rewritten answers require explicit acceptance.
+requires user intervention. Recovery first checks the candidate, evidence,
+request and conversation-revision bindings, current authorization and task claim.
+Unchanged work resumes answer verification without a planner or tool turn. A
+changed instruction or rejected candidate returns to the agent loop with the
+completed mutation fingerprints intact. Unavailable verification remains waiting;
+only accepted verification publishes the candidate. Rewritten answers require
+explicit acceptance. Private checkpoint clones share an immutable snapshot rather
+than copying its full JSON tree.
+
+The UI and CLI show execution, verification and delivery independently. Completed
+execution does not imply a verified answer or a delivered channel message.
 
 Recent execution anchors publish bounded `task-context:v1:<UUID>` references.
 The planner may use `task_control.recall_context` to read 1-8 explicit JSON
@@ -65,7 +74,12 @@ flowchart TD
     I -->|no| J[Caller polls same task_id]
     I -->|yes| K[Recovery claims new generation]
     K --> L[Restore observations, artifacts,<br/>side effects, and counters]
-    L --> E
+    L --> LV{Unchanged verification checkpoint?}
+    LV -->|yes| VV[Retry answer verification only]
+    LV -->|no| E
+    VV -->|passed| M
+    VV -->|unavailable| G
+    VV -->|rejected or instruction changed| E
     F -->|needs_user| N[Persist user-input state]
     N --> J
     F -->|terminal or finished| M[Persist final result]

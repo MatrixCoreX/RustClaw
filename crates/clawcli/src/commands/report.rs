@@ -224,6 +224,18 @@ pub(super) fn task_report_text_lines(task: &task::TaskStatusView, report: &Value
     if let Some(state) = report.pointer("/outcome/state").and_then(Value::as_str) {
         lines.push(format!("outcome_state: {state}"));
     }
+    for (label, path) in [
+        ("execution_status", "/outcome/execution_status"),
+        (
+            "answer_verification_status",
+            "/outcome/answer_verification/status",
+        ),
+        ("delivery_status", "/outcome/delivery/status"),
+    ] {
+        if let Some(value) = report.pointer(path).and_then(Value::as_str) {
+            lines.push(format!("{label}: {value}"));
+        }
+    }
     for item in report_string_array(report, "/outcome/done_conditions")
         .into_iter()
         .take(16)

@@ -41,6 +41,22 @@ unknown. It returns only a bounded index with capability/status and exact
 `args_ref`/`data_ref` pointers, not the full result bodies. Follow those pointers
 to fetch only the fields needed for the current instruction. Confirmation,
 approval, permission and credential fields are not reusable historical context.
+For the original request and invocation parameters, select `/request` and the
+known `args_ref`; do not fetch `data_ref` unless the user needs recorded outputs.
+Keep source identity, digest, scope and authority metadata as internal grounding
+unless the user explicitly requests them in the visible answer.
+
+When projecting a `call_capability` result into `respond.observed_fields`, recall
+values live under `data.extra.fields`, for example `data.extra.fields./request`
+or `data.extra.fields./capabilities/0/args`. The slash-prefixed field name is one
+object key. `data.output` is serialized skill text, not a nested fields object.
+Reuse a successful selected-field result within the same task; request another
+field only when it is missing or its source snapshot changed. A response-shape
+repair does not require repeating a successful recall.
+`observed_fields` selects the latest result of its capability. After another
+recall returns a smaller field selection, do not address fields that existed
+only in an older result as if they were in the latest result. Request the needed
+fields together or compose from the already observed, snapshot-bound context.
 
 | Param | Required | Type | Default | Description |
 |---|---|---|---|---|

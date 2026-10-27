@@ -1128,7 +1128,7 @@ fn native_planner_request(
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": MAX_NATIVE_RESPONSE_SOURCE_PATH,
-                                "description": "selector=machine_dotted_json_path; success_roots=data,data.extra,data.output; failure_roots=status,error.code,error.message_key,error.retryable,error.details; array_index=decimal_path_segment; examples=data.extra.items.0.name,error.details.structured_error.extra.error_code; bracket_notation=unsupported"
+                                "description": "selector=machine_dotted_json_path; success_roots=data,data.extra,data.output; failure_roots=status,error.code,error.message_key,error.retryable,error.details; array_index=decimal_path_segment; slash=literal_object_key_character; object_key_case=preserved; examples=data.extra.items.0.name,data.extra.fields./request,error.details.structured_error.extra.error_code; bracket_notation=unsupported"
                             }
                         },
                         "additionalProperties": false
@@ -1445,7 +1445,9 @@ fn native_contract_repair_signal_with_context(
                 "success_roots": ["data", "data.extra", "data.output"],
                 "failure_roots": ["status", "error.code", "error.message_key", "error.retryable", "error.details"],
                 "array_index": "decimal_path_segment",
-                "examples": ["data.extra.items.0.name", "error.details.structured_error.extra.error_code"],
+                "slash": "literal_object_key_character",
+                "object_key_case": "preserved",
+                "examples": ["data.extra.items.0.name", "data.extra.fields./request", "error.details.structured_error.extra.error_code"],
                 "bracket_notation": "rejected"
             }),
         );

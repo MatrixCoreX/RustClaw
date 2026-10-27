@@ -1,4 +1,5 @@
 import type { TaskQueryResponse } from "../types/api";
+import { newRequestUuid } from "./request-id";
 
 export type KbIdentity = {
   userKey?: string;
@@ -54,7 +55,7 @@ export function buildKbTaskBody(
   return {
     channel: "ui",
     kind: "run_skill",
-    idempotency_key: `ui:kb:${crypto.randomUUID()}`,
+    idempotency_key: `ui:kb:${newRequestUuid()}`,
     payload: { skill_name: "kb", args },
     ...(userKey
       ? { user_key: userKey }

@@ -2,6 +2,10 @@ use serde_json::{json, Map, Value};
 
 pub(super) fn task_outcome_report_json(raw_data: &Value, coding: &Value) -> Value {
     let outcome = task_outcome_root(raw_data);
+    let summary = first_object_at(
+        raw_data,
+        &["/result_json/task_journal/summary", "/task_journal/summary"],
+    );
     let evidence = evidence_coverage_root(raw_data);
     let mut done_conditions =
         collect_meta_list(outcome.and_then(|value| value.get("done_conditions")));
@@ -23,6 +27,9 @@ pub(super) fn task_outcome_report_json(raw_data: &Value, coding: &Value) -> Valu
 
     json!({
         "schema_version": 1,
+        "execution_status": summary.and_then(|value| string_field(value, "execution_status")),
+        "answer_verification": summary.and_then(|value| value.get("answer_verification")),
+        "delivery": summary.and_then(|value| value.get("delivery")),
         "state": outcome.and_then(|value| string_field(value, "state")),
         "message_key": outcome.and_then(|value| string_field(value, "message_key")),
         "final_answer_shape": first_string_at(raw_data, &[
@@ -43,6 +50,10 @@ pub(super) fn task_outcome_report_json(raw_data: &Value, coding: &Value) -> Valu
         "remaining_work": remaining_work,
     })
 }
+
+#[cfg(test)]
+#[path = "report_outcome_tests.rs"]
+mod tests;
 
 fn task_outcome_root(raw_data: &Value) -> Option<&Value> {
     first_object_at(

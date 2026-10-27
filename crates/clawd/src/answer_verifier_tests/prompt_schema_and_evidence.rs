@@ -347,6 +347,18 @@ fn answer_verifier_prompts_scope_constraints_to_compound_deliverables() {
 }
 
 #[test]
+fn answer_retry_does_not_reintroduce_unrequested_provenance_wrappers() {
+    const RETRY: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_retry_prompt.md");
+    let normalized = RETRY.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(normalized.contains("remove them even if they seem useful for provenance or auditing"));
+    assert!(normalized.contains("Evidence stays in the internal trace"));
+    assert!(normalized.contains("Do not reintroduce rejected content"));
+    assert!(normalized.contains("only if the effective user request explicitly asks for it"));
+    assert!(RETRY.contains("Do not\nrun tools"));
+}
+
+#[test]
 fn answer_verifier_audits_exact_counts_side_deliverables_and_ambiguous_targets() {
     const VERIFIER_PROMPT: &str =
         include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");

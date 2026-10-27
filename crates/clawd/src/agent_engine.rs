@@ -159,6 +159,9 @@ pub(crate) fn verification_checkpoint_payload(task: &ClaimedTask, loop_state: &L
     )
 }
 
+mod verification_resume;
+pub(crate) use verification_resume::bind_checkpoint as bind_verification_checkpoint;
+
 #[derive(Debug, Deserialize)]
 struct SinglePlanEnvelope {
     #[serde(default)]

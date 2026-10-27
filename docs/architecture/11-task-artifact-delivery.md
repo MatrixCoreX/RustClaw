@@ -80,6 +80,18 @@ never repeat the original skill or tool action. A service restart retains receip
 an ambiguous in-flight claim remains `query_required`, not an exactly-once claim.
 Task/parent receipt removal cleans the part plan and child receipts.
 
+Authorized task queries expose bounded delivery facts and a snapshot digest.
+The current channel owner can submit an explicit decision through
+`POST /v1/tasks/:task_id/delivery/reconcile`. The UI asks for confirmation before
+retrying an unknown send and warns about duplicates. Confirmation that the user
+received a part is audited as `user_confirmed`, not provider delivery/read proof.
+Reconciliation checks the current key and channel binding transactionally, rejects
+active sends and stale snapshots, and deduplicates decision IDs. Retry queues the
+original part plan through the existing outbox; queued is not delivered. Content
+and artifact digest checks still apply. Unknown non-retryable sends stop automatic
+outbox polling and wait for reconciliation rather than exhausting a generic retry
+budget. Inspection never sends anything and unsupported provider lookup is explicit.
+
 ```mermaid
 flowchart LR
     A[Authorized terminal delivery] --> B[Immutable part plan]
@@ -89,7 +101,10 @@ flowchart LR
     C -->|unknown acknowledgement| F[Reconcile without resend]
     E --> C
     D --> G[Aggregate delivery receipt]
-    F --> G
+    F --> H{Owner decision + snapshot check}
+    H -->|received| I[Audit user confirmation, no provider proof]
+    H -->|not received + duplicate risk accepted| E
+    I --> G
 ```
 
 ## Browser Access

@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use crate::answer_verifier::AnswerVerificationStatus;
 use crate::{task_journal::TaskJournal, AppState, ClaimedTask};
 
-pub(super) fn checkpoint_unavailable_verification(
+pub(crate) fn checkpoint_unavailable_verification(
     state: &AppState,
     task: &ClaimedTask,
     journal: &mut TaskJournal,
@@ -19,6 +19,7 @@ pub(super) fn checkpoint_unavailable_verification(
     let mut checkpoint_payload = journal
         .answer_verification_checkpoint
         .take()
+        .map(std::sync::Arc::unwrap_or_clone)
         .unwrap_or_else(|| fallback_checkpoint(task, journal, now));
     let provider = state.task_provider_blocker(&task.task_id);
     let retry_after = provider
@@ -44,6 +45,7 @@ pub(super) fn checkpoint_unavailable_verification(
         "next_recovery_kind": if needs_user { "needs_user" } else { "wait_background" },
     });
     let checkpoint_id = checkpoint["checkpoint_id"].clone();
+    crate::agent_engine::bind_verification_checkpoint(state, task, journal, checkpoint);
     journal.record_task_checkpoint(checkpoint.clone());
     journal.record_task_lifecycle(json!({
         "schema_version": 1,

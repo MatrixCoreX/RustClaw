@@ -34,9 +34,10 @@ pub(crate) use helpers::*;
 // === TASK 层（已物理位于 finalize/task.rs，Stage 2.2）===
 // 任务级编排：DB write / memory / 通知 / journal merge
 pub(crate) use task::{
-    answer_verifier_retry_answer_has_required_machine_evidence, finalize_ask_direct_success,
-    finalize_ask_result, preserve_verified_delivery_tokens_after_retry,
-    retry_answer_after_verifier, run_direct_classifier_reply,
+    answer_verifier_retry_answer_has_required_machine_evidence,
+    checkpoint_unavailable_verification, finalize_ask_direct_success, finalize_ask_result,
+    preserve_verified_delivery_tokens_after_retry, retry_answer_after_verifier,
+    run_direct_classifier_reply,
 };
 
 // === LOOP REPLY 层（已物理位于 finalize/loop_reply.rs，Stage 2.3）===

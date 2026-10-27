@@ -191,7 +191,7 @@ pub(crate) async fn deliver_loaded_terminal_task(
         .map(crate::delivery_service::ChannelDeliveryServiceResult::into_task_response)
 }
 
-fn authorized_delivery_request(
+pub(super) fn authorized_delivery_request(
     state: &AppState,
     headers: &HeaderMap,
     record: &TaskDeliveryRecord,

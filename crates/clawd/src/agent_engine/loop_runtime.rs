@@ -50,6 +50,20 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
     let mut effective_user_text = user_text.to_string();
     restore_applied_task_steering(state, task, &mut effective_user_text);
     restore_applied_conversation_inputs(state, task, &mut effective_user_text, &mut loop_state);
+    if let Some(checkpoint) = resume_checkpoint {
+        if let Some(reply) = super::verification_resume::try_resume(
+            state,
+            task,
+            &effective_user_text,
+            agent_run_context,
+            checkpoint,
+            &mut loop_state,
+        )
+        .await?
+        {
+            return Ok(reply);
+        }
+    }
     let mut skip_planner_rounds = false;
     loop {
         if !skip_planner_rounds {
@@ -242,10 +256,8 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                         break;
                     }
                     crate::task_budget_contract::BudgetDecision::Waiting => {
-                        if let Some(resume_reason) = round_machine_blocker_resume_reason(
-                            Some(&outcome),
-                            &loop_state,
-                        )
+                        if let Some(resume_reason) =
+                            round_machine_blocker_resume_reason(Some(&outcome), &loop_state)
                         {
                             publish_agent_loop_checkpoint_progress(
                                 state,
@@ -505,7 +517,9 @@ fn initial_plan_for_round<'a>(
     initial_plan_round: usize,
     initial_plan: Option<&'a crate::PlanResult>,
 ) -> Option<&'a crate::PlanResult> {
-    (round == initial_plan_round).then_some(initial_plan).flatten()
+    (round == initial_plan_round)
+        .then_some(initial_plan)
+        .flatten()
 }
 
 #[cfg(test)]

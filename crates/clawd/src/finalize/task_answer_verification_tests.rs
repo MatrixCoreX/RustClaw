@@ -26,9 +26,8 @@ fn unavailable_provider_preserves_loop_checkpoint_without_replayable_action() {
         .successful_action_fingerprints
         .insert("opaque-completed-action".into(), 1);
     let mut journal = TaskJournal::for_task(&task.task_id, "ask", "opaque");
-    journal.answer_verification_checkpoint = Some(
-        crate::agent_engine::verification_checkpoint_payload(&task, &loop_state),
-    );
+    journal.answer_verification_checkpoint =
+        Some(crate::agent_engine::verification_checkpoint_payload(&task, &loop_state).into());
     journal.record_answer_verification(
         AnswerVerificationOutcome::Unavailable {
             error_code: "answer_verifier_provider_unavailable",
@@ -118,9 +117,8 @@ async fn finalization_persists_waiting_instead_of_success_after_completed_effect
     loop_state
         .successful_action_fingerprints
         .insert("completed-effect".into(), 1);
-    journal.answer_verification_checkpoint = Some(
-        crate::agent_engine::verification_checkpoint_payload(&task, &loop_state),
-    );
+    journal.answer_verification_checkpoint =
+        Some(crate::agent_engine::verification_checkpoint_payload(&task, &loop_state).into());
     journal.record_answer_verification(
         AnswerVerificationOutcome::Unavailable {
             error_code: "answer_verifier_provider_unavailable",

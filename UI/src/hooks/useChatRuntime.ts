@@ -167,6 +167,7 @@ export function useChatRuntime({
   const chatTeachingTaskResult = activeTeachingRun
     ? (activeTeachingRun.taskResult ?? null)
     : (activeChatThread.teachingTaskResult ?? null);
+  const chatTaskResults = activeChatThread.teachingRuns.flatMap(run => run.taskResult ? [run.taskResult] : []);
   const chatTeachingLlmDebug = activeTeachingRun
     ? (activeTeachingRun.llmDebug ?? null)
     : (activeChatThread.teachingLlmDebug ?? null);
@@ -2039,6 +2040,7 @@ export function useChatRuntime({
     chatAttachments,
     chatTeachingMode,
     chatTeachingTaskResult,
+    chatTaskResults,
     chatTeachingLlmDebug,
     chatTeachingLlmDebugLoading,
     chatTeachingLlmDebugError,

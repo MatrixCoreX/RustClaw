@@ -12,6 +12,9 @@ use sha2::{Digest, Sha256};
 
 use crate::db_init::DbPool;
 
+#[path = "channel_delivery_reconciliation.rs"]
+pub(crate) mod reconciliation;
+
 const INIT_CHANNEL_DELIVERY_RECEIPT_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS channel_delivery_receipts (
     idempotency_key TEXT PRIMARY KEY,
@@ -522,13 +525,21 @@ fn record_whatsapp_cloud_provider_status_in_db(
     next.provider_error_code = aggregate.provider_error_code;
     next.retryable = false;
     // A delivered prefix cannot settle an aggregate that still has unsent parts.
-    if current_receipt.status == ChannelDeliveryStatus::Partial
+    if (current_receipt.status == ChannelDeliveryStatus::Partial
         && current_receipt
             .parts
             .iter()
-            .any(|part| part.status == ChannelDeliveryStatus::Failed)
+            .any(|part| part.status == ChannelDeliveryStatus::Failed))
+        || (matches!(
+            next.status,
+            ChannelDeliveryStatus::Delivered | ChannelDeliveryStatus::Read
+        ) && current_receipt
+            .parts
+            .iter()
+            .any(|part| part.provider_message_id.is_none()))
     {
-        next.status = ChannelDeliveryStatus::Partial;
+        // A user-confirmed part without a provider ID is not provider delivery proof.
+        next.status = current_receipt.status;
         next.error_code = current_receipt.error_code.clone();
         next.message_key = current_receipt.message_key.clone();
         next.diagnostic_id = current_receipt.diagnostic_id.clone();

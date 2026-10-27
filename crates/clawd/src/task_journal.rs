@@ -655,7 +655,8 @@ pub(crate) struct TaskJournal {
     pub(crate) finalizer_summary: Option<TaskJournalFinalizerSummary>,
     pub(crate) answer_verifier_summary: Option<TaskJournalAnswerVerifierSummary>,
     pub(crate) answer_verification: Option<crate::answer_verifier::AnswerVerificationRecord>,
-    pub(crate) answer_verification_checkpoint: Option<Value>,
+    pub(crate) answer_verification_checkpoint: Option<std::sync::Arc<Value>>,
+    pub(crate) answer_verification_candidate: Option<String>,
     pub(crate) task_metrics: TaskJournalTaskMetrics,
     pub(crate) task_lifecycle: Option<Value>,
     pub(crate) task_checkpoint: Option<Value>,
@@ -847,6 +848,11 @@ impl TaskJournal {
         candidate: &str,
     ) {
         self.answer_verification = Some(outcome.record(candidate));
+        self.answer_verification_candidate = matches!(
+            outcome,
+            crate::answer_verifier::AnswerVerificationOutcome::Unavailable { .. }
+        )
+        .then(|| candidate.to_string());
         if let Some(verdict) = outcome.verdict() {
             self.record_answer_verifier_summary(verdict.clone());
         } else {
@@ -1056,6 +1062,9 @@ impl TaskJournal {
         }
         if self.answer_verification_checkpoint.is_none() {
             self.answer_verification_checkpoint = other.answer_verification_checkpoint.clone();
+        }
+        if self.answer_verification_candidate.is_none() {
+            self.answer_verification_candidate = other.answer_verification_candidate.clone();
         }
         if self.task_metrics.used_evidence_ids_count.is_none() {
             self.task_metrics.used_evidence_ids_count = other.task_metrics.used_evidence_ids_count;

@@ -320,6 +320,21 @@ async fn channel_terminal_delivery_once(state: &AppState) -> anyhow::Result<bool
         )?,
         Ok(response)
             if response.status
+                == claw_core::channel_delivery::ChannelTaskDeliveryStatus::QueryRequired
+                && !response.retryable =>
+        {
+            // Stop automatic attempts, retaining the unknown receipt for explicit reconciliation.
+            repo::finish_channel_terminal_delivery(
+                &state.core.db,
+                &claim,
+                false,
+                None,
+                Some("channel_delivery_confirmation_required"),
+                now_ts_u64(),
+            )?
+        }
+        Ok(response)
+            if response.status
                 == claw_core::channel_delivery::ChannelTaskDeliveryStatus::Failed
                 && !response.retryable =>
         {

@@ -199,9 +199,9 @@ pub(crate) fn build_from_loop_state(
     journal.record_delivery_consistent(delivery_consistent);
     journal.record_final_answer(final_text.to_string());
     journal.record_final_status(final_status);
-    journal.answer_verification_checkpoint = Some(
+    journal.answer_verification_checkpoint = Some(std::sync::Arc::new(
         crate::agent_engine::verification_checkpoint_payload(task, loop_state),
-    );
+    ));
     journal
 }
 

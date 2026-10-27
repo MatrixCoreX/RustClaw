@@ -120,6 +120,75 @@ async fn flaky_file(State(mock): State<Mock>) -> (StatusCode, Json<Value>) {
 }
 
 #[tokio::test]
+async fn explicit_owner_retry_uses_the_original_plan_without_resending_accepted_text() {
+    use crate::repo::channel_delivery_receipt::reconciliation::{self, Decision, Operation};
+    let (mut state, mut task, payload, _) = fixture();
+    state.seed_test_auth_identity("part-owner", "user");
+    let identity = crate::resolve_auth_identity_by_key(&state, "part-owner")
+        .unwrap()
+        .unwrap();
+    task.user_key = Some(identity.user_key.clone());
+    {
+        let db = state.core.db.get().unwrap();
+        crate::repo::channel_delivery_outbox::ensure_channel_delivery_outbox_schema(&db).unwrap();
+        db.execute("INSERT INTO tasks(task_id,user_id,chat_id,user_key,principal_id,channel,external_user_id,external_chat_id,kind,payload_json,status,created_at,updated_at) VALUES (?1,1,2,'part-owner',?2,'whatsapp','one','fixture@chat','ask',?3,'succeeded','1','1')",rusqlite::params![task.task_id,identity.principal_id,task.payload_json]).unwrap();
+        db.execute("INSERT INTO channel_bindings(channel,external_user_id,external_chat_id,user_key,bound_at,updated_at) VALUES ('whatsapp','one','fixture@chat','part-owner','1','1')",[]).unwrap();
+    }
+    let mock = Mock::default();
+    let app = Router::new()
+        .route("/v1/send-text", post(accept_text))
+        .route("/v1/send-result", post(flaky_file))
+        .with_state(mock.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    state.channels.whatsapp_web_enabled = true;
+    state.channels.whatsapp_web_bridge_base_url =
+        format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let file = std::env::temp_dir().join(format!("delivery-explicit-{}.txt", Uuid::new_v4()));
+    std::fs::write(&file, b"fixture transcript").unwrap();
+    let envelope = build_daemon_delivery_envelope(
+        &state,
+        &task,
+        &payload,
+        &format!("fixture text\nFILE:{}", file.display()),
+        ChannelDeliverySource::ImmediateDaemon,
+        ChannelTaskDeliveryContent::Full,
+        None,
+    )
+    .unwrap();
+    assert!(
+        deliver(&state, &task, &payload, &envelope)
+            .await
+            .unwrap()
+            .retryable
+    );
+    {
+        let mut db = state.core.db.get().unwrap();
+        let now = crate::now_ts_u64() as i64;
+        let view = reconciliation::inspect(&db, &task.task_id, now).unwrap();
+        let decision = Decision {
+            operation: Operation::RetryFailed,
+            snapshot_digest: view["snapshot_digest"].as_str().unwrap().into(),
+            decision_id: Uuid::new_v4(),
+            confirmed_duplicate_risk: false,
+        };
+        assert_eq!(
+            reconciliation::reconcile(&mut db, &task.task_id, &identity, &decision, now).unwrap()
+                ["status"],
+            "queued"
+        );
+    }
+    assert!(deliver(&state, &task, &payload, &envelope)
+        .await
+        .unwrap()
+        .accepted());
+    assert_eq!(mock.text.load(Ordering::SeqCst), 1);
+    assert_eq!(mock.file.load(Ordering::SeqCst), 2);
+    std::fs::remove_file(file).unwrap();
+    server.abort();
+}
+
+#[tokio::test]
 async fn partial_file_retry_survives_service_restart_and_never_resends_accepted_text() {
     let (mut state, task, payload, mut envelope) = fixture();
     let db_file = std::env::temp_dir().join(format!("delivery-restart-{}.sqlite", Uuid::new_v4()));

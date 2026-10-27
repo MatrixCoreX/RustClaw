@@ -6,6 +6,7 @@ use crate::{repo, AppState};
 
 #[path = "task_answer_verification.rs"]
 mod task_answer_verification;
+pub(crate) use task_answer_verification::checkpoint_unavailable_verification;
 #[path = "task_answer_verifier_failure.rs"]
 mod task_answer_verifier_failure;
 #[path = "task_content_evidence_delivery.rs"]

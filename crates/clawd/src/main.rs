@@ -18,7 +18,6 @@ use serde_json::json;
 use tokio::sync::Semaphore;
 use tracing::{error, info, warn};
 use uuid::Uuid;
-mod task_result_retention;
 mod agent_engine;
 mod agent_hooks;
 mod agent_runtime_contract;
@@ -119,6 +118,7 @@ mod task_execution_policy;
 mod task_journal;
 mod task_lifecycle;
 mod task_model_selection;
+mod task_result_retention;
 mod token_estimator;
 mod turn_boundary_envelope;
 mod turn_context;
@@ -1439,7 +1439,14 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
             delete(http::conversation_history::archive_conversation),
         )
         .route("/tasks/:task_id", get(get_task))
-        .route("/tasks/:task_id/context-recall", post(http::task_context::recall))
+        .route(
+            "/tasks/:task_id/context-recall",
+            post(http::task_context::recall),
+        )
+        .route(
+            "/tasks/:task_id/delivery/reconcile",
+            post(http::task_delivery_reconciliation::reconcile),
+        )
         .route(
             "/tasks/:task_id/delivery",
             post(http::task_delivery::deliver_task_result),

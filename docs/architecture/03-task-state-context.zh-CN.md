@@ -17,8 +17,14 @@
 任务 journal 的 summary 与 trace 分别记录 `execution_status` 和 `answer_verification`。
 验证状态包括 `not_required`、`passed`、`failed`、`unavailable`，通过 SHA-256 绑定被验证的
 候选答案。缺少提示词或模型请求失败不等于验证通过。验证服务不可用时，已完成动作的指纹、
-观察、预算和调用统计会保存到验证阶段 checkpoint；配置缺失则等待用户处理。恢复时从证据
-继续规划，不重放已完成的修改动作。改写后的答案必须获得明确接受，才能替换原答案。
+观察、预算和调用统计会保存到验证阶段 checkpoint；配置缺失则等待用户处理。恢复时核对
+候选答案、证据、请求与会话版本的绑定，并重新检查权限和任务租约。内容未变时只重试答案
+验证，不再调用 planner 或工具；指令变化或验证拒绝时，携带已完成动作指纹返回 agent loop。
+验证仍不可用则继续等待，只有获得接受才发布候选答案。改写后的答案必须获得明确接受。
+私有 checkpoint 的克隆共享不可变快照，避免重复复制完整 JSON 树。
+
+UI 和 CLI 独立显示执行、答案验证与投送状态：执行完成不代表答案已通过验证，也不代表
+通信端已经收到消息。
 
 近期执行锚点提供有限数量的 `task-context:v1:<UUID>` 引用。Planner 可以调用
 `task_control.recall_context`，用 1-8 个 JSON pointer 指定读取旧请求或能力参数、结果字段。
@@ -57,7 +63,12 @@ flowchart TD
     I -->|否| J[调用方轮询同一 task_id]
     I -->|是| K[Recovery 认领新 generation]
     K --> L[恢复 observations、artifacts、<br/>side effects 与累计计数]
-    L --> E
+    L --> LV{验证 checkpoint 内容未变?}
+    LV -->|是| VV[只重试答案验证]
+    LV -->|否| E
+    VV -->|通过| M
+    VV -->|不可用| G
+    VV -->|拒绝或指令变化| E
     F -->|needs_user| N[保存等待用户输入状态]
     N --> J
     F -->|终止或完成| M[保存最终结果]
