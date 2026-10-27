@@ -124,7 +124,10 @@ Rollback procedure:
 
 ## Current Risk Areas
 
-- `repo/tasks.rs` and `UI/src/App.tsx` are near the 2,000-line ceiling.
+- Task checkpoint persistence is isolated in `repo/tasks/checkpoint_resume.rs`;
+  keep its lease/claim fencing aligned with the task facade. Remaining Rust
+  exemptions are pinned in `scripts/check_long_files.py`; `UI/src/App.tsx`
+  separately exceeds the maintenance ceiling.
 - Exact-output finalization must remain zero-domain and independent of registry
   skill names.
 - Provider usage/cost can be unknown; unknown cost records must not be treated

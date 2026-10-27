@@ -27,7 +27,6 @@ BASELINE_LONG_FILES: dict[str, int] = {
     "crates/claw-core/src/skill_registry.rs": 2_044,
     "crates/clawd/src/agent_engine/support_tests.rs": 2_166,
     "crates/clawd/src/main.rs": 2_003,
-    "crates/clawd/src/repo/tasks.rs": 2_009,
     "crates/clawd/src/runtime/state.rs": 2_069,
     "crates/clawd/src/skills.rs": 2_133,
     "crates/skills/web_search_extract/src/main.rs": 2_242,

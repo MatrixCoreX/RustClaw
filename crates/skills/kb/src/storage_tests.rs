@@ -1,6 +1,16 @@
+use super::database::{
+    integrity_check, storage_schema_is_current, table_exists, table_has_column,
+    SCHEMA_V6_CUTOVER_MIGRATION_ID,
+};
+use super::namespace_index::insert_retrieval_row;
+use super::retrieval::semantic_candidate_scores;
+use super::test_support::rebuild_ann_projection;
+use super::vector_index::verify_ann_projection;
 use super::*;
 use crate::{Chunk, DocMeta, KbRuntime, NamespaceIndex};
 use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 use std::process::Command;
 
 fn runtime(root: &Path, user_key: &str) -> KbRuntime {

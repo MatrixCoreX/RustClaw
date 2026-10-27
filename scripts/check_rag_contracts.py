@@ -35,7 +35,7 @@ EMBEDDING_LITERAL_OWNERS = {
     Path("crates/claw-core/src/retrieval_embedding.rs"): {
         "local-hash-v3": 3,
     },
-    Path("crates/skills/kb/src/storage.rs"): {
+    Path("crates/skills/kb/src/storage/database.rs"): {
         "local-hash-v3": 2,
     },
 }
@@ -48,6 +48,7 @@ REGISTRIES = (
     Path("configs/skills_registry.toml"),
     Path("docker/config/skills_registry.toml"),
 )
+KB_STORAGE_MODULES = ("database", "namespace_index", "retrieval", "vector_index")
 
 
 def read_text(root: Path, relative: Path, findings: list[str]) -> str:
@@ -56,6 +57,18 @@ def read_text(root: Path, relative: Path, findings: list[str]) -> str:
     except OSError:
         findings.append(f"missing_required_file:{relative.as_posix()}")
         return ""
+
+
+def read_kb_storage(root: Path, findings: list[str]) -> str:
+    facade = read_text(root, Path("crates/skills/kb/src/storage.rs"), findings)
+    sources = [facade]
+    for module in KB_STORAGE_MODULES:
+        if f"mod {module};" not in facade:
+            findings.append(f"kb_storage_module_not_wired:{module}")
+        sources.append(
+            read_text(root, Path(f"crates/skills/kb/src/storage/{module}.rs"), findings)
+        )
+    return "\n".join(sources)
 
 
 def load_toml(root: Path, relative: Path, findings: list[str]) -> dict:
@@ -265,7 +278,7 @@ def markers_precede(body: str, terminal: str, markers: tuple[str, ...]) -> bool:
 
 
 def check_filter_before_limit(root: Path, findings: list[str]) -> None:
-    storage = read_text(root, Path("crates/skills/kb/src/storage.rs"), findings)
+    storage = read_kb_storage(root, findings)
     fts = function_body(storage, "fts_candidate_chunk_ids")
     if not markers_precede(
         fts,
@@ -323,7 +336,7 @@ def check_ann_projection_contract(root: Path, findings: list[str]) -> None:
     embedding = read_text(
         root, Path("crates/claw-core/src/retrieval_embedding.rs"), findings
     )
-    storage = read_text(root, Path("crates/skills/kb/src/storage.rs"), findings)
+    storage = read_kb_storage(root, findings)
     recall = read_text(root, Path("crates/clawd/src/memory/retrieval.rs"), findings)
     host_schema = read_text(
         root, Path("crates/clawd/src/skill_storage/schema.rs"), findings
@@ -343,7 +356,6 @@ def check_ann_projection_contract(root: Path, findings: list[str]) -> None:
         "ANN_MAX_CANDIDATES_STANDARD: usize = 4_096",
         "ANN_MAX_CANDIDATES_CONSTRAINED: usize = 1_024",
         "CREATE TABLE IF NOT EXISTS kb_vector_ann_projection",
-        "fn rebuild_ann_projection(",
         "fn verify_ann_projection(",
         'degradation: Some("ann_projection_stale".to_string())',
         '"ann_projection", rows',
@@ -352,6 +364,11 @@ def check_ann_projection_contract(root: Path, findings: list[str]) -> None:
     )
     if any(marker not in storage for marker in storage_markers):
         findings.append("kb_ann_projection_contract_missing")
+    test_support = read_text(
+        root, Path("crates/skills/kb/src/storage_support_tests.rs"), findings
+    )
+    if "fn rebuild_ann_projection(" not in test_support:
+        findings.append("kb_ann_projection_test_support_missing")
 
     semantic = function_body(storage, "semantic_candidate_scores")
     exact_threshold_markers = (
@@ -443,7 +460,7 @@ def check_runtime_rebuild_safety(root: Path, findings: list[str]) -> None:
 
 
 def check_removed_profile_compatibility(root: Path, findings: list[str]) -> None:
-    source = read_text(root, Path("crates/skills/kb/src/storage.rs"), findings)
+    source = read_kb_storage(root, findings)
     forbidden = (
         "fn migrate_local_hash_v2_projection(",
         "fn migrate_legacy_vector_generations(",
@@ -570,7 +587,26 @@ fn clear_inline_vector_payloads() {
         "crates/skills/kb/src/main.rs": (
             'fn hit() { let _ = Hit { instruction_authority: "none" }; }\n'
         ),
-        "crates/skills/kb/src/storage.rs": storage,
+        "crates/skills/kb/src/storage.rs": (
+            storage[: storage.index("const EXACT_VECTOR_LIMIT_STANDARD")]
+            + "\n".join(f"mod {module};" for module in KB_STORAGE_MODULES)
+            + "\n"
+        ),
+        "crates/skills/kb/src/storage/database.rs": storage[
+            storage.index("fn clear_inline_vector_payloads") :
+        ],
+        "crates/skills/kb/src/storage/namespace_index.rs": "// namespace fixture\n",
+        "crates/skills/kb/src/storage/retrieval.rs": storage[
+            storage.index("const EXACT_VECTOR_LIMIT_STANDARD") : storage.index(
+                "fn rebuild_ann_projection"
+            )
+        ],
+        "crates/skills/kb/src/storage/vector_index.rs": storage[
+            storage.index("fn verify_ann_projection") : storage.index(
+                "fn clear_inline_vector_payloads"
+            )
+        ],
+        "crates/skills/kb/src/storage_support_tests.rs": "fn rebuild_ann_projection() {}\n",
         "crates/skills/kb/src/ingest_extract.rs": (
             "const DOCUMENT_EXTRACTION_SCHEMA_VERSION: u32 = 1;\n"
             "struct DocumentExtractionResult {}\n"
@@ -627,6 +663,31 @@ def self_test() -> int:
         if findings:
             print(f"RAG_CONTRACT_SELF_TEST positive_failed={findings}")
             return 1
+        retrieval = root / "crates/skills/kb/src/storage/retrieval.rs"
+        retrieval.write_text(
+            retrieval.read_text(encoding="utf-8").replace(
+                "c.mtime_epoch >= ?10", "missing_time_filter"
+            ),
+            encoding="utf-8",
+        )
+        if "kb_semantic_filter_before_limit_contract_missing" not in evaluate(root):
+            print("RAG_CONTRACT_SELF_TEST split_filter_negative_failed")
+            return 1
+        write_fixture(root)
+        facade = root / "crates/skills/kb/src/storage.rs"
+        facade.write_text(
+            facade.read_text(encoding="utf-8").replace("mod retrieval;", ""),
+            encoding="utf-8",
+        )
+        if "kb_storage_module_not_wired:retrieval" not in evaluate(root):
+            print("RAG_CONTRACT_SELF_TEST split_wiring_negative_failed")
+            return 1
+        write_fixture(root)
+        retrieval.unlink()
+        if "missing_required_file:crates/skills/kb/src/storage/retrieval.rs" not in evaluate(root):
+            print("RAG_CONTRACT_SELF_TEST split_missing_negative_failed")
+            return 1
+        write_fixture(root)
         main = root / "crates/skills/kb/src/main.rs"
         main.write_text(main.read_text(encoding="utf-8") + 'json!({"error_kind":"bad"});\n')
         findings = evaluate(root)
@@ -701,7 +762,7 @@ def self_test() -> int:
             print(f"RAG_CONTRACT_SELF_TEST discovery_negative_failed={findings}")
             return 1
         write_fixture(root)
-        storage = root / "crates/skills/kb/src/storage.rs"
+        storage = root / "crates/skills/kb/src/storage/database.rs"
         storage.write_text(
             storage.read_text(encoding="utf-8")
             + "\nfn migrate_legacy_vector_generations() {}\n",

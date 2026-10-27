@@ -84,7 +84,7 @@ bash scripts/nl_tests/run_suite.sh agent_parity_gate
 
 ## 当前风险
 
-- `repo/tasks.rs` 和 `UI/src/App.tsx` 接近 2,000 行。
+- Task checkpoint 持久化由 `repo/tasks/checkpoint_resume.rs` 独立维护，lease/claim 围栏必须与任务门面对齐。Rust 历史豁免锁定在 `scripts/check_long_files.py`；`UI/src/App.tsx` 另外超过维护上限。
 - 精确输出 finalization 必须保持 zero-domain，不依赖 registry skill name。
 - Provider usage/cost 可能 unknown；不能把 unknown 当作零成本。
 - 长尾工具必须具备 heartbeat/checkpoint/async 状态才能安全 pause/resume。

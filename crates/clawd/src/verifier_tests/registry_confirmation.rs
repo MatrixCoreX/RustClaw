@@ -1,4 +1,5 @@
 use super::*;
+use crate::AppState;
 
 pub(super) fn workspace_registry_state() -> AppState {
     let state = AppState::test_default_with_fixture_provider();
