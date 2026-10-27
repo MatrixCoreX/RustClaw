@@ -31,6 +31,7 @@ import {
 } from "../lib/product-identity";
 import { extractTaskText } from "../lib/task-result";
 import { formatUiError } from "../lib/ui-error";
+import { newRequestUuid } from "../lib/request-id";
 import {
   extractTaskArtifactDeliverySummary,
   extractTaskArtifacts,
@@ -1903,7 +1904,7 @@ export function useChatRuntime({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           schema_version: 1,
-          client_request_id: `ui-stop:${thread.id}:${crypto.randomUUID()}`,
+          client_request_id: `ui-stop:${thread.id}:${newRequestUuid()}`,
           scope: {
             conversation_id: thread.id,
             agent_id: thread.agentId,

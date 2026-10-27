@@ -92,6 +92,21 @@ and artifact digest checks still apply. Unknown non-retryable sends stop automat
 outbox polling and wait for reconciliation rather than exhausting a generic retry
 budget. Inspection never sends anything and unsupported provider lookup is explicit.
 
+The delivery status comes from actual receipts and outbox state, not task success.
+A nonterminal task or real pending outbox entry may show `pending`; an active
+outbox lease shows `in_progress`. A terminal task with no receipt or active queue
+has `unavailable` delivery evidence. A completed outbox alone is not proof of
+provider delivery. Multipart callbacks advance the aggregate parent's proof even
+when child send receipts remain `accepted`; genuine delivery/read evidence takes
+precedence over an earlier manual confirmation without deleting that audit.
+
+Task details, teaching pages, lists, and grant views are bound to the current
+API endpoint, authenticated identity, and latest request. Switching identity or
+endpoint clears the old view and discards late responses, including an identity
+roundtrip or an old live stream's final query. Periodic refreshes do not overlap
+while a slow refresh is pending. Request identifiers use secure random bytes on
+LAN HTTP as well as HTTPS; this does not relax private-key transport restrictions.
+
 ```mermaid
 flowchart LR
     A[Authorized terminal delivery] --> B[Immutable part plan]

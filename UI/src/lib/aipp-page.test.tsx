@@ -166,6 +166,8 @@ test("loads sandbox bundles through an opaque iframe and a capability allowlist"
   assert.match(source, /event\.source !== frameRef\.current\?\.contentWindow/);
   assert.match(source, /type === "aipp.ready"/);
   assert.match(source, /entrypoint: "run_capability"/);
+  assert.match(source, /idempotency_key: `aipp-\$\{newRequestUuid\(\)\}`/);
+  assert.doesNotMatch(source, /crypto\.randomUUID\(/);
   assert.match(source, /AIPP_BRIDGE_MAX_IN_FLIGHT = 4/);
   assert.match(source, /AIPP_BRIDGE_MAX_ARGS_BYTES = 64 \* 1024/);
 });

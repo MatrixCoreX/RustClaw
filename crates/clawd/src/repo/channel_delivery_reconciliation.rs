@@ -141,9 +141,73 @@ fn digest(value: &impl Serialize) -> anyhow::Result<String> {
     Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(value)?)))
 }
 
+fn status_without_dispatch(
+    db: &Connection,
+    task_id: &str,
+    now: i64,
+) -> anyhow::Result<&'static str> {
+    if exists(db, "channel_terminal_delivery_outbox")? {
+        let queued = db.query_row(
+            "SELECT state, lease_expires_at_ts FROM channel_terminal_delivery_outbox WHERE task_id=?1",
+            [task_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        ).optional()?;
+        if let Some((state, expires)) = queued {
+            return Ok(match state.as_str() {
+                "pending" => "pending",
+                "dispatching" if expires > now => "in_progress",
+                "dispatching" => "pending",
+                _ => "unavailable",
+            });
+        }
+    }
+    if exists(db, "tasks")? {
+        let status = db
+            .query_row(
+                "SELECT status FROM tasks WHERE task_id=?1",
+                [task_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if matches!(status.as_deref(), Some("queued" | "running")) {
+            return Ok("pending");
+        }
+    }
+    Ok("unavailable")
+}
+
+fn provider_proof_status(s: &Snapshot) -> Option<&'static str> {
+    // Multipart webhook IDs belong to the parent. Its callback aggregate is
+    // authoritative even when immutable child receipts still say accepted.
+    let parent = s.parent.receipt.as_ref().map(|receipt| receipt.status);
+    if parent == Some(ChannelDeliveryStatus::Read)
+        || s.parts.iter().all(|part| {
+            part.receipt
+                .as_ref()
+                .is_some_and(|r| r.status == ChannelDeliveryStatus::Read)
+        })
+    {
+        Some("read")
+    } else if matches!(parent, Some(ChannelDeliveryStatus::Delivered))
+        || s.parts.iter().all(|part| {
+            part.receipt.as_ref().is_some_and(|r| {
+                matches!(
+                    r.status,
+                    ChannelDeliveryStatus::Delivered | ChannelDeliveryStatus::Read
+                )
+            })
+        })
+    {
+        Some("delivered")
+    } else {
+        None
+    }
+}
+
 pub(crate) fn inspect(db: &Connection, task_id: &str, now: i64) -> anyhow::Result<Value> {
     let Some(s) = snapshot(db, task_id)? else {
-        return Ok(json!({"schema_version":1,"status":"pending","can_reconcile":false}));
+        return Ok(
+            json!({"schema_version":1,"status":status_without_dispatch(db, task_id, now)?,"can_reconcile":false}),
+        );
     };
     let count = s.parts.len();
     let accepted_count = s.parts.iter().filter(|p| accepted(p)).count();
@@ -156,23 +220,10 @@ pub(crate) fn inspect(db: &Connection, task_id: &str, now: i64) -> anyhow::Resul
     } else if unknown_count > 0 || (unknown(&s.parent, now) && accepted_count < count) {
         "query_required"
     } else if accepted_count == count {
-        if user_confirmed {
+        if let Some(status) = provider_proof_status(&s) {
+            status
+        } else if user_confirmed {
             "user_confirmed"
-        } else if s.parts.iter().all(|p| {
-            p.receipt
-                .as_ref()
-                .is_some_and(|r| r.status == ChannelDeliveryStatus::Read)
-        }) {
-            "read"
-        } else if s.parts.iter().all(|p| {
-            p.receipt.as_ref().is_some_and(|r| {
-                matches!(
-                    r.status,
-                    ChannelDeliveryStatus::Delivered | ChannelDeliveryStatus::Read
-                )
-            })
-        }) {
-            "delivered"
         } else {
             "accepted"
         }

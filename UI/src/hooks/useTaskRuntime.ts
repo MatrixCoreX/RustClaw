@@ -79,9 +79,22 @@ export function useTaskRuntime({
   const [taskHistoryOffset, setTaskHistoryOffset] = useState(0);
   const [taskHistoryLimit, setTaskHistoryLimit] = useState(TASK_HISTORY_PAGE_SIZE);
   const taskHistoryRequestEpoch = useRef(0);
-  const deliveryOwnerRef = useRef(activeUserKey);
+  const activeTasksRequestEpoch = useRef(0);
+  const taskRequestEpoch = useRef(0);
+  const teachingRequestEpoch = useRef(0);
+  const grantsRequestEpoch = useRef(0);
+  const selectedTaskIdRef = useRef("");
+  const scopeKey = JSON.stringify([apiBase, activeUserKey, interactionUserId, interactionChatId, uiAuthReady]);
+  const taskScopeRef = useRef({ key: scopeKey });
+  // A fresh token also fences an old request across an identity A -> B -> A roundtrip.
+  if (taskScopeRef.current.key !== scopeKey) taskScopeRef.current = { key: scopeKey };
+  const taskScope = taskScopeRef.current;
+  const isCurrentScope = () => taskScopeRef.current === taskScope;
+  const beginRead = (epoch: { current: number }) => {
+    const requestEpoch = ++epoch.current;
+    return () => isCurrentScope() && epoch.current === requestEpoch;
+  };
   const deliveryFlightRef = useRef<object | null>(null);
-  deliveryOwnerRef.current = JSON.stringify([activeUserKey, interactionUserId, interactionChatId, uiAuthReady]);
   const [resumeDrafts, setResumeDrafts] = useState<Record<string, string>>({});
   const [resumeSubmittingTaskId, setResumeSubmittingTaskId] = useState<string | null>(null);
   const [resumeTaskMessage, setResumeTaskMessage] = useState<string | null>(null);
@@ -104,31 +117,30 @@ export function useTaskRuntime({
   const [interactionAdapter, setInteractionAdapter] = useState("");
 
   async function reconcileTaskDelivery(taskId: string, operation: "confirm_received" | "retry_unknown" | "retry_failed", snapshotDigest: string) {
-    if (taskControlSubmittingId || deliveryFlightRef.current) return;
+    if (!isCurrentScope() || taskControlSubmittingId || deliveryFlightRef.current) return;
     const flight = {};
     deliveryFlightRef.current = flight;
     setTaskControlSubmittingId(`delivery:${taskId}`);
     setTaskControlError(null);
     setTaskControlMessage(null);
-    const owner = deliveryOwnerRef.current;
     try {
       const response = await apiFetch(`/v1/tasks/${encodeURIComponent(taskId)}/delivery/reconcile`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ operation, snapshot_digest: snapshotDigest, decision_id: newRequestUuid(), confirmed_duplicate_risk: operation === "retry_unknown" }),
       });
       const body = await response.json() as ApiResponse<unknown>;
-      if (deliveryOwnerRef.current !== owner) return;
+      if (!isCurrentScope()) return;
       if (!response.ok || !body.ok) throw new Error(body.error || "task_delivery_reconciliation_failed");
       setTaskControlMessage(operation === "confirm_received"
         ? t("已记录你的收取确认。", "Your receipt confirmation was recorded.")
         : t("补发已授权，后台将处理可补发部分；请刷新查看投送状态。", "Retry is authorized. The worker will process eligible parts; refresh to inspect delivery status."));
       const refreshed = await fetchTaskById(taskId);
-      if (deliveryOwnerRef.current === owner) setTaskResult(refreshed);
+      if (isCurrentScope() && selectedTaskIdRef.current === taskId) setTaskResult(refreshed);
     } catch (error) {
-      if (deliveryOwnerRef.current === owner) setTaskControlError(formatUiError(error, t, "投送核查未完成，请刷新状态后重试。", "Reconciliation did not complete. Refresh the status before retrying."));
+      if (isCurrentScope()) setTaskControlError(formatUiError(error, t, "投送核查未完成，请刷新状态后重试。", "Reconciliation did not complete. Refresh the status before retrying."));
     } finally {
       if (deliveryFlightRef.current === flight) deliveryFlightRef.current = null;
-      if (deliveryOwnerRef.current === owner) setTaskControlSubmittingId(null);
+      if (isCurrentScope()) setTaskControlSubmittingId(null);
     }
   }
   const [interactionAskText, setInteractionAskText] = useState("你好，请汇报当前系统状态");
@@ -167,6 +179,7 @@ export function useTaskRuntime({
     silent = false,
     offset = activeTasksOffset,
   ): Promise<ActiveTaskItem[]> => {
+    if (!isCurrentScope()) return [];
     const keyAuthenticated = Boolean(activeUserKey.trim());
     if (!keyAuthenticated && (interactionUserId == null || interactionChatId == null)) {
       if (!silent) {
@@ -174,6 +187,7 @@ export function useTaskRuntime({
       }
       return [];
     }
+    const isCurrentRequest = beginRead(activeTasksRequestEpoch);
     if (!silent) {
       setActiveTasksLoading(true);
       setActiveTasksError(null);
@@ -190,6 +204,7 @@ export function useTaskRuntime({
         }),
       });
       const body = (await res.json()) as ApiResponse<ActiveTasksResponse>;
+      if (!isCurrentRequest()) return [];
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `active_tasks_fetch_http_${res.status}`);
       }
@@ -202,24 +217,26 @@ export function useTaskRuntime({
       setActiveTasksLastUpdated(Date.now());
       return tasks;
     } catch (err) {
+      if (!isCurrentRequest()) return [];
       const message = formatUiError(err, t, "正在处理的任务暂时无法读取。", "Active tasks are temporarily unavailable.");
       setActiveTasksError(message);
       return [];
     } finally {
-      if (!silent) {
+      if (isCurrentRequest()) {
         setActiveTasksLoading(false);
       }
     }
   };
 
   const fetchTaskHistory = async (offset = 0): Promise<TaskHistoryItem[]> => {
+    if (!isCurrentScope()) return [];
     const keyAuthenticated = Boolean(activeUserKey.trim());
     if (!keyAuthenticated && (interactionUserId == null || interactionChatId == null)) {
       setTaskHistoryError(t("本地身份还没有加载完成。", "Local identity is not loaded yet."));
       return [];
     }
     const normalizedOffset = Math.max(0, Math.floor(offset));
-    const requestEpoch = ++taskHistoryRequestEpoch.current;
+    const isCurrentRequest = beginRead(taskHistoryRequestEpoch);
     setTaskHistoryLoading(true);
     setTaskHistoryError(null);
     try {
@@ -234,10 +251,10 @@ export function useTaskRuntime({
         }),
       });
       const body = (await res.json()) as ApiResponse<TaskHistoryResponse>;
+      if (!isCurrentRequest()) return [];
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `task_history_fetch_http_${res.status}`);
       }
-      if (requestEpoch !== taskHistoryRequestEpoch.current) return [];
       setTaskHistory(body.data.tasks ?? []);
       setTaskHistoryTotal(body.data.total ?? 0);
       setTaskHistoryOffset(body.data.offset ?? normalizedOffset);
@@ -245,37 +262,47 @@ export function useTaskRuntime({
       setTaskHistoryLoaded(true);
       return body.data.tasks ?? [];
     } catch (error) {
-      if (requestEpoch !== taskHistoryRequestEpoch.current) return [];
+      if (!isCurrentRequest()) return [];
       const message = formatUiError(error, t, "无法读取任务历史。", "Could not load task history.");
       setTaskHistoryError(message);
       return [];
     } finally {
-      if (requestEpoch === taskHistoryRequestEpoch.current) {
+      if (isCurrentRequest()) {
         setTaskHistoryLoading(false);
       }
     }
   };
 
   const queryTaskById = async (id: string, resetBeforeLoad = true): Promise<TaskQueryResponse | null> => {
-    if (!id.trim()) return null;
+    const normalizedId = id.trim();
+    if (!isCurrentScope() || !normalizedId) return null;
     if (resetBeforeLoad) {
+      selectedTaskIdRef.current = normalizedId;
+      teachingRequestEpoch.current += 1;
+      setTrackingTaskId(null);
       setTaskLoading(true);
       setTaskError(null);
       setTaskResult(null);
       setTaskLlmDebug(null);
       setTaskLlmDebugError(null);
+      setTaskLlmDebugLoading(false);
+    } else if (selectedTaskIdRef.current !== normalizedId) {
+      return null;
     }
+    const isCurrentRequest = beginRead(taskRequestEpoch);
     try {
-      const result = await fetchTaskById(id);
+      const result = await fetchTaskById(normalizedId);
+      if (!isCurrentRequest()) return null;
       setTaskResult(result);
       setTaskError(null);
       return result;
     } catch (err) {
+      if (!isCurrentRequest()) return null;
       const message = formatUiError(err, t, "任务详情暂时无法读取。", "Task details are temporarily unavailable.");
       setTaskError(message);
       return null;
     } finally {
-      if (resetBeforeLoad) {
+      if (isCurrentRequest()) {
         setTaskLoading(false);
       }
     }
@@ -283,41 +310,51 @@ export function useTaskRuntime({
 
   const queryTask = async () => {
     if (!taskId.trim()) return;
-    setTaskLoading(true);
-    await queryTaskById(taskId, false);
-    setTaskLoading(false);
+    await queryTaskById(taskId);
   };
 
   const queryTaskLlmDebug = async (id?: string, offset = 0) => {
     const targetTaskId = (id ?? taskId).trim();
-    if (!targetTaskId) return null;
+    if (!isCurrentScope() || !targetTaskId) return null;
+    const isCurrentRequest = beginRead(teachingRequestEpoch);
     setTaskLlmDebugLoading(true);
     setTaskLlmDebugError(null);
     try {
       const result = await fetchTaskLlmDebugById(targetTaskId, offset);
+      if (!isCurrentRequest()) return null;
       setTaskLlmDebug(result);
       return result;
     } catch (err) {
+      if (!isCurrentRequest()) return null;
       const message = formatUiError(err, t, "教学过程暂时无法读取。", "The teaching trace is temporarily unavailable.");
       setTaskLlmDebugError(message);
       setTaskLlmDebug(null);
       return null;
     } finally {
-      setTaskLlmDebugLoading(false);
+      if (isCurrentRequest()) setTaskLlmDebugLoading(false);
     }
   };
 
   const markTaskSubmitted = (submittedTaskId: string) => {
+    if (!isCurrentScope()) return;
+    selectedTaskIdRef.current = submittedTaskId;
+    taskRequestEpoch.current += 1;
+    teachingRequestEpoch.current += 1;
     setTaskId(submittedTaskId);
     setTrackingTaskId(submittedTaskId);
     setTaskResult(null);
     setTaskError(null);
     setTaskLlmDebug(null);
     setTaskLlmDebugError(null);
+    setTaskLoading(false);
+    setTaskLlmDebugLoading(false);
   };
 
   const recordTaskResult = (submittedTaskId: string, finalResult: TaskQueryResponse) => {
+    if (!isCurrentScope() || selectedTaskIdRef.current !== submittedTaskId) return;
+    taskRequestEpoch.current += 1;
     setTaskResult(finalResult);
+    setTaskLoading(false);
     setTrackingTaskId(
       shouldTrackTaskLive(finalResult.status, finalResult.execution_state, finalResult.lifecycle)
         ? submittedTaskId
@@ -333,6 +370,7 @@ export function useTaskRuntime({
   };
 
   const submitResumeForTask = async (resumeTaskId: string) => {
+    if (!isCurrentScope()) return;
     const text = (resumeDrafts[resumeTaskId] ?? "").trim();
     if (!text) {
       setResumeTaskMessage(null);
@@ -374,6 +412,7 @@ export function useTaskRuntime({
         body: JSON.stringify(body),
       });
       const resp = (await res.json()) as ApiResponse<SubmitTaskResponse>;
+      if (!isCurrentScope()) return;
       if (!res.ok || !resp.ok || !resp.data?.task_id) {
         throw new Error(resp.error || `task_resume_submit_http_${res.status}`);
       }
@@ -388,14 +427,16 @@ export function useTaskRuntime({
       markTaskSubmitted(resp.data.task_id);
       void fetchActiveTasks(true);
     } catch (err) {
+      if (!isCurrentScope()) return;
       const message = formatUiError(err, t, "任务继续执行失败，请稍后重试。", "The task could not resume. Try again shortly.");
       setResumeTaskError(message);
     } finally {
-      setResumeSubmittingTaskId(null);
+      if (isCurrentScope()) setResumeSubmittingTaskId(null);
     }
   };
 
   const cancelActiveTask = async (item: ActiveTaskItem) => {
+    if (!isCurrentScope()) return;
     setCancelingTaskId(item.task_id);
     setCancelTaskMessage(null);
     setCancelTaskError(null);
@@ -409,6 +450,7 @@ export function useTaskRuntime({
         }),
       });
       const body = (await res.json()) as ApiResponse<{ canceled?: number }>;
+      if (!isCurrentScope()) return;
       if (!res.ok || !body.ok) {
         throw new Error(body.error || `task_cancel_http_${res.status}`);
       }
@@ -418,10 +460,11 @@ export function useTaskRuntime({
         void queryTaskById(item.task_id, false);
       }
     } catch (err) {
+      if (!isCurrentScope()) return;
       const message = formatUiError(err, t, "任务取消失败，请稍后重试。", "The task could not be cancelled. Try again shortly.");
       setCancelTaskError(message);
     } finally {
-      setCancelingTaskId(null);
+      if (isCurrentScope()) setCancelingTaskId(null);
     }
   };
 
@@ -431,7 +474,7 @@ export function useTaskRuntime({
     userMessage?: string,
   ) => {
     const normalizedTaskId = controlTaskId.trim();
-    if (!normalizedTaskId) return;
+    if (!isCurrentScope() || !normalizedTaskId) return;
     setTaskControlSubmittingId(`${control}:${normalizedTaskId}`);
     setTaskControlMessage(null);
     setTaskControlError(null);
@@ -447,16 +490,16 @@ export function useTaskRuntime({
           ? {
               task_id: normalizedTaskId,
               user_message: userMessage?.trim(),
-              idempotency_key: `ui-steer-${crypto.randomUUID()}`,
+              idempotency_key: `ui-steer-${newRequestUuid()}`,
             }
           : control === "pause"
             ? {
                 task_id: normalizedTaskId,
-                idempotency_key: `ui-pause-${crypto.randomUUID()}`,
+                idempotency_key: `ui-pause-${newRequestUuid()}`,
               }
             : {
                 task_id: normalizedTaskId,
-                idempotency_key: `ui-resume-${crypto.randomUUID()}`,
+                idempotency_key: `ui-resume-${newRequestUuid()}`,
               };
       const res = await apiFetch(path, {
         method: "POST",
@@ -464,6 +507,7 @@ export function useTaskRuntime({
         body: JSON.stringify(payload),
       });
       const body = (await res.json()) as ApiResponse<{ status?: string; task_id?: string }>;
+      if (!isCurrentScope()) return;
       if (!res.ok || !body.ok) {
         throw new Error(body.error || `task_control_http_${res.status}`);
       }
@@ -482,10 +526,11 @@ export function useTaskRuntime({
         void queryTaskById(normalizedTaskId, false);
       }
     } catch (err) {
+      if (!isCurrentScope()) return;
       const message = formatUiError(err, t, "任务控制操作未完成，请稍后重试。", "The task control action did not complete. Try again shortly.");
       setTaskControlError(message);
     } finally {
-      setTaskControlSubmittingId(null);
+      if (isCurrentScope()) setTaskControlSubmittingId(null);
     }
   };
 
@@ -497,14 +542,14 @@ export function useTaskRuntime({
   ) => {
     const normalizedParentId = parentTaskId.trim();
     const normalizedChildId = childTaskId?.trim() ?? "";
-    if (!normalizedParentId || (control !== "stop_all" && !normalizedChildId)) return;
+    if (!isCurrentScope() || !normalizedParentId || (control !== "stop_all" && !normalizedChildId)) return;
     const targetId = normalizedChildId || normalizedParentId;
     setTaskControlSubmittingId(`subagent-${control}:${targetId}`);
     setTaskControlMessage(null);
     setTaskControlError(null);
     try {
       let path = "/v1/tasks/resume-by-task-id";
-      const idempotencyKey = `ui-subagent-${control}-${crypto.randomUUID()}`;
+      const idempotencyKey = `ui-subagent-${control}-${newRequestUuid()}`;
       let payload: Record<string, unknown> = {
         task_id: normalizedChildId,
         idempotency_key: idempotencyKey,
@@ -540,6 +585,7 @@ export function useTaskRuntime({
         body: JSON.stringify(payload),
       });
       const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
+      if (!isCurrentScope()) return;
       if (!res.ok || !body.ok) {
         throw new Error(body.error || `subagent_control_http_${res.status}`);
       }
@@ -553,10 +599,11 @@ export function useTaskRuntime({
       await fetchActiveTasks(true);
       await queryTaskById(normalizedParentId, false);
     } catch (err) {
+      if (!isCurrentScope()) return;
       const message = formatUiError(err, t, "子任务控制操作未完成，请稍后重试。", "The subtask control action did not complete. Try again shortly.");
       setTaskControlError(message);
     } finally {
-      setTaskControlSubmittingId(null);
+      if (isCurrentScope()) setTaskControlSubmittingId(null);
     }
   };
 
@@ -567,7 +614,7 @@ export function useTaskRuntime({
   ) => {
     const normalizedTaskId = controlTaskId.trim();
     const normalizedRequestId = approvalRequestId.trim();
-    if (!normalizedTaskId || !normalizedRequestId) return;
+    if (!isCurrentScope() || !normalizedTaskId || !normalizedRequestId) return;
     setTaskControlSubmittingId(`${approvalDecision}:${normalizedTaskId}`);
     setTaskControlMessage(null);
     setTaskControlError(null);
@@ -579,10 +626,11 @@ export function useTaskRuntime({
           task_id: normalizedTaskId,
           approval_request_id: normalizedRequestId,
           approval_decision: approvalDecision,
-          idempotency_key: `ui-approval-${crypto.randomUUID()}`,
+          idempotency_key: `ui-approval-${newRequestUuid()}`,
         }),
       });
       const body = (await res.json()) as ApiResponse<{ status?: string; task_id?: string }>;
+      if (!isCurrentScope()) return;
       if (!res.ok || !body.ok) {
         throw new Error(body.error || `task_approval_http_${res.status}`);
       }
@@ -602,14 +650,17 @@ export function useTaskRuntime({
       await fetchActiveTasks(true);
       void queryTaskById(normalizedTaskId, false);
     } catch (err) {
+      if (!isCurrentScope()) return;
       const message = formatUiError(err, t, "任务确认操作未完成，请稍后重试。", "The task approval action did not complete. Try again shortly.");
       setTaskControlError(message);
     } finally {
-      setTaskControlSubmittingId(null);
+      if (isCurrentScope()) setTaskControlSubmittingId(null);
     }
   };
 
   const fetchApprovalScopeGrants = async (silent = false): Promise<ApprovalScopeGrantView[]> => {
+    if (!isCurrentScope()) return [];
+    const isCurrentRequest = beginRead(grantsRequestEpoch);
     if (!silent) {
       setApprovalScopeGrantsLoading(true);
       setApprovalScopeGrantsError(null);
@@ -617,6 +668,7 @@ export function useTaskRuntime({
     try {
       const res = await apiFetch("/v1/tasks/approval-grants");
       const body = (await res.json()) as ApiResponse<ApprovalScopeGrantListResponse>;
+      if (!isCurrentRequest()) return [];
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `approval_scope_grants_fetch_http_${res.status}`);
       }
@@ -625,11 +677,12 @@ export function useTaskRuntime({
       setApprovalScopeGrantsError(null);
       return grants;
     } catch (err) {
+      if (!isCurrentRequest()) return [];
       const message = formatUiError(err, t, "确认授权范围暂时无法读取。", "Approval scopes are temporarily unavailable.");
       setApprovalScopeGrantsError(message);
       return [];
     } finally {
-      if (!silent) {
+      if (isCurrentRequest()) {
         setApprovalScopeGrantsLoading(false);
       }
     }
@@ -637,7 +690,7 @@ export function useTaskRuntime({
 
   const revokeApprovalScopeGrant = async (grantId: string) => {
     const normalizedGrantId = grantId.trim();
-    if (!normalizedGrantId) return;
+    if (!isCurrentScope() || !normalizedGrantId) return;
     setApprovalScopeGrantRevokingId(normalizedGrantId);
     setApprovalScopeGrantsError(null);
     try {
@@ -647,15 +700,17 @@ export function useTaskRuntime({
         body: JSON.stringify({ grant_id: normalizedGrantId }),
       });
       const body = (await res.json()) as ApiResponse<{ status?: string; grant_id?: string }>;
+      if (!isCurrentScope()) return;
       if (!res.ok || !body.ok) {
         throw new Error(body.error || `approval_scope_grant_revoke_http_${res.status}`);
       }
       await fetchApprovalScopeGrants(true);
     } catch (err) {
+      if (!isCurrentScope()) return;
       const message = formatUiError(err, t, "确认授权撤销失败，请稍后重试。", "The approval grant could not be revoked. Try again shortly.");
       setApprovalScopeGrantsError(message);
     } finally {
-      setApprovalScopeGrantRevokingId(null);
+      if (isCurrentScope()) setApprovalScopeGrantRevokingId(null);
     }
   };
 
@@ -665,7 +720,7 @@ export function useTaskRuntime({
     goal?: Record<string, unknown>,
   ) => {
     const normalizedTaskId = controlTaskId.trim();
-    if (!normalizedTaskId) return;
+    if (!isCurrentScope() || !normalizedTaskId) return;
     setTaskControlSubmittingId(`goal-${operation}:${normalizedTaskId}`);
     setTaskControlMessage(null);
     setTaskControlError(null);
@@ -680,6 +735,7 @@ export function useTaskRuntime({
         }),
       });
       const body = (await res.json()) as ApiResponse<{ status?: string; task_id?: string }>;
+      if (!isCurrentScope()) return;
       if (!res.ok || !body.ok) {
         throw new Error(body.error || `task_goal_control_http_${res.status}`);
       }
@@ -693,14 +749,16 @@ export function useTaskRuntime({
         void queryTaskById(normalizedTaskId, false);
       }
     } catch (err) {
+      if (!isCurrentScope()) return;
       const message = formatUiError(err, t, "目标任务控制操作未完成，请稍后重试。", "The goal control action did not complete. Try again shortly.");
       setTaskControlError(message);
     } finally {
-      setTaskControlSubmittingId(null);
+      if (isCurrentScope()) setTaskControlSubmittingId(null);
     }
   };
 
   const submitInteractionTask = async () => {
+    if (!isCurrentScope()) return;
     setInteractionLoading(true);
     setInteractionError(null);
     setInteractionSubmittedTaskId(null);
@@ -752,6 +810,7 @@ export function useTaskRuntime({
         body: JSON.stringify(body),
       });
       const resp = (await res.json()) as ApiResponse<SubmitTaskResponse>;
+      if (!isCurrentScope()) return;
       if (!res.ok || !resp.ok || !resp.data?.task_id) {
         throw new Error(resp.error || `task_submit_http_${res.status}`);
       }
@@ -760,22 +819,45 @@ export function useTaskRuntime({
       markTaskSubmitted(resp.data.task_id);
       void fetchActiveTasks(true);
     } catch (err) {
+      if (!isCurrentScope()) return;
       const message = formatUiError(err, t, "任务提交失败，请稍后重试。", "The task could not be submitted. Try again shortly.");
       setInteractionError(message);
     } finally {
-      setInteractionLoading(false);
+      if (isCurrentScope()) setInteractionLoading(false);
     }
   };
 
   const viewTask = async (taskIdToView: string) => {
+    if (!isCurrentScope()) return null;
     setTaskId(taskIdToView);
     setTaskLlmDebug(null);
     setTaskLlmDebugError(null);
-    return queryTaskById(taskIdToView);
+    const result = await queryTaskById(taskIdToView);
+    if (result && isCurrentScope() && selectedTaskIdRef.current === result.task_id) {
+      setTrackingTaskId(shouldTrackTaskLive(result.status, result.execution_state, result.lifecycle)
+        ? result.task_id : null);
+    }
+    return result;
   };
 
   useEffect(() => {
+    selectedTaskIdRef.current = "";
+    taskRequestEpoch.current += 1;
+    teachingRequestEpoch.current += 1;
+    activeTasksRequestEpoch.current += 1;
+    grantsRequestEpoch.current += 1;
+    setTaskId("");
+    setTaskLoading(false);
+    setTaskResult(null);
+    setTaskError(null);
+    setTaskLlmDebug(null);
+    setTaskLlmDebugLoading(false);
+    setTaskLlmDebugError(null);
+    setTrackingTaskId(null);
     setActiveTasks([]);
+    setActiveTasksLoading(false);
+    setActiveTasksError(null);
+    setActiveTasksLastUpdated(null);
     setActiveTasksTotal(0);
     setActiveTasksOffset(0);
     setActiveTasksLimit(ACTIVE_TASK_PAGE_SIZE);
@@ -790,18 +872,36 @@ export function useTaskRuntime({
     setTaskControlSubmittingId(null);
     setTaskControlMessage(null);
     setTaskControlError(null);
+    setApprovalScopeGrants([]);
+    setApprovalScopeGrantsLoading(false);
+    setApprovalScopeGrantsError(null);
+    setApprovalScopeGrantRevokingId(null);
+    setResumeDrafts({});
+    setResumeSubmittingTaskId(null);
+    setResumeTaskMessage(null);
+    setResumeTaskError(null);
+    setCancelingTaskId(null);
+    setCancelTaskMessage(null);
+    setCancelTaskError(null);
+    setInteractionLoading(false);
+    setInteractionError(null);
+    setInteractionSubmittedTaskId(null);
     deliveryFlightRef.current = null;
-  }, [activeUserKey, interactionUserId, interactionChatId, uiAuthReady]);
+  }, [taskScope]);
 
   useEffect(() => {
     if (!uiAuthReady) return;
     if (!trackingTaskId) return;
     const controller = new AbortController();
+    const isCurrentStream = () => !controller.signal.aborted && isCurrentScope()
+      && selectedTaskIdRef.current === trackingTaskId;
     void followTaskEventStream(
       apiFetch,
       trackingTaskId,
       (event) => {
+        if (!isCurrentStream()) return;
         setTaskResult((current) => {
+          if (!isCurrentStream()) return current;
           const withEvent = appendLiveTaskEvent(current, trackingTaskId, event);
           if (event.event_kind !== "task_state") return withEvent;
           const status = event.payload?.status;
@@ -823,8 +923,9 @@ export function useTaskRuntime({
       controller.signal,
     )
       .then(async () => {
-        if (controller.signal.aborted) return;
+        if (!isCurrentStream()) return;
         const result = await fetchTaskById(trackingTaskId);
+        if (!isCurrentStream()) return;
         setTaskResult(result);
         setTaskError(null);
         if (!shouldTrackTaskLive(result.status, result.execution_state, result.lifecycle)) {
@@ -832,12 +933,12 @@ export function useTaskRuntime({
         }
       })
       .catch((error) => {
-        if (controller.signal.aborted) return;
+        if (!isCurrentStream()) return;
         setTaskError(formatUiError(error, t, "任务进度连接已中断，请刷新后重试。", "The task progress connection was interrupted. Refresh and try again."));
       });
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trackingTaskId, apiBase, uiAuthReady]);
+  }, [trackingTaskId, apiBase, uiAuthReady, taskScope]);
 
   useEffect(() => {
     if (!uiAuthReady) return;
@@ -848,10 +949,13 @@ export function useTaskRuntime({
     ) {
       return;
     }
+    let refreshPending = false;
     const refreshWhenVisible = () => {
-      if (document.visibilityState !== "visible") return;
-      void fetchActiveTasks(true, activeTasksOffset);
-      void fetchApprovalScopeGrants(true);
+      if (document.visibilityState !== "visible" || refreshPending) return;
+      refreshPending = true;
+      void Promise.all([
+        fetchActiveTasks(true, activeTasksOffset), fetchApprovalScopeGrants(true),
+      ]).finally(() => { refreshPending = false; });
     };
     refreshWhenVisible();
     const interval = window.setInterval(() => {

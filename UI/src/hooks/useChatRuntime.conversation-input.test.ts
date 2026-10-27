@@ -359,7 +359,11 @@ test("busy text sends steer the active task immediately and preserve per-input t
   } finally { await app.unmount(); }
 });
 
-test("stops the authenticated current conversation without submitting natural-language control", async () => {
+test("stops the authenticated current conversation on LAN HTTP without natural-language control", async t => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  const getRandomValues = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value: { getRandomValues } });
+  t.after(() => { if (previous) Object.defineProperty(globalThis, "crypto", previous); });
   const app = await setup();
   try {
     await app.send("start a long task");
@@ -372,6 +376,7 @@ test("stops the authenticated current conversation without submitting natural-la
 
     assert.equal(app.cancelRequests.length, 1);
     assert.equal(app.cancelRequests[0].expected_task_id, "task-1");
+    assert.match(String(app.cancelRequests[0].client_request_id), /[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     assert.deepEqual(app.cancelRequests[0].scope, app.conversationInputs[0].scope);
     assert.equal(app.conversationInputs.length, 1);
     assert.equal(app.runtime().chatActivity.stage, "stopping");

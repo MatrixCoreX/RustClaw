@@ -105,6 +105,138 @@ fn inspection_is_bounded_private_and_does_not_grant_or_retry() {
 }
 
 #[test]
+fn missing_delivery_evidence_is_not_an_infinite_pending_queue() {
+    let (state, id, _) = fixture();
+    let db = state.core.db.get().unwrap();
+    db.execute("DELETE FROM channel_delivery_dispatch_claims", [])
+        .unwrap();
+    let before = db.total_changes();
+    assert_eq!(inspect(&db, &id, 10).unwrap()["status"], "unavailable");
+    assert_eq!(db.total_changes(), before, "inspection must stay read-only");
+    for (queue_state, lease, expected) in [
+        ("pending", 0, "pending"),
+        ("dispatching", 20, "in_progress"),
+        ("dispatching", 5, "pending"),
+        ("completed", 0, "unavailable"),
+        ("failed", 0, "unavailable"),
+    ] {
+        db.execute(
+            "INSERT INTO channel_terminal_delivery_outbox(task_id,state,lease_expires_at_ts,created_at_ts,updated_at_ts)
+             VALUES (?1,?2,?3,1,1) ON CONFLICT(task_id) DO UPDATE SET state=excluded.state,lease_expires_at_ts=excluded.lease_expires_at_ts",
+            params![id, queue_state, lease],
+        ).unwrap();
+        let view = inspect(&db, &id, 10).unwrap();
+        assert_eq!(view["status"], expected, "queue state {queue_state}");
+        assert_eq!(view["can_reconcile"], false);
+        assert!(view.get("snapshot_digest").is_none());
+    }
+    db.execute("DELETE FROM channel_terminal_delivery_outbox", [])
+        .unwrap();
+    db.execute("UPDATE tasks SET status='running' WHERE task_id=?1", [&id])
+        .unwrap();
+    assert_eq!(inspect(&db, &id, 10).unwrap()["status"], "pending");
+}
+
+#[test]
+fn multipart_task_projection_follows_real_provider_callbacks_not_stale_child_receipts() {
+    use claw_core::{channel_delivery::ChannelDeliveryPartReceipt, types::ChannelKind};
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let id = uuid::Uuid::new_v4().to_string();
+    let mut parent = ChannelDeliveryReceipt {
+        schema_version: 1,
+        delivery_id: format!("delivery:{id}:terminal"),
+        idempotency_key: "callback-parent".into(),
+        channel: ChannelKind::Whatsapp,
+        adapter: "whatsapp_cloud".into(),
+        status: ChannelDeliveryStatus::Accepted,
+        provider_message_ids: vec!["wamid.first".into(), "wamid.second".into()],
+        parts: vec![],
+        error_code: None,
+        message_key: None,
+        diagnostic_id: None,
+        provider_error_code: None,
+        retryable: false,
+        updated_at_ts: 1,
+    };
+    let db = state.core.db.get().unwrap();
+    ensure_channel_delivery_receipt_schema(&db).unwrap();
+    for index in 0..2 {
+        let mut child = parent.clone();
+        child.idempotency_key = format!("callback-part-{index}");
+        child.delivery_id = format!("delivery-part:{index}");
+        child.provider_message_ids.clear();
+        child.parts = vec![ChannelDeliveryPartReceipt {
+            part_index: 0,
+            status: ChannelDeliveryStatus::Accepted,
+            provider_message_id: Some(parent.provider_message_ids[index].clone()),
+            error_code: None,
+        }];
+        record_channel_delivery_receipt_in_db(&db, &child).unwrap();
+        parent.parts.push(ChannelDeliveryPartReceipt {
+            part_index: index as u32,
+            ..child.parts[0].clone()
+        });
+    }
+    record_channel_delivery_receipt_in_db(&db, &parent).unwrap();
+    db.execute("INSERT INTO channel_delivery_dispatch_claims VALUES ('callback-parent',?1,'whatsapp','whatsapp_cloud','receipt_recorded',NULL,0,1,1,1)", [&parent.delivery_id]).unwrap();
+    db.execute_batch("CREATE TABLE channel_delivery_part_plans(idempotency_key TEXT PRIMARY KEY,plan_json TEXT,task_id TEXT,part_keys_json TEXT);").unwrap();
+    db.execute("INSERT INTO channel_delivery_part_plans VALUES ('callback-parent','{}',?1,'[\"callback-part-0\",\"callback-part-1\"]')", [&id]).unwrap();
+    for (index, status, expected) in [
+        (0, WhatsappDeliveryEventStatus::Delivered, "accepted"),
+        (1, WhatsappDeliveryEventStatus::Delivered, "delivered"),
+        (0, WhatsappDeliveryEventStatus::Read, "delivered"),
+        (1, WhatsappDeliveryEventStatus::Read, "read"),
+    ] {
+        record_whatsapp_cloud_provider_status_in_db(
+            &db,
+            &parent.provider_message_ids[index],
+            status,
+            10 + index as u64,
+            None,
+            true,
+        )
+        .unwrap();
+        assert_eq!(inspect(&db, &id, 20).unwrap()["status"], expected);
+    }
+    for index in 0..2 {
+        assert_eq!(
+            load_channel_delivery_receipt_from_db(&db, &format!("callback-part-{index}"))
+                .unwrap()
+                .unwrap()
+                .status,
+            ChannelDeliveryStatus::Accepted
+        );
+    }
+    ensure_decision_schema(&db).unwrap();
+    db.execute("INSERT INTO channel_delivery_reconciliations VALUES (?1,'decision','owner','digest','confirm_received','snapshot',1,'[1]')", [&id]).unwrap();
+    let view = inspect(&db, &id, 20).unwrap();
+    assert_eq!(
+        view["status"], "read",
+        "real provider proof supersedes manual confirmation"
+    );
+    assert_eq!(view["user_confirmation_recorded"], true);
+}
+
+#[test]
+fn inspection_without_delivery_tables_stays_unavailable_and_read_only() {
+    let db = Connection::open_in_memory().unwrap();
+    assert_eq!(
+        inspect(&db, "missing", 10).unwrap()["status"],
+        "unavailable"
+    );
+    assert_eq!(db.total_changes(), 0);
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+}
+
+#[test]
 fn explicit_retry_preserves_accepted_prefix_and_is_idempotent_and_fenced() {
     let (state, id, identity) = fixture();
     let mut db = state.core.db.get().unwrap();

@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 
 import { formatUiError } from "../lib/ui-error";
+import { newRequestUuid } from "../lib/request-id";
 import { PageRequestLifecycle } from "../lib/page-request-lifecycle";
 import { AippSkillRemovalError, removeAippAndSkill } from "../lib/aipp-skill-removal";
 import { skillStoreErrorMessage } from "../lib/skill-store";
@@ -355,7 +356,7 @@ export function SandboxedAipp({
             body: JSON.stringify({
               channel: "ui",
               kind: "ask",
-              idempotency_key: `aipp-${crypto.randomUUID()}`,
+              idempotency_key: `aipp-${newRequestUuid()}`,
               payload: {
                 entrypoint: "run_capability",
                 capability: request.capability,
