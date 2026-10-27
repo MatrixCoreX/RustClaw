@@ -440,92 +440,27 @@ fn usage_chain_entry_from_entry(entry: &TaskDebugEntry) -> UsageHistoryChainEntr
     }
 }
 
-fn summarize_usage_task(
-    task_id: String,
-    meta: UsageTaskMeta,
-    entries: &[TaskDebugEntry],
-) -> UsageHistoryRecordSummary {
-    let mut prompt_tokens = 0u64;
-    let mut completion_tokens = 0u64;
-    let mut total_tokens = 0u64;
-    let mut latest_entry: Option<&TaskDebugEntry> = None;
-    for entry in entries {
-        let chain_entry = usage_chain_entry_from_entry(entry);
-        prompt_tokens += chain_entry.prompt_tokens.unwrap_or(0);
-        completion_tokens += chain_entry.completion_tokens.unwrap_or(0);
-        total_tokens += chain_entry.total_tokens.unwrap_or_else(|| {
-            chain_entry.prompt_tokens.unwrap_or(0) + chain_entry.completion_tokens.unwrap_or(0)
-        });
-        let replace = latest_entry
-            .map(|current| entry.ts.unwrap_or(0) >= current.ts.unwrap_or(0))
-            .unwrap_or(true);
-        if replace {
-            latest_entry = Some(entry);
-        }
-    }
-    let latest = latest_entry.cloned().unwrap_or(TaskDebugEntry {
-        ts: None,
-        task_id: Some(task_id.clone()),
-        parent_task_id: None,
-        child_task_id: None,
-        call_id: None,
-        vendor: None,
-        provider: None,
-        provider_type: None,
-        model: None,
-        model_kind: None,
-        status: None,
-        mode: None,
-        prompt_source: None,
-        prompt_hash: None,
-        prompt_file: None,
-        prompt: None,
-        request_payload: None,
-        response: None,
-        raw_response: None,
-        clean_response: None,
-        sanitized: None,
-        error: None,
-        usage: None,
-    });
-    UsageHistoryRecordSummary {
-        record_id: task_id.clone(),
-        task_id,
-        ts: latest.ts,
-        channel: Some(meta.channel),
-        kind: Some(meta.kind),
-        task_status: Some(meta.task_status),
-        telegram_bot_name: meta.telegram_bot_name,
-        external_user_id: meta.external_user_id,
-        external_chat_id: meta.external_chat_id,
-        request_text: meta.request_text,
-        vendor: latest.vendor,
-        provider: latest.provider,
-        provider_type: latest.provider_type,
-        model: latest.model,
-        model_kind: latest.model_kind,
-        prompt_file: latest.prompt_file,
-        prompt_tokens: Some(prompt_tokens),
-        completion_tokens: Some(completion_tokens),
-        total_tokens: Some(total_tokens),
-        llm_call_count: entries.len(),
-        status: latest.status,
-        error: latest.error,
-    }
-}
-
 fn usage_stats_add(stats: &mut UsageHistoryStats, record: &UsageHistoryRecordSummary) {
-    stats.total_requests += 1;
+    stats.total_requests = stats.total_requests.saturating_add(1);
     if record.status.as_deref() == Some("ok") {
-        stats.success_requests += 1;
+        stats.success_requests = stats.success_requests.saturating_add(1);
     } else {
-        stats.failed_requests += 1;
+        stats.failed_requests = stats.failed_requests.saturating_add(1);
     }
-    stats.prompt_tokens += record.prompt_tokens.unwrap_or(0);
-    stats.completion_tokens += record.completion_tokens.unwrap_or(0);
-    stats.total_tokens += record.total_tokens.unwrap_or_else(|| {
-        record.prompt_tokens.unwrap_or(0) + record.completion_tokens.unwrap_or(0)
-    });
+    stats.prompt_tokens = stats
+        .prompt_tokens
+        .saturating_add(record.prompt_tokens.unwrap_or(0));
+    stats.completion_tokens = stats
+        .completion_tokens
+        .saturating_add(record.completion_tokens.unwrap_or(0));
+    stats.total_tokens = stats
+        .total_tokens
+        .saturating_add(record.total_tokens.unwrap_or_else(|| {
+            record
+                .prompt_tokens
+                .unwrap_or(0)
+                .saturating_add(record.completion_tokens.unwrap_or(0))
+        }));
 }
 
 fn usage_channel_matches(query_channel: Option<&str>, record: &UsageHistoryRecordSummary) -> bool {
@@ -745,7 +680,7 @@ async fn usage_records(
         }
     };
     let mut meta_cache: HashMap<String, Option<UsageTaskMeta>> = HashMap::new();
-    let mut tasks_by_id: HashMap<String, (UsageTaskMeta, Vec<TaskDebugEntry>)> = HashMap::new();
+    let mut tasks_by_id: HashMap<String, (UsageTaskMeta, UsageTaskAccumulator)> = HashMap::new();
     let mut stats = UsageHistoryStats {
         total_requests: 0,
         success_requests: 0,
@@ -762,7 +697,7 @@ async fn usage_records(
         if trimmed.is_empty() {
             continue;
         }
-        let Ok(entry) = serde_json::from_str::<TaskDebugEntry>(trimmed) else {
+        let Ok(entry) = serde_json::from_str::<UsageLogEntry>(trimmed) else {
             continue;
         };
         let Some(task_id) = entry
@@ -799,15 +734,14 @@ async fn usage_records(
         if !usage_record_visible_to_identity(&identity, &meta) {
             continue;
         }
-        tasks_by_id
+        let (_, summary) = tasks_by_id
             .entry(task_id)
-            .and_modify(|(_, entries)| entries.push(entry.clone()))
-            .or_insert_with(|| (meta, vec![entry]));
+            .or_insert_with(|| (meta, UsageTaskAccumulator::default()));
+        summary.add(entry);
     }
     let mut matched_records = Vec::new();
-    for (task_id, (meta, mut entries)) in tasks_by_id {
-        entries.sort_by(|a, b| (a.ts.unwrap_or(0)).cmp(&b.ts.unwrap_or(0)));
-        let summary = summarize_usage_task(task_id, meta, &entries);
+    for (task_id, (meta, accumulator)) in tasks_by_id {
+        let summary = accumulator.into_summary(task_id, meta);
         if !usage_channel_matches(channel, &summary) {
             continue;
         }
@@ -1008,6 +942,9 @@ fn read_task_debug_entries_page_from_paths(
             };
             let trimmed = line.trim();
             if trimmed.is_empty() {
+                continue;
+            }
+            if !line_matches_task_ids(trimmed, trace_task_ids) {
                 continue;
             }
             let Ok(entry) = serde_json::from_str::<TaskDebugEntry>(trimmed) else {

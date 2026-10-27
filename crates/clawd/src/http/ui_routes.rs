@@ -53,8 +53,13 @@ use claw_core::{
     skill_registry::{PlannerCapabilityKind, SkillKind},
 };
 
+#[path = "ui_routes/model_log_scan.rs"]
+mod model_log_scan;
 #[path = "ui_routes/nni_owner_financial.rs"]
 mod nni_owner_financial;
+use model_log_scan::{
+    line_matches_task_ids, summarize_usage_task, UsageLogEntry, UsageTaskAccumulator,
+};
 mod workspace_update_config_snapshot;
 use workspace_update_config_snapshot::*;
 

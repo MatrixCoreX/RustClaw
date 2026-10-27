@@ -22,6 +22,14 @@ payloads and existing plain records remain readable. This is lossless storage,
 not encryption or a retention change. Existing append locks, provider-response
 sanitization and access checks remain in force; no sidecar is needed on restart.
 
+Usage lists scan only request metadata and retain one summary per visible task;
+they do not inflate compressed bodies or keep complete provider chains in memory.
+Valid usage metadata remains countable even if the separate request body is damaged.
+Teaching detail filters exact task/child IDs before decoding payloads. Matching
+records still undergo full validation, so existing archive order, valid-call totals,
+pagination, raw-field reconstruction, authorization and redaction are preserved.
+Token and request counters saturate at their integer limit instead of overflowing.
+
 ```mermaid
 flowchart TD
     A[Coding request or goal] --> B[Inspect workspace and evidence]
