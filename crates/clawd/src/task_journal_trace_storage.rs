@@ -1,12 +1,47 @@
 use super::*;
+use std::io::{self, Write};
+
+const TRACE_HASH_OFFSET: u64 = 0xcbf29ce484222325;
+
+fn extend_trace_hash(hash: &mut u64, bytes: &[u8]) {
+    for byte in bytes {
+        *hash ^= u64::from(*byte);
+        *hash = hash.wrapping_mul(0x100000001b3);
+    }
+}
 
 pub(super) fn stable_trace_hash(text: &str) -> String {
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for byte in text.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
+    let mut hash = TRACE_HASH_OFFSET;
+    extend_trace_hash(&mut hash, text.as_bytes());
     format!("fnv64:{hash:016x}")
+}
+
+struct TraceJsonMeasure<const HASH: bool> {
+    bytes: usize,
+    hash: u64,
+}
+
+impl<const HASH: bool> Write for TraceJsonMeasure<HASH> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.bytes = self.bytes.saturating_add(bytes.len());
+        if HASH {
+            extend_trace_hash(&mut self.hash, bytes);
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn measure_trace_json<const HASH: bool>(value: &Value) -> Option<TraceJsonMeasure<HASH>> {
+    let mut measure = TraceJsonMeasure {
+        bytes: 0,
+        hash: TRACE_HASH_OFFSET,
+    };
+    serde_json::to_writer(&mut measure, value).ok()?;
+    Some(measure)
 }
 
 #[derive(Debug, Default)]
@@ -17,15 +52,15 @@ pub(super) struct TraceStorageStats {
 }
 
 pub(super) fn trace_json_bytes(value: &Value) -> usize {
-    serde_json::to_vec(value)
-        .map(|bytes| bytes.len())
+    measure_trace_json::<false>(value)
+        .map(|measure| measure.bytes)
         .unwrap_or(0)
 }
 
 pub(super) fn trace_json_hash(value: &Value) -> String {
-    serde_json::to_string(value)
-        .map(|text| stable_trace_hash(&text))
-        .unwrap_or_else(|_| stable_trace_hash("<unserializable-trace>"))
+    measure_trace_json::<true>(value)
+        .map(|measure| format!("fnv64:{:016x}", measure.hash))
+        .unwrap_or_else(|| stable_trace_hash("<unserializable-trace>"))
 }
 
 const TRACE_STORAGE_TRUNCATION_MARKER: &str = "...(truncated)";
@@ -98,39 +133,33 @@ fn retain_user_delivery_capability_results(
         return;
     }
     let omitted = items.len() - max_array_items;
-    let delivery_idx: Vec<usize> = items
+    let mut keep_idx: Vec<usize> = items
         .iter()
         .enumerate()
+        .rev()
         .filter(|(_, item)| capability_result_delivers_user_artifact(item))
         .map(|(index, _)| index)
+        .take(max_array_items)
         .collect();
-    let other_idx: Vec<usize> = items
-        .iter()
-        .enumerate()
-        .filter(|(_, item)| !capability_result_delivers_user_artifact(item))
-        .map(|(index, _)| index)
-        .collect();
-    let mut keep_idx = Vec::new();
-    if delivery_idx.len() >= max_array_items {
+    if keep_idx.len() < max_array_items {
+        let fill = max_array_items - keep_idx.len();
         keep_idx.extend(
-            delivery_idx
-                .into_iter()
-                .rev()
-                .take(max_array_items)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev(),
+            items
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| !capability_result_delivers_user_artifact(item))
+                .map(|(index, _)| index)
+                .take(fill),
         );
-    } else {
-        let fill = max_array_items - delivery_idx.len();
-        keep_idx.extend(other_idx.into_iter().take(fill));
-        keep_idx.extend(delivery_idx);
-        keep_idx.sort_unstable();
     }
+    keep_idx.sort_unstable();
     let mut kept = Vec::with_capacity(keep_idx.len());
+    let mut indexes = keep_idx.into_iter();
+    let mut next = indexes.next();
     for (index, item) in items.drain(..).enumerate() {
-        if keep_idx.contains(&index) {
+        if next == Some(index) {
             kept.push(item);
+            next = indexes.next();
         }
     }
     stats.truncated_arrays += 1;
@@ -262,18 +291,20 @@ fn refresh_stored_bytes(trace: &mut Value) -> usize {
 }
 
 pub(super) fn result_trace_json_with_storage_limit(mut trace: Value) -> Value {
-    let original_bytes = trace_json_bytes(&trace);
-    let original_hash = trace_json_hash(&trace);
-    let evidence_streams = json!({
-        "step_results": trace_json_hash(&trace["step_results"]),
-        "capability_results": trace_json_hash(&trace["capability_results"]),
-    });
+    let (original_bytes, original_hash) = measure_trace_json::<true>(&trace)
+        .map(|measure| (measure.bytes, format!("fnv64:{:016x}", measure.hash)))
+        .unwrap_or_else(|| (0, stable_trace_hash("<unserializable-trace>")));
     let mut stats = TraceStorageStats::default();
     let meta = result_trace_storage_meta(original_bytes, 0, original_hash.clone(), &stats, false);
     insert_result_trace_storage_meta(&mut trace, meta);
     if refresh_stored_bytes(&mut trace) <= MAX_RESULT_TRACE_BYTES {
         return trace;
     }
+
+    let evidence_streams = json!({
+        "step_results": trace_json_hash(&trace["step_results"]),
+        "capability_results": trace_json_hash(&trace["capability_results"]),
+    });
 
     for (items, chars) in [
         (MAX_RESULT_TRACE_ARRAY_ITEMS, MAX_RESULT_TRACE_STRING_CHARS),

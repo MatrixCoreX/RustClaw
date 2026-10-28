@@ -27,6 +27,13 @@ payloads and existing plain records remain readable. This is lossless storage,
 not encryption or a retention change. Existing append locks, provider-response
 sanitization and access checks remain in force; no sidecar is needed on restart.
 
+Task-result trace projections count serialized JSON bytes and compute FNV digests
+through a streaming writer, without allocating complete serialization buffers.
+Artifact selection keeps bounded indexes and preserves original result order;
+byte limits, digest format and truncation metadata remain exact. A truncated
+projection retains evidence-stream digests for verified recovery from the full
+journal; it does not replace the authoritative execution evidence.
+
 Usage lists scan only request metadata and retain one summary per visible task;
 they do not inflate compressed bodies or keep complete provider chains in memory.
 Valid usage metadata remains countable even if the separate request body is damaged.

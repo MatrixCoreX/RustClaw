@@ -34,6 +34,9 @@ mod frontdoor_llm_metrics;
 #[path = "task_journal_tests/trace_storage_bounds.rs"]
 mod trace_storage_bounds;
 
+#[path = "task_journal_tests/trace_storage_equivalence.rs"]
+mod trace_storage_equivalence;
+
 fn route_for_contract(exact_command_output: bool) -> crate::IntentOutputContract {
     let mut route = crate::IntentOutputContract {
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
