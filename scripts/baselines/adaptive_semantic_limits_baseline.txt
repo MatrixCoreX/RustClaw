@@ -338,6 +338,13 @@ crates/clawd/src/resource_scheduler.rs	clamp	.clamp(128, 256)
 crates/clawd/src/resource_scheduler.rs	hard_count	MAX_METADATA_BYTES
 crates/clawd/src/resource_scheduler.rs	take	.take(RESOURCE_ESTIMATE_MAX_ENTRIES)
 crates/clawd/src/routing_context.rs	take	.take(limit)
+# Reviewed 2026-10-29: prior-step preview, not the canonical history index.
+# routing_context_tests::preview_counts_only_steps_before_selected_domain_anchor
+crates/clawd/src/routing_context.rs	take	.take(4)
+# Reviewed 2026-10-29: bounded/redacted previews publish truncation and a scoped
+# recall reference. routing_context_projection_tests covers count/depth/bytes.
+crates/clawd/src/routing_context_projection.rs	take	.take(16)
+crates/clawd/src/routing_context_projection.rs	take	.take(32)
 crates/clawd/src/runtime/state.rs	take	.take(remaining)
 crates/clawd/src/schedule_service.rs	take	.take(6)
 crates/clawd/src/scheduled_run_contract.rs	clamp	.clamp(1, 100)

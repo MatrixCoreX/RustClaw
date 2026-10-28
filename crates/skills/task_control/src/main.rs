@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
+mod context_recall;
 mod response_contract;
 
 use response_contract::*;
@@ -80,12 +81,14 @@ struct SkillInput {
     dry_run: bool,
     context_ref: Option<String>,
     field_paths: Vec<String>,
+    recall_options: context_recall::Options,
 }
 
 #[derive(Debug)]
 struct SkillOutput {
     text: String,
     extra: Option<Value>,
+    error_text: Option<String>,
 }
 
 impl SkillOutput {
@@ -93,6 +96,7 @@ impl SkillOutput {
         Self {
             text: text.into(),
             extra: Some(extra),
+            error_text: None,
         }
     }
 }
@@ -109,9 +113,14 @@ async fn main() -> anyhow::Result<()> {
                 Ok(fut) => match fut.await {
                     Ok(output) => Resp {
                         request_id: req.request_id,
-                        status: "ok".to_string(),
+                        status: if output.error_text.is_some() {
+                            "error"
+                        } else {
+                            "ok"
+                        }
+                        .to_string(),
                         text: output.text,
-                        error_text: None,
+                        error_text: output.error_text,
                         extra: output.extra,
                     },
                     Err(err) => Resp {
@@ -220,6 +229,11 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
     {
         return Err("context_reference_invalid".into());
     }
+    let recall_options = if action == "recall_context" {
+        context_recall::Options::parse(args)?
+    } else {
+        context_recall::Options::default()
+    };
     let alias = obj
         .get("alias")
         .and_then(Value::as_str)
@@ -336,6 +350,7 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
             dry_run,
             context_ref,
             field_paths,
+            recall_options,
         });
     }
     Ok(SkillInput {
@@ -355,6 +370,7 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
         dry_run,
         context_ref,
         field_paths,
+        recall_options,
     })
 }
 
@@ -382,10 +398,16 @@ fn execute(
                 let key = user_key.as_deref().ok_or("context_auth_required")?;
                 let response = client.post(format!("{base_url}/v1/tasks/{request_id}/context-recall"))
                     .header("x-agent-key", key)
-                    .json(&json!({"context_ref": input.context_ref, "field_paths": input.field_paths}))
+                    .json(&json!({"context_ref": input.context_ref, "field_paths": input.field_paths,
+                        "cursor": input.recall_options.cursor, "page_size": input.recall_options.page_size,
+                        "source_digest": input.recall_options.source_digest}))
                     .send().await.map_err(|_| "context_recall_transport_failed".to_string())?;
-                let value = parse_api_response::<Value>(response).await?;
-                Ok(SkillOutput::structured(value.to_string(), value))
+                let success = response.status().is_success();
+                let api = response
+                    .json::<ApiResponse>()
+                    .await
+                    .map_err(|_| "context_recall_response_invalid".to_string())?;
+                context_recall::decode_response(success, api)
             }
             "bind_session_alias" => {
                 let alias = input

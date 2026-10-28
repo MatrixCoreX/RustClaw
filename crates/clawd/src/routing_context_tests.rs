@@ -2,6 +2,54 @@ use super::*;
 use rusqlite::params;
 
 #[test]
+fn preview_counts_only_steps_before_selected_domain_anchor() {
+    let mut items = (0..7)
+        .map(|i| {
+            json!({"capability":format!("fixture.step{i}"),
+        "status":"ok", "data":{"count":i}})
+        })
+        .collect::<Vec<_>>();
+    items.push(json!({"capability":"task.plan_update","status":"ok"}));
+    let result = json!({"task_journal":{"trace":{"capability_results":items}}});
+    let projection = capability_anchor_from_result(&result).unwrap();
+    assert_eq!(projection.capability, "fixture.step6");
+    assert_eq!(
+        projection.preview["prior_steps"],
+        json!({"total":6,"returned":4,"truncated":true})
+    );
+    assert_eq!(
+        projection.data.unwrap()["prior_steps"][0]["capability"],
+        "fixture.step5"
+    );
+}
+
+#[test]
+fn preview_flags_and_scoped_recovery_survive_failed_summary_projection() {
+    let result = json!({"task_journal":{"trace":{"capability_results":[{
+        "capability":"fixture.read","status":"error",
+        "data":{"items":(0..17).collect::<Vec<_>>()},
+        "provenance":{"continuation_args":{"items":[1]},
+            "continuation_args_projection":{"truncated":true}}
+    }]}}});
+    let projection = capability_anchor_from_result(&result).unwrap();
+    assert_eq!(projection.preview["data_truncated"], true);
+    assert_eq!(projection.preview["args_truncated"], true);
+    let compacted = compact_prior_terminal_result(&result.to_string(), "failed");
+    let rows = vec![(
+        "fixture-task".into(),
+        "ask".into(),
+        json!({"text":"fixture"}).to_string(),
+        compacted,
+        "100".into(),
+        "failed".into(),
+    )];
+    let context = render_recent_execution_anchor_context(&rows);
+    assert!(context.contains("prior_context_projection="));
+    assert!(context.contains("\"source_trace_compacted\":true"));
+    assert!(context.contains("task-context:v1:fixture-task"));
+}
+
+#[test]
 fn extracts_generic_anchor_from_capability_result_envelope() {
     let anchor = extract_execution_anchor(
         "task-anchor",

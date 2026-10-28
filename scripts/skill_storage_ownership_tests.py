@@ -8,6 +8,24 @@ from check_skill_storage_ownership import evaluate, production_rust_files, write
 
 
 class StorageScanTests(unittest.TestCase):
+    def test_root_release_backups_are_not_live_source_but_nested_names_are_scanned(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_fixture(root)
+            backup = root / ".release-backups/revision/preserved-files/files/optional_skills/crypto/src/main.rs"
+            backup.parent.mkdir(parents=True)
+            backup.write_text("exchange_api_credentials\n")
+            self.assertEqual(evaluate(root), [])
+            self.assertNotIn(backup, production_rust_files(root))
+            production = root / "external_skills/demo/.release-backups/storage.rs"
+            production.parent.mkdir(parents=True)
+            production.write_text("exchange_api_credentials\n")
+            self.assertIn(production, production_rust_files(root))
+            self.assertIn(
+                "crypto_table_outside_owner:external_skills/demo/.release-backups/storage.rs",
+                evaluate(root),
+            )
+
     def test_retained_workspace_is_excluded_but_nested_production_tmp_is_checked(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -63,6 +63,30 @@ pub(super) fn trace_json_hash(value: &Value) -> String {
         .unwrap_or_else(|| stable_trace_hash("<unserializable-trace>"))
 }
 
+pub(crate) fn retained_capability_results_complete(trace: &Value) -> bool {
+    let Some(items) = trace
+        .get("capability_results")
+        .filter(|items| items.is_array())
+    else {
+        return false;
+    };
+    let Some(storage) = trace.get("trace_storage") else {
+        return true;
+    };
+    match storage.get("truncated").and_then(Value::as_bool) {
+        Some(false) => true,
+        Some(true) => {
+            // Whole-trace compaction may touch only unrelated diagnostic fields.
+            // Permit this retained stream only when its original identity matches.
+            storage
+                .pointer("/evidence_streams/capability_results")
+                .and_then(Value::as_str)
+                .is_some_and(|expected| expected == trace_json_hash(items))
+        }
+        None => false,
+    }
+}
+
 const TRACE_STORAGE_TRUNCATION_MARKER: &str = "...(truncated)";
 const MAX_RESULT_TRACE_LOCATOR_CHARS: usize = 4096;
 

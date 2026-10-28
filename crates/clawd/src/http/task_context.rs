@@ -11,11 +11,20 @@ use uuid::Uuid;
 
 use crate::{repo::TaskDeliveryRecord, AppState};
 
-#[derive(Deserialize)]
+#[path = "task_context_cursor.rs"]
+mod cursor;
+#[path = "task_context_selection.rs"]
+mod selection;
+use selection::select_context;
+
+#[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RecallRequest {
     pub context_ref: String,
     pub field_paths: Vec<String>,
+    pub cursor: Option<String>,
+    pub page_size: Option<usize>,
+    pub source_digest: Option<String>,
 }
 
 pub(crate) fn context_ref(task_id: &str) -> String {
@@ -53,7 +62,9 @@ pub(crate) async fn recall(
             return Err("context_reference_unauthorized");
         }
         let source = load(source_id)?;
-        if !same_scope(&current, &source) {
+        if !same_scope(&current, &source)
+            || state.task_agent_id(&current.task) != state.task_agent_id(&source.task)
+        {
             return Err("context_reference_unauthorized");
         }
         if current.status != "running"
@@ -64,7 +75,17 @@ pub(crate) async fn recall(
         {
             return Err("context_reference_not_terminal");
         }
-        select_context(&source, &request)
+        let binding = source_digest(&json!({
+            "current_task_id": current_id,
+            "principal_id": identity.principal_id,
+            "user_key": identity.user_key,
+            "task": {"user_id": current.task.user_id, "chat_id": current.task.chat_id,
+                "channel": current.task.channel, "external_user_id": current.task.external_user_id,
+                "external_chat_id": current.task.external_chat_id,
+                "payload_json": current.task.payload_json},
+            "agent_id": state.task_agent_id(&current.task),
+        }))?;
+        select_context(&source, &request, &binding, chrono::Utc::now().timestamp())
     })();
     match result {
         Ok(value) => crate::api_ok(value),
@@ -77,6 +98,9 @@ pub(crate) async fn recall(
                 "context_reference_unavailable" => StatusCode::NOT_FOUND,
                 "auth_lookup_failed" | "context_lookup_failed" => StatusCode::INTERNAL_SERVER_ERROR,
                 "context_value_too_large" => StatusCode::PAYLOAD_TOO_LARGE,
+                "context_source_compacted"
+                | "context_field_compacted"
+                | "context_snapshot_changed" => StatusCode::CONFLICT,
                 _ => StatusCode::BAD_REQUEST,
             },
             code,
@@ -87,10 +111,14 @@ pub(crate) async fn recall(
 fn same_scope(current: &TaskDeliveryRecord, source: &TaskDeliveryRecord) -> bool {
     let a = &current.task;
     let b = &source.task;
-    let conversation = |payload: &str| {
-        serde_json::from_str::<Value>(payload)
-            .ok()
-            .and_then(|v| v.get("conversation_id").cloned())
+    let conversation = |payload: &str| -> Option<Option<String>> {
+        let value = serde_json::from_str::<Value>(payload).ok()?;
+        value.as_object()?;
+        match value.get("conversation_id") {
+            None | Some(Value::Null) => Some(None),
+            Some(Value::String(id)) => Some(Some(id.clone())),
+            _ => None,
+        }
     };
     current.owner_principal_id.is_some()
         && current.owner_principal_id == source.owner_principal_id
@@ -101,82 +129,8 @@ fn same_scope(current: &TaskDeliveryRecord, source: &TaskDeliveryRecord) -> bool
         && a.channel == b.channel
         && a.external_user_id == b.external_user_id
         && a.external_chat_id == b.external_chat_id
+        && conversation(&a.payload_json).is_some()
         && conversation(&a.payload_json) == conversation(&b.payload_json)
-}
-
-fn select_context(
-    source: &TaskDeliveryRecord,
-    request: &RecallRequest,
-) -> Result<Value, &'static str> {
-    if request.field_paths.is_empty() || request.field_paths.len() > 8 {
-        return Err("context_fields_invalid");
-    }
-    let payload: Value =
-        serde_json::from_str(&source.task.payload_json).map_err(|_| "context_payload_invalid")?;
-    let result = source
-        .result_json
-        .as_ref()
-        .ok_or("context_result_unavailable")?;
-    let capabilities = [
-        "/task_journal/trace/capability_results",
-        "/final_result_json/task_journal/trace/capability_results",
-    ]
-    .iter()
-    .find_map(|path| result.pointer(path).and_then(Value::as_array));
-    let mut fields = serde_json::Map::new();
-    for path in &request.field_paths {
-        if path == "/capabilities" {
-            let index = json!(capabilities.into_iter().flatten().take(64).enumerate().map(|(index, item)| json!({
-                "index": index, "capability": item.get("capability"), "status": item.get("status"),
-                "args_ref": format!("/capabilities/{index}/args"), "data_ref": format!("/capabilities/{index}/data"),
-            })).collect::<Vec<_>>());
-            check_json_size(&index)?;
-            fields.insert(path.clone(), index);
-            continue;
-        }
-        if !path.starts_with('/') || path.len() > 256 {
-            return Err("context_fields_invalid");
-        }
-        if path
-            .split('/')
-            .any(|part| sensitive_key(&part.replace("~1", "/").replace("~0", "~")))
-        {
-            return Err("context_field_forbidden");
-        }
-        let value =
-            historical_field(&payload, capabilities, path).ok_or("context_field_unavailable")?;
-        check_json_size(value)?;
-        fields.insert(path.clone(), redact(value, 0)?);
-    }
-    let value = json!({"schema_version": 1, "action": "recall_context", "status": "ok", "message_key": "task_control.recall_context.ok",
-        "field_value": {"source_task_id": source.task.task_id, "source_status": source.status}, "source_task_id": source.task.task_id,
-        "source_status": source.status, "source_digest": source_digest(result)?,
-        "instruction_authority": "none", "current_execution_evidence": false,
-        "scope": "prior_task_context", "fields": fields});
-    check_json_size(&value)?;
-    Ok(value)
-}
-
-fn historical_field<'a>(
-    payload: &'a Value,
-    capabilities: Option<&'a Vec<Value>>,
-    path: &str,
-) -> Option<&'a Value> {
-    if path == "/request" {
-        return payload.get("text").or_else(|| payload.get("user_message"));
-    }
-    let mut parts = path.strip_prefix("/capabilities/")?.splitn(3, '/');
-    let index = parts.next()?.parse::<usize>().ok().filter(|i| *i < 64)?;
-    let capability = capabilities?.get(index)?;
-    let field = match parts.next()? {
-        "args" => capability.pointer("/provenance/continuation_args"),
-        name @ ("data" | "capability" | "status") => capability.get(name),
-        _ => None,
-    }?;
-    match parts.next() {
-        Some(suffix) => field.pointer(&format!("/{suffix}")),
-        None => Some(field),
-    }
 }
 
 struct SizeWriter(usize);

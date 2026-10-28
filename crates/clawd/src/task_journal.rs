@@ -63,6 +63,7 @@ use task_journal_summary_trace::{
     turn_analysis_json, verify_repair_signals_json, verify_summary_json, verify_trace_json,
     RequestedPlanCapability,
 };
+pub(crate) use task_journal_trace_storage::retained_capability_results_complete;
 use task_journal_trace_storage::*;
 use task_journal_validation_result::validation_result_json;
 

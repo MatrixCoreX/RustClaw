@@ -34,11 +34,22 @@ UI 和 CLI 独立显示执行、答案验证与投送状态：执行完成不代
 结果明确标记 `instruction_authority=none`、`current_execution_evidence=false`：
 历史内容只补充上下文，不是新指令、权限授予或本轮执行证据。
 
+`/capabilities` 返回分页索引及 `pagination.has_more`、不透明的 `next_cursor`。
+`page_size` 默认 64，允许 1-64；翻页时保持字段选择和页大小不变，原样使用游标。
+签名游标绑定当前任务、作用域、源快照和字段选择，15 分钟后或运行时重启后失效。
+首屏以后的字段也可以按索引读取；传入返回的 `source_digest` 可拒绝已变化的快照。
+每次读取重新鉴权，包括 agent 隔离。能力流已被裁剪时返回 `context_source_compacted`；
+若只是其他 trace 字段压缩，能力流与持久化的原始流摘要一致，仍可正常回查。
+缺少持久化证据时返回 `context_source_unavailable`，不会从诊断日志重建历史。
+执行摘要中的 `prior_context_projection` 明确标记预览、截断、源压缩状态及授权回查入口。
+摘要未展示某个值，不代表历史中没有该值，也不代表执行失败。
+
 ```mermaid
 flowchart LR
     A[有界历史任务引用] --> B[Planner 选择明确字段]
-    B --> C[重新校验当前用户与会话]
-    C -->|允许| D[脱敏的历史上下文]
+    B --> C[重新校验用户、会话、Agent 与源快照]
+    C -->|允许| D[脱敏字段或有界索引页]
+    D -->|还有下一页及签名游标| C
     C -->|拒绝或不可用| E[结构化观察]
     D --> F[Planner 应用本轮约束]
     F --> G[正常能力解析与权限校验]

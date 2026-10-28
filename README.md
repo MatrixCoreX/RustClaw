@@ -82,6 +82,8 @@ Execution, answer verification, and delivery are separate facts. Journals expose
 `failed`, or `unavailable`). Unavailable verification checkpoints completed work
 instead of accepting an unchecked answer. Same-conversation references can be
 recalled through `task_control.recall_context` after fresh ownership checks.
+Historical capability indices support bounded, snapshot-bound pagination;
+preview summaries report truncation and provide scoped recall references.
 Multi-part channel delivery retries explicitly retryable rejected parts without
 replaying accepted parts or tool execution. Unchanged verification checkpoints
 resume verification only. UI/CLI display the three facts separately; ambiguous

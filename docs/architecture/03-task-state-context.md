@@ -45,11 +45,27 @@ The result declares `instruction_authority=none` and
 `current_execution_evidence=false`: recalled content is not an instruction,
 permission grant, or proof that a new action executed.
 
+`/capabilities` is a paged index, with `pagination.has_more` and an opaque
+`next_cursor`; `page_size` defaults to 64 and may be 1-64. Follow the exact cursor
+with the same field selection and page size. The signed cursor binds the current
+task/scope, source snapshot and selection, expires after 15 minutes, and becomes
+invalid after a runtime restart. Selected fields beyond the first page can be
+read directly; pass `source_digest` to fence them to the observed snapshot.
+Each page/read repeats authorization, including the agent scope. A compacted
+capability stream returns `context_source_compacted`; whole-trace compaction
+alone does not deny an unchanged stream whose original checksum still matches.
+Absent retained evidence returns
+`context_source_unavailable`. Diagnostic logs are not a context data store.
+Prior execution summaries expose `prior_context_projection` with preview,
+truncation and source-compaction flags plus an authorized discovery reference.
+An omitted preview value is not an absent historical value or proof of failure.
+
 ```mermaid
 flowchart LR
     A[Bounded prior-task reference] --> B[Planner selects explicit fields]
-    B --> C[Current actor and conversation checks]
-    C -->|allowed| D[Redacted historical context]
+    B --> C[Current actor, conversation, agent and snapshot checks]
+    C -->|allowed| D[Redacted fields or bounded index page]
+    D -->|has_more and signed cursor| C
     C -->|denied or unavailable| E[Structured observation]
     D --> F[Planner applies current user constraints]
     F --> G[Normal resolver and permission checks]

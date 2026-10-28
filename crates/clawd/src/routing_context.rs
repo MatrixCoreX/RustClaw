@@ -3,6 +3,10 @@ use serde_json::{json, Value};
 
 use crate::{AppState, ClaimedTask};
 
+#[path = "routing_context_projection.rs"]
+mod projection;
+pub(crate) use projection::bounded_prior_context_value;
+
 #[derive(Debug, Clone)]
 struct ExecutionAnchor {
     source_task_id: String,
@@ -12,6 +16,7 @@ struct ExecutionAnchor {
     capability: String,
     action: Option<String>,
     data: Option<Value>,
+    preview: Value,
     error_code: Option<String>,
     message_key: Option<String>,
     retryable: Option<bool>,
@@ -27,6 +32,7 @@ struct CapabilityAnchorProjection {
     capability: String,
     action: Option<String>,
     data: Option<Value>,
+    preview: Value,
     error_code: Option<String>,
     message_key: Option<String>,
     retryable: Option<bool>,
@@ -181,6 +187,7 @@ fn compact_prior_terminal_result(result_json: &str, task_status: &str) -> String
         },
         "task_journal": {
             "trace": {
+                "prior_context_compacted": true,
                 "capability_results": if attempt.is_empty() {
                     Vec::<Value>::new()
                 } else {
@@ -334,6 +341,11 @@ fn render_recent_execution_anchor_context(rows: &[RecentExecutionRow]) -> String
     if let Some(data) = anchor.data.as_ref() {
         lines.push(format!("- prior_capability_summary={}", data));
     }
+    let mut preview = anchor.preview.clone();
+    preview["recovery"] = json!({"capability":"task_control.recall_context",
+        "context_ref":crate::http::task_context::context_ref(&anchor.source_task_id),
+        "field_paths":["/capabilities"]});
+    lines.push(format!("- prior_context_projection={preview}"));
     if let Some(error_code) = anchor.error_code.as_deref() {
         lines.push(format!("- prior_error_code={error_code}"));
     }
@@ -397,6 +409,7 @@ fn extract_execution_anchor(
         capability: projection.capability,
         action: projection.action,
         data: projection.data,
+        preview: projection.preview,
         error_code: projection.error_code,
         message_key: projection.message_key,
         retryable: projection.retryable,
@@ -413,22 +426,42 @@ fn capability_anchor_from_result(result: &Value) -> Option<CapabilityAnchorProje
         "/final_result_json/task_journal/trace/capability_results",
         "/result/task_journal/trace/capability_results",
     ];
-    let results = POINTERS
+    let (trace, results) = POINTERS.iter().find_map(|pointer| {
+        let trace = result.pointer(pointer.trim_end_matches("/capability_results"))?;
+        Some((trace, trace.get("capability_results")?.as_array()?))
+    })?;
+    let (selected_index, mut projection) = results
         .iter()
-        .find_map(|pointer| result.pointer(pointer).and_then(Value::as_array))?;
-    let mut projection = results
-        .iter()
+        .enumerate()
         .rev()
-        .find_map(capability_anchor_from_envelope)?;
-    let prior_steps = results.iter().rev().skip(1).take(4).filter_map(|value| {
-        let capability = machine_ref(value.get("capability")?.as_str()?)?;
-        if capability_is_runtime_control(capability) { return None; }
-        Some(json!({
-            "capability": capability,
-            "status": machine_ref(value.get("status")?.as_str()?)?,
-            "attempted_effect": value.get("effect").and_then(Value::as_str).and_then(machine_ref),
-        }))
-    }).collect::<Vec<_>>();
+        .find_map(|(index, value)| capability_anchor_from_envelope(value).map(|p| (index, p)))?;
+    let prior = || {
+        results[..selected_index].iter().rev().filter_map(|value| {
+            let capability = machine_ref(value.get("capability")?.as_str()?)?;
+            if capability_is_runtime_control(capability) {
+                return None;
+            }
+            Some(json!({
+                "capability": capability,
+                "status": machine_ref(value.get("status")?.as_str()?)?,
+                "attempted_effect": value.get("effect").and_then(Value::as_str).and_then(machine_ref),
+            }))
+        })
+    };
+    let prior_total = prior().count();
+    let prior_steps = prior().take(4).collect::<Vec<_>>();
+    projection.preview["prior_steps"] = json!({"total":prior_total,
+        "returned":prior_steps.len(),"truncated":prior_total > prior_steps.len()});
+    projection.preview["source_trace_compacted"] = json!(
+        trace
+            .pointer("/trace_storage/truncated")
+            .and_then(Value::as_bool)
+            == Some(true)
+            || trace
+                .get("prior_context_compacted")
+                .and_then(Value::as_bool)
+                == Some(true)
+    );
     if !prior_steps.is_empty() {
         let data = projection.data.get_or_insert_with(|| json!({}));
         data.as_object_mut()?
@@ -452,15 +485,24 @@ fn capability_anchor_from_envelope(value: &Value) -> Option<CapabilityAnchorProj
         .and_then(Value::as_str)
         .and_then(machine_ref)
         .map(ToString::to_string);
-    let mut context_data = match value.get("data").and_then(bounded_prior_context_value) {
+    let (projected_data, data_truncated) = value
+        .get("data")
+        .map(bounded_prior_context_value)
+        .unwrap_or((None, false));
+    let mut context_data = match projected_data {
         Some(Value::Object(fields)) => fields,
         Some(data) => serde_json::Map::from_iter([("observation".into(), data)]),
         None => serde_json::Map::new(),
     };
-    if let Some(args) = value
+    let (args, mut args_truncated) = value
         .pointer("/provenance/continuation_args")
-        .and_then(bounded_prior_context_value)
-    {
+        .map(bounded_prior_context_value)
+        .unwrap_or((None, false));
+    args_truncated |= value
+        .pointer("/provenance/continuation_args_projection/truncated")
+        .and_then(Value::as_bool)
+        == Some(true);
+    if let Some(args) = args {
         context_data.insert("prior_args".into(), args);
     }
     let data = (!context_data.is_empty()).then_some(Value::Object(context_data));
@@ -503,6 +545,8 @@ fn capability_anchor_from_envelope(value: &Value) -> Option<CapabilityAnchorProj
         capability,
         action,
         data,
+        preview: json!({"schema_version":1,"is_preview":true,
+            "data_truncated":data_truncated,"args_truncated":args_truncated}),
         error_code,
         message_key,
         retryable,
@@ -521,10 +565,11 @@ fn capability_anchor_from_run_skill_payload(
     }
     let payload = payload?;
     let capability = machine_ref(payload.get("skill_name")?.as_str()?)?.to_string();
-    let args = payload
+    let (args, args_truncated) = payload
         .get("args")
         .filter(|args| args.is_object())
-        .map(redacted_context_value);
+        .map(bounded_prior_context_value)
+        .unwrap_or((None, false));
     let action = args
         .as_ref()
         .and_then(|args| args.get("action"))
@@ -540,6 +585,8 @@ fn capability_anchor_from_run_skill_payload(
         capability,
         action,
         data: args,
+        preview: json!({"schema_version":1,"is_preview":true,"args_truncated":args_truncated,
+            "source_kind":"invocation_payload","current_execution_evidence":false}),
         error_code: None,
         message_key: None,
         retryable: None,
@@ -566,53 +613,6 @@ fn redacted_reference(value: &str) -> Option<String> {
 fn redacted_context_value(value: &Value) -> Value {
     let redacted = crate::visible_text::sanitize_user_visible_text(&value.to_string());
     serde_json::from_str(&redacted).unwrap_or(Value::String(redacted))
-}
-
-pub(crate) fn bounded_prior_context_value(value: &Value) -> Option<Value> {
-    fn project(value: &Value, depth: usize, budget: &mut usize) -> Option<Value> {
-        if depth > 5 || *budget < 8 {
-            return None;
-        }
-        let projected = match value {
-            Value::Object(fields) => Value::Object(
-                fields
-                    .iter()
-                    .take(32)
-                    .filter(|(key, _)| key.len() <= 64 && !is_prior_task_locator_key(key))
-                    .filter_map(|(key, value)| {
-                        *budget = budget.saturating_sub(key.len() + 4);
-                        project(value, depth + 1, budget).map(|value| (key.clone(), value))
-                    })
-                    .collect(),
-            ),
-            Value::Array(items) => Value::Array(
-                items
-                    .iter()
-                    .take(16)
-                    .filter_map(|value| project(value, depth + 1, budget))
-                    .collect(),
-            ),
-            Value::String(text) if text.len() > 512 || is_private_artifact_locator(text) => {
-                return None
-            }
-            other => {
-                let size = other.to_string().len();
-                if size > *budget {
-                    return None;
-                }
-                *budget -= size;
-                other.clone()
-            }
-        };
-        match &projected {
-            Value::Null => None,
-            Value::Object(fields) if fields.is_empty() => None,
-            Value::Array(items) if items.is_empty() => None,
-            _ => Some(projected),
-        }
-    }
-    let safe = strip_prior_task_locators(redacted_context_value(value));
-    project(&safe, 0, &mut 2048)
 }
 
 fn strip_prior_task_locators(value: Value) -> Value {

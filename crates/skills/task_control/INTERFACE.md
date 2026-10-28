@@ -33,7 +33,20 @@
 For `recall_context`, select `/capabilities` first when the prior step index is
 unknown. It returns only a bounded index with capability/status and exact
 `args_ref`/`data_ref` pointers, not the full result bodies. Follow those pointers
-to fetch only the fields needed for the current instruction. Confirmation,
+to fetch only the fields needed for the current instruction. Index reads return
+`pagination.{offset,returned,total,has_more,next_cursor,page_size,index_complete}`.
+Use the exact `next_cursor` and unchanged field selection/page size while
+`has_more=true`; the default and maximum page size is 64. Indices beyond the
+first page remain readable. Pass the returned `source_digest` when reading
+selected fields to reject a changed snapshot. Cursors expire after 15 minutes
+or a runtime restart; restart index discovery then. Every page rechecks current
+ownership, conversation and agent scope. An altered capability stream returns
+`context_source_compacted`, not a partial index or reconstructed log data;
+when only other trace fields were compacted, the unchanged capability stream
+remains readable after its persisted original stream checksum is verified.
+missing retained evidence returns `context_source_unavailable`. Preview summaries
+are not complete history. Previously bounded invocation parameters return
+`context_field_compacted` instead of incomplete `args`. Confirmation,
 approval, permission and credential fields are not reusable historical context.
 For the original request and invocation parameters, select `/request` and the
 known `args_ref`; do not fetch `data_ref` unless the user needs recorded outputs.
@@ -60,6 +73,9 @@ fields together or compose from the already observed, snapshot-bound context.
 | `action` | yes | string | - | One of: `list`, `list_with_first_detail`, `get`, `recall_context`, `cancel_all`, `cancel_one`, `preview_resume`, `preview_provider_failure`, `preview_retryable_failure_observation`, `preview_repair_observation`, `preview_coding_repair`, `bind_session_alias`, `resume`, `pause`. |
 | `context_ref` | required for `recall_context` | string | - | Exact opaque `task-context:v1:<UUID>` supplied by the current conversation context. Maximum 80 bytes. |
 | `field_paths` | required for `recall_context` | string array | - | 1-8 explicit JSON pointers, maximum 256 bytes each. `/capabilities` returns only an index; follow its `args_ref` or `data_ref` for selected values. |
+| `cursor` | optional for index reads | string | - | Exact returned `next_cursor`, at most 1024 bytes; never construct or edit it. |
+| `page_size` | optional for index reads | integer | `64` | 1-64 entries per page; keep unchanged when following a cursor. Responses still have a 24 KiB bound. |
+| `source_digest` | optional for `recall_context` | string | - | Returned 64-character snapshot hash; reject changed historical fields. |
 | `alias` | required for `bind_session_alias` | string | - | Exact shorthand identifier explicitly assigned or reassigned by the current request; it must differ from `target`. Maximum 256 characters. |
 | `target` | required for `bind_session_alias` | string | - | Concrete typed machine locator to retain for later turns; maximum 4096 characters. |
 | `target_kind` | required for `bind_session_alias` | string | - | One of `path`, `url`, `task`, `artifact`, or `resource`. A resource target uses `namespace:identifier`. |

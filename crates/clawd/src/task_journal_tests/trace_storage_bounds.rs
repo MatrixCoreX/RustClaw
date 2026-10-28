@@ -1,6 +1,19 @@
 use super::*;
+
+#[test]
+fn retained_stream_can_be_verified_independently_of_other_compacted_trace_fields() {
+    let items = json!([{"capability":"fixture.read","status":"ok","data":{"count":7}}]);
+    let mut trace = json!({"capability_results":items,"trace_storage":{"truncated":true,
+        "evidence_streams":{"capability_results":trace_json_hash(&items)}}});
+    assert!(retained_capability_results_complete(&trace));
+    trace["capability_results"][0]["data"]["count"] = json!(8);
+    assert!(!retained_capability_results_complete(&trace));
+    trace["trace_storage"]["truncated"] = json!("invalid");
+    assert!(!retained_capability_results_complete(&trace));
+}
 use crate::task_journal::{
-    result_trace_json_with_storage_limit, trace_json_bytes, trace_json_hash, MAX_RESULT_TRACE_BYTES,
+    result_trace_json_with_storage_limit, retained_capability_results_complete, trace_json_bytes,
+    trace_json_hash, MAX_RESULT_TRACE_BYTES,
 };
 
 fn assert_bound(original: Value) -> Value {

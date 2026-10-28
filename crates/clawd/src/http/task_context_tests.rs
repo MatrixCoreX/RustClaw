@@ -1,5 +1,12 @@
 use super::*;
 
+fn select_context(
+    source: &TaskDeliveryRecord,
+    request: &RecallRequest,
+) -> Result<Value, &'static str> {
+    super::select_context(source, request, "fixture-binding", 100)
+}
+
 fn record() -> TaskDeliveryRecord {
     TaskDeliveryRecord {
         task: crate::ClaimedTask {
@@ -54,6 +61,7 @@ fn selected_context_preserves_target_but_never_credentials_or_current_success_ev
     let mut request = RecallRequest {
         context_ref: context_ref(&source.task.task_id),
         field_paths: vec!["/capabilities/0/args".into()],
+        ..Default::default()
     };
     let value = select_context(&source, &request).unwrap();
     assert_eq!(
@@ -85,6 +93,7 @@ fn context_recall_rejects_unbounded_selection_instead_of_silent_loss() {
     let request = RecallRequest {
         context_ref: context_ref(&source.task.task_id),
         field_paths: vec!["/capabilities/0/data".into()],
+        ..Default::default()
     };
     assert_eq!(
         select_context(&source, &request),
@@ -100,6 +109,7 @@ fn capability_index_discovers_exact_argument_refs_without_copying_large_results(
     let request = RecallRequest {
         context_ref: context_ref(&source.task.task_id),
         field_paths: vec!["/capabilities".into()],
+        ..Default::default()
     };
     let value = select_context(&source, &request).unwrap();
     let index = &value["fields"]["/capabilities"][0];
@@ -134,6 +144,7 @@ async fn context_api_rechecks_current_auth_and_denies_cross_conversation_and_rev
     let request = || RecallRequest {
         context_ref: context_ref(&source.task.task_id),
         field_paths: vec!["/capabilities/0/args/topics".into()],
+        ..Default::default()
     };
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -189,3 +200,6 @@ async fn context_api_rechecks_current_auth_and_denies_cross_conversation_and_rev
     assert!(!reply.ok);
     assert_eq!(reply.error.as_deref(), Some("auth_key_invalid"));
 }
+
+#[path = "task_context_pagination_tests.rs"]
+mod pagination;

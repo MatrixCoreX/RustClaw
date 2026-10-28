@@ -120,7 +120,8 @@ def production_rust_files(root: Path) -> list[Path]:
         current = Path(current)
         directories[:] = [
             name for name in directories
-            if name != "target" and not (current == root and name == "tmp")
+            if name != "target"
+            and not (current == root and name in {"tmp", ".release-backups"})
         ]
         for name in names:
             path = current / name
