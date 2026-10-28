@@ -48,6 +48,8 @@ struct ApiResponse {
 struct ActiveTasksData {
     count: usize,
     tasks: Vec<ActiveTaskItem>,
+    #[serde(default)]
+    scope: Value,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -402,7 +404,7 @@ fn execute(
                 Ok(SkillOutput::structured(extra.to_string(), extra))
             }
             "list" => {
-                let tasks = fetch_active_tasks(
+                let page = fetch_active_tasks(
                     &client,
                     &base_url,
                     user_id,
@@ -411,13 +413,13 @@ fn execute(
                     user_key.as_deref(),
                 )
                 .await?;
-                Ok(SkillOutput::structured(
-                    task_list_extra(&tasks).to_string(),
-                    task_list_extra(&tasks),
-                ))
+                let mut extra = task_list_extra(&page.tasks);
+                extra["scope"] = page.scope.clone();
+                extra["field_value"]["scope"] = page.scope;
+                Ok(SkillOutput::structured(extra.to_string(), extra))
             }
             "list_with_first_detail" => {
-                let tasks = fetch_active_tasks(
+                let page = fetch_active_tasks(
                     &client,
                     &base_url,
                     user_id,
@@ -426,7 +428,7 @@ fn execute(
                     user_key.as_deref(),
                 )
                 .await?;
-                let detail = if let Some(first) = tasks.first() {
+                let detail = if let Some(first) = page.tasks.first() {
                     Some(
                         fetch_task_detail(&client, &base_url, &first.task_id, user_key.as_deref())
                             .await?,
@@ -434,7 +436,9 @@ fn execute(
                 } else {
                     None
                 };
-                let extra = task_list_with_first_detail_extra(&tasks, detail.as_ref());
+                let mut extra = task_list_with_first_detail_extra(&page.tasks, detail.as_ref());
+                extra["scope"] = page.scope.clone();
+                extra["field_value"]["scope"] = page.scope;
                 Ok(SkillOutput::structured(extra.to_string(), extra))
             }
             "get" => {
@@ -458,7 +462,7 @@ fn execute(
                     let extra = cancel_dry_run_extra("cancel_all", None);
                     return Ok(SkillOutput::structured(extra.to_string(), extra));
                 }
-                let tasks = fetch_active_tasks(
+                let page = fetch_active_tasks(
                     &client,
                     &base_url,
                     user_id,
@@ -467,8 +471,8 @@ fn execute(
                     user_key.as_deref(),
                 )
                 .await?;
-                if tasks.is_empty() {
-                    let extra = cancel_all_result_extra(&tasks, 0);
+                if page.tasks.is_empty() {
+                    let extra = cancel_all_result_extra(&page.tasks, 0);
                     return Ok(SkillOutput::structured(extra.to_string(), extra));
                 }
                 let canceled = cancel_all_tasks(
@@ -480,7 +484,7 @@ fn execute(
                     user_key.as_deref(),
                 )
                 .await?;
-                let extra = cancel_all_result_extra(&tasks, canceled);
+                let extra = cancel_all_result_extra(&page.tasks, canceled);
                 Ok(SkillOutput::structured(extra.to_string(), extra))
             }
             "cancel_one" => {
@@ -691,6 +695,22 @@ fn task_control_timeout_seconds() -> u64 {
         .unwrap_or(30)
 }
 
+fn session_control_request(user_id: i64, chat_id: i64, anchor: &str) -> Value {
+    json!({
+        "scope": "current_session",
+        "user_id": user_id,
+        "chat_id": chat_id,
+        "exclude_task_id": anchor,
+    })
+}
+
+fn session_scope_matches(scope: &Value, user_id: i64, chat_id: i64, anchor: &str) -> bool {
+    scope.get("kind").and_then(Value::as_str) == Some("current_session")
+        && scope.get("anchor_task_id").and_then(Value::as_str) == Some(anchor)
+        && scope.get("user_id").and_then(Value::as_i64) == Some(user_id)
+        && scope.get("chat_id").and_then(Value::as_i64) == Some(chat_id)
+}
+
 async fn fetch_active_tasks(
     client: &reqwest::Client,
     base_url: &str,
@@ -698,7 +718,7 @@ async fn fetch_active_tasks(
     chat_id: i64,
     exclude_task_id: &str,
     user_key: Option<&str>,
-) -> Result<Vec<ActiveTaskItem>, String> {
+) -> Result<ActiveTasksData, String> {
     let mut req = client.post(format!(
         "{}/v1/tasks/active",
         base_url.trim_end_matches('/')
@@ -707,18 +727,17 @@ async fn fetch_active_tasks(
         req = req.header("x-agent-key", key);
     }
     let resp = req
-        .json(&json!({
-            "user_id": user_id,
-            "chat_id": chat_id,
-            "exclude_task_id": exclude_task_id,
-        }))
+        .json(&session_control_request(user_id, chat_id, exclude_task_id))
         .send()
         .await
         .map_err(|e| format!("request active tasks failed: {e}"))?;
-    parse_api_response::<ActiveTasksData>(resp).await.map(|v| {
-        debug_assert_eq!(v.count, v.tasks.len());
-        v.tasks
-    })
+    let page = parse_api_response::<ActiveTasksData>(resp).await?;
+    if page.count != page.tasks.len()
+        || !session_scope_matches(&page.scope, user_id, chat_id, exclude_task_id)
+    {
+        return Err("task_scope_response_mismatch".into());
+    }
+    Ok(page)
 }
 
 async fn fetch_task_detail(
@@ -758,11 +777,7 @@ async fn cancel_all_tasks(
         req = req.header("x-agent-key", key);
     }
     let resp = req
-        .json(&json!({
-            "user_id": user_id,
-            "chat_id": chat_id,
-            "exclude_task_id": exclude_task_id,
-        }))
+        .json(&session_control_request(user_id, chat_id, exclude_task_id))
         .send()
         .await
         .map_err(|e| format!("request cancel tasks failed: {e}"))?;
@@ -779,6 +794,23 @@ async fn cancel_one_task(
     index: usize,
     user_key: Option<&str>,
 ) -> Result<ActiveTaskItem, String> {
+    let page = fetch_active_tasks(
+        client,
+        base_url,
+        user_id,
+        chat_id,
+        exclude_task_id,
+        user_key,
+    )
+    .await?;
+    let selected = page
+        .tasks
+        .iter()
+        .find(|task| task.index == index)
+        .ok_or("task_index_invalid")?;
+    let mut payload = session_control_request(user_id, chat_id, exclude_task_id);
+    payload["index"] = json!(index);
+    payload["expected_task_id"] = json!(selected.task_id);
     let mut req = client.post(format!(
         "{}/v1/tasks/cancel-one",
         base_url.trim_end_matches('/')
@@ -787,12 +819,7 @@ async fn cancel_one_task(
         req = req.header("x-agent-key", key);
     }
     let resp = req
-        .json(&json!({
-            "user_id": user_id,
-            "chat_id": chat_id,
-            "index": index,
-            "exclude_task_id": exclude_task_id,
-        }))
+        .json(&payload)
         .send()
         .await
         .map_err(|e| format!("request cancel one task failed: {e}"))?;

@@ -14,8 +14,21 @@ use tracing::{error, info};
 
 use crate::AppState;
 
+#[path = "task_admin_session_scope.rs"]
+mod session_scope;
+
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum ActiveTasksScope {
+    #[default]
+    Accessible,
+    CurrentSession,
+}
+
 #[derive(Debug, Deserialize)]
 pub(super) struct CancelTasksRequest {
+    #[serde(default)]
+    scope: ActiveTasksScope,
     user_id: i64,
     chat_id: i64,
     exclude_task_id: Option<String>,
@@ -23,6 +36,8 @@ pub(super) struct CancelTasksRequest {
 
 #[derive(Debug, Deserialize)]
 pub(super) struct ActiveTasksRequest {
+    #[serde(default)]
+    scope: ActiveTasksScope,
     user_id: i64,
     chat_id: i64,
     exclude_task_id: Option<String>,
@@ -48,6 +63,9 @@ pub(super) struct AutomationRunsRequest {
 
 #[derive(Debug, Deserialize)]
 pub(super) struct CancelOneTaskRequest {
+    #[serde(default)]
+    scope: ActiveTasksScope,
+    expected_task_id: Option<String>,
     user_id: i64,
     chat_id: i64,
     index: usize,
@@ -495,6 +513,15 @@ pub(super) async fn list_active_tasks(
 ) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
     let limit = req.limit.unwrap_or(100).clamp(1, 100);
     let offset = req.offset.unwrap_or(0).min(100_000);
+    if req.scope == ActiveTasksScope::CurrentSession {
+        return session_scope::list(
+            &state,
+            &headers,
+            req.exclude_task_id.as_deref(),
+            limit,
+            offset,
+        );
+    }
     let provided_key = crate::auth_key_from_headers(&headers)
         .map(str::trim)
         .filter(|value| !value.is_empty());
@@ -1242,6 +1269,9 @@ pub(super) async fn cancel_tasks(
     headers: HeaderMap,
     Json(req): Json<CancelTasksRequest>,
 ) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
+    if req.scope == ActiveTasksScope::CurrentSession {
+        return session_scope::cancel_all(&state, &headers, req.exclude_task_id.as_deref());
+    }
     let effective_user_id = match authorize_task_admin_request(&state, &headers, req.user_id) {
         Ok(user_id) => user_id,
         Err(resp) => return resp,
@@ -1277,6 +1307,15 @@ pub(super) async fn cancel_one_task(
     headers: HeaderMap,
     Json(req): Json<CancelOneTaskRequest>,
 ) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
+    if req.scope == ActiveTasksScope::CurrentSession {
+        return session_scope::cancel_one(
+            &state,
+            &headers,
+            req.exclude_task_id.as_deref(),
+            req.index,
+            req.expected_task_id.as_deref(),
+        );
+    }
     let effective_user_id = match authorize_task_admin_request(&state, &headers, req.user_id) {
         Ok(user_id) => user_id,
         Err(resp) => return resp,

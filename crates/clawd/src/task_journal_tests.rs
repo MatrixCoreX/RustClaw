@@ -12,6 +12,8 @@ mod observed_evidence_core;
 
 #[path = "task_journal_tests/skill_output_evidence_tests.rs"]
 mod skill_output_evidence;
+#[path = "task_journal_tests/stdio_evidence.rs"]
+mod stdio_evidence;
 #[path = "task_journal_tests/structured_selector_evidence.rs"]
 mod structured_selector_evidence;
 

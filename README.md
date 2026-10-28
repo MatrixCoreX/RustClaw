@@ -597,6 +597,9 @@ The Ubuntu x86_64 and macOS full Releases preinstall every compatible repository
 
 For automatic first installation, run `bash install-latest-release.sh --repo OWNER/REPO`.
 For existing installations, use `bash deploy-github-release.sh --restart`. Both use prebuilt packages.
+Developer checkouts must match the signed source commit and have no uncommitted
+changes in release-managed paths; omitted tracked development files and local
+device settings are preserved. See the [update requirements](docs/release_installation.md#update-an-existing-installation).
 
 ```bash
 # Install local command entrypoints without nginx

@@ -88,6 +88,12 @@ const MAX_RESULT_TRACE_STRING_CHARS: usize = 768;
 const MAX_RESULT_TRACE_COMPACT_ARRAY_ITEMS: usize = 8;
 const MAX_RESULT_TRACE_COMPACT_STRING_CHARS: usize = 240;
 const JSON_EVIDENCE_PRIORITY_KEYS: &[&str] = &[
+    "stdout",
+    "stderr",
+    "exit_code",
+    "truncated",
+    "output_truncated",
+    "output",
     "title",
     "content_excerpt",
     "excerpt",
@@ -132,6 +138,11 @@ const JSON_EVIDENCE_PRIORITY_KEYS: &[&str] = &[
     "results",
 ];
 const OBSERVED_EVIDENCE_STORAGE_PRIORITY_LEAVES: &[&str] = &[
+    "stdout",
+    "stderr",
+    "exit_code",
+    "truncated",
+    "output_truncated",
     "provider",
     "model",
     "duration",

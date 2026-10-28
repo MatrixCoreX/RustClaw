@@ -255,6 +255,12 @@ fn collect_priority_json_log_status_fields(
 }
 
 const JSON_STATUS_SCALAR_PRIORITY_KEYS: &[&str] = &[
+    "stdout",
+    "stderr",
+    "exit_code",
+    "truncated",
+    "output_truncated",
+    "output",
     "ok",
     "status",
     "status_code",
@@ -336,6 +342,12 @@ pub(super) fn json_status_scalar_field_is_priority(field: &str, value: &Value) -
     matches!(
         leaf,
         "ok" | "status"
+            | "stdout"
+            | "stderr"
+            | "exit_code"
+            | "truncated"
+            | "output_truncated"
+            | "output"
             | "status_code"
             | "success_status"
             | "healthy"

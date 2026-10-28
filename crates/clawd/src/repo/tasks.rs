@@ -11,13 +11,13 @@ mod history;
 mod lifecycle_projection;
 mod success_artifacts;
 
+pub(crate) use active::{
+    list_active_tasks_for_session_page_internal, list_active_tasks_for_user_page_internal,
+    list_active_tasks_page_internal, list_all_active_tasks_page_internal,
+};
 #[cfg(test)]
 pub(crate) use active::{
     list_active_tasks_for_user_internal, list_active_tasks_internal, list_all_active_tasks_internal,
-};
-pub(crate) use active::{
-    list_active_tasks_for_user_page_internal, list_active_tasks_page_internal,
-    list_all_active_tasks_page_internal,
 };
 pub(crate) use checkpoint_resume::{
     claim_due_paused_checkpoint_task_internal,

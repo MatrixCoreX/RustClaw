@@ -1,6 +1,6 @@
 [package]
 name = "task-control-skill"
-version.workspace = true
+version = "0.1.9"
 edition.workspace = true
 
 [[bin]]

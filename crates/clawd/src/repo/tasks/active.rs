@@ -30,6 +30,7 @@ pub(crate) fn list_active_tasks_internal(
         state,
         Some(user_id),
         Some(chat_id),
+        None,
         exclude_task_id,
         ACTIVE_TASK_INTERNAL_LIMIT,
         0,
@@ -47,6 +48,7 @@ pub(crate) fn list_active_tasks_for_user_internal(
         state,
         Some(user_id),
         None,
+        None,
         exclude_task_id,
         ACTIVE_TASK_INTERNAL_LIMIT,
         0,
@@ -61,6 +63,7 @@ pub(crate) fn list_all_active_tasks_internal(
 ) -> anyhow::Result<Vec<ActiveTaskItem>> {
     Ok(list_active_tasks_scoped_page_internal(
         state,
+        None,
         None,
         None,
         exclude_task_id,
@@ -82,6 +85,7 @@ pub(crate) fn list_active_tasks_page_internal(
         state,
         Some(user_id),
         Some(chat_id),
+        None,
         exclude_task_id,
         limit,
         offset,
@@ -99,6 +103,7 @@ pub(crate) fn list_active_tasks_for_user_page_internal(
         state,
         Some(user_id),
         None,
+        None,
         exclude_task_id,
         limit,
         offset,
@@ -111,13 +116,31 @@ pub(crate) fn list_all_active_tasks_page_internal(
     limit: usize,
     offset: usize,
 ) -> anyhow::Result<ActiveTaskPage> {
-    list_active_tasks_scoped_page_internal(state, None, None, exclude_task_id, limit, offset)
+    list_active_tasks_scoped_page_internal(state, None, None, None, exclude_task_id, limit, offset)
+}
+
+pub(crate) fn list_active_tasks_for_session_page_internal(
+    state: &AppState,
+    anchor: &crate::TaskAdminTarget,
+    limit: usize,
+    offset: usize,
+) -> anyhow::Result<ActiveTaskPage> {
+    list_active_tasks_scoped_page_internal(
+        state,
+        Some(anchor.user_id),
+        Some(anchor.chat_id),
+        Some(&anchor.channel),
+        Some(&anchor.task_id),
+        limit,
+        offset,
+    )
 }
 
 fn list_active_tasks_scoped_page_internal(
     state: &AppState,
     user_id: Option<i64>,
     chat_id: Option<i64>,
+    channel: Option<&str>,
     exclude_task_id: Option<&str>,
     limit: usize,
     offset: usize,
@@ -137,8 +160,9 @@ fn list_active_tasks_scoped_page_internal(
          WHERE (?1 IS NULL OR user_id = ?1)
            AND (?2 IS NULL OR chat_id = ?2)
            AND status IN ('running', 'queued')
-           AND (?3 IS NULL OR task_id <> ?3)",
-        params![user_id, chat_id, exclude_task_id.as_deref()],
+           AND (?3 IS NULL OR task_id <> ?3)
+           AND (?4 IS NULL OR channel = ?4)",
+        params![user_id, chat_id, exclude_task_id.as_deref(), channel],
         |row| row.get::<_, i64>(0),
     )?;
     let total = total.max(0) as usize;
@@ -158,16 +182,18 @@ fn list_active_tasks_scoped_page_internal(
            AND (?2 IS NULL OR chat_id = ?2)
            AND status IN ('running', 'queued')
            AND (?3 IS NULL OR task_id <> ?3)
+           AND (?4 IS NULL OR channel = ?4)
          ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END,
                   created_ts ASC,
                   task_id ASC
-         LIMIT ?4 OFFSET ?5",
+         LIMIT ?5 OFFSET ?6",
     )?;
     let rows = stmt.query_map(
         params![
             user_id,
             chat_id,
             exclude_task_id.as_deref(),
+            channel,
             limit as i64,
             offset as i64
         ],

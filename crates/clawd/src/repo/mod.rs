@@ -88,9 +88,9 @@ pub(crate) use submit::{
 };
 pub(crate) use task_admin::{
     cancel_child_tasks_for_parent, cancel_one_task_for_user_chat, cancel_task_by_id,
-    cancel_tasks_for_user_chat, close_child_task_thread, get_task_admin_target,
-    pause_task_by_id_with_control, reconcile_cancelled_task_settlements, resume_task_with_input,
-    steer_task_by_id, TaskAdminTarget, TaskResumeControlInput,
+    cancel_tasks_for_session, cancel_tasks_for_user_chat, close_child_task_thread,
+    get_task_admin_target, pause_task_by_id_with_control, reconcile_cancelled_task_settlements,
+    resume_task_with_input, steer_task_by_id, TaskAdminTarget, TaskResumeControlInput,
 };
 #[cfg(test)]
 pub(crate) use task_admin::{pause_task_by_id, pause_task_until_resumed};
@@ -139,9 +139,9 @@ pub(crate) use tasks::{
     claim_ready_paused_checkpoint_resume_executor_internal, get_task_artifact_result_projection,
     get_task_query_record, is_task_claim_active,
     is_task_claim_active_or_pending_ask_success_projection,
-    list_active_tasks_for_user_page_internal, list_active_tasks_page_internal,
-    list_all_active_tasks_page_internal, list_all_task_history_internal,
-    list_due_paused_checkpoint_tasks_internal,
+    list_active_tasks_for_session_page_internal, list_active_tasks_for_user_page_internal,
+    list_active_tasks_page_internal, list_all_active_tasks_page_internal,
+    list_all_task_history_internal, list_due_paused_checkpoint_tasks_internal,
     list_ready_paused_checkpoint_resume_executors_internal, list_task_history_for_user_internal,
     list_task_history_internal, record_paused_checkpoint_resume_execution_plan_internal,
     record_paused_checkpoint_resume_executor_state_internal,

@@ -547,6 +547,8 @@ Rust、Python、Node、Go、prebuilt、生命周期、安全和发布说明见
 
 首次自动安装使用 `install-latest-release.sh --repo OWNER/REPO`（以 Bash 运行）；
 已有安装使用 `bash deploy-github-release.sh --restart` 更新。两者都使用预编译包。
+开发者工作区必须与签名包的源码提交一致，发行管理路径不能有未提交修改；安装器保留
+运行包省略的已跟踪开发文件和设备本地配置，详见[更新要求](docs/release_installation.zh-CN.md#更新现有设备)。
 
 ```bash
 # 安装本地命令入口，不配置 nginx

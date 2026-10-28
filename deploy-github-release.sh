@@ -1114,6 +1114,84 @@ PY
   rm -f "$inventory"
 }
 
+preserve_deployment_files() {
+  python3 - "$@" "$MANIFEST_RECORD" <<'PY'
+import json
+import os
+from pathlib import Path, PurePosixPath
+import shutil
+import subprocess
+import sys
+
+operation, source, target, storage, managed_file, manifest_file = sys.argv[1:]
+source, target, storage = map(lambda value: Path(value).resolve(), (source, target, storage))
+
+def safe_path(root, name):
+    relative = PurePosixPath(name)
+    if relative.is_absolute() or '..' in relative.parts:
+        raise SystemExit('release_preservation_path_invalid')
+    path = root / name
+    if not path.parent.resolve().is_relative_to(root):
+        raise SystemExit('release_preservation_parent_invalid')
+    return path
+
+def copy_entry(src, dst):
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    temporary = dst.with_name(dst.name + '.preserve-new')
+    if os.path.lexists(temporary):
+        temporary.unlink()
+    if src.is_symlink():
+        temporary.symlink_to(os.readlink(src))
+    else:
+        shutil.copy2(src, temporary)
+    os.replace(temporary, dst)
+
+if operation == 'restore':
+    record = json.loads((storage / 'inventory.json').read_text())
+    for name in record['files']:
+        copy_entry(safe_path(storage / 'files', name), safe_path(target, name))
+    print(f"release_preserved_files={len(record['files'])}")
+elif operation in ('capture-source', 'capture-package'):
+    storage.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(storage, 0o700)
+    names = set()
+    if operation == 'capture-source' and os.path.lexists(source / '.git'):
+        def git(*args):
+            return subprocess.run(['git', '-C', str(source), *args], capture_output=True, check=True).stdout
+        try:
+            head = git('rev-parse', 'HEAD').decode().strip()
+            expected = json.loads(Path(manifest_file).read_text())['release']['commit']
+            if head != expected:
+                raise SystemExit('workspace_update_local_source_conflicts: source_revision_mismatch')
+            managed = Path(managed_file).read_text().splitlines()
+            git('diff', '--quiet', 'HEAD', '--', *managed)
+            tracked = git('ls-files', '-z', '--', *managed).split(b'\0')
+        except (OSError, subprocess.CalledProcessError) as error:
+            raise SystemExit('workspace_update_local_source_conflicts: source_not_clean') from error
+        for raw in tracked:
+            if not raw:
+                continue
+            name = os.fsdecode(raw)
+            src = safe_path(source, name)
+            if not os.path.lexists(target / name) and (src.is_file() or src.is_symlink()):
+                names.add(name)
+    for suffix in ('so', 'dylib'):
+        for relative in ('build-pyfix/lib', 'python/cryptoauthlib'):
+            name = f'pi_app/vendor/cryptoauthlib/{relative}/libcryptoauth.{suffix}'
+            src = safe_path(source, name)
+            if (src.is_file() or src.is_symlink()) and not os.path.lexists(target / name):
+                names.add(name)
+    for src in (source / 'pi_app').glob('.agent_small_screen_*'):
+        if src.is_file() and not src.is_symlink():
+            names.add(src.relative_to(source).as_posix())
+    for name in sorted(names):
+        copy_entry(safe_path(source, name), safe_path(storage / 'files', name))
+    (storage / 'inventory.json').write_text(json.dumps({'schema_version': 1, 'files': sorted(names)}))
+else:
+    raise SystemExit('release_preservation_operation_invalid')
+PY
+}
+
 if [[ "$PACKAGE_MODE" -eq 1 ]]; then
   PACKAGE_STAGE_DIR="$(mktemp -d "$ROOT_PARENT/.${ROOT_NAME}-release-stage.XXXXXX")"
   STAGED_ROOT="$PACKAGE_STAGE_DIR/runtime"
@@ -1217,6 +1295,10 @@ PY
     die "release_package_staged_config_missing"
   [[ ! -e "$STAGED_ROOT/.git" ]] ||
     die "release_package_staged_git_metadata_present"
+  preserve_deployment_files capture-package "$ROOT_DIR" "$PACKAGE_DIR" \
+    "$PACKAGE_STAGE_DIR/preserved-files" ""
+  preserve_deployment_files restore "$ROOT_DIR" "$STAGED_ROOT" \
+    "$PACKAGE_STAGE_DIR/preserved-files" ""
   bootstrap_bundled_release_skills "$STAGED_ROOT" "$STAGED_ROOT"
   converge_installed_bundled_skills "$STAGED_ROOT"
 
@@ -1381,6 +1463,9 @@ printf '%s\n' ".release-tag" >> "$MANAGED_PATHS_FILE"
 printf '%s\n' ".release-rollback" >> "$MANAGED_PATHS_FILE"
 printf '%s\n' ".release-manifest-digest" >> "$MANAGED_PATHS_FILE"
 
+preserve_deployment_files capture-source "$ROOT_DIR" "$PACKAGE_DIR" \
+  "$BACKUP_DIR/preserved-files" "$MANAGED_PATHS_FILE"
+
 while IFS= read -r relative; do
   [[ -n "$relative" ]] || continue
   if [[ -e "$ROOT_DIR/$relative" ]]; then
@@ -1435,6 +1520,8 @@ if [[ -d "$PACKAGE_DIR/configs" ]]; then
     cp -a "$PACKAGE_DIR/$relative" "$ROOT_DIR/$relative"
   done < "$NEW_CONFIG_PATHS_FILE"
 fi
+preserve_deployment_files restore "$ROOT_DIR" "$ROOT_DIR" \
+  "$BACKUP_DIR/preserved-files" ""
 bootstrap_bundled_release_skills "$ROOT_DIR" "$PACKAGE_DIR"
 converge_installed_bundled_skills "$ROOT_DIR"
 printf '%s\n' "$TAG" > "$ROOT_DIR/.release-tag"

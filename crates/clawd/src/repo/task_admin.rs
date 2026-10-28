@@ -75,6 +75,29 @@ pub(crate) fn cancel_tasks_for_user_chat(
     chat_id: i64,
     exclude_task_id: Option<&str>,
 ) -> anyhow::Result<i64> {
+    cancel_tasks_for_user_chat_scope(state, user_id, chat_id, None, exclude_task_id)
+}
+
+pub(crate) fn cancel_tasks_for_session(
+    state: &AppState,
+    anchor: &TaskAdminTarget,
+) -> anyhow::Result<i64> {
+    cancel_tasks_for_user_chat_scope(
+        state,
+        anchor.user_id,
+        anchor.chat_id,
+        Some(&anchor.channel),
+        Some(&anchor.task_id),
+    )
+}
+
+fn cancel_tasks_for_user_chat_scope(
+    state: &AppState,
+    user_id: i64,
+    chat_id: i64,
+    channel: Option<&str>,
+    exclude_task_id: Option<&str>,
+) -> anyhow::Result<i64> {
     let now = now_ts();
     let mut db = state
         .core
@@ -89,11 +112,12 @@ pub(crate) fn cancel_tasks_for_user_chat(
              WHERE user_id = ?1
                AND chat_id = ?2
                AND status IN ('queued', 'running')
-               AND (?3 IS NULL OR task_id <> ?3)",
+               AND (?3 IS NULL OR task_id <> ?3)
+               AND (?4 IS NULL OR channel = ?4)",
         )?;
         let records = stmt
             .query_map(
-                params![user_id, chat_id, exclude_task_id.as_deref()],
+                params![user_id, chat_id, exclude_task_id.as_deref(), channel],
                 |row| {
                     Ok(CancelTaskRecord {
                         task_id: row.get(0)?,

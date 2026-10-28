@@ -1,6 +1,32 @@
 use super::*;
 
 #[test]
+fn session_control_payload_pins_current_task_scope() {
+    assert_eq!(
+        session_control_request(12, 34, "anchor"),
+        json!({
+            "scope":"current_session", "user_id":12, "chat_id":34, "exclude_task_id":"anchor"
+        })
+    );
+}
+
+#[test]
+fn scope_response_must_match_exact_anchor_actor_and_chat() {
+    let scope =
+        json!({"kind":"current_session","anchor_task_id":"anchor","user_id":12,"chat_id":34});
+    assert!(session_scope_matches(&scope, 12, 34, "anchor"));
+    for invalid in [
+        Value::Null,
+        json!({"kind":"accessible"}),
+        json!({"kind":"current_session","anchor_task_id":"other","user_id":12,"chat_id":34}),
+        json!({"kind":"current_session","anchor_task_id":"anchor","user_id":99,"chat_id":34}),
+        json!({"kind":"current_session","anchor_task_id":"anchor","user_id":12,"chat_id":99}),
+    ] {
+        assert!(!session_scope_matches(&invalid, 12, 34, "anchor"));
+    }
+}
+
+#[test]
 fn recall_context_requires_bounded_machine_reference_and_explicit_field_paths() {
     let parsed=parse_input(&json!({"action":"recall_context","context_ref":"task-context:v1:00000000-0000-0000-0000-000000000001","field_paths":["/capabilities/0/args"]})).unwrap();
     assert_eq!(parsed.action, "recall_context");

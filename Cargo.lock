@@ -4841,7 +4841,7 @@ dependencies = [
 
 [[package]]
 name = "task-control-skill"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "claw-core",

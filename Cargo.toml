@@ -96,7 +96,7 @@ rmcp = { version = "2.2.0", default-features = false, features = ["auth", "clien
 # bundled：从源码编译 SQLite，交叉编译 aarch64 时无需目标平台 libsqlite3
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
 sha2 = "0.10"
 ripemd = "0.1"
 k256 = { version = "0.14", features = ["ecdsa"] }

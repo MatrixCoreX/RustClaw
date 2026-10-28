@@ -24,7 +24,7 @@ create_release_evidence() {
     --sbom "$archive.spdx.json" \
     --output "$archive.manifest.json" \
     --version "$version" \
-    --commit 0123456789abcdef0123456789abcdef01234567 \
+    --commit "${4:-0123456789abcdef0123456789abcdef01234567}" \
     --target "$target" \
     --package-root "$APP_RELEASE_ARTIFACT_ID"
   ssh-keygen -q -Y sign -f "$SIGNING_KEY" -n agent-runtime-release "$archive.manifest.json"
@@ -77,6 +77,7 @@ mkdir -p \
   "$PACKAGE_DIR/prebuilt/toolchains/node/bin" \
   "$PACKAGE_DIR/scripts" \
   "$PACKAGE_DIR/services/wa-web-bridge" \
+  "$PACKAGE_DIR/pi_app/vendor/cryptoauthlib/build-pyfix/lib" \
   "$PACKAGE_DIR/UI/dist"
 cp /bin/true "$PACKAGE_DIR/target/release/clawd"
 cp "$(command -v python3)" "$PACKAGE_DIR/prebuilt/toolchains/python/bin/python3"
@@ -111,6 +112,7 @@ esac
 SH
 chmod +x "$PACKAGE_DIR/target/release/skillctl"
 printf 'new release readme\n' > "$PACKAGE_DIR/README.md"
+printf 'new packaged library\n' > "$PACKAGE_DIR/pi_app/vendor/cryptoauthlib/build-pyfix/lib/libcryptoauth.so"
 printf '9.8.7\n' > "$PACKAGE_DIR/VERSION"
 printf 'new-default = true\n' > "$PACKAGE_DIR/configs/new-default.toml"
 printf 'registry-version = "release"\n' > "$PACKAGE_DIR/configs/skills_registry.toml"
@@ -220,6 +222,8 @@ mkdir -p \
   "$RUNTIME/prebuilt/toolchains/python/bin" \
   "$RUNTIME/prebuilt/toolchains/node/bin" \
   "$RUNTIME/services/wa-web-bridge" \
+  "$RUNTIME/pi_app/vendor/cryptoauthlib/build-pyfix/lib" \
+  "$RUNTIME/pi_app/vendor/cryptoauthlib/python/cryptoauthlib" \
   "$RUNTIME/target/release"
 cp /bin/false "$RUNTIME/target/release/clawd"
 cp /bin/false "$RUNTIME/prebuilt/toolchains/python/bin/python3"
@@ -228,6 +232,9 @@ printf 'stale toolchain file\n' > "$RUNTIME/prebuilt/toolchains/stale.txt"
 printf 'local-secret = "preserve"\n' > "$RUNTIME/configs/config.toml"
 printf 'registry-version = "stale"\n' > "$RUNTIME/configs/skills_registry.toml"
 printf 'old readme\n' > "$RUNTIME/README.md"
+printf 'old packaged library\n' > "$RUNTIME/pi_app/vendor/cryptoauthlib/build-pyfix/lib/libcryptoauth.so"
+printf 'local native library\n' > "$RUNTIME/pi_app/vendor/cryptoauthlib/python/cryptoauthlib/libcryptoauth.so"
+printf 'local screen config\n' > "$RUNTIME/pi_app/.agent_small_screen_fixture"
 printf 'keep local optional\n' > "$RUNTIME/data/skill-packages/local_optional/current.json"
 printf '%s\n' '{"version":"1.0.0"}' > "$RUNTIME/data/skill-packages/store_fixture/current.json"
 printf 'stale runner source\n' > "$RUNTIME/optional_skills/store_fixture/stale.txt"
@@ -466,6 +473,9 @@ grep -Fxq 'local-secret = "preserve"' "$RUNTIME/configs/config.toml"
 grep -Fxq 'registry-version = "release"' "$RUNTIME/configs/skills_registry.toml"
 grep -Fxq 'new-default = true' "$RUNTIME/configs/new-default.toml"
 grep -Fxq 'new release readme' "$RUNTIME/README.md"
+grep -Fxq 'new packaged library' "$RUNTIME/pi_app/vendor/cryptoauthlib/build-pyfix/lib/libcryptoauth.so"
+grep -Fxq 'local native library' "$RUNTIME/pi_app/vendor/cryptoauthlib/python/cryptoauthlib/libcryptoauth.so"
+grep -Fxq 'local screen config' "$RUNTIME/pi_app/.agent_small_screen_fixture"
 grep -Fxq '9.8.7' "$RUNTIME/VERSION"
 grep -Fxq 'name = "core_fixture"' "$RUNTIME/crates/skills/core_fixture/skill.toml"
 grep -Fxq 'name = "store_fixture"' "$RUNTIME/optional_skills/store_fixture/skill.toml"
@@ -747,6 +757,7 @@ mkdir -p \
   "$SOURCE_RUNTIME/run" \
   "$SOURCE_RUNTIME/external_skills/local" \
   "$SOURCE_RUNTIME/optional_skills/local" \
+  "$SOURCE_RUNTIME/pi_app/vendor/cryptoauthlib/python/cryptoauthlib" \
   "$SOURCE_RUNTIME/target/release"
 printf 'source-only\n' > "$SOURCE_RUNTIME/Cargo.toml"
 printf 'local-secret = "preserve"\n' > "$SOURCE_RUNTIME/configs/config.toml"
@@ -755,6 +766,8 @@ printf 'runtime-state\n' > "$SOURCE_RUNTIME/data/state.db"
 printf 'checkpoint\n' > "$SOURCE_RUNTIME/.agent-runtime/checkpoint"
 printf 'external\n' > "$SOURCE_RUNTIME/external_skills/local/INTERFACE.md"
 printf 'optional\n' > "$SOURCE_RUNTIME/optional_skills/local/INTERFACE.md"
+printf 'local mac native library\n' > "$SOURCE_RUNTIME/pi_app/vendor/cryptoauthlib/python/cryptoauthlib/libcryptoauth.dylib"
+printf 'source screen config\n' > "$SOURCE_RUNTIME/pi_app/.agent_small_screen_fixture"
 printf '#!/usr/bin/env bash\n' > "$SOURCE_RUNTIME/target/release/optional-skill"
 chmod +x "$SOURCE_RUNTIME/target/release/optional-skill"
 
@@ -778,6 +791,8 @@ grep -Fxq 'runtime-state' "$SOURCE_RUNTIME/data/state.db"
 grep -Fxq 'checkpoint' "$SOURCE_RUNTIME/.agent-runtime/checkpoint"
 grep -Fxq 'external' "$SOURCE_RUNTIME/external_skills/local/INTERFACE.md"
 grep -Fxq 'optional' "$SOURCE_RUNTIME/optional_skills/local/INTERFACE.md"
+grep -Fxq 'local mac native library' "$SOURCE_RUNTIME/pi_app/vendor/cryptoauthlib/python/cryptoauthlib/libcryptoauth.dylib"
+grep -Fxq 'source screen config' "$SOURCE_RUNTIME/pi_app/.agent_small_screen_fixture"
 test -x "$SOURCE_RUNTIME/target/release/optional-skill"
 cmp /bin/true "$SOURCE_RUNTIME/target/release/clawd"
 SOURCE_BACKUP="$(find "$TMP_ROOT/.source-runtime-release-mode-backups" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
@@ -795,4 +810,50 @@ ALREADY_PACKAGE_OUTPUT="$(
 )"
 grep -Fq 'release_package_status=already_enabled' <<< "$ALREADY_PACKAGE_OUTPUT"
 
+GIT_RUNTIME="$TMP_ROOT/git-runtime"
+mkdir -p "$GIT_RUNTIME"
+cp -a "$PACKAGE_DIR/." "$GIT_RUNTIME/"
+printf 'local-secret = "preserve"\n' > "$GIT_RUNTIME/configs/config.toml"
+mkdir -p "$GIT_RUNTIME/optional_skills/store_fixture/src"
+printf 'tracked developer source\n' > "$GIT_RUNTIME/optional_skills/store_fixture/src/developer.rs"
+printf 'stale untracked source\n' > "$GIT_RUNTIME/optional_skills/store_fixture/stale.txt"
+git init -q "$GIT_RUNTIME"
+git -C "$GIT_RUNTIME" config user.name fixture
+git -C "$GIT_RUNTIME" config user.email fixture@example.invalid
+git -C "$GIT_RUNTIME" add optional_skills/store_fixture/src/developer.rs
+git -C "$GIT_RUNTIME" -c commit.gpgsign=false commit -qm fixture
+SOURCE_COMMIT="$(git -C "$GIT_RUNTIME" rev-parse HEAD)"
+GIT_BUNDLE="$TMP_ROOT/git-bundle"
+mkdir -p "$GIT_BUNDLE"
+GIT_ARCHIVE="$GIT_BUNDLE/$APP_RELEASE_ARTIFACT_ID-ubuntu-x86_64-source-fixture.tar.gz"
+tar -czf "$GIT_ARCHIVE" -C "$TMP_ROOT/package" "$APP_RELEASE_ARTIFACT_ID"
+sha256sum "$GIT_ARCHIVE" > "$GIT_ARCHIVE.sha256"
+create_release_evidence "$GIT_ARCHIVE" 9.8.7 x86_64-unknown-linux-gnu "$SOURCE_COMMIT"
+GIT_OUTPUT="$("$DEPLOY_SCRIPT" --root "$GIT_RUNTIME" --platform ubuntu-x86_64 \
+  --local-release-dir "$GIT_BUNDLE" --tag ubuntu-x86_64-source-fixture --no-restart)"
+grep -Fq 'release_update_status=deployed' <<< "$GIT_OUTPUT"
+grep -Fxq 'tracked developer source' "$GIT_RUNTIME/optional_skills/store_fixture/src/developer.rs"
+test ! -e "$GIT_RUNTIME/optional_skills/store_fixture/stale.txt"
+git -C "$GIT_RUNTIME" diff --quiet HEAD -- optional_skills/store_fixture/src/developer.rs
+
+printf 'uncommitted developer work\n' > "$GIT_RUNTIME/optional_skills/store_fixture/src/developer.rs"
+if "$DEPLOY_SCRIPT" --root "$GIT_RUNTIME" --platform ubuntu-x86_64 \
+  --local-release-dir "$GIT_BUNDLE" --tag ubuntu-x86_64-source-fixture --force --no-restart \
+  > "$TMP_ROOT/dirty-source.log" 2>&1; then
+  echo 'dirty source deployment unexpectedly succeeded' >&2
+  exit 1
+fi
+grep -Fq 'workspace_update_local_source_conflicts' "$TMP_ROOT/dirty-source.log"
+grep -Fxq 'uncommitted developer work' "$GIT_RUNTIME/optional_skills/store_fixture/src/developer.rs"
+grep -Fxq 'ubuntu-x86_64-source-fixture' "$GIT_RUNTIME/.release-tag"
+git -C "$GIT_RUNTIME" add optional_skills/store_fixture/src/developer.rs
+git -C "$GIT_RUNTIME" -c commit.gpgsign=false commit -qm changed
+if "$DEPLOY_SCRIPT" --root "$GIT_RUNTIME" --platform ubuntu-x86_64 \
+  --local-release-dir "$GIT_BUNDLE" --tag ubuntu-x86_64-source-fixture --force --no-restart \
+  > "$TMP_ROOT/mismatched-source.log" 2>&1; then
+  echo 'mismatched source deployment unexpectedly succeeded' >&2
+  exit 1
+fi
+grep -Fq 'source_revision_mismatch' "$TMP_ROOT/mismatched-source.log"
+grep -Fxq 'uncommitted developer work' "$GIT_RUNTIME/optional_skills/store_fixture/src/developer.rs"
 echo "DEPLOY_GITHUB_RELEASE_TESTS ok"

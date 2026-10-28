@@ -23,6 +23,9 @@ use super::{
 
 const USER_KEY: &str = "goal-route-test-key";
 
+#[path = "task_admin_session_scope_tests.rs"]
+mod session_scope_tests;
+
 fn state_with_goal_task(task_id: &str, payload: Value) -> crate::AppState {
     let state = crate::AppState::test_default_with_fixture_provider();
     let db = state.core.db.get().expect("get db");
@@ -188,6 +191,7 @@ async fn admin_active_task_list_uses_the_same_system_scope_as_health() {
         State(state),
         auth_headers(),
         Json(ActiveTasksRequest {
+            scope: super::ActiveTasksScope::Accessible,
             user_id: 0,
             chat_id: 0,
             exclude_task_id: None,

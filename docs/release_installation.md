@@ -151,6 +151,13 @@ installed skills, and the displayed release version. Keep configuration, wallet
 keys, databases, skill data, and the newest rollback copy. Do not clear caches
 or business data just to make an installation pass.
 
+A developer Git checkout must be clean in release-managed paths and match the
+signed package's source commit. Align it through the separate developer workflow
+before deployment; the installer does not reset, merge, or discard source edits.
+Tracked development files omitted from a runtime package are preserved. Release-only
+installations do not require Git. Device-local screen settings are preserved;
+existing chip libraries are retained when the signed package does not replace them.
+
 ## Publisher Retention
 
 Every platform Release includes all compatible optional Skill Store packages.
