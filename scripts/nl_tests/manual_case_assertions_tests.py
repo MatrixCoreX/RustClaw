@@ -198,9 +198,39 @@ def row_for_status(path: Path, tags: str, status: str) -> dict:
     )
 
 
+def assert_current_session_case_contract(root: Path) -> None:
+    case_file = Path(__file__).parent / "cases/nl_cases_task_status_consistency_20261027.txt"
+    case = next(line for line in case_file.read_text().splitlines()
+                if line.startswith("status_consistency|pending_tasks_zh|"))
+    _, _, tags, _, expectation = case.split("|", 4)
+    for kind, source, count, expected in [
+        ("current_session", "current_task_record", 0, "pass"),
+        ("accessible", "current_task_record", 0, "fail"),
+        ("current_session", "untrusted_override", 0, "fail"),
+        ("current_session", "current_task_record", 1, "fail"),
+        (None, None, 0, "fail"),
+    ]:
+        step = capability_step(dry_run=False, capability="task_control.list")
+        step["executed_skill"] = "task_control"
+        step["observed_evidence"] = {"items": [
+            {"field": "extra.count", "kind": "number", "excerpt": str(count)}
+        ], "truncated": True}
+        value = result_with_steps([step])
+        journal = value["data"]["result_json"]["task_journal"]
+        journal["summary"]["delivery"] = {"status": "not_required"}
+        journal["trace"]["capability_results"] = [{
+            "capability": "task_control.list", "status": "ok",
+            "data": {"extra": {"scope": {"kind": kind, "source": source}}},
+        }]
+        path = write_result(root, "current-session-contract.json", value)
+        row = row_for(path, tags, expect=expectation.removeprefix("expect="))
+        assert row["assertion"] == expected, row
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="manual-case-assertions-") as tmp:
         root = Path(tmp)
+        assert_current_session_case_contract(root)
 
         direct = write_result(root, "direct.json", result_with_steps([terminal_step()]))
         direct_row = row_for(

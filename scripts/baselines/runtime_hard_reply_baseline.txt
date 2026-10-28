@@ -27,6 +27,17 @@ crates/claw-core/src/product_identity.rs	unsupported product identity schema ver
 crates/claw-core/src/product_identity.rs	{field} must be 1-64 lowercase ASCII letters, digits, or hyphens and cannot start or end with a hyphen
 crates/claw-core/src/product_identity.rs	{field} must be a safe file name
 crates/claw-core/src/product_identity.rs	{field} must not be empty
+crates/claw-core/src/retrieval_embedding.rs	alpha beta gamma delta
+crates/claw-core/src/retrieval_embedding.rs	alpha beta gamma delta
+crates/claw-core/src/retrieval_embedding.rs	local provider must not accept remote policy
+crates/claw-core/src/retrieval_embedding.rs	missing principal must fail
+crates/claw-core/src/retrieval_embedding.rs	中文
+crates/claw-core/src/retrieval_embedding.rs	中文, 日本語。한국어! English-42 🧠
+crates/claw-core/src/retrieval_embedding.rs	尾部
+crates/claw-core/src/retrieval_embedding.rs	日本
+crates/claw-core/src/retrieval_embedding.rs	東京 天気 予報
+crates/claw-core/src/retrieval_embedding.rs	答案
+crates/claw-core/src/retrieval_embedding.rs	这是一个足够长的中文检索语句用于验证尾部独特事实仍然能够建立索引尾部答案
 crates/claw-core/src/secrets.rs	backend error while looking up `{name}`: {source}
 crates/claw-core/src/secrets.rs	env var `{var}` is not valid UTF-8
 crates/claw-core/src/secrets.rs	image_edit_{}_api_key
@@ -42,6 +53,8 @@ crates/claw-core/src/secrets.rs	secret token record at `{path}` is invalid JSON:
 crates/claw-core/src/secrets.rs	secret token store IO failed at `{path}`: {source}
 crates/claw-core/src/secrets_file.rs	environment+os_broker+private_file_fallback
 crates/claw-core/src/secrets_model_environment.rs	# Managed model credentials. Literal assignments; do not source as shell.\n
+crates/claw-core/src/skill_registry.rs	Copy an exact, verbatim quote from the current user request that authorizes this argument. Conversation history is not valid evidence.
+crates/claw-core/src/skill_registry.rs	Runtime-only provenance for arguments that require explicit authorization in the current user request. Include the matching field whenever such an argument is supplied.
 crates/claw-core/src/skill_registry.rs	argument alias `{alias}` is duplicated or equals `{canonical}`
 crates/claw-core/src/skill_registry.rs	argument alias canonical field is empty
 crates/claw-core/src/skill_registry.rs	capability token must not be empty
@@ -53,6 +66,7 @@ crates/claw-core/src/skill_registry.rs	parse memory_policy for skill `{skill_nam
 crates/claw-core/src/skill_registry.rs	parse memory_policy.max_chars for skill `{skill_name}` in {}: value must be greater than 0
 crates/claw-core/src/skill_registry.rs	parse memory_policy.{field} for skill `{skill_name}` in {}: unknown source token `{token}`
 crates/claw-core/src/skill_registry.rs	planner capability `{}` argument `{field}` is absent from skill input_schema
+crates/claw-core/src/skill_registry.rs	planner capability `{}` current-request evidence field `{field}` is not a declared argument
 crates/claw-core/src/skill_registry.rs	planner capability `{}` declares arguments but its skill input_schema has no properties
 crates/claw-core/src/skill_registry.rs	planner capability `{}` has invalid optional expression `{invalid}`
 crates/claw-core/src/skill_registry.rs	planner capability `{}` has invalid required expression `{requirement}`
@@ -163,6 +177,7 @@ crates/clawd/src/agent_engine/observed_output_success.rs	# Test Workspace\nThis 
 crates/clawd/src/agent_engine/observed_output_success.rs	# Test Workspace\nThis directory is reserved.
 crates/clawd/src/agent_engine/observed_output_success.rs	skill(run_cmd): success
 crates/clawd/src/agent_engine/observed_output_transform.rs	| name | score |\n| --- | --- |\n| beta | 12 |\n| gamma | 9 |\n| alpha | 7 |
+crates/clawd/src/agent_engine/planning.rs	observed_fields[].step_id
 crates/clawd/src/agent_engine/planning.rs	runtime_capability_map_v2\n{capability_map}
 crates/clawd/src/agent_engine/prepare_round.rs	needs_clarification: {needs_clarify}
 crates/clawd/src/agent_engine/prepare_round.rs	needs_confirmation: {needs_confirmation}
@@ -215,6 +230,7 @@ crates/clawd/src/bootstrap/config_loaders.rs	Scheduled successfully: {job_id}\nT
 crates/clawd/src/bootstrap/config_loaders.rs	There are no scheduled jobs right now.
 crates/clawd/src/bootstrap/config_loaders.rs	There are no scheduled jobs to delete.
 crates/clawd/src/bootstrap/config_loaders.rs	There are no scheduled jobs to update.
+crates/clawd/src/bootstrap/config_loaders.rs	agent-memory-runtime-config-{}
 crates/clawd/src/bootstrap/prompts.rs	Persona profile: advisor. Be calm, balanced, and recommendation-oriented. Help the user choose a sensible default, explain the main trade-offs briefly, and optimize for practical decisions.
 crates/clawd/src/bootstrap/prompts.rs	Persona profile: companion. Be friendly and supportive while staying practical. Keep responses clear and encouraging, but still action-oriented.
 crates/clawd/src/bootstrap/prompts.rs	Persona profile: executor. Be direct and efficient. Give conclusion first, then minimal actionable details. Prioritize execution quality and safety.
@@ -645,6 +661,7 @@ crates/clawd/src/main.rs	user_id is required when user_key is absent
 crates/clawd/src/memory.rs	[safety_signal content omitted]
 crates/clawd/src/memory.rs	[safety_signal content omitted]
 crates/clawd/src/memory/indexing.rs	Preference {pref_key}: {pref_value}
+crates/clawd/src/memory/retrieval.rs	{"schema_version":2,"context_kind":"retrieval_evidence","instruction_authority":"none","data_only":true}
 crates/clawd/src/memory/service.rs	count memory rounds failed: {err}
 crates/clawd/src/memory/service.rs	long_term_summary empty summary after normalize
 crates/clawd/src/memory/service.rs	long_term_summary:{latest_id}:{:x}
@@ -758,9 +775,9 @@ crates/clawd/src/repo/task_resume_execution/result_projection.rs	async completio
 crates/clawd/src/repo/task_resume_execution/result_projection.rs	async completion artifacts preserved before result projection
 crates/clawd/src/resource_scheduler.rs	durable_resource_lease_encode_failed: {error}
 crates/clawd/src/resource_scheduler.rs	durable_resource_lease_write_failed: {error}
-crates/clawd/src/routing_context.rs	### PRIOR_TASK_EXECUTION_ANCHOR\n{}
 crates/clawd/src/routing_context.rs	[prior_task_private_artifact]
 crates/clawd/src/routing_context.rs	[prior_task_private_artifact]
+crates/clawd/src/routing_context.rs	[prior_task_{task_status}]
 crates/clawd/src/runtime/policy.rs	tools.by_provider contains empty key
 crates/clawd/src/runtime/state.rs	agent_test_minimal_registry_{}.toml
 crates/clawd/src/runtime/state.rs	expected layered prompt manifest at workspace root: {}
@@ -881,6 +898,7 @@ crates/clawd/src/skills/runner.rs	skill runner execution binding is missing
 crates/clawd/src/skills/runner.rs	skill runner execution binding snapshot mismatch
 crates/clawd/src/skills/runner.rs	wait skill-runner failed: {err}
 crates/clawd/src/skills/runner.rs	write skill-runner stdin failed: {err}
+crates/clawd/src/skills/runner_durable_job_plan.rs	browser authentication sandbox target unavailable
 crates/clawd/src/skills/runner_durable_job_plan.rs	durable_skill_job_permissions_failed: {error}
 crates/clawd/src/skills/runner_durable_job_plan.rs	skill storage sandbox target unavailable
 crates/clawd/src/skills_receipt_test_support.rs	Verified clawd test fixture
@@ -1012,12 +1030,12 @@ crates/skill-sdk/src/bin/skillctl.rs	Implement the {skill_name} capability throu
 crates/skill-sdk/src/bin/skillctl.rs	JSON by default; add --human for concise text
 crates/skill-sdk/src/bin/skillctl.rs	admit <source_dir> <clawd_url> <admin_key> [--disabled] [--network] [--timeout-seconds <seconds>]
 crates/skill-sdk/src/bin/skillctl.rs	adopt-built <skill.toml> <workspace_root> <package_root> <binary_path> [--target <triple>]
-crates/skill-sdk/src/bin/skillctl.rs	build <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]
+crates/skill-sdk/src/bin/skillctl.rs	build <skill.toml> <workspace_root> <package_root> [--network] [--no-source-build] [--target <triple>]
 crates/skill-sdk/src/bin/skillctl.rs	init <rust|python|node|go|prebuilt|generic_process|http_json> <skill_name> <destination>
-crates/skill-sdk/src/bin/skillctl.rs	install-local <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]
+crates/skill-sdk/src/bin/skillctl.rs	install-local <skill.toml> <workspace_root> <package_root> [--network] [--no-source-build] [--target <triple>]
 crates/skill-sdk/src/bin/skillctl.rs	install-precompiled <skill.toml> <workspace_root> <package_root> <precompiled_root> [--target <triple>]
 crates/skill-sdk/src/bin/skillctl.rs	package <skill.toml> <output_dir>
-crates/skill-sdk/src/bin/skillctl.rs	protocol-test <skill.toml> <workspace_root> <package_root> [--network] [--target <triple>]
+crates/skill-sdk/src/bin/skillctl.rs	protocol-test <skill.toml> <workspace_root> <package_root> [--network] [--no-source-build] [--target <triple>]
 crates/skill-sdk/src/bin/skillctl.rs	protocol-validate <request_id> <response.jsonl>
 crates/skill-sdk/src/bin/skillctl.rs	receipt-verify <package_root> <skill_name>
 crates/skill-sdk/src/bin/skillctl.rs	rollback <package_root> <skill_name>
@@ -1251,7 +1269,22 @@ crates/skills/db_basic/src/main.rs	prepare query failed: {err}
 crates/skills/db_basic/src/main.rs	read col failed: {err}
 crates/skills/db_basic/src/main.rs	run query failed: {err}
 crates/skills/db_basic/src/main.rs	unsupported action; use sqlite_query|sqlite_execute|schema_version|user_version|list_tables
-crates/skills/doc_parse/src/main.rs	failed to run pdftotext; install poppler-utils
+crates/skills/doc_parse/src/lib.rs	PDF page range does not select any page
+crates/skills/doc_parse/src/lib.rs	PDF source must be a file
+crates/skills/doc_parse/src/lib.rs	cannot inspect PDF source: {error}
+crates/skills/doc_parse/src/lib.rs	cannot inspect PDF source: {error}
+crates/skills/doc_parse/src/lib.rs	cannot open PDF source: {error}
+crates/skills/doc_parse/src/lib.rs	cannot run pdfinfo: {error}
+crates/skills/doc_parse/src/lib.rs	cannot run pdftotext: {error}
+crates/skills/doc_parse/src/lib.rs	doc-parse-encrypted-{}-{}.pdf
+crates/skills/doc_parse/src/lib.rs	doc-parse-missing-parser-{}-{}.pdf
+crates/skills/doc_parse/src/lib.rs	encrypted PDF documents require an unlocked source
+crates/skills/doc_parse/src/lib.rs	encrypted source must fail before external parser
+crates/skills/doc_parse/src/lib.rs	missing parser dependency must fail deterministically
+crates/skills/doc_parse/src/lib.rs	missing source must fail
+crates/skills/doc_parse/src/lib.rs	pdfinfo did not report a positive page count
+crates/skills/doc_parse/src/lib.rs	pdfinfo rejected the PDF: {}
+crates/skills/doc_parse/src/lib.rs	pdftotext rejected the PDF: {}
 crates/skills/doc_parse/src/main.rs	missing required args.path
 crates/skills/doc_parse/src/main.rs	unsupported action: {raw_action}
 crates/skills/docker_basic/src/main.rs	args must be object
@@ -1652,48 +1685,79 @@ crates/skills/install_module/src/main.rs	python3 pip is not available. install p
 crates/skills/install_module/src/main.rs	run installer failed: {err}
 crates/skills/install_module/src/main.rs	workspace root unavailable: {error}
 crates/skills/kb/src/ingest.rs	ingest checkpoint changed; inspect the current continuation
+crates/skills/kb/src/ingest.rs	ingest chunk_overlap must not exceed one third of chunk_size
+crates/skills/kb/src/ingest.rs	ingest file_types exceed their allowed boundary
+crates/skills/kb/src/ingest.rs	ingest file_types exceed their allowed boundary
 crates/skills/kb/src/ingest.rs	ingest job owner mismatch
+crates/skills/kb/src/ingest.rs	ingest paths exceed their allowed boundary
+crates/skills/kb/src/ingest.rs	ingest paths must be a string or string array
+crates/skills/kb/src/ingest.rs	ingest paths must contain non-empty strings
+crates/skills/kb/src/ingest.rs	ingest {key} exceeds its allowed boundary
+crates/skills/kb/src/ingest.rs	ingest {key} exceeds its allowed boundary
 crates/skills/kb/src/ingest.rs	namespace has no documents to reindex
 crates/skills/kb/src/ingest.rs	namespace not found or unreadable: {namespace}
 crates/skills/kb/src/ingest.rs	resume_ingest requires a nonnegative next_file_index
+crates/skills/kb/src/ingest.rs	skip file {path_str}: source bytes exceed max_bytes_per_run {}
 crates/skills/kb/src/ingest.rs	skip large file {path_str} ({size} bytes > max_file_size {})
 crates/skills/kb/src/ingest.rs	skip {path_str}: extraction failed: {error}
-crates/skills/kb/src/ingest.rs	skip {path_str}: {reason}
+crates/skills/kb/src/ingest.rs	skip {path_str}: produced chunks exceed max_chunks_per_run {}
+crates/skills/kb/src/ingest.rs	skip {path_str}: {error_code} ({message_key})
+crates/skills/kb/src/ingest.rs	{action} job_id exceeds its allowed boundary
 crates/skills/kb/src/ingest.rs	{action} requires job_id
-crates/skills/kb/src/ingest_extract.rs	binary content contains NUL bytes
-crates/skills/kb/src/ingest_extract.rs	content is not valid UTF-8
-crates/skills/kb/src/ingest_extract.rs	document has no extractable text
+crates/skills/kb/src/ingest_extract.rs	&#(?:(?P<hex>[xX][0-9a-fA-F]+)|(?P<dec>[0-9]+));
+crates/skills/kb/src/ingest_extract.rs	invalid JSONL at line {}: {error}
 crates/skills/kb/src/main.rs	KB skill storage descriptor is invalid
 crates/skills/kb/src/main.rs	KB skill storage descriptor is required
-crates/skills/kb/src/main.rs	action must be ingest|search|list_namespaces|list_documents|remove_documents|delete_namespace|reindex|resume_ingest|ingest_job_status|cancel_ingest|stats
-crates/skills/kb/src/main.rs	found {} hit(s) for query
+crates/skills/kb/src/main.rs	action must be ingest|search|list_namespaces|list_documents|remove_documents|delete_namespace|reindex|resume_ingest|ingest_job_status|cancel_ingest|start_vector_reindex|resume_vector_reindex|vector_reindex_status|cancel_vector_reindex|stats
+crates/skills/kb/src/main.rs	batch_size must be an integer between 1 and 256
+crates/skills/kb/src/main.rs	list_documents continuation must be an object
+crates/skills/kb/src/main.rs	list_documents cursor exceeds its allowed boundary
 crates/skills/kb/src/main.rs	load namespace failed: {namespace}
 crates/skills/kb/src/main.rs	managed document path is invalid
+crates/skills/kb/src/main.rs	namespace exceeds its allowed boundary
 crates/skills/kb/src/main.rs	namespace not found or unreadable: {namespace}
 crates/skills/kb/src/main.rs	namespace not found or unreadable: {namespace}
 crates/skills/kb/src/main.rs	namespace not found or unreadable: {}
 crates/skills/kb/src/main.rs	no effective query terms
-crates/skills/kb/src/main.rs	no matching chunks under filters
-crates/skills/kb/src/storage.rs	KB chunk text must not be empty
-crates/skills/kb/src/storage.rs	KB document chunk count does not match payload
+crates/skills/kb/src/main.rs	search file_type exceeds its allowed boundary
+crates/skills/kb/src/main.rs	search filters contain unsupported fields
+crates/skills/kb/src/main.rs	search filters must be an object
+crates/skills/kb/src/main.rs	search min_score must be between 0 and 1
+crates/skills/kb/src/main.rs	search min_score must be numeric
+crates/skills/kb/src/main.rs	search path_prefix exceeds its allowed boundary
+crates/skills/kb/src/main.rs	search query is empty or exceeds its allowed boundary
+crates/skills/kb/src/main.rs	search time range is invalid
+crates/skills/kb/src/main.rs	search top_k must be an integer
+crates/skills/kb/src/main.rs	search top_k must be between 1 and 50
+crates/skills/kb/src/main.rs	search {field} must be an epoch integer
+crates/skills/kb/src/main.rs	stats namespace must be a non-empty string
+crates/skills/kb/src/main.rs	vector_reindex_status requires a positive generation
+crates/skills/kb/src/main.rs	{action} requires a positive generation
 crates/skills/kb/src/storage.rs	KB ingest job identity is incomplete
 crates/skills/kb/src/storage.rs	KB ingest job owner mismatch
-crates/skills/kb/src/storage.rs	KB skill storage integrity check failed
-crates/skills/kb/src/storage.rs	KB snapshot contains an orphan chunk
-crates/skills/kb/src/storage.rs	both active and staged legacy KB namespace tables exist
-crates/skills/kb/src/storage.rs	changed KB document disappeared
 crates/skills/kb/src/storage.rs	ingest job not found
-crates/skills/kb/src/storage.rs	legacy KB snapshot digest verification failed
-crates/skills/kb/src/storage.rs	legacy KB snapshot has no stable owner or namespace identity
-crates/skills/kb/src/storage.rs	legacy KB snapshot row-count verification failed
 crates/skills/kb/src/storage.rs	namespace is owned by another user scope
-crates/skills/kb/src/storage.rs	open KB skill storage failed: {}
-crates/skills/kb/src/storage.rs	parse legacy KB snapshot failed: {}
-crates/skills/kb/src/storage.rs	read legacy KB directory failed: {}
-crates/skills/kb/src/storage.rs	read legacy KB snapshot failed: {}
-crates/skills/kb/src/storage.rs	remove migrated KB snapshot failed: {}
-crates/skills/kb/src/storage.rs	skill storage database identity is invalid
-crates/skills/kb/src/storage.rs	skill storage database path must be absolute
+crates/skills/kb/src/storage/database.rs	KB skill storage integrity check failed
+crates/skills/kb/src/storage/database.rs	KB snapshot contains an orphan chunk
+crates/skills/kb/src/storage/database.rs	both active and staged legacy KB namespace tables exist
+crates/skills/kb/src/storage/database.rs	legacy KB snapshot digest verification failed
+crates/skills/kb/src/storage/database.rs	legacy KB snapshot has no stable owner or namespace identity
+crates/skills/kb/src/storage/database.rs	legacy KB snapshot row-count verification failed
+crates/skills/kb/src/storage/database.rs	open KB skill storage failed: {}
+crates/skills/kb/src/storage/database.rs	parse legacy KB snapshot failed: {}
+crates/skills/kb/src/storage/database.rs	read legacy KB directory failed: {}
+crates/skills/kb/src/storage/database.rs	read legacy KB snapshot failed: {}
+crates/skills/kb/src/storage/database.rs	remove migrated KB snapshot failed: {}
+crates/skills/kb/src/storage/database.rs	skill storage database identity is invalid
+crates/skills/kb/src/storage/database.rs	skill storage database path must be absolute
+crates/skills/kb/src/storage/namespace_index.rs	KB chunk text must not be empty
+crates/skills/kb/src/storage/namespace_index.rs	KB document chunk count does not match payload
+crates/skills/kb/src/storage/namespace_index.rs	changed KB document disappeared
+crates/skills/kb/src/storage/namespace_index.rs	changed KB document disappeared
+crates/skills/kb/src/storage/vector_index.rs	ANN projection row count overflow
+crates/skills/kb/src/storage/vector_index.rs	namespace missing while preparing vector generation
+crates/skills/kb/src/storage/vector_index.rs	vector reindex batch_size must be between 1 and 256
+crates/skills/kb/src/storage/vector_index.rs	vector reindex generation not found
 crates/skills/log_analyze/src/main.rs	args must be object
 crates/skills/log_analyze/src/main.rs	log directory contains no readable files: {}
 crates/skills/log_analyze/src/main.rs	log directory contains no readable files: {}
@@ -1783,6 +1847,7 @@ crates/skills/office_workspace/src/operations.rs	operations must contain at leas
 crates/skills/office_workspace/src/package.rs	OOXML package has too many members
 crates/skills/office_workspace/src/package.rs	OOXML package part is not UTF-8 XML: {error}
 crates/skills/office_workspace/src/package.rs	Office package format does not match the requested capability
+crates/skills/office_workspace/src/package.rs	cannot decode ZIP member name: {error}
 crates/skills/office_workspace/src/package.rs	cannot inspect ZIP member: {error}
 crates/skills/office_workspace/src/package.rs	cannot read ZIP member: {error}
 crates/skills/office_workspace/src/package.rs	cannot read source package: {error}
@@ -1912,6 +1977,7 @@ crates/skills/office_workspace/src/xlsx_write.rs	supported spreadsheet image inp
 crates/skills/office_workspace/src/xlsx_write.rs	unsupported spreadsheet cell value_type
 crates/skills/office_workspace/src/xlsx_write.rs	worksheet name violates XLSX naming constraints
 crates/skills/office_workspace/src/xlsx_write.rs	worksheet names must be unique
+crates/skills/office_workspace/src/xml_text.rs	only text and references are coalesced
 crates/skills/package_manager/src/main.rs	args must be object
 crates/skills/package_manager/src/main.rs	args.package or args.packages is required
 crates/skills/package_manager/src/main.rs	cannot detect package manager; set args.manager
@@ -2183,12 +2249,17 @@ crates/wechat-ilink/src/cdn.rs	{label}: destination mkdir {error}
 crates/wechat-ilink/src/cdn.rs	{label}: destination parent missing
 crates/wechat-ilink/src/cdn.rs	{label}: destination replace {error}
 crates/wechat-ilink/src/cdn.rs	{label}: open encrypted body {error}
+crates/wechat-ilink/src/crypto.rs	aes ciphertext chunk exceeds platform address space
 crates/wechat-ilink/src/crypto.rs	aes ciphertext metadata: {error}
 crates/wechat-ilink/src/crypto.rs	aes ciphertext open: {error}
 crates/wechat-ilink/src/crypto.rs	aes ciphertext read: {error}
+crates/wechat-ilink/src/crypto.rs	aes ciphertext read: {error}
+crates/wechat-ilink/src/crypto.rs	aes decrypt worker: {error}
 crates/wechat-ilink/src/crypto.rs	aes ecb decrypt: ciphertext not a non-empty multiple of 16
 crates/wechat-ilink/src/crypto.rs	aes ecb decrypt: ciphertext not multiple of 16
+crates/wechat-ilink/src/crypto.rs	aes encrypt worker: {error}
 crates/wechat-ilink/src/crypto.rs	aes input changed while reading
+crates/wechat-ilink/src/crypto.rs	aes input chunk exceeds platform address space
 crates/wechat-ilink/src/crypto.rs	aes input exceeds platform address space
 crates/wechat-ilink/src/crypto.rs	aes input final read: {error}
 crates/wechat-ilink/src/crypto.rs	aes input metadata: {error}
@@ -2201,6 +2272,7 @@ crates/wechat-ilink/src/crypto.rs	aes output tail write: {error}
 crates/wechat-ilink/src/crypto.rs	aes output write: {error}
 crates/wechat-ilink/src/crypto.rs	aes plaintext create: {error}
 crates/wechat-ilink/src/crypto.rs	aes plaintext flush: {error}
+crates/wechat-ilink/src/crypto.rs	aes plaintext write: {error}
 crates/wechat-ilink/src/crypto.rs	aes plaintext write: {error}
 crates/wechat-ilink/src/crypto.rs	aes: bad key len
 crates/wechat-ilink/src/crypto.rs	aes: bad key len

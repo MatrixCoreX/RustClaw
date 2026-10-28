@@ -1856,6 +1856,15 @@
     },
     {
       "adapter_kind": null,
+      "capability": "kb.cancel_vector_reindex",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "kb",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
       "capability": "kb.delete_namespace",
       "execution_mode": "sync_short",
       "isolation_profile": null,
@@ -1927,6 +1936,15 @@
       "timeout_seconds": 30
     },
     {
+      "adapter_kind": "local_process_poll",
+      "capability": "kb.resume_vector_reindex",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "kb",
+      "timeout_seconds": 30
+    },
+    {
       "adapter_kind": null,
       "capability": "kb.search",
       "execution_mode": "sync_short",
@@ -1936,8 +1954,26 @@
       "timeout_seconds": 30
     },
     {
+      "adapter_kind": "local_process_poll",
+      "capability": "kb.start_vector_reindex",
+      "execution_mode": "async_preferred",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "kb",
+      "timeout_seconds": 30
+    },
+    {
       "adapter_kind": null,
       "capability": "kb.stats",
+      "execution_mode": "sync_short",
+      "isolation_profile": null,
+      "progress_contract": "native_progress",
+      "skill": "kb",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "kb.vector_reindex_status",
       "execution_mode": "sync_short",
       "isolation_profile": null,
       "progress_contract": "native_progress",
@@ -2060,6 +2096,15 @@
       "progress_contract": "native_progress",
       "skill": "media_discovery",
       "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
+      "capability": "media_discovery.get_run_results",
+      "execution_mode": "sync_short",
+      "isolation_profile": "read_only",
+      "progress_contract": "native_progress",
+      "skill": "media_discovery",
+      "timeout_seconds": 15
     },
     {
       "adapter_kind": null,
@@ -3332,6 +3377,15 @@
     },
     {
       "adapter_kind": null,
+      "capability": "task_control.recall_context",
+      "execution_mode": "sync_short",
+      "isolation_profile": "local_current_workspace",
+      "progress_contract": "not_long_tail",
+      "skill": "task_control",
+      "timeout_seconds": 30
+    },
+    {
+      "adapter_kind": null,
       "capability": "task_control.resume",
       "execution_mode": "sync_short",
       "isolation_profile": "local_current_workspace",
@@ -3581,15 +3635,15 @@
     "configs/agent_guard.toml"
   ],
   "summary": {
-    "capability_count": 397,
+    "capability_count": 403,
     "execution_modes": {
-      "async_preferred": 73,
+      "async_preferred": 75,
       "async_required": 9,
-      "sync_short": 315
+      "sync_short": 319
     },
     "progress_contracts": {
-      "native_progress": 51,
-      "not_long_tail": 284,
+      "native_progress": 56,
+      "not_long_tail": 285,
       "poll_status": 62
     },
     "remote_executor_capability_count": 0
