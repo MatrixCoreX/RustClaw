@@ -1,4 +1,7 @@
 use super::*;
+
+#[path = "dispatch_blocking_tests.rs"]
+mod blocking;
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use serde_json::json;
 use std::sync::{

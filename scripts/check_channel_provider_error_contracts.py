@@ -13,6 +13,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PROTECTED_PATHS = (
     "crates/claw-core/src/channel_open_platform.rs",
     "crates/clawd/src/channel_send.rs",
+    "crates/clawd/src/delivery_service.rs",
+    "crates/clawd/src/delivery_service",
     "crates/telegramd/src",
     "crates/whatsappd/src",
     "crates/wechatd/src",
@@ -107,28 +109,47 @@ def check_shared_contract(root: Path) -> list[str]:
     return [f"shared_contract_field_missing:{value}" for value in required if value not in text]
 
 
+TELEGRAM_CONTRACT_TOKENS = {
+    "crates/telegramd/src/telegram_provider_failure.rs": (
+        "RequestError::RetryAfter",
+        "ApiError::BotBlocked",
+        "ApiError::ChatNotFound",
+        "ApiError::NotEnoughRightsToPostMessages",
+        "ChannelProviderFailureClass::RecipientBlocked",
+        "ChannelProviderFailureClass::TargetNotFound",
+    ),
+    "crates/clawd/src/channel_send.rs": (
+        "telegram_message_id",
+        "provider_message_ids.push",
+        "provider_transport_error(\"telegram_bot\", \"send_text\"",
+    ),
+    "crates/clawd/src/delivery_service.rs": (
+        "outcome.provider_message_ids",
+        "persistence::claim(state, envelope).await?",
+        "persistence::record_receipt",
+        "persistence::complete",
+        "persistence::renew",
+    ),
+    "crates/clawd/src/delivery_service/persistence.rs": (
+        "tokio::task::spawn_blocking",
+        "crate::repo::claim_channel_delivery_dispatch",
+        "crate::repo::record_channel_delivery_receipt",
+        "crate::repo::complete_channel_delivery_dispatch",
+        "crate::repo::renew_channel_delivery_dispatch",
+    ),
+    "crates/clawd/src/delivery_service/parts.rs": (
+        "persistence::claim(state, envelope).await?",
+        "persistence::load_receipt",
+        "persistence::record_receipt",
+        "persistence::complete",
+        'persistence::run_blocking("artifact_rejection"',
+    ),
+}
+
+
 def check_telegram_contract(root: Path) -> list[str]:
-    required_by_path = {
-        "crates/telegramd/src/telegram_provider_failure.rs": (
-            "RequestError::RetryAfter",
-            "ApiError::BotBlocked",
-            "ApiError::ChatNotFound",
-            "ApiError::NotEnoughRightsToPostMessages",
-            "ChannelProviderFailureClass::RecipientBlocked",
-            "ChannelProviderFailureClass::TargetNotFound",
-        ),
-        "crates/clawd/src/channel_send.rs": (
-            "telegram_message_id",
-            "provider_message_ids.push",
-            "provider_transport_error(\"telegram_bot\", \"send_text\"",
-        ),
-        "crates/clawd/src/delivery_service.rs": (
-            "outcome.provider_message_ids",
-            "claim_channel_delivery_dispatch",
-        ),
-    }
     findings: list[str] = []
-    for relative, required in required_by_path.items():
+    for relative, required in TELEGRAM_CONTRACT_TOKENS.items():
         path = root / relative
         if not path.is_file():
             findings.append(f"telegram_contract_file_missing:{relative}")
@@ -188,6 +209,24 @@ def run_self_test() -> int:
         if scan(root):
             print(f"SELF_TEST_FAIL safe findings={scan(root)}")
             return 1
+
+        for relative, tokens in TELEGRAM_CONTRACT_TOKENS.items():
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("\n".join(tokens), encoding="utf-8")
+        if check_telegram_contract(root):
+            print("SELF_TEST_FAIL complete delivery contract rejected")
+            return 1
+        for relative, tokens in TELEGRAM_CONTRACT_TOKENS.items():
+            path = root / relative
+            original = path.read_text(encoding="utf-8")
+            for token in tokens:
+                path.write_text(original.replace(token, ""), encoding="utf-8")
+                expected = f"telegram_contract_token_missing:{relative}:{token}"
+                if expected not in check_telegram_contract(root):
+                    print(f"SELF_TEST_FAIL missing contract accepted:{relative}:{token}")
+                    return 1
+            path.write_text(original, encoding="utf-8")
 
     print("CHANNEL_PROVIDER_ERROR_CONTRACT_SELF_TEST ok")
     return 0

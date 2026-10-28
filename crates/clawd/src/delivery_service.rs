@@ -22,6 +22,7 @@ use crate::{AppState, ClaimedTask, RuntimeChannel};
 
 mod failure_notice;
 mod parts;
+mod persistence;
 
 const DELIVERY_DISPATCH_LEASE_SECONDS: u64 = 120;
 const DELIVERY_DISPATCH_HEARTBEAT_SECONDS: u64 = 30;
@@ -328,11 +329,7 @@ async fn deliver_task_envelope_once(
     envelope
         .validate()
         .map_err(|err| anyhow!(err.to_string()))?;
-    let claim = crate::repo::claim_channel_delivery_dispatch(
-        &state.core.db,
-        envelope,
-        DELIVERY_DISPATCH_LEASE_SECONDS,
-    )?;
+    let claim = persistence::claim(state, envelope).await?;
     let lease_token = match claim {
         ClaimChannelDeliveryDispatchOutcome::Acquired { lease_token } => lease_token,
         ClaimChannelDeliveryDispatchOutcome::ExistingReceipt(receipt) => {
@@ -468,12 +465,8 @@ async fn deliver_task_envelope_once(
         // exact provider IDs inside `parts` without claiming the global index.
         receipt.provider_message_ids.clear();
     }
-    crate::repo::record_channel_delivery_receipt(&state.core.db, &receipt)?;
-    if let Err(err) = crate::repo::complete_channel_delivery_dispatch(
-        &state.core.db,
-        &envelope.idempotency_key,
-        &lease_token,
-    ) {
+    persistence::record_receipt(state, &receipt).await?;
+    if let Err(err) = persistence::complete(state, &envelope.idempotency_key, &lease_token).await {
         warn!(
             "channel delivery dispatch completion failed delivery_id={} diagnostic={}",
             envelope.delivery_id, err
@@ -510,12 +503,7 @@ where
         tokio::select! {
             send_result = &mut send_future => return send_result,
             _ = heartbeat.tick() => {
-                match crate::repo::renew_channel_delivery_dispatch(
-                    &state.core.db,
-                    idempotency_key,
-                    lease_token,
-                    DELIVERY_DISPATCH_LEASE_SECONDS,
-                ) {
+                match persistence::renew(state, idempotency_key, lease_token).await {
                     Ok(true) => {}
                     Ok(false) => {
                         warn!(

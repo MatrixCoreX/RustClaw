@@ -236,11 +236,7 @@ pub(super) async fn deliver(
         )
     })
     .await??;
-    let lease = match crate::repo::claim_channel_delivery_dispatch(
-        &state.core.db,
-        envelope,
-        DELIVERY_DISPATCH_LEASE_SECONDS,
-    )? {
+    let lease = match persistence::claim(state, envelope).await? {
         ClaimChannelDeliveryDispatchOutcome::Acquired { lease_token } => lease_token,
         ClaimChannelDeliveryDispatchOutcome::ExistingReceipt(receipt) => {
             let mut result = result_from_existing_receipt(receipt);
@@ -266,18 +262,9 @@ pub(super) async fn deliver(
         let mut results = Vec::new();
         for (index, text) in texts.iter().enumerate() {
             let child = part_envelope(envelope, &plan, index, text);
-            let previous = {
-                let db = state
-                    .core
-                    .db
-                    .get()
-                    .map_err(|_| "channel_delivery_receipt_db_failed")?;
-                crate::repo::channel_delivery_receipt::load_channel_delivery_receipt_from_db(
-                    &db,
-                    &child.idempotency_key,
-                )
-                .map_err(|_| "channel_delivery_receipt_load_failed")?
-            };
+            let previous = persistence::load_receipt(state, &child.idempotency_key)
+                .await
+                .map_err(|error| error.to_string())?;
             if let Some(receipt) = previous.as_ref().filter(|r| {
                 !r.retryable
                     || matches!(
@@ -297,9 +284,13 @@ pub(super) async fn deliver(
                 if actual.ok().as_ref() != plan.file_digests[index].as_ref()
                     || plan.file_digests[index].is_none()
                 {
+                    let state = state.clone();
                     results.push(
-                        reject_artifact(state, &child)
-                            .map_err(|_| "channel_delivery_artifact_check_failed")?,
+                        persistence::run_blocking("artifact_rejection", move || {
+                            reject_artifact(&state, &child)
+                        })
+                        .await
+                        .map_err(|_| "channel_delivery_artifact_check_failed")?,
                     );
                     continue;
                 }
@@ -316,12 +307,8 @@ pub(super) async fn deliver(
     .map_err(|e| anyhow!(e))?;
     let mut result = aggregate(envelope, &results);
     attach_failed_files(state, &texts, &mut result);
-    crate::repo::record_channel_delivery_receipt(&state.core.db, result.receipt.as_ref().unwrap())?;
-    crate::repo::complete_channel_delivery_dispatch(
-        &state.core.db,
-        &envelope.idempotency_key,
-        &lease,
-    )?;
+    persistence::record_receipt(state, result.receipt.as_ref().unwrap()).await?;
+    persistence::complete(state, &envelope.idempotency_key, &lease).await?;
     Ok(result)
 }
 

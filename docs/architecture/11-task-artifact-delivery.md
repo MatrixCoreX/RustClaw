@@ -80,6 +80,15 @@ never repeat the original skill or tool action. A service restart retains receip
 an ambiguous in-flight claim remains `query_required`, not an exactly-once claim.
 Task/parent receipt removal cleans the part plan and child receipts.
 
+The async delivery service awaits database claims, receipt reads/writes,
+completion and lease renewal on blocking workers. Local artifact rejection uses
+the same isolation. This keeps connection-pool waits and SQLite locks off the
+async executor without detaching sends or changing receipt authority. Each
+renewal is awaited before another starts; a failed or lost renewal stops the
+send. Already-started SQL may finish after its waiter is canceled, but it never
+sends a message or retries an effect. Durable leases and receipts still govern
+the next attempt.
+
 Authorized task queries expose bounded delivery facts and a snapshot digest.
 Inspection reads parent, part plan, receipts, claims and manual confirmations in
 one SQLite snapshot. At most 128 parts are fetched in a single ordered batch,
