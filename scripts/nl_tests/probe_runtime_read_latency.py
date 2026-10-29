@@ -11,6 +11,7 @@ import sqlite3
 import time
 import tomllib
 import urllib.request
+from urllib.parse import urlsplit
 
 
 def timing_summary(values: list[float]) -> dict[str, float | int]:
@@ -22,7 +23,12 @@ def timing_summary(values: list[float]) -> dict[str, float | int]:
             "max_ms": round(ordered[-1], 3)}
 
 
-def probe(root: Path, samples: int) -> dict:
+def probe(root: Path, samples: int, base_url: str = "http://127.0.0.1:8787") -> dict:
+    target = urlsplit(base_url)
+    if target.scheme != "http" or target.hostname not in ("127.0.0.1", "::1", "localhost") \
+            or target.username or target.password or target.path not in ("", "/") \
+            or target.query or target.fragment:
+        raise ValueError("probe_requires_loopback_base_url")
     config = tomllib.loads((root / "configs/config.toml").read_text())
     database = (root / config["database"]["sqlite_path"]).resolve()
     report = {"platform": platform.system(), "architecture": platform.machine(),
@@ -56,7 +62,7 @@ def probe(root: Path, samples: int) -> dict:
         for _ in range(samples):
             start = time.perf_counter()
             try:
-                request = urllib.request.Request("http://127.0.0.1:8787/v1/health", headers={"X-Agent-Key": key[0]})
+                request = urllib.request.Request(base_url.rstrip("/") + "/v1/health", headers={"X-Agent-Key": key[0]})
                 with opener.open(request, timeout=30) as response:
                     if not json.loads(response.read(64 * 1024)).get("ok"):
                         failures += 1
@@ -73,5 +79,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--samples", type=int, default=10, choices=range(1, 51))
+    parser.add_argument("--base-url", default="http://127.0.0.1:8787")
     args = parser.parse_args()
-    print(json.dumps(probe(args.root.resolve(), args.samples), sort_keys=True))
+    print(json.dumps(probe(args.root.resolve(), args.samples, args.base_url), sort_keys=True))

@@ -69,12 +69,15 @@ async fn health(
         oldest_running_task_age_seconds_for_user(&state, identity.user_id)
     }
     .unwrap_or(0);
-    let legacy_telegramd_stats = telegramd_process_stats();
-    let channel_gateway_stats = channel_gateway_process_stats();
-    let whatsappd_stats = whatsappd_process_stats();
-    let wa_webd_stats = wa_webd_process_stats();
-    let webd_stats = webd_process_stats();
-    let wechatd_stats = wechatd_process_stats();
+    let processes = tokio::task::spawn_blocking(crate::system_health::DaemonProcessSnapshot::capture)
+        .await
+        .unwrap_or_default();
+    let legacy_telegramd_stats = processes.stats("telegramd");
+    let channel_gateway_stats = processes.stats("channel-gateway");
+    let whatsappd_stats = processes.stats("whatsappd");
+    let wa_webd_stats = processes.stats("whatsapp_webd");
+    let webd_stats = processes.stats("webd");
+    let wechatd_stats = processes.stats("wechatd");
     let channel_gateway_process_count = channel_gateway_stats.map(|(count, _)| count);
     let channel_gateway_memory_rss_bytes = channel_gateway_stats.map(|(_, rss_bytes)| rss_bytes);
     let channel_gateway_healthy = channel_gateway_process_count.map(|count| count > 0);
@@ -104,10 +107,10 @@ async fn health(
     let wechatd_process_count = wechatd_stats.map(|(count, _)| count);
     let wechatd_memory_rss_bytes = wechatd_stats.map(|(_, rss_bytes)| rss_bytes);
     let wechatd_healthy = wechatd_process_count.map(|count| count > 0);
-    let feishud_stats = feishud_process_stats();
+    let feishud_stats = processes.stats("feishud");
     let feishud_process_count_raw = feishud_stats.map(|(count, _)| count);
     let feishud_memory_rss_bytes_raw = feishud_stats.map(|(_, rss_bytes)| rss_bytes);
-    let larkd_stats = larkd_process_stats();
+    let larkd_stats = processes.stats("larkd");
     let larkd_process_count_raw = larkd_stats.map(|(count, _)| count);
     let larkd_memory_rss_bytes_raw = larkd_stats.map(|(_, rss_bytes)| rss_bytes);
     let (user_count, bound_channel_count, bound_channels) =
@@ -334,7 +337,7 @@ async fn health(
         queue_length,
         worker_state: "running".to_string(),
         uptime_seconds: state.worker.started_at.elapsed().as_secs(),
-        memory_rss_bytes: current_rss_bytes(),
+        memory_rss_bytes: processes.current_rss_bytes(),
         running_length,
         running_oldest_age_seconds,
         telegramd_healthy,

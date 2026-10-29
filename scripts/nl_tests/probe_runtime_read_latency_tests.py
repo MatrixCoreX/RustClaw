@@ -11,6 +11,12 @@ from probe_runtime_read_latency import probe, timing_summary
 
 
 class ReadProbeTests(unittest.TestCase):
+    def test_remote_or_credential_bearing_targets_are_rejected_before_reading_keys(self):
+        for url in ("https://example.com", "http://192.0.2.1", "http://user@localhost",
+                    "http://localhost/elsewhere", "http://localhost?target=remote"):
+            with self.subTest(url=url), self.assertRaisesRegex(ValueError, "loopback"):
+                probe(Path("missing"), 1, url)
+
     def test_percentiles_do_not_claim_more_samples_than_measured(self):
         self.assertEqual(timing_summary([]), {"samples": 0})
         self.assertEqual(timing_summary([5]), {"samples": 1, "p50_ms": 5, "p95_ms": 5, "max_ms": 5})

@@ -5,6 +5,9 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
+#[path = "skill_output_artifact/evidence_storage.rs"]
+mod evidence_storage;
+
 const DEFAULT_PREVIEW_BYTES: usize = 32 * 1024;
 const MIN_PREVIEW_BYTES: usize = 4 * 1024;
 const MAX_PREVIEW_BYTES: usize = 1024 * 1024;
@@ -343,10 +346,7 @@ fn publish_evidence_artifact(
         .join(task_key)
         .join(format!("{sha256}.json"));
     let artifact_path = workspace_root.join(&relative_path);
-    if !artifact_path.is_file() {
-        atomic_write(&artifact_path, bytes)?;
-        restrict_evidence_permissions(&artifact_path)?;
-    }
+    evidence_storage::publish(workspace_root, &artifact_path, bytes)?;
     let relative_path = relative_path.to_string_lossy().replace('\\', "/");
     let artifact_ref = json!({
         "id": evidence_id,
@@ -439,21 +439,6 @@ fn redacted_value(value: &Value) -> Value {
     })
 }
 
-#[cfg(unix)]
-fn restrict_evidence_permissions(path: &Path) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-    if let Some(parent) = path.parent() {
-        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn restrict_evidence_permissions(_path: &Path) -> io::Result<()> {
-    Ok(())
-}
-
 fn preview_limit_bytes() -> usize {
     claw_core::product_identity::env_string("SKILL_OUTPUT_PREVIEW_BYTES")
         .ok()
@@ -483,7 +468,7 @@ fn machine_path_component(value: &str, fallback: &str) -> String {
             }
         })
         .collect::<String>();
-    if component.is_empty() {
+    if component.is_empty() || matches!(component.as_str(), "." | "..") {
         fallback.to_string()
     } else {
         component

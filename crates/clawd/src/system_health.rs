@@ -4,11 +4,47 @@ use rusqlite::OptionalExtension;
 use std::process::Command as StdCommand;
 
 pub(crate) fn current_rss_bytes() -> Option<u64> {
-    process_snapshots()
-        .ok()?
-        .into_iter()
-        .find(|proc| proc.pid == std::process::id())
-        .and_then(|proc| proc.rss_bytes)
+    #[cfg(target_os = "linux")]
+    {
+        current_rss_bytes_from_status_path("/proc/self/status")
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        DaemonProcessSnapshot::capture().current_rss_bytes()
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct DaemonProcessSnapshot {
+    processes: Option<Vec<ProcessSnapshot>>,
+}
+
+impl DaemonProcessSnapshot {
+    pub(crate) fn capture() -> Self {
+        Self {
+            processes: process_snapshots().ok(),
+        }
+    }
+
+    pub(crate) fn stats(&self, process_name: &str) -> Option<(usize, u64)> {
+        let mut count = 0usize;
+        let mut total_rss_bytes = 0u64;
+        for proc in self.processes.as_ref()? {
+            if process_name_matches(proc, process_name) {
+                count += 1;
+                total_rss_bytes = total_rss_bytes.saturating_add(proc.rss_bytes.unwrap_or(0));
+            }
+        }
+        Some((count, total_rss_bytes))
+    }
+
+    pub(crate) fn current_rss_bytes(&self) -> Option<u64> {
+        self.processes
+            .as_ref()?
+            .iter()
+            .find(|proc| proc.pid == std::process::id())
+            .and_then(|proc| proc.rss_bytes)
+    }
 }
 
 pub(crate) fn telegramd_process_stats() -> Option<(usize, u64)> {
@@ -25,10 +61,6 @@ pub(crate) fn whatsappd_process_stats() -> Option<(usize, u64)> {
 
 pub(crate) fn wa_webd_process_stats() -> Option<(usize, u64)> {
     daemon_process_stats("whatsapp_webd")
-}
-
-pub(crate) fn webd_process_stats() -> Option<(usize, u64)> {
-    daemon_process_stats("webd")
 }
 
 pub(crate) fn wechatd_process_stats() -> Option<(usize, u64)> {
@@ -52,20 +84,7 @@ pub(crate) fn daemon_process_pids_by_name(process_name: &str) -> Option<Vec<u32>
 }
 
 fn daemon_process_stats(process_name: &str) -> Option<(usize, u64)> {
-    let mut count = 0usize;
-    let mut total_rss_bytes = 0u64;
-
-    for proc in process_snapshots().ok()? {
-        if !process_name_matches(&proc, process_name) {
-            continue;
-        }
-        count += 1;
-        if let Some(rss_bytes) = proc.rss_bytes {
-            total_rss_bytes = total_rss_bytes.saturating_add(rss_bytes);
-        }
-    }
-
-    Some((count, total_rss_bytes))
+    DaemonProcessSnapshot::capture().stats(process_name)
 }
 
 #[derive(Debug, Clone)]

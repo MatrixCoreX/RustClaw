@@ -2,6 +2,12 @@ use std::fs;
 
 use super::*;
 
+#[test]
+fn dot_components_are_not_artifact_namespace_or_task_paths() {
+    assert_eq!(machine_path_component("..", "task"), "task");
+    assert_eq!(machine_path_component(".", "output"), "output");
+}
+
 struct TestWorkspace {
     root: PathBuf,
 }

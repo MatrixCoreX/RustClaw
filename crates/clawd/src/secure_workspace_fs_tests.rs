@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 
 use super::{atomic_write_workspace_file, open_workspace_file};
 
-struct TestWorkspace(PathBuf);
+pub(crate) struct TestWorkspace(PathBuf);
 
 impl TestWorkspace {
-    fn new(label: &str) -> Self {
+    pub(crate) fn new(label: &str) -> Self {
         let path = std::env::temp_dir().join(format!(
             "agent-runtime-secure-workspace-{label}-{}",
             uuid::Uuid::new_v4().simple()
@@ -27,7 +27,7 @@ impl TestWorkspace {
         Self(path)
     }
 
-    fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         &self.0
     }
 }

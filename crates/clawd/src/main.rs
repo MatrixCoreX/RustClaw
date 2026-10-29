@@ -222,7 +222,7 @@ pub(crate) use system_health::{
     active_running_task_count, active_running_task_count_for_user, channel_gateway_process_stats,
     current_rss_bytes, daemon_process_pids_by_name, feishud_process_stats, larkd_process_stats,
     oldest_running_task_age_seconds, oldest_running_task_age_seconds_for_user,
-    telegramd_process_stats, wa_webd_process_stats, webd_process_stats, wechatd_process_stats,
+    telegramd_process_stats, wa_webd_process_stats, wechatd_process_stats,
     whatsappd_process_stats,
 };
 use task_admin_routes::{

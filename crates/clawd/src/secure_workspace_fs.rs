@@ -112,6 +112,33 @@ fn open_parent_directory(
 }
 
 #[cfg(unix)]
+pub(crate) fn ensure_private_workspace_directory(
+    workspace_root: &Path,
+    target: &Path,
+) -> io::Result<()> {
+    let (directory, _) =
+        open_parent_directory(workspace_root, &target.join(".directory-handle"), true)?;
+    let directory = File::from(directory);
+    use std::os::unix::fs::MetadataExt;
+    // SAFETY: geteuid takes no arguments and does not access caller memory.
+    if directory.metadata()?.uid() != unsafe { libc::geteuid() } {
+        return Err(invalid_path("workspace_private_directory_not_owned"));
+    }
+    directory.set_permissions(std::fs::Permissions::from_mode(0o700))
+}
+
+#[cfg(not(unix))]
+pub(crate) fn ensure_private_workspace_directory(
+    _workspace_root: &Path,
+    _target: &Path,
+) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "workspace_private_directory_unsupported",
+    ))
+}
+
+#[cfg(unix)]
 pub(crate) fn open_workspace_file(workspace_root: &Path, target: &Path) -> io::Result<File> {
     let (parent, filename) = open_parent_directory(workspace_root, target, false)?;
     // SAFETY: parent and filename are validated and remain alive for the call.
@@ -315,4 +342,4 @@ pub(crate) fn remove_workspace_file(workspace_root: &Path, target: &Path) -> io:
 
 #[cfg(test)]
 #[path = "secure_workspace_fs_tests.rs"]
-mod tests;
+pub(crate) mod tests;

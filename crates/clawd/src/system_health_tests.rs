@@ -1,8 +1,107 @@
 use super::{
     active_running_task_count, active_running_task_count_for_user, collect_matching_pids,
     oldest_running_task_age_seconds, oldest_running_task_age_seconds_for_user, process_basename,
-    process_name_matches, ProcessSnapshot,
+    process_name_matches, DaemonProcessSnapshot, ProcessSnapshot,
 };
+
+#[test]
+fn one_snapshot_preserves_all_daemon_counts_and_rss_without_rescanning() {
+    let names = [
+        "telegramd",
+        "channel-gateway",
+        "whatsappd",
+        "whatsapp_webd",
+        "webd",
+        "wechatd",
+        "feishud",
+        "larkd",
+    ];
+    let processes = names
+        .iter()
+        .enumerate()
+        .flat_map(|(index, name)| {
+            [
+                ProcessSnapshot {
+                    pid: index as u32 * 2 + 1,
+                    rss_bytes: Some(1024),
+                    comm: name.to_string(),
+                    args: format!("/opt/bin/{name}"),
+                },
+                ProcessSnapshot {
+                    pid: index as u32 * 2 + 2,
+                    rss_bytes: None,
+                    comm: "cargo".into(),
+                    args: format!("cargo run -p {name}"),
+                },
+            ]
+        })
+        .collect();
+    let snapshot = DaemonProcessSnapshot {
+        processes: Some(processes),
+    };
+    for _ in 0..2 {
+        for name in names {
+            assert_eq!(snapshot.stats(name), Some((2, 1024)));
+        }
+        assert_eq!(snapshot.stats("absent-service"), Some((0, 0)));
+    }
+}
+
+#[test]
+fn unavailable_snapshot_is_not_a_zero_process_observation() {
+    let unknown = DaemonProcessSnapshot::default();
+    assert_eq!(unknown.stats("webd"), None);
+    assert_eq!(unknown.current_rss_bytes(), None);
+    let empty = DaemonProcessSnapshot {
+        processes: Some(Vec::new()),
+    };
+    assert_eq!(empty.stats("webd"), Some((0, 0)));
+    assert_eq!(empty.current_rss_bytes(), None);
+}
+
+#[test]
+fn process_snapshot_preserves_saturating_rss_and_current_pid_selection() {
+    let snapshot = DaemonProcessSnapshot {
+        processes: Some(vec![
+            ProcessSnapshot {
+                pid: std::process::id(),
+                rss_bytes: Some(u64::MAX),
+                comm: "webd".into(),
+                args: String::new(),
+            },
+            ProcessSnapshot {
+                pid: 0,
+                rss_bytes: Some(1024),
+                comm: "webd".into(),
+                args: String::new(),
+            },
+        ]),
+    };
+    assert_eq!(snapshot.stats("webd"), Some((2, u64::MAX)));
+    assert_eq!(snapshot.current_rss_bytes(), Some(u64::MAX));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_current_rss_reads_own_status_and_handles_missing_or_malformed_data() {
+    assert!(super::current_rss_bytes().is_some_and(|rss| rss > 0));
+    let root = crate::secure_workspace_fs::tests::TestWorkspace::new("rss");
+    let path = root.path().join("status");
+    assert_eq!(
+        super::current_rss_bytes_from_status_path(path.to_str().unwrap()),
+        None
+    );
+    std::fs::write(&path, "Name:\tfixture\nVmRSS:\t123 kB\n").unwrap();
+    assert_eq!(
+        super::current_rss_bytes_from_status_path(path.to_str().unwrap()),
+        Some(123 * 1024)
+    );
+    std::fs::write(&path, "VmRSS:\tunknown kB\n").unwrap();
+    assert_eq!(
+        super::current_rss_bytes_from_status_path(path.to_str().unwrap()),
+        None
+    );
+}
 
 #[test]
 fn process_name_matches_binary_and_cargo_run_forms() {
