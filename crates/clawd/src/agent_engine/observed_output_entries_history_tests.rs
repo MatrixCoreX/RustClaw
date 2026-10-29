@@ -30,6 +30,13 @@ fn catalog(entries: &[String]) -> Value {
     .unwrap()
 }
 
+fn artifact_is_within_workspace(artifact: &std::path::Path, workspace: &std::path::Path) -> bool {
+    match (artifact.canonicalize(), workspace.canonicalize()) {
+        (Ok(artifact), Ok(workspace)) => artifact.starts_with(workspace),
+        _ => false,
+    }
+}
+
 fn step(id: &str, skill: &str, output: &str) -> StepExecutionResult {
     StepExecutionResult {
         step_id: id.to_string(),
@@ -217,7 +224,7 @@ fn finalization_catalog_preserves_large_earlier_results_with_verified_continuati
         .as_str()
         .unwrap();
     let artifact = workspace.0.join(relative);
-    assert!(artifact.canonicalize().unwrap().starts_with(&workspace.0));
+    assert!(artifact_is_within_workspace(&artifact, &workspace.0));
     let bytes = std::fs::read(artifact).unwrap();
     assert_eq!(
         first["model_projection_sha256"],
@@ -254,3 +261,6 @@ fn finalization_catalog_publication_failure_does_not_silently_revert_to_recent_s
 
 #[path = "observed_output_entries_gateway_tests.rs"]
 mod gateway_tests;
+
+#[path = "observed_output_entries_path_tests.rs"]
+mod path_tests;
