@@ -62,11 +62,14 @@ cleanup() {
   echo "retained_test_state=$STATE"
 }
 trap cleanup EXIT
-(
-  cd "$WORKSPACE"
-  exec "$BINARY" --config "$STATE/config.toml"
-) >"$STATE/server.log" 2>&1 &
-SERVER_PID=$!
+start_server() {
+  (
+    cd "$WORKSPACE"
+    exec "$BINARY" --config "$STATE/config.toml"
+  ) >>"$STATE/server.log" 2>&1 &
+  SERVER_PID=$!
+}
+start_server
 export USER_KEY='' APP_USER_KEY=''
 READY=0
 for ((attempt=0; attempt<120; attempt++)); do
@@ -85,7 +88,36 @@ for ((attempt=0; attempt<120; attempt++)); do
 done
 [[ "$READY" == 1 ]] || { echo "Isolated health timeout: $STATE/server.log" >&2; exit 1; }
 echo "run_id=correctness-continuity-$PORT suite=correctness-continuity provider=selected_config model=selected_config dry_run=false isolation=$STATE"
-bash scripts/nl_tests/run_manual_test.sh --base-url "http://127.0.0.1:$PORT" \
-  --case-file "$CASE_FILE" \
-  "$@" \
-  --log-root "$STATE/results" --wait-seconds 900 --provider-retries 0 --fail-fast 1 --full-text
+if [[ -n "${NL_CASE_SEQUENCE:-}" ]]; then
+  IFS=',' read -r -a sequence <<< "$NL_CASE_SEQUENCE"
+  position=0
+  for case_name in "${sequence[@]}"; do
+    position=$((position + 1))
+    bash scripts/nl_tests/run_manual_test.sh --base-url "http://127.0.0.1:$PORT" \
+      --case-file "$CASE_FILE" --case-name "$case_name" --reuse-chat-id-base --chat-id "$PORT" \
+      --log-root "$STATE/results" --wait-seconds 900 --provider-retries 0 --fail-fast 1 --full-text
+    if [[ "$position" == "${NL_RESTART_AFTER_CASE:-0}" && "$position" -lt "${#sequence[@]}" ]]; then
+      old_pid="$SERVER_PID"
+      kill "$SERVER_PID"
+      wait "$SERVER_PID" || true
+      start_server
+      echo "test_runtime_restart=completed after_case=$case_name old_pid=$old_pid new_pid=$SERVER_PID"
+      python3 -c 'import json,sys; print(json.dumps({"after_case":sys.argv[1],"old_pid":int(sys.argv[2]),"new_pid":int(sys.argv[3])}))' \
+        "$case_name" "$old_pid" "$SERVER_PID" > "$STATE/restart-evidence.json"
+      ready=0
+      for ((attempt=0; attempt<120; attempt++)); do
+        kill -0 "$SERVER_PID" 2>/dev/null || { echo 'Restarted isolated server stopped' >&2; exit 1; }
+        if curl -fsS --max-time 2 -H "X-Agent-Key: $USER_KEY" "http://127.0.0.1:$PORT/v1/health" >/dev/null; then
+          ready=1
+          break
+        fi
+        sleep 1
+      done
+      [[ "$ready" == 1 ]] || { echo 'Restarted isolated server health timeout' >&2; exit 1; }
+    fi
+  done
+else
+  bash scripts/nl_tests/run_manual_test.sh --base-url "http://127.0.0.1:$PORT" \
+    --case-file "$CASE_FILE" "$@" \
+    --log-root "$STATE/results" --wait-seconds 900 --provider-retries 0 --fail-fast 1 --full-text
+fi

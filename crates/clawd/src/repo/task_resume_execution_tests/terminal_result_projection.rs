@@ -3,6 +3,85 @@ use super::*;
 use crate::repo::deferred_dispatch_checkpoint_result;
 
 #[test]
+fn delayed_async_poll_projection_accepts_due_times_without_replaying_effects() {
+    for scheduled_at in [0, -1, 9_999, 10_002, 10_100] {
+        let state = state_with_tasks_table();
+        let now = 10_000;
+        let task_id = "delayed-poll";
+        let checkpoint_id = "delayed-checkpoint";
+        let seed = terminal_projection_seed(
+            task_id,
+            checkpoint_id,
+            "executing_async_poll",
+            "poll_async_job",
+            "async_poll_adapter_pending",
+            "ready_to_poll_async_job",
+            "async_poll_rescheduled",
+            now,
+        );
+        insert_task(&state, task_id, "running", Some(&seed), now);
+        activate_resume_owner(&state, task_id, checkpoint_id, now, now + 30);
+        claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
+            &state,
+            task_id,
+            checkpoint_id,
+            "executing_async_poll",
+            "poll_async_job",
+            "async_poll_adapter_pending",
+            "ready_to_poll_async_job",
+            "async_poll_rescheduled",
+            now + 1,
+            20,
+        )
+        .expect("claim projection")
+        .expect("valid owner");
+        let payload = json!({
+            "schema_version": 1, "task_id": task_id, "checkpoint_id": checkpoint_id,
+            "executor_state": "executing_async_poll", "executor_action": "poll_async_job",
+            "executor_status": "async_poll_adapter_pending",
+            "dispatch_state": "ready_to_poll_async_job",
+            "executor_result_status": "async_poll_rescheduled",
+            "result_projection_state": "project_async_poll_rescheduled",
+            "next_check_after": scheduled_at,
+        });
+        let record = || {
+            record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
+                &state,
+                CLAIM_ATTEMPT,
+                task_id,
+                checkpoint_id,
+                "executing_async_poll",
+                "poll_async_job",
+                "async_poll_adapter_pending",
+                "ready_to_poll_async_job",
+                "async_poll_rescheduled",
+                &payload,
+                now + 2,
+            )
+            .expect("project result")
+        };
+        let accepted = record();
+        assert_eq!(accepted, scheduled_at > 0);
+        if accepted {
+            let result = stored_result_json(&state, task_id);
+            assert_eq!(
+                result["task_lifecycle"]["next_check_after"],
+                scheduled_at.max(now + 2)
+            );
+            assert_eq!(
+                result["task_lifecycle"]["resume_executor"]["executor_state"],
+                "poll_scheduled"
+            );
+            assert_eq!(
+                result["task_checkpoint"]["completed_side_effect_refs"],
+                seed["task_checkpoint"]["completed_side_effect_refs"]
+            );
+            assert!(!record(), "one projection claim cannot be consumed twice");
+        }
+    }
+}
+
+#[test]
 fn reclaiming_expired_async_poll_executor_renews_parent_resume_lease() {
     let state = state_with_tasks_table();
     let now = 10_000;

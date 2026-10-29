@@ -1,10 +1,38 @@
 use super::*;
 
+pub(super) fn source_journal(result: &Value) -> Option<&Value> {
+    [
+        "/task_journal",
+        "/final_result_json/task_journal",
+        "/result/task_journal",
+    ]
+    .iter()
+    .find_map(|path| {
+        result.pointer(path).filter(|journal| {
+            journal
+                .pointer("/trace/capability_results")
+                .is_some_and(Value::is_array)
+                || journal.get("canonical_capabilities").is_some()
+        })
+    })
+}
+
+#[cfg(test)]
 pub(super) fn select_context(
     source: &TaskDeliveryRecord,
     request: &RecallRequest,
     binding: &str,
     now: i64,
+) -> Result<Value, &'static str> {
+    select_context_with_capabilities(source, request, binding, now, None)
+}
+
+pub(super) fn select_context_with_capabilities(
+    source: &TaskDeliveryRecord,
+    request: &RecallRequest,
+    binding: &str,
+    now: i64,
+    canonical: Option<&Vec<Value>>,
 ) -> Result<Value, &'static str> {
     if request.field_paths.is_empty() || request.field_paths.len() > 8 {
         return Err("context_fields_invalid");
@@ -41,24 +69,14 @@ pub(super) fn select_context(
         .map(|token| cursor::offset(token, binding, &snapshot, &selection, page_size, now))
         .transpose()?
         .unwrap_or(0);
-    let trace = [
-        "/task_journal/trace",
-        "/final_result_json/task_journal/trace",
-        "/result/task_journal/trace",
-    ]
-    .iter()
-    .find_map(|path| {
-        result.pointer(path).filter(|trace| {
-            trace
-                .get("capability_results")
-                .and_then(Value::as_array)
-                .is_some()
-        })
+    let trace = source_journal(result).and_then(|journal| journal.get("trace"));
+    let complete = canonical.is_some()
+        || trace.is_some_and(crate::task_journal::retained_capability_results_complete);
+    let capabilities = canonical.or_else(|| {
+        trace
+            .and_then(|t| t.get("capability_results"))
+            .and_then(Value::as_array)
     });
-    let complete = trace.is_some_and(crate::task_journal::retained_capability_results_complete);
-    let capabilities = trace
-        .and_then(|t| t.get("capability_results"))
-        .and_then(Value::as_array);
     let mut fields = serde_json::Map::new();
     let mut pagination = Value::Null;
     for path in &request.field_paths {
@@ -120,6 +138,10 @@ pub(super) fn select_context(
         "message_key": "task_control.recall_context.ok", "source_task_id": source.task.task_id,
         "field_value": {"source_task_id": source.task.task_id, "source_status": source.status},
         "source_status": source.status, "source_digest": snapshot,
+        "capability_evidence_source": if request.field_paths.iter().any(|path|
+            path == "/capabilities" || path.starts_with("/capabilities/")) {
+            if canonical.is_some() { "canonical_archive" } else { "retained_trace" }
+        } else { "not_selected" },
         "instruction_authority": "none", "current_execution_evidence": false,
         "scope": "prior_task_context", "fields": fields});
     if has_index {

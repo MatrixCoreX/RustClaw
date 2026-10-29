@@ -1588,3 +1588,41 @@ optional_skills/photo_organize/src/organize_flow.rs	take	.take(preview_limit)
 optional_skills/photo_organize/src/organize_flow.rs	take	.take(preview_limit)
 optional_skills/stock/src/main.rs	take	.take(3)
 optional_skills/x/src/main.rs	take	.take(max_chars)
+# Individually reviewed 2026-10-29; ownership, recovery and tests:
+# docs/adaptive_limit_review.md. No task round/tool quota is accepted here.
+# Display pages/previews preserve canonical source; digest prefixes are labels.
+UI/src/components/TaskEvidenceList.tsx	slice	.slice(start, start + PAGE_SIZE)
+UI/src/lib/kb-maintenance.ts	slice	.slice(0, limit)
+crates/clawd/src/http/ui_routes/aipp.rs	take	.take(max_chars)
+crates/clawd/src/memory/retrieval.rs	take	.take(16)
+crates/skills/kb/src/main.rs	take	.take(16)
+# Integrity-checked diagnostic decompression; larger encode inputs remain raw.
+crates/clawd/src/providers/model_log_payload.rs	hard_count	MAX_BYTES
+crates/clawd/src/providers/model_log_payload.rs	take	.take(bytes + 1)
+# Per-pass scheduler fairness cursor continues past rejected candidates.
+crates/clawd/src/repo/tasks/checkpoint_resume.rs	clamp	.clamp(16, 128)
+crates/clawd/src/repo/tasks/checkpoint_resume.rs	clamp	.clamp(candidate_batch, 1024)
+# Untrusted parser/cache safety, explicit partial status and source-range handles.
+crates/clawd/src/skills/builtin_code_index.rs	take	.take(128 * 1024 * 1024 + 1)
+crates/clawd/src/skills/builtin_code_index.rs	take	.take(MAX_SOURCE_BYTES + 1)
+crates/clawd/src/skills/builtin_code_index.rs	take	.take(MAX_SOURCE_BYTES + 1)
+crates/clawd/src/skills/builtin_code_index/language_parsers.rs	hard_count	MAX_ENTRIES
+# Task-owned immutable archive quotas fail explicitly, never replay effects.
+crates/clawd/src/task_context_archive.rs	hard_count	MAX_ITEMS
+crates/clawd/src/task_context_archive.rs	hard_count	MAX_ITEM_BYTES
+crates/clawd/src/task_context_archive.rs	hard_count	MAX_TOTAL_BYTES
+crates/clawd/src/task_context_archive.rs	take	.take(MAX_ITEM_BYTES as u64 + 1)
+# Validated KB input, checkpointed ingestion and persistent transactional quotas.
+crates/skills/kb/src/ingest.rs	hard_count	MAX_BYTES_PER_RUN
+crates/skills/kb/src/ingest.rs	hard_count	MAX_FILES_PER_RUN
+crates/skills/kb/src/ingest_extract.rs	hard_count	MAX_EXTRACTED_CHARS
+crates/skills/kb/src/main.rs	hard_count	MAX_NAMESPACE_CHARS
+crates/skills/kb/src/main.rs	hard_count	MAX_PATH_CHARS
+crates/skills/kb/src/main.rs	hard_count	MAX_QUERY_CHARS
+# One-row lookahead with owner-scoped stable document continuation.
+crates/skills/kb/src/storage.rs	clamp	.clamp(1, 500)
+crates/skills/kb/src/storage.rs	truncate	.truncate(limit)
+crates/skills/kb/src/storage/database.rs	hard_count	DEFAULT_MAX_DATABASE_BYTES
+# Data-only scalar/byte-count view; full original artifact and ranges retained.
+crates/clawd/src/skill_output_artifact/structured_preview.rs	hard_count	MAX_PREVIEW_BYTES
+crates/clawd/src/skill_output_artifact/structured_preview.rs	hard_count	MAX_INLINE_STRING_BYTES

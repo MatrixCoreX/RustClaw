@@ -51,9 +51,20 @@ with the same field selection and page size. The signed cursor binds the current
 task/scope, source snapshot and selection, expires after 15 minutes, and becomes
 invalid after a runtime restart. Selected fields beyond the first page can be
 read directly; pass `source_digest` to fence them to the observed snapshot.
-Each page/read repeats authorization, including the agent scope. A compacted
-capability stream returns `context_source_compacted`; whole-trace compaction
-alone does not deny an unchanged stream whose original checksum still matches.
+Each page/read repeats authorization, including the agent scope. Before a
+capability stream is compacted for API delivery, task finalization publishes
+redacted immutable entries and a SHA-256-bound manifest in the task-owned
+canonical-evidence namespace. Normal, failed, checkpoint and seeded-resume paths
+use the same publisher. A stale worker claim cannot publish a new reference.
+The result keeps only the manifest identity and bounds; index reads load that
+manifest, while exact field reads open only the selected entries. Directory-fd
+no-follow operations, private permissions and digest checks apply to publication
+and reuse. Limits are 4,096 entries, 1 MiB per object and 32 MiB per archive;
+budget/write failures are explicit unavailable records, not complete histories.
+Task-owned deletion removes these objects. Missing or corrupted archived objects
+return explicit errors. Earlier histories without a complete archive return
+`context_source_compacted`; whole-trace compaction alone does not deny an
+unchanged stream whose original checksum still matches.
 Absent retained evidence returns
 `context_source_unavailable`. Diagnostic logs are not a context data store.
 Prior execution summaries expose `prior_context_projection` with preview,
@@ -83,7 +94,9 @@ the evidence page, and displayed references are data, not executable links.
 flowchart LR
     A[Bounded prior-task reference] --> B[Planner selects explicit fields]
     B --> C[Current actor, conversation, agent and snapshot checks]
-    C -->|allowed| D[Redacted fields or bounded index page]
+    C -->|allowed| S[Retained stream or digest-bound private archive]
+    S --> D[Redacted fields or bounded index page]
+    S -->|missing, corrupt or over quota| E
     D -->|has_more and signed cursor| C
     C -->|denied or unavailable| E[Structured observation]
     E -->|stale read boundary and bounded recovery| R[Rediscover same source index]

@@ -555,8 +555,8 @@ aliases = ["repository_index", "code_repository_index"]
 timeout_seconds = 90
 prompt_file = "prompts/skills/code_index.md"
 output_kind = "text"
-description = "Incremental repository code index using parser-derived Rust symbols, definitions, references, tests, changed-file impact, and bounded context ranges."
-description_zh = "增量索引代码仓库，查询 Rust 符号、定义、引用、测试、改动影响和限定范围的上下文。"
+description = "Incremental repository code index for Rust, Python, JavaScript/JSX and TypeScript/TSX definitions, scoped syntactic reference candidates, tests, changed-file impact and bounded source ranges."
+description_zh = "增量索引 Rust、Python、JavaScript/JSX 和 TypeScript/TSX 的定义、带作用域的语法引用候选、测试、改动影响和有界源码区间。"
 semantic_tags = ["repository_index", "symbol_search", "definition_lookup", "reference_lookup", "test_impact", "bounded_code_context"]
 risk_level = "low"
 auto_invocable = true
@@ -566,7 +566,7 @@ retryable = true
 capabilities = ["fs.read"]
 preferred_over_run_cmd = true
 supported_os = ["linux", "macos", "windows"]
-platform_notes = ["Rust symbols use syn parser spans. Other recognized source languages participate in the file index until a parser adapter is configured."]
+platform_notes = ["Rust uses syn; Python, JavaScript/JSX and TypeScript/TSX use pinned Tree-sitter grammars. References are syntax candidates, not language-server resolutions. Other recognized languages remain file-only; parser budgets return explicit partial statuses."]
 planner_capabilities = [
   { name = "code.refresh_index", action = "refresh", effect = "observe", optional = ["max_files", "scan_continuation"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false },
   { name = "code.search_symbols", action = "search_symbols", effect = "observe", required = ["query"], optional = ["mode", "cursor", "max_results", "max_files"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },

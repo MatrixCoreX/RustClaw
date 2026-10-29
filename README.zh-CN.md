@@ -198,6 +198,7 @@ flowchart TD
 - `Async job start`：长尾工具可以先发布包含 `checkpoint_id`、`poll_ref`、`next_check_after`、`can_poll`、`can_cancel` 的机器回复，同时任务仍可通过 checkpoint 轮询恢复。媒体技能通过 registry capability 暴露这类形状，例如 `image.generate` / `image.poll` / `image.cancel`、`audio.synthesize` / `audio.poll` / `audio.cancel`、`video.generate` / `video.poll` / `video.cancel` 和 `music.generate` / `music.poll` / `music.cancel`。
 - `Capability result observation`：每个成功的 `CapabilityResultEnvelope` 都会投影成一条有界、脱敏的通用机器 observation，返回下一轮 planner。领域专用投影可以压缩常用证据，但未知能力或新安装能力无需新增 runtime 分支，也能保留 provider、artifact、异步任务、effect 和 verification 等结构化字段。
 - `Evidence coverage`：工具、技能和合成输出都会成为循环内观测；缺证据或可恢复失败会带着压缩的已尝试方法历史回到循环。
+- `代码仓库理解`：Rust 使用 `syn`，Python、JavaScript/JSX 和 TypeScript/TSX 使用固定版本的 Tree-sitter 语法，提供定义、带作用域的语法引用候选、测试发现和有界源码上下文；语法错误和资源预算内的部分结果会明确标记。详见[代码索引合同](docs/code_index_contract.zh-CN.md)。
 - `Answer-verifier 操作审计`：模型返回结构化的 `operation_checks`、`output_field_checks` 和 `unsupported_claims`。每个正向操作必须引用 `evidence_step_ids` 和所需的 `required_dispatches`，宿主再与持久化 task journal 中真实执行过的步骤交叉核对。禁止项和“不得发生”约束作为整体 verdict 检查，不伪造成执行记录。审计数据非法时返回有界机器错误 `verification_audit_invalid`，不会把模型 prose 当作已验证事实。
 - `Task plan 收尾`：最终回答前，由 planner 按实际执行证据核对未完成步骤。Runtime 提供最新 revision 和回答已准备好的状态；实际投送由 runtime 负责。只有未完成步骤减少时才允许第二次核对，跨 checkpoint 最多两次。真实阻塞仍保留未完成状态，未收尾状态可被观测，不为关闭计划而重放已完成的副作用。
 - `异步执行证据`：尝试记录绑定执行步骤和 job ID。完成时只将该次等待态观测替换为实际回执或结构化错误；恢复时保留此前步骤和已完成副作用。条件操作依据实际条件和保留状态验收，不把被排除的操作记为已经执行。前台与恢复后的终态路径均在生成有大小限制的 API 投影前记录完整 journal；恢复证据时必须匹配任务身份和持久化执行流摘要。

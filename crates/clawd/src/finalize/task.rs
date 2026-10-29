@@ -110,7 +110,11 @@ async fn finalize_ask_success(
     let notify_outcome =
         crate::worker::maybe_notify_schedule_result(state, task, payload, true, answer_text).await;
     crate::worker::record_schedule_notify_outcome(journal, notify_outcome);
-    let result = ask_result_payload(answer_text, answer_messages, Some(journal));
+    let result = journal.attach_to_result_with_state(
+        state,
+        task,
+        ask_result_payload(answer_text, answer_messages, None),
+    );
     repo::update_task_success(
         state,
         &task.task_id,
@@ -156,7 +160,11 @@ async fn finalize_ask_checkpointed(
     journal: &mut crate::task_journal::TaskJournal,
 ) -> Result<()> {
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
-    let mut result = ask_result_payload(answer_text, answer_messages, Some(journal));
+    let mut result = journal.attach_to_result_with_state(
+        state,
+        task,
+        ask_result_payload(answer_text, answer_messages, None),
+    );
     if let (Some(obj), Some(resume_context)) = (result.as_object_mut(), resume_context) {
         obj.insert("resume_context".to_string(), resume_context.clone());
     }
@@ -208,7 +216,7 @@ async fn finalize_ask_resume_failure(
             failed_task_lifecycle_payload(user_error),
         );
     }
-    let result = journal.attach_to_result(result);
+    let result = journal.attach_to_result_with_state(state, task, result);
     repo::update_task_failure_with_result(
         state,
         &task.task_id,
@@ -250,7 +258,7 @@ async fn finalize_ask_failure(
             failed_task_lifecycle_payload(err_text),
         );
     }
-    let result = journal.attach_to_result(result);
+    let result = journal.attach_to_result_with_state(state, task, result);
     repo::update_task_failure_with_result(
         state,
         &task.task_id,
@@ -330,7 +338,7 @@ pub(crate) async fn finalize_ask_direct_success(
     let notify_outcome =
         crate::worker::maybe_notify_schedule_result(state, task, payload, true, answer_text).await;
     crate::worker::record_schedule_notify_outcome(&mut journal, notify_outcome);
-    let result = journal.attach_to_result(json!({ "text": answer_text }));
+    let result = journal.attach_to_result_with_state(state, task, json!({ "text": answer_text }));
     repo::update_task_success(
         state,
         &task.task_id,

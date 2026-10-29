@@ -909,6 +909,16 @@ def evaluate_expectations(
                     "ok": ok,
                 }
             )
+        elif raw.startswith("visible_json_fields:"):
+            wanted = [field.strip() for field in raw[len("visible_json_fields:"):].split(",")
+                      if field.strip()]
+            try:
+                visible = json.loads(str(result.get("text") or ""))
+            except json.JSONDecodeError:
+                visible = _MISSING
+            ok = bool(wanted) and isinstance(visible, dict) and all(field in visible for field in wanted)
+            details.append({"kind": "visible_json_fields", "expected": wanted,
+                            "actual": sorted(visible) if isinstance(visible, dict) else None, "ok": ok})
         elif raw.startswith("result_text_json_records_eq:"):
             expected = raw[len("result_text_json_records_eq:"):]
             try:

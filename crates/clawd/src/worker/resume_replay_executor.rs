@@ -133,6 +133,7 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
     if let Ok(answer) = &mut result {
         if let Some(journal) = answer.task_journal.as_mut() {
             journal.record_runtime_llm_metrics(state, &claimed.task_id);
+            journal.prepare_context_archive(state, &claimed.task);
         }
     } else if let Err(error) = &result {
         warn!(

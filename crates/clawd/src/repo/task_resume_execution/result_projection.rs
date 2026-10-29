@@ -69,7 +69,8 @@ pub(crate) fn claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
     now_ts: i64,
     lease_seconds: i64,
 ) -> anyhow::Result<Option<ClaimedPausedCheckpointResumeDispatchResult>> {
-    let _result_write_guard = crate::task_result_retention::write_gate::try_begin_writing(state, task_id)?;
+    let _result_write_guard =
+        crate::task_result_retention::write_gate::try_begin_writing(state, task_id)?;
     let task_id = task_id.trim();
     let checkpoint_id = checkpoint_id.trim();
     let executor_state = executor_state.trim();
@@ -418,7 +419,10 @@ pub(crate) fn record_claimed_paused_checkpoint_resume_dispatch_result_projection
                 .filter(|seconds| *seconds > 0)
                 .map(|seconds| now_ts.saturating_add(seconds))
         })
-        .filter(|ts| *ts > now_ts);
+        .filter(|ts| *ts > 0)
+        // A valid poll can become due while its result waits for projection.
+        // Keep it schedulable rather than stranding the claimed projection.
+        .map(|ts| ts.max(now_ts));
     if next_check_after.is_none() && deferred_checkpoint_result.is_none() {
         return Ok(false);
     }
@@ -795,7 +799,8 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
     projection_payload: &Value,
     now_ts: i64,
 ) -> anyhow::Result<bool> {
-    let _result_write_guard = crate::task_result_retention::write_gate::try_begin_writing(state, task_id)?;
+    let _result_write_guard =
+        crate::task_result_retention::write_gate::try_begin_writing(state, task_id)?;
     let db = state
         .core
         .db

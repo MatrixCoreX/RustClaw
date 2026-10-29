@@ -186,7 +186,7 @@ async fn finalize_machine_operation_success(
     if let Some(object) = result.as_object_mut() {
         object.insert("text".to_string(), json!(status_token));
     }
-    let result = journal.attach_to_result(result);
+    let result = journal.attach_to_result_with_state(state, task, result);
     crate::repo::update_task_success(
         state,
         &task.task_id,

@@ -1,5 +1,75 @@
 use super::*;
 
+#[test]
+fn verified_archive_pages_survive_trace_compaction_without_reading_all_data() {
+    let root = crate::secure_workspace_fs::tests::TestWorkspace::new("context-archive-pages");
+    let mut source = history(130);
+    let items = source.result_json.as_ref().unwrap()["task_journal"]["trace"]["capability_results"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let archive =
+        crate::task_context_archive::publish_fixture(root.path(), &source.task.task_id, &items);
+    source.result_json.as_mut().unwrap()["task_journal"] = json!({
+        "trace":{"capability_results":[],"trace_storage":{"truncated":true}},
+        "canonical_capabilities":archive});
+    let mut request = index_request();
+    let mut indices = Vec::new();
+    loop {
+        let canonical = crate::task_context_archive::read_selected(
+            root.path(),
+            &source.task.task_id,
+            &archive,
+            &request.field_paths,
+        )
+        .unwrap();
+        let value = selection::select_context_with_capabilities(
+            &source,
+            &request,
+            "fixture-binding",
+            100,
+            Some(&canonical),
+        )
+        .unwrap();
+        indices.extend(
+            value["fields"]["/capabilities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item["index"].as_u64().unwrap()),
+        );
+        if let Some(cursor) = value["pagination"]["next_cursor"].as_str() {
+            request.cursor = Some(cursor.to_string());
+        } else {
+            break;
+        }
+    }
+    assert_eq!(indices, (0..130).collect::<Vec<_>>());
+    request = RecallRequest {
+        field_paths: vec!["/capabilities/129/data/index".into()],
+        ..Default::default()
+    };
+    let canonical = crate::task_context_archive::read_selected(
+        root.path(),
+        &source.task.task_id,
+        &archive,
+        &request.field_paths,
+    )
+    .unwrap();
+    let value = selection::select_context_with_capabilities(
+        &source,
+        &request,
+        "fixture-binding",
+        100,
+        Some(&canonical),
+    )
+    .unwrap();
+    assert_eq!(value["fields"]["/capabilities/129/data/index"], 129);
+    assert_eq!(value["instruction_authority"], "none");
+    assert_eq!(value["current_execution_evidence"], false);
+    assert_eq!(value["capability_evidence_source"], "canonical_archive");
+}
+
 fn history(count: usize) -> TaskDeliveryRecord {
     let mut source = record();
     source.result_json.as_mut().unwrap()["task_journal"]["trace"]["capability_results"] = json!((0

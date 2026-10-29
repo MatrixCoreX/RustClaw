@@ -663,6 +663,7 @@ pub(crate) struct TaskJournal {
     pub(crate) rounds: Vec<TaskJournalRoundTrace>,
     pub(crate) step_results: Vec<TaskJournalStepTrace>,
     pub(crate) capability_results: Vec<claw_core::capability_result::CapabilityResultEnvelope>,
+    pub(crate) canonical_context_archive: Option<Value>,
     pub(crate) task_observations: Vec<Value>,
     pub(crate) finalizer_summary: Option<TaskJournalFinalizerSummary>,
     pub(crate) answer_verifier_summary: Option<TaskJournalAnswerVerifierSummary>,
@@ -1128,25 +1129,65 @@ impl TaskJournal {
         }
     }
 
-    pub(crate) fn attach_to_result(&self, mut result: Value) -> Value {
-        let summary = self.to_summary_json();
+    pub(crate) fn prepare_context_archive(
+        &mut self,
+        state: &crate::AppState,
+        task: &crate::ClaimedTask,
+    ) {
         let trace = result_trace_json_with_storage_limit(self.to_trace_json());
+        if !retained_capability_results_complete(&trace) {
+            self.canonical_context_archive = Some(self.capture_context_archive(state, task));
+        }
+    }
+
+    pub(crate) fn attach_to_result_with_state(
+        &self,
+        state: &crate::AppState,
+        task: &crate::ClaimedTask,
+        result: Value,
+    ) -> Value {
+        let trace = result_trace_json_with_storage_limit(self.to_trace_json());
+        let archive = if retained_capability_results_complete(&trace) {
+            self.canonical_context_archive.clone()
+        } else {
+            Some(self.capture_context_archive(state, task))
+        };
+        self.attach_trace_to_result(result, trace, archive)
+    }
+
+    fn capture_context_archive(&self, state: &crate::AppState, task: &crate::ClaimedTask) -> Value {
+        if self.task_id.as_deref() != Some(task.task_id.as_str()) {
+            return json!({"schema_version":1,"status":"unavailable","error_code":"context_archive_task_mismatch"});
+        }
+        crate::task_context_archive::capture(state, task, &self.capability_results)
+    }
+
+    pub(crate) fn attach_to_result(&self, result: Value) -> Value {
+        self.attach_trace_to_result(
+            result,
+            result_trace_json_with_storage_limit(self.to_trace_json()),
+            self.canonical_context_archive.clone(),
+        )
+    }
+
+    fn attach_trace_to_result(
+        &self,
+        mut result: Value,
+        trace: Value,
+        archive: Option<Value>,
+    ) -> Value {
+        let summary = self.to_summary_json();
+        let mut journal = json!({"summary":summary,"trace":trace});
+        if let Some(archive) = archive {
+            journal["canonical_capabilities"] = archive;
+        }
         if let Some(obj) = result.as_object_mut() {
-            obj.insert(
-                "task_journal".to_string(),
-                json!({
-                    "summary": summary,
-                    "trace": trace,
-                }),
-            );
+            obj.insert("task_journal".to_string(), journal);
             result
         } else {
             json!({
                 "result": result,
-                "task_journal": {
-                    "summary": summary,
-                    "trace": trace,
-                }
+                "task_journal": journal,
             })
         }
     }

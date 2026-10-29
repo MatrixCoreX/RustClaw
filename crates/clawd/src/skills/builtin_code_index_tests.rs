@@ -281,13 +281,14 @@ fn symbol_results_expose_stable_cursor_pages() {
 }
 
 #[test]
-fn index_summary_exposes_freshness_and_file_only_fallback_coverage() {
+fn index_summary_exposes_parsed_language_and_explicit_fallback_coverage() {
     let repo = TempRepo::new();
     fs::write(
         repo.path.join("src/helper.py"),
         "def helper():\n    return 1\n",
     )
-    .expect("write Python fallback");
+    .expect("write Python source");
+    fs::write(repo.path.join("src/main.go"), "package main\n").unwrap();
 
     let refreshed = execute_json(&repo, json!({"action": "refresh"}));
     assert_eq!(refreshed["summary"]["scan_complete"], true);
@@ -297,8 +298,128 @@ fn index_summary_exposes_freshness_and_file_only_fallback_coverage() {
     assert!(refreshed["summary"]["generated_at"].as_u64().unwrap() > 0);
     assert_eq!(
         refreshed["summary"]["index_backend"],
-        "syn_ast_with_file_fallback"
+        "syn_tree_sitter_with_file_fallback"
     );
+    assert_eq!(refreshed["summary"]["parse_status_counts"]["parsed"], 2);
+    assert_eq!(
+        refreshed["summary"]["completeness_scope"],
+        "source_file_scan"
+    );
+    assert_eq!(refreshed["summary"]["symbol_coverage_complete"], false);
+}
+
+#[test]
+fn parser_revision_invalidates_file_only_cache_without_changing_public_schema() {
+    let repo = TempRepo::new();
+    fs::write(
+        repo.path.join("src/helper.py"),
+        "def python_helper():\n    return 1\n",
+    )
+    .unwrap();
+    execute_json(&repo, json!({"action": "refresh"}));
+    let cache = repo.path.join(INDEX_RELATIVE_PATH);
+    let mut old: Value = serde_json::from_slice(&fs::read(&cache).unwrap()).unwrap();
+    old.as_object_mut().unwrap().remove("parser_revision");
+    old["files"]["src/helper.py"]["symbols"] = json!([]);
+    fs::write(&cache, serde_json::to_vec(&old).unwrap()).unwrap();
+    let result = execute_json(
+        &repo,
+        json!({"action": "find_definitions", "symbol": "python_helper"}),
+    );
+    assert_eq!(result["schema_version"], 1);
+    assert_eq!(
+        result["data"]["definitions"][0]["source"],
+        "tree_sitter_ast"
+    );
+    assert_eq!(result["summary"]["reused_files"], 0);
+    fs::write(
+        repo.path.join("src/helper.py"),
+        "def renamed_helper():\n    return 2\n",
+    )
+    .unwrap();
+    let result = execute_json(
+        &repo,
+        json!({"action": "find_definitions", "symbol": "renamed_helper"}),
+    );
+    assert_eq!(result["data"]["definitions"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn node_and_typescript_module_extensions_share_real_parser_support() {
+    let repo = TempRepo::new();
+    for extension in ["mjs", "cjs", "mts", "cts"] {
+        fs::write(
+            repo.path.join(format!("src/module.{extension}")),
+            "function module_helper(value) { return value; }\n",
+        )
+        .unwrap();
+    }
+    let result = execute_json(
+        &repo,
+        json!({"action":"find_definitions", "symbol":"module_helper"}),
+    );
+    assert_eq!(result["data"]["definitions"].as_array().unwrap().len(), 4);
+    assert!(result["data"]["definitions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|item| item["source"] == "tree_sitter_ast"));
+}
+
+#[test]
+fn oversized_source_context_returns_a_narrow_read_handle_instead_of_loading_all_bytes() {
+    let repo = TempRepo::new();
+    fs::write(
+        repo.path.join("src/large.rs"),
+        format!(
+            "pub fn large() {{}}\n//{}",
+            "x".repeat(MAX_SOURCE_BYTES as usize)
+        ),
+    )
+    .unwrap();
+    let error = execute(
+        &repo.path,
+        &json!({"action":"retrieve_context", "symbols":["large"]}),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "source_budget_exceeded");
+    assert_eq!(
+        error.extra.unwrap()["range_handle"]["read_capability"],
+        "filesystem.read_text_range"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn source_range_does_not_follow_a_link_substituted_after_indexing() {
+    let repo = TempRepo::new();
+    let outside = TempRepo::new();
+    let (index, _) = refresh_index(&repo.path, 10, None, false).unwrap();
+    let definition = index.files["src/lib.rs"].symbols[0].clone();
+    let source = repo.path.join("src/lib.rs");
+    fs::remove_file(&source).unwrap();
+    std::os::unix::fs::symlink(outside.path.join("src/lib.rs"), &source).unwrap();
+    assert_eq!(
+        context_snippet(&repo.path, "src/lib.rs", &definition, 0)
+            .unwrap_err()
+            .code,
+        "source_read_failed"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn index_cache_symlink_cannot_overwrite_external_files() {
+    let repo = TempRepo::new();
+    let outside = TempRepo::new();
+    let victim = outside.path.join("secret");
+    fs::write(&victim, "unchanged").unwrap();
+    let index = repo.path.join(INDEX_RELATIVE_PATH);
+    fs::create_dir_all(index.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&victim, &index).unwrap();
+    let error = execute(&repo.path, &json!({"action":"refresh"})).unwrap_err();
+    assert_eq!(error.code, "index_write_failed");
+    assert_eq!(fs::read_to_string(victim).unwrap(), "unchanged");
 }
 
 #[test]

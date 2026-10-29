@@ -569,6 +569,7 @@ fn direct_run_skill_async_checkpoint_payload(
 }
 
 fn direct_run_skill_pending_async_checkpoint_result(
+    state: &AppState,
     task: &crate::ClaimedTask,
     skill_name: &str,
     clean_text: &str,
@@ -597,7 +598,9 @@ fn direct_run_skill_pending_async_checkpoint_result(
         journal.record_task_checkpoint(checkpoint);
     }
     journal.record_final_stop_signal("async_job_checkpoint_waiting");
-    Ok(Some(journal.attach_to_result(payload)))
+    Ok(Some(
+        journal.attach_to_result_with_state(state, task, payload),
+    ))
 }
 
 async fn finalize_run_skill_success(
@@ -679,6 +682,7 @@ async fn finalize_run_skill_success(
         &[],
     ));
     let pending_checkpoint_result = match direct_run_skill_pending_async_checkpoint_result(
+        state,
         task,
         skill_name,
         &clean_text,
@@ -748,14 +752,18 @@ async fn finalize_run_skill_success(
             super::maybe_notify_schedule_result(state, task, payload, true, &clean_text).await;
         super::record_schedule_notify_outcome(&mut journal, notify_outcome);
     }
-    let result = journal.attach_to_result(json!({
-        "text": clean_text,
-        "delivery_meta": {
-            "mode": "single_step_skill",
-            "label": "step",
-            "skill_name": skill_name
-        }
-    }));
+    let result = journal.attach_to_result_with_state(
+        state,
+        task,
+        json!({
+            "text": clean_text,
+            "delivery_meta": {
+                "mode": "single_step_skill",
+                "label": "step",
+                "skill_name": skill_name
+            }
+        }),
+    );
     repo::update_task_success(
         state,
         &task.task_id,
@@ -901,13 +909,17 @@ async fn finalize_run_skill_failure(
         });
         journal.record_task_lifecycle(lifecycle.clone());
         journal.record_final_stop_signal("resource_admission_wait");
-        let result = journal.attach_to_result(json!({
-            "text": "",
-            "status_code": "resource_admission_wait",
-            "message_key": "clawd.task.resource_waiting",
-            "retryable": true,
-            "task_lifecycle": lifecycle,
-        }));
+        let result = journal.attach_to_result_with_state(
+            state,
+            task,
+            json!({
+                "text": "",
+                "status_code": "resource_admission_wait",
+                "message_key": "clawd.task.resource_waiting",
+                "retryable": true,
+                "task_lifecycle": lifecycle,
+            }),
+        );
         repo::requeue_task_after_resource_wait(
             state,
             &task.task_id,
@@ -961,9 +973,13 @@ async fn finalize_run_skill_failure(
             task.task_id, skill_name
         );
     }
-    let result = journal.attach_to_result(json!({
-        "text": err_text,
-    }));
+    let result = journal.attach_to_result_with_state(
+        state,
+        task,
+        json!({
+            "text": err_text,
+        }),
+    );
     repo::update_task_failure_with_result(
         state,
         &task.task_id,
@@ -1149,11 +1165,15 @@ pub(super) async fn finalize_run_skill_confirmation_required(
         journal.record_task_checkpoint(checkpoint.to_machine_json());
         journal.record_final_stop_signal("approval_checkpoint_needs_user");
         journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
-        let result = journal.attach_to_result(json!({
-            "text": user_error,
-            "resume_context": resume_context,
-            "task_lifecycle": lifecycle,
-        }));
+        let result = journal.attach_to_result_with_state(
+            state,
+            task,
+            json!({
+                "text": user_error,
+                "resume_context": resume_context,
+                "task_lifecycle": lifecycle,
+            }),
+        );
         repo::update_task_checkpointed_result(
             state,
             &task.task_id,
@@ -1188,10 +1208,14 @@ pub(super) async fn finalize_run_skill_confirmation_required(
     let notify_outcome =
         super::maybe_notify_schedule_result(state, task, payload, false, &user_error).await;
     super::record_schedule_notify_outcome(&mut journal, notify_outcome);
-    let result = journal.attach_to_result(json!({
-        "text": user_error,
-        "resume_context": resume_context,
-    }));
+    let result = journal.attach_to_result_with_state(
+        state,
+        task,
+        json!({
+            "text": user_error,
+            "resume_context": resume_context,
+        }),
+    );
     repo::update_task_failure_with_result(
         state,
         &task.task_id,

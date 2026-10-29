@@ -84,7 +84,7 @@ fn large_text_output_is_preserved_with_exact_resume_metadata() {
 #[test]
 fn large_json_output_keeps_inline_projection_valid_json() {
     let workspace = TestWorkspace::new();
-    let original = json!({"rows": vec!["value"; 10000]}).to_string();
+    let original = json!({"rows": vec!["value"; 10000],"exit_code":0}).to_string();
     let mut text = original.clone();
     let mut extra = None;
 
@@ -96,6 +96,11 @@ fn large_json_output_keeps_inline_projection_valid_json() {
     assert_eq!(projection["status_code"], "output_truncated");
     assert_eq!(projection["next_cursor"], extra["page"]["next_cursor"]);
     assert_eq!(projection["total_bytes"], original.len());
+    assert_eq!(projection["structured_preview"]["fields"]["exit_code"], 0);
+    assert_eq!(
+        projection["structured_preview"]["instruction_authority"],
+        "none"
+    );
     assert_eq!(
         fs::read_to_string(
             workspace

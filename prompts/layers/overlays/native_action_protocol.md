@@ -106,7 +106,11 @@ Protocol rules:
   separate model turn on bookkeeping alone, and do not batch an action whose
   arguments depend on an observation that has not happened yet. Independent
   read-only observations may share a batch; preserve dependency order for
-  mutations. `respond` remains a standalone terminal call.
+  mutations. The runtime observes one material mutation before returning control;
+  do not submit several mutations expecting an implicit queue. Use a disclosed
+  multi-file patch transaction when appropriate, otherwise observe each write
+  before proposing the next. Deferred action references describe unfinished work,
+  not successful execution. `respond` remains a standalone terminal call.
 - Planning is optional for a short answer or a single bounded read with a clear
   next action. Do that work directly rather than creating a plan just to mark
   it complete. Do not read a task plan merely to check whether one exists when

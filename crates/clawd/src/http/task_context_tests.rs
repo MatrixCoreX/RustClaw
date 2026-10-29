@@ -120,12 +120,23 @@ fn capability_index_discovers_exact_argument_refs_without_copying_large_results(
 
 #[tokio::test]
 async fn context_api_rechecks_current_auth_and_denies_cross_conversation_and_revoked_keys() {
-    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let root = crate::secure_workspace_fs::tests::TestWorkspace::new("context-api-archive");
+    let mut state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    state.skill_rt.workspace_root = root.path().to_path_buf();
     state.seed_test_auth_identity("context-owner", "admin");
     let identity = crate::resolve_auth_identity_by_key(&state, "context-owner")
         .unwrap()
         .unwrap();
-    let source = record();
+    let mut source = record();
+    let items = source.result_json.as_ref().unwrap()["task_journal"]["trace"]["capability_results"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let archive =
+        crate::task_context_archive::publish_fixture(root.path(), &source.task.task_id, &items);
+    source.result_json.as_mut().unwrap()["task_journal"] = json!({
+        "trace":{"capability_results":[],"trace_storage":{"truncated":true}},
+        "canonical_capabilities":archive});
     let current_id = Uuid::new_v4();
     let db = state.core.db.get().unwrap();
     for (id, status, result) in [

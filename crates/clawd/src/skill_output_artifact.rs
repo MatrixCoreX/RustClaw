@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 
 #[path = "skill_output_artifact/evidence_storage.rs"]
 mod evidence_storage;
+mod structured_preview;
 
 const DEFAULT_PREVIEW_BYTES: usize = 32 * 1024;
 const MIN_PREVIEW_BYTES: usize = 4 * 1024;
@@ -113,7 +114,8 @@ pub(crate) fn spill_skill_text_if_needed(
     let total_bytes = full_bytes.len();
     let preview_end = utf8_prefix_end(text, preview_limit);
     let preview = text[..preview_end].to_string();
-    let is_json = serde_json::from_str::<Value>(text).is_ok();
+    let parsed = serde_json::from_str::<Value>(text).ok();
+    let is_json = parsed.is_some();
     let extension = if is_json { "json" } else { "txt" };
     let media_type = if is_json {
         "application/json"
@@ -186,6 +188,7 @@ pub(crate) fn spill_skill_text_if_needed(
             "artifact_ref": format!("skill-output:{artifact_id}"),
             "next_cursor": preview_end,
             "total_bytes": total_bytes,
+            "structured_preview": parsed.as_ref().map(structured_preview::project),
         })
         .to_string()
     } else {

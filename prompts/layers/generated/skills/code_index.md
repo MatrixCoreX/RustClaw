@@ -8,8 +8,8 @@ handles; it does not infer repository intent from user prose.
 ## Capability
 
 - Incrementally index repository source files.
-- Search parser-derived Rust symbols.
-- Find exact definitions and references.
+- Search parser-derived Rust, Python, JavaScript/JSX and TypeScript/TSX symbols.
+- Find definitions and lexical-scope-labelled syntactic reference candidates.
 - List tests and estimate changed-file impact.
 - Retrieve compact code context by structured symbol/path relevance.
 
@@ -38,6 +38,12 @@ handles; it does not infer repository intent from user prose.
 `mode` is a machine enum: `exact|prefix|contains`. `symbols` and `paths`
 accept a string or string array. Paths must be workspace-relative.
 Use `page.next_cursor` for exact continuation; do not invent a cursor.
+Rust uses syn; the other four dialects use pinned Tree-sitter grammars. Other
+recognized languages remain file-only. Parse errors and exhausted per-file
+budgets are explicit partial states, never proof of missing symbols. Reference
+and impact results are syntax candidates, not resolved language-server evidence.
+For oversized source context, use the returned `filesystem.read_text_range`
+handle rather than retrying the same bounded index read.
 
 ## Planning Rules
 

@@ -45,6 +45,8 @@ class AcceptanceTests(unittest.TestCase):
             root = Path(temp)
             self.fixture(root)
             self.assertEqual(audit(root)["status"], "passed")
+            with self.assertRaises(AssertionError):
+                audit(root, require_canonical=True)
 
     def test_missing_proof_wrong_source_and_replayed_mutations_never_pass(self):
         with tempfile.TemporaryDirectory() as temp:

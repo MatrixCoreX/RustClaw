@@ -15,7 +15,9 @@ use crate::{repo::TaskDeliveryRecord, AppState};
 mod cursor;
 #[path = "task_context_selection.rs"]
 mod selection;
+#[cfg(test)]
 use selection::select_context;
+use selection::select_context_with_capabilities;
 
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -37,7 +39,7 @@ pub(crate) async fn recall(
     Path(current_id): Path<Uuid>,
     Json(request): Json<RecallRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    let result = (|| -> Result<Value, &'static str> {
+    let result = tokio::task::spawn_blocking(move || -> Result<Value, &'static str> {
         let key = crate::auth_key_from_headers(&headers).ok_or("auth_key_invalid")?;
         let identity = crate::resolve_auth_identity_by_key(&state, key)
             .map_err(|_| "auth_lookup_failed")?
@@ -85,8 +87,45 @@ pub(crate) async fn recall(
                 "payload_json": current.task.payload_json},
             "agent_id": state.task_agent_id(&current.task),
         }))?;
-        select_context(&source, &request, &binding, chrono::Utc::now().timestamp())
-    })();
+        let canonical = if (1..=8).contains(&request.field_paths.len())
+            && request
+                .field_paths
+                .iter()
+                .any(|path| path == "/capabilities" || path.starts_with("/capabilities/"))
+        {
+            let result = source
+                .result_json
+                .as_ref()
+                .ok_or("context_result_unavailable")?;
+            let journal = selection::source_journal(result);
+            if journal
+                .and_then(|j| j.get("trace"))
+                .is_some_and(crate::task_journal::retained_capability_results_complete)
+            {
+                None
+            } else if let Some(reference) = journal.and_then(|j| j.get("canonical_capabilities")) {
+                Some(crate::task_context_archive::read_selected(
+                    &state.skill_rt.workspace_root,
+                    &source.task.task_id,
+                    reference,
+                    &request.field_paths,
+                )?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        select_context_with_capabilities(
+            &source,
+            &request,
+            &binding,
+            chrono::Utc::now().timestamp(),
+            canonical.as_ref(),
+        )
+    })
+    .await
+    .unwrap_or(Err("context_lookup_failed"));
     match result {
         Ok(value) => crate::api_ok(value),
         Err(code) => crate::api_err(
@@ -100,6 +139,9 @@ pub(crate) async fn recall(
                 "context_value_too_large" => StatusCode::PAYLOAD_TOO_LARGE,
                 "context_source_compacted"
                 | "context_field_compacted"
+                | "context_archive_unavailable"
+                | "context_archive_corrupt"
+                | "context_archive_budget_exceeded"
                 | "context_snapshot_changed" => StatusCode::CONFLICT,
                 _ => StatusCode::BAD_REQUEST,
             },

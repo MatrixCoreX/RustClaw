@@ -1,6 +1,9 @@
 # Use the LLD bundled with the active Rust toolchain for native Linux links.
 # Cross-build scripts set CARGO_TARGET_*_LINKER explicitly, so their platform
 # toolchains continue to take precedence over these host defaults.
+[env]
+APP_PRODUCT_IDENTITY_CONFIG = { value = "configs/product_identity.toml", relative = true, force = false }
+
 [target.x86_64-unknown-linux-gnu]
 linker = "scripts/rust-linker.sh"
 

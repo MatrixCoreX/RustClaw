@@ -1,5 +1,5 @@
 schema_version = 1
-reviewed_at = "2026-07-28"
+reviewed_at = "2026-10-29"
 source_audit = "plan/reports/model_capability_hard_limits_audit_20260728.md"
 
 # `locations` are source anchors, not enforcement configuration. The checker
@@ -154,9 +154,14 @@ acceptance_case = "checkpoint_replays_old_and_large_evidence"
 locations = [
   "crates/clawd/src/agent_engine/checkpoint_resume_state.rs::build_checkpoint_resume_state",
   "crates/clawd/src/agent_engine/checkpoint_resume_state.rs::restore_checkpoint_resume_state",
+  "crates/clawd/src/task_context_archive.rs::MAX_ITEMS",
+  "crates/clawd/src/task_context_archive.rs::MAX_ITEM_BYTES",
+  "crates/clawd/src/task_context_archive.rs::MAX_TOTAL_BYTES",
 ]
 migration_tests = [
   "crates/clawd/src/agent_engine/checkpoint_resume_state_tests.rs::restart_snapshot_preserves_large_state_and_ignores_unknown_stage_tokens",
+  "crates/clawd/src/task_context_archive_tests.rs::immutable_history_keeps_130_entries_and_reads_only_selected_data",
+  "crates/clawd/src/task_context_archive_tests.rs::over_budget_items_and_manifest_path_injection_fail_explicitly",
 ]
 
 [[limits]]
@@ -172,10 +177,13 @@ acceptance_case = "repository_over_50k_files"
 locations = [
   "crates/clawd/src/skills/builtin_code_index.rs::HARD_MAX_FILES",
   "crates/clawd/src/skills/builtin_code_index.rs::MAX_SOURCE_BYTES",
+  "crates/clawd/src/skills/builtin_code_index/language_parsers.rs::MAX_ENTRIES",
 ]
 boundary_tests = [
   "crates/clawd/src/skills/builtin_code_index_tests.rs::max_file_budget_is_reported_as_incomplete_index_evidence",
   "crates/clawd/src/skills/builtin_code_index_tests.rs::symbol_results_expose_stable_cursor_pages",
+  "crates/clawd/src/skills/builtin_code_index_tests.rs::oversized_source_context_returns_a_narrow_read_handle_instead_of_loading_all_bytes",
+  "crates/clawd/src/skills/builtin_code_index/language_parsers_tests.rs::high_density_source_has_an_explicit_bounded_partial_state",
 ]
 
 [[limits]]
@@ -249,11 +257,13 @@ terminal_behavior = "Unsafe output growth may stop the producer, but every prese
 acceptance_case = "output_over_inline_limit"
 locations = [
   "crates/clawd/src/skills/builtin_read_file.rs::MAX_READ_BYTES",
+  "crates/clawd/src/skill_output_artifact/structured_preview.rs::MAX_PREVIEW_BYTES",
   "crates/skill-sdk/src/process.rs::MAX_CAPTURE_BYTES",
 ]
 boundary_tests = [
   "crates/skills/system_basic/src/main_tests.rs::read_range_enforces_output_byte_budget_with_resume_line",
   "crates/clawd/src/skill_output_artifact_tests.rs::large_text_output_is_preserved_with_exact_resume_metadata",
+  "crates/clawd/src/skill_output_artifact/structured_preview_tests.rs::large_strings_keep_actual_sizes_and_small_machine_fields_without_secret_fields",
 ]
 
 [[limits]]
@@ -270,11 +280,13 @@ locations = [
   "crates/clawd/src/repo/conversation_history.rs::read_conversation_body_range",
   "UI/src/lib/chat-history.ts::fetchConversationHistoryPage",
   "UI/src/hooks/useChatRuntime.ts::loadEarlierConversationHistory",
+  "UI/src/components/TaskEvidenceList.tsx::PAGE_SIZE",
 ]
 migration_tests = [
   "crates/clawd/src/repo/conversation_history_tests.rs::large_conversation_bodies_expose_verified_ranges_without_data_loss",
   "crates/clawd/src/repo/conversation_history_tests.rs::conversation_body_ranges_are_owner_scoped_and_snapshot_bound",
   "UI/src/hooks/useChatRuntime.history.test.ts::more than 80 teaching runs and 120 messages remain reachable through incremental pages",
+  "UI/src/lib/task-evidence-list.test.tsx::evidence pagination handles final page, shrink and task switch",
 ]
 
 [[limits]]
@@ -313,9 +325,11 @@ locations = [
   "crates/skill-sdk/src/lib.rs::MAX_PROTOCOL_LINE_BYTES",
   "crates/skill-runner/src/main.rs::MAX_PROTOCOL_LINE_BYTES",
   "crates/skill-sdk/src/installer.rs::MAX_PROTOCOL_LINE_BYTES",
+  "crates/clawd/src/providers/model_log_payload.rs::MAX_BYTES",
 ]
 boundary_tests = [
   "crates/skill-sdk/src/lib_tests.rs::protocol_rejects_multiple_records_and_requires_structured_errors",
   "crates/skill-sdk/src/prebuilt_tests.rs::archive_traversal_and_links_are_rejected",
   "crates/skill-sdk/src/installer_tests.rs::prebuilt_adapter_rejects_digest_mismatch_before_activation",
+  "crates/clawd/src/providers/model_log_payload_tests.rs::corrupted_or_expanding_payloads_fail_closed",
 ]

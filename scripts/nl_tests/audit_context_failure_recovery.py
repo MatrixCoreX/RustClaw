@@ -8,7 +8,7 @@ from pathlib import Path
 from manual_trace_evidence import restore_execution_streams
 
 
-def audit(state: Path) -> dict:
+def audit(state: Path, require_canonical: bool = False) -> dict:
     runs = sorted((state / "results").glob("*/summary.jsonl"))
     if len(runs) != 1:
         raise ValueError("expected_one_run")
@@ -49,6 +49,10 @@ def audit(state: Path) -> dict:
     assert all(item["instruction_authority"] == "none" and item["current_execution_evidence"] is False for item in good)
     assert good[0]["pagination"]["offset"] == 0
     assert good[0]["pagination"]["total"] == 2
+    if require_canonical:
+        reference = seed["result_json"]["task_journal"].get("canonical_capabilities") or {}
+        assert reference.get("status") == "available" and reference.get("total") == 2
+        assert all(item.get("capability_evidence_source") == "canonical_archive" for item in good)
     assert recovery["status"] == "succeeded"
     assert failure["status"] == "failed"
     negative_observations = failure["result_json"]["task_journal"]["trace"]["capability_results"]
@@ -75,6 +79,7 @@ def audit(state: Path) -> dict:
     return {"status": "passed", "run": str(run), "cases": 3,
             "llm_counts": {row["case_name"]: sum(call.get("task_id") == row["task_id"] for call in calls) for row in rows},
             "checks": {"source_not_reexecuted": True, "same_source_rediscovery": True,
+                       "canonical_archive_required": require_canonical,
                        "failure_state_preserved": True, "public_model_json_preserved": True,
                        "historical_authority_not_escalated": True}}
 
@@ -82,9 +87,10 @@ def audit(state: Path) -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--state", type=Path, required=True)
+    parser.add_argument("--require-canonical", action="store_true")
     args = parser.parse_args()
     try:
-        result = audit(args.state.resolve())
+        result = audit(args.state.resolve(), args.require_canonical)
     except (AssertionError, ValueError, KeyError, TypeError, IndexError, OSError) as error:
         print(json.dumps({"status":"failed", "error_code":"acceptance_assertion_failed",
                           "error_type":type(error).__name__}, sort_keys=True))

@@ -93,6 +93,30 @@ fn extraction_result_is_versioned_and_machine_structured() {
 }
 
 #[test]
+fn extraction_safety_bounds_reject_documents_instead_of_indexing_a_prefix() {
+    let lines = "x\n".repeat(MAX_TEXT_LINES + 1);
+    assert!(matches!(
+        extract_document(Path::new("fixture.txt"), lines.as_bytes(), "txt")
+            .expect("typed extraction outcome"),
+        ExtractOutcome::Skip { error_code, .. } if error_code == "document_line_limit_exceeded"
+    ));
+
+    let path = temp_office_path("docx");
+    office_workspace::execute(&json!({
+        "action": "word.create", "output_path": path,
+        "operations": [{"op":"add_paragraph", "text":"fixture"}],
+    }))
+    .expect("create bounded office fixture");
+    let mut envelope = inspect_for_ingestion(&path).expect("inspect bounded fixture");
+    std::fs::remove_file(path).expect("remove fixture");
+    envelope.document_blocks[0].text = "x".repeat(MAX_EXTRACTED_CHARS + 1);
+    assert_eq!(
+        office_blocks(&envelope).unwrap_err(),
+        "document_text_limit_exceeded"
+    );
+}
+
+#[test]
 fn html_extraction_keeps_visible_structure_and_drops_inert_content() {
     let result = extracted(
         br#"<!doctype html><html><head><style>.secret{display:none}</style><script>window.token='SCRIPT-HIDDEN';</script></head><body><h1>Title &amp; Guide</h1><ul><li>First</li><li>Second &#x2713;</li></ul></body></html>"#,

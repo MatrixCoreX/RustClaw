@@ -13,7 +13,11 @@ use sha2::{Digest, Sha256};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
+#[path = "builtin_code_index/language_parsers.rs"]
+mod language_parsers;
+
 const INDEX_SCHEMA_VERSION: u32 = 1;
+const PARSER_REVISION: u32 = 1;
 const INDEX_RELATIVE_PATH: &str = ".agent-runtime/index/repository-v1.json";
 const MAX_SOURCE_BYTES: u64 = 2 * 1024 * 1024;
 const DEFAULT_MAX_FILES: usize = 20_000;
@@ -47,6 +51,8 @@ impl CodeIndexError {
 struct RepositoryIndex {
     schema_version: u32,
     #[serde(default)]
+    parser_revision: u32,
+    #[serde(default)]
     generated_at: u64,
     #[serde(default)]
     scan_complete: bool,
@@ -57,6 +63,7 @@ impl Default for RepositoryIndex {
     fn default() -> Self {
         Self {
             schema_version: INDEX_SCHEMA_VERSION,
+            parser_revision: PARSER_REVISION,
             generated_at: 0,
             scan_complete: false,
             files: BTreeMap::new(),
@@ -84,6 +91,8 @@ struct SymbolDefinition {
     end_line: usize,
     visibility: String,
     is_test: bool,
+    #[serde(default)]
+    source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -91,6 +100,8 @@ struct SymbolReference {
     name: String,
     line: usize,
     kind: String,
+    #[serde(default)]
+    scope: String,
 }
 
 #[derive(Debug, Default)]
@@ -172,7 +183,7 @@ fn refresh_index(
     persist: bool,
 ) -> Result<(RepositoryIndex, RefreshStats), CodeIndexError> {
     let index_path = workspace_root.join(INDEX_RELATIVE_PATH);
-    let previous = load_index(&index_path);
+    let previous = load_index(workspace_root, &index_path);
     let (candidates, unreadable_entries) = collect_source_candidates(workspace_root)?;
     let scan_snapshot_sha256 = source_candidate_snapshot(workspace_root, &candidates);
     let scan_start = decode_scan_continuation(scan_continuation, &scan_snapshot_sha256)?;
@@ -210,7 +221,7 @@ fn refresh_index(
                 continue;
             }
         }
-        let indexed = index_source_file(candidate)?;
+        let indexed = index_source_file(workspace_root, candidate)?;
         if indexed.parse_status == "parsed" {
             stats.parsed_files += 1;
         } else {
@@ -235,44 +246,47 @@ fn refresh_index(
     }
     let index = RepositoryIndex {
         schema_version: INDEX_SCHEMA_VERSION,
+        parser_revision: PARSER_REVISION,
         generated_at: stats.refreshed_at,
         scan_complete,
         files,
     };
     if persist {
-        persist_index(&index_path, &index)?;
+        persist_index(workspace_root, &index_path, &index)?;
     }
     Ok((index, stats))
 }
 
-fn load_index(path: &Path) -> RepositoryIndex {
-    let Ok(bytes) = fs::read(path) else {
+fn load_index(workspace_root: &Path, path: &Path) -> RepositoryIndex {
+    let Ok(file) = crate::secure_workspace_fs::open_workspace_file(workspace_root, path) else {
         return RepositoryIndex::default();
     };
+    let mut bytes = Vec::new();
+    if file
+        .take(128 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .is_err()
+        || bytes.len() > 128 * 1024 * 1024
+    {
+        return RepositoryIndex::default();
+    }
     let Ok(index) = serde_json::from_slice::<RepositoryIndex>(&bytes) else {
         return RepositoryIndex::default();
     };
-    if index.schema_version != INDEX_SCHEMA_VERSION {
+    if index.schema_version != INDEX_SCHEMA_VERSION || index.parser_revision != PARSER_REVISION {
         return RepositoryIndex::default();
     }
     index
 }
 
-fn persist_index(path: &Path, index: &RepositoryIndex) -> Result<(), CodeIndexError> {
-    let parent = path.parent().ok_or_else(|| {
-        CodeIndexError::new("index_path_invalid", "code_index.index_path_invalid")
-    })?;
-    fs::create_dir_all(parent)
-        .map_err(|error| CodeIndexError::new("index_write_failed", error.to_string()))?;
+fn persist_index(
+    workspace_root: &Path,
+    path: &Path,
+    index: &RepositoryIndex,
+) -> Result<(), CodeIndexError> {
     let bytes = serde_json::to_vec(index)
         .map_err(|error| CodeIndexError::new("serialize_failed", error.to_string()))?;
-    let temporary = parent.join(format!(
-        ".repository-v1-{}.tmp",
-        uuid::Uuid::new_v4().as_simple()
-    ));
-    fs::write(&temporary, bytes)
-        .map_err(|error| CodeIndexError::new("index_write_failed", error.to_string()))?;
-    fs::rename(&temporary, path)
+    crate::secure_workspace_fs::atomic_write_workspace_file(workspace_root, path, &bytes)
         .map_err(|error| CodeIndexError::new("index_write_failed", error.to_string()))
 }
 
@@ -415,8 +429,8 @@ fn source_language(path: &Path) -> Option<&'static str> {
     match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
         "rs" => Some("rust"),
         "py" => Some("python"),
-        "js" | "jsx" => Some("javascript"),
-        "ts" | "tsx" => Some("typescript"),
+        "js" | "jsx" | "mjs" | "cjs" => Some("javascript"),
+        "ts" | "tsx" | "mts" | "cts" => Some("typescript"),
         "go" => Some("go"),
         "java" => Some("java"),
         "c" | "h" => Some("c"),
@@ -425,11 +439,20 @@ fn source_language(path: &Path) -> Option<&'static str> {
     }
 }
 
-fn index_source_file(candidate: &SourceCandidate) -> Result<IndexedFile, CodeIndexError> {
+fn index_source_file(
+    workspace_root: &Path,
+    candidate: &SourceCandidate,
+) -> Result<IndexedFile, CodeIndexError> {
     if candidate.language == "rust" && candidate.size_bytes > MAX_SOURCE_BYTES {
-        return index_large_rust_source(candidate);
+        return index_large_rust_source(workspace_root, candidate);
     }
-    let bytes = fs::read(&candidate.path)
+    let mut source_file =
+        crate::secure_workspace_fs::open_workspace_file(workspace_root, &candidate.path)
+            .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
+    let mut bytes = Vec::new();
+    (&mut source_file)
+        .take(MAX_SOURCE_BYTES + 1)
+        .read_to_end(&mut bytes)
         .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
     let sha256 = format!("{:x}", Sha256::digest(&bytes));
     let mut indexed = IndexedFile {
@@ -441,13 +464,35 @@ fn index_source_file(candidate: &SourceCandidate) -> Result<IndexedFile, CodeInd
         symbols: Vec::new(),
         references: Vec::new(),
     };
-    if candidate.language != "rust" {
+    if bytes.len() as u64 > MAX_SOURCE_BYTES {
+        indexed.parse_status = "source_budget_exceeded".to_string();
+        let mut digest = Sha256::new();
+        digest.update(&bytes);
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            let read = source_file
+                .read(&mut buffer)
+                .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
+            if read == 0 {
+                break;
+            }
+            digest.update(&buffer[..read]);
+        }
+        indexed.sha256 = format!("{:x}", digest.finalize());
         return Ok(indexed);
     }
     let Ok(source) = std::str::from_utf8(&bytes) else {
         indexed.parse_status = "invalid_utf8".to_string();
         return Ok(indexed);
     };
+    if candidate.language != "rust" {
+        if let Some(parsed) = language_parsers::parse(source, &candidate.path, candidate.language) {
+            indexed.parse_status = parsed.status.to_string();
+            indexed.symbols = parsed.symbols;
+            indexed.references = parsed.references;
+        }
+        return Ok(indexed);
+    }
     let Ok(syntax) = syn::parse_file(source) else {
         indexed.parse_status = "parse_failed".to_string();
         return Ok(indexed);
@@ -461,9 +506,12 @@ fn index_source_file(candidate: &SourceCandidate) -> Result<IndexedFile, CodeInd
     Ok(indexed)
 }
 
-fn index_large_rust_source(candidate: &SourceCandidate) -> Result<IndexedFile, CodeIndexError> {
+fn index_large_rust_source(
+    workspace_root: &Path,
+    candidate: &SourceCandidate,
+) -> Result<IndexedFile, CodeIndexError> {
     let mut hasher = Sha256::new();
-    let mut file = fs::File::open(&candidate.path)
+    let mut file = crate::secure_workspace_fs::open_workspace_file(workspace_root, &candidate.path)
         .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
     let mut buffer = [0_u8; 64 * 1024];
     loop {
@@ -476,7 +524,7 @@ fn index_large_rust_source(candidate: &SourceCandidate) -> Result<IndexedFile, C
         hasher.update(&buffer[..read]);
     }
 
-    let file = fs::File::open(&candidate.path)
+    let file = crate::secure_workspace_fs::open_workspace_file(workspace_root, &candidate.path)
         .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
     let mut symbols = Vec::new();
     for (index, line) in BufReader::new(file).lines().enumerate() {
@@ -496,6 +544,7 @@ fn index_large_rust_source(candidate: &SourceCandidate) -> Result<IndexedFile, C
                     .unwrap_or("private")
                     .to_string(),
                 is_test: false,
+                source: "range_line_candidate".to_string(),
             });
         }
     }
@@ -575,6 +624,7 @@ impl RustSymbolCollector {
             end_line: end,
             visibility: visibility_token(visibility).to_string(),
             is_test,
+            source: "syn_ast".to_string(),
         });
     }
 
@@ -586,6 +636,7 @@ impl RustSymbolCollector {
             name: name.to_string(),
             line: span.start().line.max(1),
             kind: kind.to_string(),
+            scope: self.scope.join("::"),
         });
     }
 
@@ -1036,8 +1087,23 @@ fn context_snippet(
     let start_line = definition.line.saturating_sub(context_lines).max(1);
     let end_line = definition.end_line.saturating_add(context_lines);
     let path = workspace_root.join(relative_path);
-    let source = fs::read_to_string(&path)
+    let file = crate::secure_workspace_fs::open_workspace_file(workspace_root, &path)
         .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
+    let mut bytes = Vec::new();
+    file.take(MAX_SOURCE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
+    if bytes.len() as u64 > MAX_SOURCE_BYTES {
+        return Err(CodeIndexError {
+            code: "source_budget_exceeded",
+            detail: "code_index.use_source_range_for_large_file".to_string(),
+            extra: Some(json!({"range_handle": {"path": relative_path,
+                "start_line": start_line, "end_line": end_line,
+                "read_capability": "filesystem.read_text_range"}})),
+        });
+    }
+    let source = std::str::from_utf8(&bytes)
+        .map_err(|_| CodeIndexError::new("invalid_utf8", "code_index.invalid_utf8"))?;
     let content_sha256 = format!("sha256:{:x}", Sha256::digest(source.as_bytes()));
     let excerpt = source
         .lines()
@@ -1093,7 +1159,8 @@ fn query_result(
         "truncated": truncated,
         "provenance": {
             "source": "agent_repository_index",
-            "backend": "syn_ast_with_file_fallback",
+            "backend": "syn_tree_sitter_with_file_fallback",
+            "reference_resolution": "syntactic_candidate",
             "index_ref": INDEX_RELATIVE_PATH,
             "generated_at": index.generated_at,
             "refreshed_at": refresh.refreshed_at,
@@ -1144,6 +1211,9 @@ fn index_summary(index: &RepositoryIndex, refresh: &RefreshStats) -> Value {
         "scan_truncated": refresh.scan_truncated,
         "scan_complete": index.scan_complete,
         "complete": index.scan_complete,
+        "completeness_scope": "source_file_scan",
+        "symbol_coverage_complete": index.scan_complete && fallback_file_count == 0,
+        "reference_resolution": "syntactic_candidate",
         "total_candidates": refresh.total_candidates,
         "scan_start": refresh.scan_start,
         "scan_end": refresh.scan_end,
@@ -1156,7 +1226,9 @@ fn index_summary(index: &RepositoryIndex, refresh: &RefreshStats) -> Value {
         "generated_at": index.generated_at,
         "refreshed_at": refresh.refreshed_at,
         "index_source": "agent_repository_index",
-        "index_backend": "syn_ast_with_file_fallback",
+        "index_backend": "syn_tree_sitter_with_file_fallback",
+        "parser_revision": PARSER_REVISION,
+        "parsed_languages": ["rust", "python", "javascript", "typescript"],
         "fallback_file_count": fallback_file_count,
         "parse_status_counts": parse_status_counts,
         "index_ref": INDEX_RELATIVE_PATH,
@@ -1189,7 +1261,7 @@ fn definition_value(path: &str, definition: &SymbolDefinition) -> Value {
         "end_line": definition.end_line,
         "visibility": definition.visibility,
         "is_test": definition.is_test,
-        "source": "syn_ast",
+        "source": definition.source,
         "freshness": "refreshed_this_call",
         "range_handle": {
             "path": path,
@@ -1206,7 +1278,9 @@ fn reference_value(path: &str, reference: &SymbolReference) -> Value {
         "name": reference.name,
         "line": reference.line,
         "kind": reference.kind,
-        "source": "syn_ast",
+        "scope": reference.scope,
+        "resolution": "syntactic_candidate",
+        "source": symbol_backend(path),
         "freshness": "refreshed_this_call",
         "range_handle": {
             "path": path,
@@ -1215,6 +1289,14 @@ fn reference_value(path: &str, reference: &SymbolReference) -> Value {
             "read_capability": "filesystem.read_text_range",
         },
     })
+}
+
+fn symbol_backend(path: &str) -> &'static str {
+    if source_language(Path::new(path)) == Some("rust") {
+        "syn_ast"
+    } else {
+        "tree_sitter_ast"
+    }
 }
 
 fn symbol_matches(value: &str, query: &str, mode: &str) -> bool {

@@ -61,6 +61,17 @@ test("KB continuation accepts only explicit resumable machine actions", () => {
   }), null);
 });
 
+test("KB display bounds do not mutate canonical evidence or manufacture task actions", () => {
+  const original = {
+    hits: [{ text: "x".repeat(8_001), instruction_authority: "none", evidence_id: "ev-1" }],
+    complete: true,
+  };
+  assert.equal(kbSearchRows(original)[0]?.text.length, 8_000);
+  assert.equal(original.hits[0].text.length, 8_001);
+  assert.equal(kbContinuationArgs(original), null);
+  assert.equal(buildKbTaskBody({}, { userKey: " " }).user_key, undefined);
+});
+
 test("KB task terminal state is derived from the structured status enum", () => {
   assert.equal(kbTaskIsTerminal({ task_id: "1", status: "running" }), false);
   assert.equal(kbTaskIsTerminal({ task_id: "1", status: "succeeded" }), true);

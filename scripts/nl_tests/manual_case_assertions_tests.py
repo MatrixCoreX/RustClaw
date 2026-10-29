@@ -6,7 +6,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from manual_case_assertions import build_summary_row, successful_call_step, step_matches_capability
+from manual_case_assertions import build_summary_row, evaluate_expectations, successful_call_step, step_matches_capability
 
 
 def result_with_steps(
@@ -228,6 +228,17 @@ def assert_current_session_case_contract(root: Path) -> None:
 
 
 def main() -> int:
+    for text, spec, expected in [
+        ('{"files":[],"test_status":{"passed":true}}', "files,test_status", "pass"),
+        ('{"files":[]}', "files,test_status", "fail"),
+        ('{"nested":{"files":[]}}', "files", "fail"),
+        ('files,test_status', "files,test_status", "fail"),
+        ('[]', "files", "fail"),
+        ('{}', "", "fail"),
+    ]:
+        status, detail = evaluate_expectations("visible_json_fields:" + spec, "", {},
+            "succeeded", text, {"text":text}, {})
+        assert status == expected, detail
     with tempfile.TemporaryDirectory(prefix="manual-case-assertions-") as tmp:
         root = Path(tmp)
         assert_current_session_case_contract(root)

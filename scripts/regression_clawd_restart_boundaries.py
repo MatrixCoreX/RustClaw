@@ -243,7 +243,10 @@ class IsolatedRuntime:
                         os.killpg(process_group, signal.SIGKILL)
                     except (ProcessLookupError, PermissionError):
                         pass
-        shutil.rmtree(self.workspace)
+        if os.environ.get("KEEP_WORKSPACE") == "1" or sys.exc_info()[0] is not None:
+            print(f"[INFO] retained isolated workspace: {self.workspace}", flush=True)
+        else:
+            shutil.rmtree(self.workspace)
 
 
 def submit_command(
@@ -393,6 +396,7 @@ def wait_for_terminal(
             write_json(case_dir / "post_restart_task.json", task)
             return task
         time.sleep(0.25)
+    write_json(case_dir / "post_restart_task.json", task)
     raise RestartBoundaryFailure("task did not become terminal after restart")
 
 
