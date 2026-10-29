@@ -2,6 +2,22 @@
 
 All natural-language test scripts are centralized in this directory.
 
+## Exact Argument Recall Acceptance
+
+Run `cases/nl_cases_exact_argument_recall_20261029.txt` in a fresh conversation,
+then run `python3 scripts/nl_tests/audit_exact_argument_recall.py RUN_DIRECTORY`.
+The audit compares actual persisted producer arguments, the authorized recall
+observation and the final JSON. A matching filename in prose is insufficient;
+missing paths, wrong parameters, source replay and authority escalation fail.
+Use a newly executed source task after upgrading: values omitted from older
+historical records cannot be reconstructed. This read-only pair works on both
+source checkouts and release packages containing README.md.
+
+`run_manual_test.sh --resume-dir PATH --resume-line 0` explicitly starts at the
+beginning; omitting the line flag still requires interactive input. Keep operator
+NL evidence private. Release updates preserve `scripts/nl_suite_logs` (including
+an existing link to retained data), and release packaging excludes these records.
+
 ## Unified Tool
 
 Primary entry point:

@@ -840,6 +840,7 @@ EXTRACT_DIR="$WORK_DIR/extract"
 mkdir -p "$EXTRACT_DIR"
 python3 - "$ARCHIVE_PATH" "$EXTRACT_DIR" "$APP_RELEASE_ARTIFACT_ID" <<'PY'
 from pathlib import Path, PurePosixPath
+import errno
 import inspect
 import sys
 import tarfile
@@ -859,10 +860,17 @@ with tarfile.open(archive, "r:gz") as package:
             raise SystemExit(f"release path is outside an accepted package root: {member.name}")
         if member.issym() or member.islnk() or member.isdev():
             raise SystemExit(f"unsupported release entry: {member.name}")
-    if "filter" in inspect.signature(package.extractall).parameters:
-        package.extractall(destination, members=members, filter="fully_trusted")
-    else:
-        package.extractall(destination, members=members)
+    try:
+        if "filter" in inspect.signature(package.extractall).parameters:
+            package.extractall(destination, members=members, filter="fully_trusted")
+        else:
+            package.extractall(destination, members=members)
+    except OSError as error:
+        if error.errno == errno.EDQUOT:
+            raise SystemExit("release_staging_quota_exceeded") from None
+        if error.errno == errno.ENOSPC:
+            raise SystemExit("release_staging_space_exhausted") from None
+        raise
 PY
 
 if [[ -d "$EXTRACT_DIR/$APP_RELEASE_ARTIFACT_ID" ]]; then
@@ -1158,6 +1166,9 @@ if operation == 'restore':
     record = json.loads((storage / 'inventory.json').read_text())
     for name in record['files']:
         copy_entry(safe_path(storage / 'files', name), safe_path(target, name))
+    operator_logs = target / 'scripts/nl_suite_logs'
+    if operator_logs.is_dir() and not operator_logs.is_symlink():
+        os.chmod(operator_logs, 0o700)
     print(f"release_preserved_files={len(record['files'])}")
 elif operation in ('capture-source', 'capture-package'):
     storage.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -1192,6 +1203,17 @@ elif operation in ('capture-source', 'capture-package'):
     for src in (source / 'pi_app').glob('.agent_small_screen_*'):
         if src.is_file() and not src.is_symlink():
             names.add(src.relative_to(source).as_posix())
+    operator_logs = source / 'scripts/nl_suite_logs'
+    if operator_logs.is_symlink():
+        names.add('scripts/nl_suite_logs')
+    elif operator_logs.is_dir():
+        for path in operator_logs.rglob('*'):
+            if path.is_file() or path.is_symlink():
+                names.add(path.relative_to(source).as_posix())
+            elif not path.is_dir():
+                raise SystemExit('release_operator_evidence_entry_invalid')
+    elif os.path.lexists(operator_logs):
+        raise SystemExit('release_operator_evidence_root_invalid')
     for name in sorted(names):
         copy_entry(safe_path(source, name), safe_path(storage / 'files', name))
     (storage / 'inventory.json').write_text(json.dumps({'schema_version': 1, 'files': sorted(names)}))

@@ -151,6 +151,14 @@ installed skills, and the displayed release version. Keep configuration, wallet
 keys, databases, skill data, and the newest rollback copy. Do not clear caches
 or business data just to make an installation pass.
 
+Operator NL records under `scripts/nl_suite_logs` are preserved during updates,
+including an existing link to a retained data directory, and excluded from
+distributable scripts. Keep these records private. Staging needs both free bytes
+and sufficient per-user quota: `release_staging_quota_exceeded` and
+`release_staging_space_exhausted` stop extraction before runtime replacement.
+Choose a user-owned native filesystem with enough staging space through `TMPDIR`;
+do not remove business data or weaken signature checks to bypass these errors.
+
 A developer Git checkout must be clean in release-managed paths and match the
 signed package's source commit. Align it through the separate developer workflow
 before deployment; the installer does not reset, merge, or discard source edits.

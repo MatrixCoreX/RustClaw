@@ -345,6 +345,10 @@ crates/clawd/src/routing_context.rs	take	.take(4)
 # recall reference. routing_context_projection_tests covers count/depth/bytes.
 crates/clawd/src/routing_context_projection.rs	take	.take(16)
 crates/clawd/src/routing_context_projection.rs	take	.take(32)
+# Redacted execution argument evidence uses the same 32-field bound. Schema-v2
+# complete_fields allows intact field recall; whole/incomplete fields fail closed.
+# Producer projection, partial arrays, escaped keys and recall tests cover recovery.
+crates/clawd/src/routing_context_projection.rs	take	.take(32)
 crates/clawd/src/runtime/state.rs	take	.take(remaining)
 crates/clawd/src/schedule_service.rs	take	.take(6)
 crates/clawd/src/scheduled_run_contract.rs	clamp	.clamp(1, 100)

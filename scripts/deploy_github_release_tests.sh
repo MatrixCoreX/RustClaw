@@ -225,6 +225,8 @@ mkdir -p \
   "$RUNTIME/pi_app/vendor/cryptoauthlib/build-pyfix/lib" \
   "$RUNTIME/pi_app/vendor/cryptoauthlib/python/cryptoauthlib" \
   "$RUNTIME/target/release"
+mkdir -p "$RUNTIME/scripts/nl_suite_logs/retained-case"
+printf '{"evidence":"retain-fixture"}\n' > "$RUNTIME/scripts/nl_suite_logs/retained-case/final.json"
 cp /bin/false "$RUNTIME/target/release/clawd"
 cp /bin/false "$RUNTIME/prebuilt/toolchains/python/bin/python3"
 cp /bin/false "$RUNTIME/prebuilt/toolchains/node/bin/node"
@@ -287,6 +289,13 @@ OUTPUT="$(
 grep -Fq 'release_checksum=verified' <<< "$OUTPUT"
 grep -Fq 'release_download_cache=released_after_verification' <<< "$OUTPUT"
 grep -Fq 'release_update_status=deployed' <<< "$OUTPUT"
+grep -Fxq '{"evidence":"retain-fixture"}' "$RUNTIME/scripts/nl_suite_logs/retained-case/final.json"
+python3 - "$RUNTIME/scripts/nl_suite_logs" <<'PY'
+import stat
+import sys
+from pathlib import Path
+assert stat.S_IMODE(Path(sys.argv[1]).stat().st_mode) == 0o700
+PY
 ! grep -Fq 'release=8.0.0' <<< "$OUTPUT"
 grep -Fxq 'ubuntu-x86_64-newest' "$RUNTIME/.release-tag"
 
@@ -363,6 +372,9 @@ grep -Fxq 'local-secret = "preserve-local"' "$LOCAL_RUNTIME/configs/config.toml"
 cmp /bin/true "$LOCAL_RUNTIME/target/release/clawd"
 
 printf 'locally damaged\n' > "$LOCAL_RUNTIME/README.md"
+mkdir -p "$LOCAL_RUNTIME/data/operator-evidence" "$LOCAL_RUNTIME/scripts"
+printf 'retain-linked-fixture\n' > "$LOCAL_RUNTIME/data/operator-evidence/trace.log"
+ln -s ../data/operator-evidence "$LOCAL_RUNTIME/scripts/nl_suite_logs"
 LOCAL_REINSTALL_OUTPUT="$(
   "$DEPLOY_SCRIPT" \
     --root "$LOCAL_RUNTIME" \
@@ -375,6 +387,8 @@ LOCAL_REINSTALL_OUTPUT="$(
 grep -Fq 'release_update_status=deployed' <<< "$LOCAL_REINSTALL_OUTPUT"
 grep -Fxq 'new release readme' "$LOCAL_RUNTIME/README.md"
 grep -Fxq 'local-secret = "preserve-local"' "$LOCAL_RUNTIME/configs/config.toml"
+[[ -L "$LOCAL_RUNTIME/scripts/nl_suite_logs" ]]
+grep -Fxq 'retain-linked-fixture' "$LOCAL_RUNTIME/scripts/nl_suite_logs/trace.log"
 
 rm -f "$RUNTIME/data/skill-packages/store_fixture/.verified"
 RESOURCE_SKIP_OUTPUT="$(

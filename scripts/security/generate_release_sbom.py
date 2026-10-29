@@ -28,11 +28,13 @@ def canonical_bytes(value: object) -> bytes:
 
 def discover_lockfiles(root: Path) -> list[Path]:
     found: list[Path] = []
-    for path in root.rglob("*"):
-        if not path.is_file() or any(part in IGNORED_PARTS for part in path.relative_to(root).parts):
-            continue
-        if path.name in {"Cargo.lock", "package-lock.json", "requirements.txt"}:
-            found.append(path)
+    for directory, subdirectories, filenames in os.walk(root, followlinks=False):
+        subdirectories[:] = [name for name in subdirectories if name not in IGNORED_PARTS]
+        for name in filenames:
+            if name in {"Cargo.lock", "package-lock.json", "requirements.txt"}:
+                path = Path(directory) / name
+                if path.is_file():
+                    found.append(path)
     return sorted(found, key=lambda item: item.relative_to(root).as_posix())
 
 

@@ -108,6 +108,7 @@ mod skills;
 mod sqlite_busy_retry;
 mod system_health;
 mod task_context_archive;
+mod task_context_privacy;
 mod task_admin_routes;
 mod task_artifacts;
 mod task_budget_contract;

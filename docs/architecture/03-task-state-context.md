@@ -45,6 +45,17 @@ The result declares `instruction_authority=none` and
 `current_execution_evidence=false`: recalled content is not an instruction,
 permission grant, or proof that a new action executed.
 
+Stored capability arguments use a separate bounded evidence projection, not the
+locator-stripped summary preview. It keeps ordinary paths, public URLs and field
+selections, while removing credentials and internal authorization controls.
+The `continuation_args_projection` schema version 2 records `truncated` and
+`complete_fields`. An intact top-level field can be selected even when another
+argument was omitted; an incomplete object, array or whole argument map returns
+`context_field_compacted`. Bounds remain 2 KiB, 32 object fields, 16 array items,
+512 bytes per string and depth 5. This is redacted retained evidence, not an
+unbounded raw argument archive; omitted historical values are never reconstructed
+from logs or by replaying the original action.
+
 `/capabilities` is a paged index, with `pagination.has_more` and an opaque
 `next_cursor`; `page_size` defaults to 64 and may be 1-64. Follow the exact cursor
 with the same field selection and page size. The signed cursor binds the current

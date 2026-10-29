@@ -173,14 +173,36 @@ fn historical_field<'a>(
     let capability = capabilities
         .and_then(|items| items.get(index))
         .ok_or("context_field_unavailable")?;
-    let field = match parts.next().ok_or("context_field_unavailable")? {
+    let name = parts.next().ok_or("context_field_unavailable")?;
+    let suffix = parts.next();
+    let field = match name {
         "args" => {
-            if capability
-                .pointer("/provenance/continuation_args_projection/truncated")
+            let projection = capability.pointer("/provenance/continuation_args_projection");
+            if projection
+                .and_then(|p| p.get("truncated"))
                 .and_then(Value::as_bool)
                 == Some(true)
             {
-                return Err("context_field_compacted");
+                let complete_field = suffix.map(|path| {
+                    path.split('/')
+                        .next()
+                        .unwrap_or_default()
+                        .replace("~1", "/")
+                        .replace("~0", "~")
+                });
+                let complete = projection.is_some_and(|p| {
+                    p.get("schema_version").and_then(Value::as_u64) == Some(2)
+                        && p.get("complete_fields")
+                            .and_then(Value::as_array)
+                            .is_some_and(|fields| {
+                                fields
+                                    .iter()
+                                    .any(|field| field.as_str() == complete_field.as_deref())
+                            })
+                });
+                if complete_field.is_none() || !complete {
+                    return Err("context_field_compacted");
+                }
             }
             capability.pointer("/provenance/continuation_args")
         }
@@ -188,7 +210,7 @@ fn historical_field<'a>(
         _ => None,
     }
     .ok_or("context_field_unavailable")?;
-    match parts.next() {
+    match suffix {
         Some(suffix) => field
             .pointer(&format!("/{suffix}"))
             .ok_or("context_field_unavailable"),

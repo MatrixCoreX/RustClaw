@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use crate::task_context_privacy::{redact, sensitive_key};
 use crate::{repo::TaskDeliveryRecord, AppState};
 
 #[path = "task_context_cursor.rs"]
@@ -205,59 +206,6 @@ fn source_digest(value: &Value) -> Result<String, &'static str> {
     let mut writer = HashWriter(Sha256::new());
     serde_json::to_writer(&mut writer, value).map_err(|_| "context_payload_invalid")?;
     Ok(format!("{:x}", writer.0.finalize()))
-}
-
-fn redact(value: &Value, depth: usize) -> Result<Value, &'static str> {
-    if depth > 12 {
-        return Err("context_value_too_deep");
-    }
-    Ok(match value {
-        Value::Object(fields) => Value::Object(
-            fields
-                .iter()
-                .filter(|(key, _)| !sensitive_key(key))
-                .map(|(key, value)| Ok::<_, &'static str>((key.clone(), redact(value, depth + 1)?)))
-                .collect::<Result<_, _>>()?,
-        ),
-        Value::Array(items) => Value::Array(
-            items
-                .iter()
-                .map(|v| redact(v, depth + 1))
-                .collect::<Result<_, _>>()?,
-        ),
-        Value::String(text) => Value::String(crate::visible_text::redact_sensitive_text(text)),
-        other => other.clone(),
-    })
-}
-
-fn sensitive_key(key: &str) -> bool {
-    let key = key.to_ascii_lowercase();
-    key.split(['_', '-']).any(|part| {
-        matches!(
-            part,
-            "confirm"
-                | "confirmation"
-                | "approved"
-                | "approval"
-                | "permission"
-                | "permissions"
-                | "policy"
-                | "yolo"
-                | "secret"
-                | "password"
-                | "token"
-                | "authorization"
-                | "cookie"
-                | "credential"
-                | "credentials"
-                | "grant"
-                | "private"
-                | "headers"
-        )
-    }) || matches!(
-        key.as_str(),
-        "api_key" | "user_key" | "principal_id" | "apikey" | "privatekey" | "accesskey"
-    )
 }
 
 #[cfg(test)]

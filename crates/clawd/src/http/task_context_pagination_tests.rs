@@ -309,6 +309,91 @@ fn malformed_scope_payloads_fail_closed() {
     assert!(!same_scope(&current, &source));
 }
 
+fn history_with_produced_arguments(args: &Value) -> TaskDeliveryRecord {
+    let mut source = history(1);
+    let (args, truncated, complete_fields) =
+        crate::routing_context::bounded_execution_argument_value(args);
+    source.result_json.as_mut().unwrap()["task_journal"]["trace"]["capability_results"][0]
+        ["provenance"] = json!({"continuation_args":args,
+            "continuation_args_projection":{"schema_version":2,"redacted":true,
+                "truncated":truncated,"complete_fields":complete_fields}});
+    source
+}
+
+#[test]
+fn argument_recall_uses_real_producer_projection_and_preserves_exact_locators() {
+    let source = history_with_produced_arguments(&json!({"path":"src/example.py",
+        "field_paths":["/request"],"public_key":"public-fixture","apiKey":"hidden"}));
+    let request = RecallRequest {
+        field_paths: vec!["/capabilities/0/args".into()],
+        ..Default::default()
+    };
+    let result = select_context(&source, &request).unwrap();
+    assert_eq!(
+        result["fields"]["/capabilities/0/args"],
+        json!({"path":"src/example.py",
+        "field_paths":["/request"],"public_key":"public-fixture"})
+    );
+    assert_eq!(result["instruction_authority"], "none");
+    assert_eq!(result["current_execution_evidence"], false);
+}
+
+#[test]
+fn incomplete_arguments_allow_only_proven_complete_top_level_fields() {
+    let source = history_with_produced_arguments(&json!({"content":"x".repeat(1024),
+        "path":"src/example.py","topics":(0..20).collect::<Vec<_>>(),
+        "a/b":{"~value":7}}));
+    let mut request = RecallRequest {
+        field_paths: vec![
+            "/capabilities/0/args/path".into(),
+            "/capabilities/0/args/a~1b/~0value".into(),
+        ],
+        ..Default::default()
+    };
+    let result = select_context(&source, &request).unwrap();
+    assert_eq!(
+        result["fields"]["/capabilities/0/args/path"],
+        "src/example.py"
+    );
+    assert_eq!(result["fields"]["/capabilities/0/args/a~1b/~0value"], 7);
+    for path in [
+        "/capabilities/0/args",
+        "/capabilities/0/args/content",
+        "/capabilities/0/args/topics",
+        "/capabilities/0/args/topics/0",
+    ] {
+        request.field_paths = vec![path.into()];
+        assert_eq!(
+            select_context(&source, &request),
+            Err("context_field_compacted")
+        );
+    }
+    for version in [json!(1), json!(3), json!("2"), Value::Null] {
+        let mut unsupported = source.clone();
+        unsupported.result_json.as_mut().unwrap()["task_journal"]["trace"]["capability_results"]
+            [0]["provenance"]["continuation_args_projection"]["schema_version"] = version;
+        request.field_paths = vec!["/capabilities/0/args/path".into()];
+        assert_eq!(
+            select_context(&unsupported, &request),
+            Err("context_field_compacted")
+        );
+    }
+}
+
+#[test]
+fn camel_case_secret_selectors_remain_forbidden_after_argument_capture() {
+    let source =
+        history_with_produced_arguments(&json!({"path":"README.md","accessToken":"hidden"}));
+    let request = RecallRequest {
+        field_paths: vec!["/capabilities/0/args/accessToken".into()],
+        ..Default::default()
+    };
+    assert_eq!(
+        select_context(&source, &request),
+        Err("context_field_forbidden")
+    );
+}
+
 #[tokio::test]
 async fn every_page_rechecks_agent_owner_recipient_and_key_authorization() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();

@@ -45,6 +45,7 @@ SKIPPED_AFTER_ABORT=0
 
 RESUME_DIR=""
 RESUME_LINE=0
+RESUME_LINE_SET=0
 CURRENT_SOURCE_LINE=0
 LAST_COMPLETED_LINE=0
 
@@ -1030,6 +1031,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --resume-line)
       RESUME_LINE="$2"
+      RESUME_LINE_SET=1
       shift 2
       ;;
     --base-url)
@@ -1121,7 +1123,7 @@ if [[ -z "$RESUME_DIR" && "$RESUME_LINE" != "0" ]]; then
   exit 2
 fi
 
-if [[ -n "$RESUME_DIR" && "$RESUME_LINE" == "0" ]]; then
+if [[ -n "$RESUME_DIR" && "$RESUME_LINE_SET" == "0" ]]; then
   if [[ -t 0 ]]; then
     printf 'Tested through source line number: ' >&2
     read -r RESUME_LINE

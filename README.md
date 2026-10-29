@@ -84,6 +84,8 @@ instead of accepting an unchecked answer. Same-conversation references can be
 recalled through `task_control.recall_context` after fresh ownership checks.
 Historical capability indices support bounded, snapshot-bound pagination;
 preview summaries report truncation and provide scoped recall references.
+Retained argument evidence keeps safe locators separately from summaries and
+marks complete fields explicitly; incomplete arguments are never passed off as exact.
 Stale read cursors return bounded argument-replanning facts rather than replaying
 the source task. Failure explanations remain model-authored, including requested
 public JSON, without exposing nested internal error wrappers.

@@ -5,7 +5,7 @@ use crate::{AppState, ClaimedTask};
 
 #[path = "routing_context_projection.rs"]
 mod projection;
-pub(crate) use projection::bounded_prior_context_value;
+pub(crate) use projection::{bounded_execution_argument_value, bounded_prior_context_value};
 
 #[derive(Debug, Clone)]
 struct ExecutionAnchor {
