@@ -743,8 +743,15 @@ check and does not require live provider generation. After running
   A `skill:<name>` tag normally requires that exact skill family to execute.
   For a failed dispatch, `step_contract_json` binds the executed skill, status
   and typed observed fields in one invocation. Its optional integer `total_calls`
-  also limits all actual tool/skill/capability dispatches, not terminal responses;
+  also limits actual business tool/skill/capability dispatches, excluding
+  planner-internal capability discovery and terminal responses;
   use it to reject replay or an unintended follow-up without matching reply prose.
+  Do not require an absolute journal index: capability discovery may precede
+  the observed dispatch. An intentional failure-observation goal can succeed
+  while the observed tool remains failed. Assert task-goal status, failed tool
+  status, exact error/retry fields and effect-free proof separately; genuine
+  unrecovered execution goals must still assert task failure. A model-authored
+  error JSON alone is not proof that the tool ran or that no effect occurred.
   Add `direct_allowed` only when the complete input and transformation rules
   are already in the turn: the quality guard then accepts either that skill or
   a zero-tool direct answer, but still rejects execution through an unrelated

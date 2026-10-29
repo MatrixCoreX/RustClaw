@@ -550,6 +550,7 @@ echo "AGENT_PARITY_GATE_STEP nl_suite_checker_self_tests"
   python3 "${SCRIPT_DIR}/check_compact_coverage.py" --self-test
   python3 "${SCRIPT_DIR}/manual_case_assertions_tests.py"
   python3 "${SCRIPT_DIR}/manual_execution_assertions_tests.py"
+  python3 "${SCRIPT_DIR}/manual_failure_observation_tests.py"
   python3 "${SCRIPT_DIR}/manual_workspace_assertions_tests.py"
   python3 "${SCRIPT_DIR}/manual_trace_evidence_tests.py"
   python3 "${SCRIPT_DIR}/manual_case_lifecycle_tests.py"
