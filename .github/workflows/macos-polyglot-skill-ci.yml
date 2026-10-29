@@ -19,6 +19,8 @@ name: Polyglot Skill macOS CI
       - "scripts/precompile_skill_store.sh"
       - "scripts/project_skill_receipts.py"
       - "scripts/skill_store_packages.py"
+      - "scripts/nl_tests/run_manual_test.sh"
+      - "scripts/nl_tests/manual_case_observation*.py"
   push:
     branches:
       - main
@@ -39,6 +41,8 @@ name: Polyglot Skill macOS CI
       - "scripts/precompile_skill_store.sh"
       - "scripts/project_skill_receipts.py"
       - "scripts/skill_store_packages.py"
+      - "scripts/nl_tests/run_manual_test.sh"
+      - "scripts/nl_tests/manual_case_observation*.py"
   workflow_dispatch:
 
 permissions:
@@ -101,6 +105,15 @@ jobs:
           python3 scripts/check_polyglot_skill_contracts.py --require-all
           python3 scripts/check_on_demand_skill_builds.py
           python3 scripts/check_cross_platform_contracts.py
+
+      - name: Test retained-task acceptance without resubmission
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --requirement scripts/nl_tests/requirements.txt
+          bash -n scripts/nl_tests/run_manual_test.sh
+          python3 scripts/nl_tests/manual_case_observation_tests.py
+          python3 scripts/nl_tests/manual_case_lifecycle_tests.py
 
       - name: Test SDK and runner
         shell: bash

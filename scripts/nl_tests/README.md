@@ -18,6 +18,38 @@ beginning; omitting the line flag still requires interactive input. Keep operato
 NL evidence private. Release updates preserve `scripts/nl_suite_logs` (including
 an existing link to retained data), and release packaging excludes these records.
 
+### Observe a Retained Task
+
+`--resume-line` selects which cases to submit; it does not resume an existing
+task. After a provider checkpoint or polling interruption, keep the original
+case directory and restore the same runtime/database and binary. Use a separate
+read-only observation run instead of submitting that instruction again:
+
+```bash
+bash scripts/nl_tests/run_manual_test.sh \
+  --case-file <original-pinned-case-file> --case-name <original-case-name> \
+  --observe-case <original-run/case-directory> \
+  --base-url <same-restored-runtime> --log-root <supplemental-results-directory> \
+  --wait-seconds 2400 --full-text
+```
+
+Use the original authenticated owner key through `APP_USER_KEY`; do not put it
+in evidence. The observer checks the original task UUID, source line, name,
+prompt, tags and expectations against submit/final/summary records. It polls
+that exact UUID using GET only and cannot submit confirmations or retry a
+submission. It does not issue resume/cancel commands or bypass provider waits;
+the runtime owns checkpoint recovery and authorization.
+
+Every observation gets a distinct run directory and `observation.json` with
+the original source hashes. Original failed/blocked rows stay unchanged. A
+wrong task identity, altered case contract, real failure or another provider
+wait cannot pass. The supplemental wall time measures the observation window,
+not the original whole-task duration. Set `NL_MODEL_IO_LOG` and
+`NL_RUNTIME_TRACE_LOG` to the retained runtime's logs for raw model returns and
+digest-bound execution evidence. Continue subsequent untouched cases only
+after this task actually succeeds; audit the original and supplemental records
+together without rewriting the original history.
+
 ## Unified Tool
 
 Primary entry point:

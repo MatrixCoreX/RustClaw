@@ -558,6 +558,7 @@ echo "AGENT_PARITY_GATE_STEP nl_suite_checker_self_tests"
   python3 "${SCRIPT_DIR}/manual_workspace_assertions_tests.py"
   python3 "${SCRIPT_DIR}/manual_trace_evidence_tests.py"
   python3 "${SCRIPT_DIR}/manual_case_lifecycle_tests.py"
+  python3 "${SCRIPT_DIR}/manual_case_observation_tests.py"
   python3 "${SCRIPT_DIR}/check_workspace_space.py" --help > /dev/null
   python3 "${SCRIPT_DIR}/check_workspace_space_tests.py"
   python3 "${SCRIPT_DIR}/live_suite_report_tests.py"

@@ -46,6 +46,7 @@ SKIPPED_AFTER_ABORT=0
 RESUME_DIR=""
 RESUME_LINE=0
 RESUME_LINE_SET=0
+OBSERVE_CASE_DIR=""
 CURRENT_SOURCE_LINE=0
 LAST_COMPLETED_LINE=0
 
@@ -62,6 +63,8 @@ Options:
   --log-root PATH       Root log dir. Default: scripts/nl_suite_logs/manual
   --resume-dir PATH     Existing run dir to append logs/results into
   --resume-line N       Continue after this tested source line number
+  --observe-case PATH   Poll the task from this original case directory; never submit.
+                        Requires --case-name and a new run (not --resume-dir).
   --base-url URL        clawd base url. Default: http://127.0.0.1:8787
   --user-id ID          User id for submit
   --chat-id ID          Base chat id for submit
@@ -544,6 +547,10 @@ poll_until_terminal() {
       return 1
     fi
     rm -f "$err_file"
+    if [[ -n "$OBSERVE_CASE_DIR" ]] && ! python3 "${SCRIPT_DIR}/manual_case_observation.py" \
+      check-reply "$task_id" "$out_file"; then
+      return 3
+    fi
     if [[ -n "$health_probe_file" && ! -f "$health_probe_file" ]]; then
       local probe_rc=0
       APP_USER_KEY="$USER_KEY_VALUE" \
@@ -605,7 +612,10 @@ append_summary_jsonl() {
 }
 
 prepare_run_dir() {
-  if [[ -n "$RESUME_DIR" ]]; then
+  if [[ -n "$OBSERVE_CASE_DIR" ]]; then
+    mkdir -p "$LOG_ROOT"
+    RUN_DIR="$(mktemp -d "${LOG_ROOT}/${RUN_STAMP}-observe-XXXXXX")"
+  elif [[ -n "$RESUME_DIR" ]]; then
     RUN_DIR="$RESUME_DIR"
   else
     RUN_DIR="${LOG_ROOT}/${RUN_STAMP}"
@@ -695,23 +705,35 @@ run_one_case() {
     llm_offset_file="${case_dir}/attempt_${attempt}_llm.offset"
     init_llm_trace_offset "$llm_offset_file"
     err_file="$(mktemp)"
-    set +e
-    raw="$(submit_task "$prompt" 2>"$err_file")"
-    rc=$?
-    set -e
-    if [[ "$rc" -ne 0 ]]; then
-      echo "  [network] submit failed: $(cat "$err_file")" >&2
+    if [[ -n "$OBSERVE_CASE_DIR" ]]; then
       rm -f "$err_file"
-      ended_at="$(date +%s)"
-      append_summary_jsonl "$source_line" "$case_name" "$tags" "$prompt" "" "" "network_error" "$started_at" "$ended_at" "$expect_substr" "$mode"
-      CONSECUTIVE_BAD=$((CONSECUTIVE_BAD + 1))
-      LAST_COMPLETED_LINE="$source_line"
-      CURRENT_SOURCE_LINE=0
-      return 0
+      if [[ -n "$confirm_reply" ]]; then
+        echo "observation_confirmation_not_allowed" >&2
+        return 2
+      fi
+      task_id="$(python3 "${SCRIPT_DIR}/manual_case_observation.py" bind \
+        "$OBSERVE_CASE_DIR" "$case_dir/observation.json" "$source_line" \
+        "$case_name" "$tags" "$prompt" "$expect_substr")" || return 2
+      echo "[OBSERVE]     existing_task_readonly"
+    else
+      set +e
+      raw="$(submit_task "$prompt" 2>"$err_file")"
+      rc=$?
+      set -e
+      if [[ "$rc" -ne 0 ]]; then
+        echo "  [network] submit failed: $(cat "$err_file")" >&2
+        rm -f "$err_file"
+        ended_at="$(date +%s)"
+        append_summary_jsonl "$source_line" "$case_name" "$tags" "$prompt" "" "" "network_error" "$started_at" "$ended_at" "$expect_substr" "$mode"
+        CONSECUTIVE_BAD=$((CONSECUTIVE_BAD + 1))
+        LAST_COMPLETED_LINE="$source_line"
+        CURRENT_SOURCE_LINE=0
+        return 0
+      fi
+      rm -f "$err_file"
+      printf '%s\n' "$raw" > "$submit_file"
+      task_id="$(extract_submit_task_id "$raw")"
     fi
-    rm -f "$err_file"
-    printf '%s\n' "$raw" > "$submit_file"
-    task_id="$(extract_submit_task_id "$raw")"
     if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
       echo "[TASK]        $task_id"
     fi
@@ -719,17 +741,23 @@ run_one_case() {
     # poll_until_terminal returns non-zero on poll timeout; under `set -e`
     # that would tear down the whole run mid-suite. (poll_until_terminal
     # internally re-enables `set -e`, so a plain `set +e ... set -e`
-    # wrapper would not work — that's why we use `if ! ...`.)
+    # wrapper would not work, so preserve its code through a conditional.)
     local poll_failed=0
-    if ! poll_until_terminal \
+    if poll_until_terminal \
       "$task_id" "$final_file" "$llm_offset_file" "$health_probe_file"; then
-      poll_failed=1
+      poll_failed=0
+    else
+      poll_failed=$?
     fi
     if (( poll_failed != 0 )); then
-      if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
-        echo "  [poll] timed out waiting for terminal status; marking case as timeout"
+      if [[ "$poll_failed" == 3 ]]; then
+        effective_status="observation_error"
+      else
+        effective_status="timeout"
       fi
-      effective_status="timeout"
+      if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
+        echo "  [poll] acceptance observation stopped: ${effective_status}"
+      fi
       if [[ ! -s "$final_file" ]]; then
         printf '%s\n' '{"data":{"status":"timeout","result_json":{"text":""},"error_text":"poll timeout"}}' > "$final_file"
       fi
@@ -748,7 +776,7 @@ run_one_case() {
     fi
     print_user_visible_dialog "$final_file" "$prompt" "$PROMPT_REPLY_ONLY"
 
-    if [[ "$(extract_status "$final_file")" == "provider_wait" ]]; then
+    if [[ "$poll_failed" == 0 && "$(extract_status "$final_file")" == "provider_wait" ]]; then
       effective_status="provider_unavailable"
       provider_waiting=1
       ABORTED_FAIL_FAST=1
@@ -805,8 +833,8 @@ run_one_case() {
       fi
     fi
 
-    if final_result_provider_unavailable "$final_file"; then
-      if [[ "$attempt" -le "$PROVIDER_RETRIES" ]]; then
+    if [[ "$poll_failed" == 0 ]] && final_result_provider_unavailable "$final_file"; then
+      if [[ -z "$OBSERVE_CASE_DIR" && "$attempt" -le "$PROVIDER_RETRIES" ]]; then
         if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
           echo "  [model] provider unavailable; retrying (${attempt}/${PROVIDER_RETRIES}) after ${PROVIDER_RETRY_SLEEP_SECONDS}s"
         fi
@@ -1033,6 +1061,10 @@ while [[ $# -gt 0 ]]; do
       RESUME_LINE_SET=1
       shift 2
       ;;
+    --observe-case)
+      OBSERVE_CASE_DIR="$2"
+      shift 2
+      ;;
     --base-url)
       BASE_URL_VALUE="$2"
       shift 2
@@ -1122,6 +1154,11 @@ if [[ -z "$RESUME_DIR" && "$RESUME_LINE" != "0" ]]; then
   exit 2
 fi
 
+if [[ -n "$OBSERVE_CASE_DIR" && ( -z "$CASE_NAME_FILTER" || -n "$RESUME_DIR" || "$RESUME_LINE_SET" == 1 ) ]]; then
+  echo "--observe-case requires --case-name and cannot use --resume-dir/--resume-line" >&2
+  exit 2
+fi
+
 if [[ -n "$RESUME_DIR" && "$RESUME_LINE_SET" == "0" ]]; then
   if [[ -t 0 ]]; then
     printf 'Tested through source line number: ' >&2
@@ -1198,6 +1235,20 @@ array_from_command_lines CASE_ROWS load_case_rows "$CASE_FILE"
 if [[ "${#CASE_ROWS[@]}" -eq 0 ]]; then
   echo "No runnable cases found in $CASE_FILE" >&2
   exit 2
+fi
+
+if [[ -n "$OBSERVE_CASE_DIR" ]]; then
+  selected_count=0
+  for row in "${CASE_ROWS[@]}"; do
+    IFS=$'\x1f' read -r _source_line selected_name _rest <<< "$row"
+    if [[ "$selected_name" == "$CASE_NAME_FILTER" ]]; then
+      selected_count=$((selected_count + 1))
+    fi
+  done
+  if [[ "$selected_count" != 1 ]]; then
+    echo "observation_requires_one_selected_case" >&2
+    exit 2
+  fi
 fi
 
 ordinal=0
