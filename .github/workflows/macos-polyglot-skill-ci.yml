@@ -176,6 +176,10 @@ jobs:
           cargo test -p clawd --bin clawd secure_workspace_fs::tests
           cargo test -p clawd --bin clawd skill_output_artifact::evidence_storage::tests
 
+      - name: Test verifier journal projections
+        shell: bash
+        run: cargo test -p clawd --bin clawd verify_projection_tests
+
       - name: Test capability loading and verification-only recovery
         shell: bash
         run: |

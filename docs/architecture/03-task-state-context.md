@@ -48,6 +48,15 @@ does not turn an actual failed execution or missing method into success.
 The UI and CLI show execution, verification and delivery independently. Completed
 execution does not imply a verified answer or a delivered channel message.
 
+Plan-verifier notes are separate from failures. Default creation-path anchoring
+and preferred-action hints remain visible as `severity=info`, without a failed
+action or repair envelope. `blocked_*` codes identify the first genuinely
+blocking issue, including shadow evidence in observe-only records. A pending
+confirmation remains actionable through `needs_confirmation` and its permission
+signal, not a fabricated blocking failure. Round `repair_signals` contain only
+blocking issues or confirmation requests; informational notes do not request a
+replan or consume a recovery attempt.
+
 Recent execution anchors publish bounded `task-context:v1:<UUID>` references.
 The planner may use `task_control.recall_context` to read 1-8 explicit JSON
 pointer fields from a prior task's request or capability arguments/data.

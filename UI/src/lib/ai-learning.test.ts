@@ -286,7 +286,11 @@ test("context learning pages retain verification recovery and canonical evidence
     const evidence = pages.find((page) => page.markdown.includes("canonical_capability_evidence"));
     assert.ok(evidence, `${file}: canonical finalization evidence must be visible`);
     assert.match(evidence.markdown, /`model_view_complete`/);
-    for (const page of [recovery, evidence]) {
+    const notes = pages.find((page) => page.markdown.includes("severity=info"));
+    assert.ok(notes, `${file}: informational verifier evidence must be visible`);
+    assert.match(notes.markdown, /`repair_signals`/);
+    assert.match(notes.markdown, /`needs_confirmation`/);
+    for (const page of [recovery, evidence, notes]) {
       assert.equal(page.stageId, "context-memory");
       assert.deepEqual(page.audiences, ["operator", "developer"]);
     }

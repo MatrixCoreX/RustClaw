@@ -35,6 +35,12 @@ checkpoint 并进入 `needs_user`。不可重试错误或非法重试元数据�
 UI 和 CLI 独立显示执行、答案验证与投送状态：执行完成不代表答案已通过验证，也不代表
 通信端已经收到消息。
 
+Plan verifier 的提示与失败分别记录。默认创建路径的锚定、优选动作建议保留为
+`severity=info`，不附加失败动作或 repair envelope。`blocked_*` 字段指向第一个真正
+会阻止执行的问题，观察模式中的 shadow 证据也遵循此规则。待确认请求仍通过
+`needs_confirmation` 和权限信号保留，不伪装成阻断失败。每轮 `repair_signals` 只包含
+阻断问题或确认请求；提示本身不要求重规划，也不消耗恢复次数。
+
 近期执行锚点提供有限数量的 `task-context:v1:<UUID>` 引用。Planner 可以调用
 `task_control.recall_context`，用 1-8 个 JSON pointer 指定读取旧请求或能力参数、结果字段。
 `POST /v1/tasks/:current_task_id/context-recall` 每次重新核对有效 key、主体、通信端、

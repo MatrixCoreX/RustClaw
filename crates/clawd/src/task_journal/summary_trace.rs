@@ -2,6 +2,10 @@ use serde_json::{json, Value};
 
 use super::*;
 
+#[cfg(test)]
+#[path = "verify_projection_tests.rs"]
+mod verify_projection_tests;
+
 pub(super) fn rollout_attribution_json(attribution: &TaskJournalRolloutAttribution) -> Value {
     json!({
         "switch_name": attribution.switch_name.as_str(),
@@ -46,7 +50,10 @@ pub(super) fn rollout_attribution_json(attribution: &TaskJournalRolloutAttributi
 }
 
 pub(super) fn verify_summary_json(verify: &TaskJournalVerifySummary) -> Value {
-    let first_issue = verify.issues.first();
+    let first_issue = verify
+        .issues
+        .iter()
+        .find(|issue| crate::verifier::issue_blocks_in_enforce(issue.kind));
     json!({
         "approved": verify.approved,
         "mode": verify.mode.as_str(),
@@ -66,7 +73,10 @@ pub(super) fn verify_trace_json(
     verify: &TaskJournalVerifySummary,
     plan: Option<&crate::PlanResult>,
 ) -> Value {
-    let first_issue = verify.issues.first();
+    let first_issue = verify
+        .issues
+        .iter()
+        .find(|issue| crate::verifier::issue_blocks_in_enforce(issue.kind));
     json!({
         "approved": verify.approved,
         "mode": verify.mode.as_str(),
@@ -79,7 +89,7 @@ pub(super) fn verify_trace_json(
         "permission_decision": &verify.permission_decision,
         "needs_confirmation": verify.needs_confirmation,
         "issues": verify.issues.iter().map(|issue| {
-            verifier_issue_repair_signal_json(issue, plan)
+            verifier_issue_trace_json(issue, plan)
         }).collect::<Vec<_>>(),
     })
 }
@@ -211,10 +221,32 @@ fn verifier_issue_forbidden_repeat_fingerprint(
     Some(format!("{}:{}", action_ref.trim(), args_fingerprint))
 }
 
-fn verifier_issue_repair_signal_json(
+fn verifier_issue_is_actionable(kind: crate::verifier::VerifyIssueKind) -> bool {
+    crate::verifier::issue_blocks_in_enforce(kind)
+        || kind == crate::verifier::VerifyIssueKind::ConfirmationRequired
+}
+
+fn verifier_issue_trace_json(
     issue: &TaskJournalVerifyIssue,
     plan: Option<&crate::PlanResult>,
 ) -> Value {
+    if !verifier_issue_is_actionable(issue.kind) {
+        return json!({
+            "schema_version": 1,
+            "source": "verifier",
+            "owner_layer": "plan_verifier",
+            "step_id": issue.step_id,
+            "kind": issue.kind.as_str(),
+            "status_code": issue.kind.status_code(),
+            "message_key": issue.kind.message_key(),
+            "reason_code": issue.kind.reason_code(),
+            "severity": "info",
+            "blocking": false,
+            "retryable": false,
+            "missing_fields": issue.missing_fields,
+            "detail": crate::truncate_for_log(&issue.detail),
+        });
+    }
     let rejected_action = plan
         .and_then(|plan| plan.steps.iter().find(|step| step.step_id == issue.step_id))
         .and_then(|step| {
@@ -781,7 +813,8 @@ pub(super) fn verify_repair_signals_json(
     verify
         .into_iter()
         .flat_map(|summary| summary.issues.iter())
-        .map(|issue| verifier_issue_repair_signal_json(issue, plan))
+        .filter(|issue| verifier_issue_is_actionable(issue.kind))
+        .map(|issue| verifier_issue_trace_json(issue, plan))
         .collect()
 }
 

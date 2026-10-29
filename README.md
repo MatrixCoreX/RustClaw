@@ -104,6 +104,10 @@ fallback share their ordered evidence catalog. Model views are redacted and
 budgeted, with explicit completeness and verified range references for oversized
 data; missing evidence never becomes a successful result.
 
+Plan-verifier informational notes remain visible without being reported as
+blocking failures or repair requests. Actual denial and pending confirmation
+retain their distinct machine evidence in teaching and audit views.
+
 ### Request and Agent Loop Flow
 
 ```mermaid
