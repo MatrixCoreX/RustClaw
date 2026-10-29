@@ -72,6 +72,17 @@ jobs:
         with:
           go-version: "1.23.x"
 
+      - name: Install native protocol compiler
+        shell: bash
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          set -euo pipefail
+          if ! command -v protoc >/dev/null 2>&1; then
+            brew install protobuf
+          fi
+          protoc --version
+
       - name: Cache Cargo registry and git
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
