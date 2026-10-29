@@ -43,6 +43,9 @@ CANONICAL_SUITES = {
 
 AUTH_CONTEXT_VALUES = {"user", "admin"}
 METADATA_TAG_RE = re.compile(r"^[A-Za-z0-9_.:+-=]+$")
+INDEXED_OBSERVATION_TAG_RE = re.compile(
+    r"^(?:final_)?observed_field:[A-Za-z_][A-Za-z0-9_]*(?:\[\d+\]|\.[A-Za-z_][A-Za-z0-9_]*)*$"
+)
 TAG_SPLIT_RE = re.compile(r"[,;]")
 
 SIDE_EFFECT_NAME_TOKENS = (
@@ -256,7 +259,8 @@ def looks_like_metadata_tags(value: str) -> bool:
     stripped = value.strip()
     if not stripped:
         return True
-    return all(METADATA_TAG_RE.fullmatch(part.strip()) for part in TAG_SPLIT_RE.split(stripped))
+    return all(METADATA_TAG_RE.fullmatch(part.strip()) or INDEXED_OBSERVATION_TAG_RE.fullmatch(part.strip())
+               for part in TAG_SPLIT_RE.split(stripped))
 
 
 def row_from_prompt(
@@ -348,15 +352,6 @@ def parse_line(source: Path, line: str, index: int, preserve_expects: bool) -> l
             "clarify_chain,client_like,aggregate",
         )
 
-    if first.startswith(("task_updates", "context_", "followup_", "clarify_")):
-        case_name, *turns = cols
-        return expand_turns(
-            source,
-            f"{source_stem}_{case_name}",
-            turns,
-            "turn_chain,client_like,aggregate",
-        )
-
     five = split_five_column(line)
     if len(five) == 5 and five[1].strip().lower() in AUTH_CONTEXT_VALUES:
         # Structured assertion shape:
@@ -386,10 +381,16 @@ def parse_line(source: Path, line: str, index: int, preserve_expects: bool) -> l
             )
         ]
 
-    if len(canonical) == 4 and (
-        first_norm in CANONICAL_SUITES or looks_like_metadata_tags(canonical[2])
-    ):
+    legacy_prefix = first.startswith(("task_updates", "context_", "followup_", "clarify_"))
+    explicit_contract = len(canonical) == 4 and bool(
+        {"requires_tool_call=true", "requires_tool_call=false"}
+        & {tag.lower() for tag in split_tag_values(canonical[2])}
+    )
+    if len(canonical) == 4 and (first_norm in CANONICAL_SUITES or
+        (looks_like_metadata_tags(canonical[2]) and (not legacy_prefix or explicit_contract))):
         suite, name, tags, prompt = canonical
+        if split_tag_values(tags) == ["selection"]:
+            return []
         prompt, stripped_expect = split_expect_suffix(prompt)
         expect = (
             stripped_expect
@@ -414,6 +415,11 @@ def parse_line(source: Path, line: str, index: int, preserve_expects: bool) -> l
                 source=str(source),
             )
         ]
+
+    if legacy_prefix:
+        case_name, *turns = cols
+        return expand_turns(source, f"{source_stem}_{case_name}", turns,
+                            "turn_chain,client_like,aggregate")
 
     if len(cols) >= 4:
         # Legacy multi-turn shape:
@@ -447,6 +453,19 @@ def run_self_test() -> int:
     assert "covers:agent_loop,run_cmd,requires_tool_call=true,local_readonly" in rendered, rendered
     assert "legacy_shape" not in rendered, rendered
     assert rendered.endswith("|expect=machine_token"), rendered
+    indexed = "unknown_suite|indexed|covers:video_generate;requires_tool_call=true;observed_field:outputs[0].path|Prompt body|expect=machine_token"
+    indexed_rows = parse_line(source, indexed, 2, preserve_expects=True)
+    assert len(indexed_rows) == 1 and indexed_rows[0].prompt == "Prompt body", indexed_rows
+    assert "legacy_shape" not in indexed_rows[0].tags
+    assert not looks_like_metadata_tags("observed_field:outputs[not_an_index].path")
+    assert not looks_like_metadata_tags("Use outputs[0].path as the next instruction")
+    context = "context_recovery|seed|group:fixture;requires_tool_call=true;local_readonly|Read the fixture"
+    context_rows = parse_line(source, context, 3, preserve_expects=True)
+    assert len(context_rows) == 1 and context_rows[0].prompt == "Read the fixture", context_rows
+    assert [row.prompt for row in parse_line(source, "followup_fixture|Begin|continue|Finish", 4, False)] == ["Begin", "continue", "Finish"]
+    assert parse_line(source, "fixture|selection_only|selection|selection", 5, False) == []
+    literal = parse_line(source, "fixture|literal|requires_tool_call=false|selection", 6, False)
+    assert len(literal) == 1 and literal[0].prompt == "selection"
     print("CLIENT_LIKE_AGGREGATE_SELF_TEST_OK")
     return 0
 

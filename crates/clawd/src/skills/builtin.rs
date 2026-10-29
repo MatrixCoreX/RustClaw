@@ -647,7 +647,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 .map(str::to_string)
                 .ok_or_else(|| {
                     pre_dispatch_replan_error(builtin_error(
-                        "run_cmd",
+                        skill_name,
                         "invalid_input",
                         "run_cmd.command_required",
                         None,
@@ -661,7 +661,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
             );
             if sanitized_command.is_empty() {
                 return Err(pre_dispatch_replan_error(builtin_error(
-                    "run_cmd",
+                    skill_name,
                     "invalid_input",
                     "run_cmd.empty_command",
                     None,
@@ -671,7 +671,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
             }
             if sanitized_command.len() > state.skill_rt.max_cmd_length {
                 return Err(pre_dispatch_replan_error(builtin_error(
-                    "run_cmd",
+                    skill_name,
                     "invalid_input",
                     "run_cmd.command_too_long",
                     None,
@@ -912,9 +912,9 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 if let Some(task) = task {
                     crate::async_job_contract::persist_prepared_direct_start(
                         state, task,
-                        super::builtin_success_extra(&state.skill_rt.workspace_root, "run_cmd", args),
+                        super::builtin_success_extra(&state.skill_rt.workspace_root, skill_name, args),
                     ).await.map_err(|_| super::structured_skill_error_from_parts(
-                        "run_cmd", "async_start_checkpoint_unavailable", "async_start_checkpoint_unavailable",
+                        skill_name, "async_start_checkpoint_unavailable", "async_start_checkpoint_unavailable",
                         Some(std::env::consts::OS),
                         Some(serde_json::json!({"side_effect_applied":false,"failure_phase":"pre_dispatch","retryable":true})),
                     ))?;

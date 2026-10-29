@@ -26,8 +26,10 @@ SYNTHESIS_PROMPT = ROOT / "prompts/layers/overlays/capability_result_synthesis_p
 MAX_FINALIZER_PRODUCTION_MODULES = 56
 # Phase 4's canonical-result/persona isolation and Phase 5's shared delivery
 # projection added generic finalizer guards without adding a domain branch or
-# registry-skill dependency. Keep the reviewed post-plan total exact.
-MAX_FINALIZER_PRODUCTION_LINES = 18_765
+# registry-skill dependency. Canonical history publication adds eight formatting
+# lines in task.rs: both success/checkpoint payloads now bind state and task to
+# the existing publisher. No domain branch, renderer or module was added.
+MAX_FINALIZER_PRODUCTION_LINES = 18_773
 
 FORBIDDEN_RUNTIME_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("legacy_raw_output_type", re.compile(r"\bRawCommandOutput\b")),

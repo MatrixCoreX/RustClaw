@@ -44,22 +44,56 @@ def case_rows(path: Path) -> list[tuple[int, str, str, set[str], str]]:
 
 def historical_prompts(exclude: Path) -> dict[str, list[str]]:
     prompts: dict[str, list[str]] = {}
+    current = {name: normalized_prompt(prompt) for _, name, _, _, prompt in case_rows(exclude)}
+    cache: dict[Path, list[tuple[int, str, str, str | None]]] = {}
+
+    def entries(path: Path) -> list[tuple[int, str, str, str | None]]:
+        if path in cache:
+            return cache[path]
+        rows = []
+        source = None
+        for line_no, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            line = raw.strip()
+            if line.startswith(("# source:", "# source=")):
+                source = line[len("# source:"):] if line.startswith("# source:") else line[len("# source="):]
+                source = source.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("|", 4)
+            if len(parts) >= 4:
+                rows.append((line_no, parts[1].strip(), normalized_prompt(parts[3]), source))
+        cache[path] = rows
+        return rows
+
+    def replay(path: Path, name: str, prompt: str, source: str | None,
+               seen: frozenset[Path] = frozenset()) -> bool:
+        if current.get(name) == prompt:
+            return True
+        if not source or path in seen or len(seen) >= 8:
+            return False
+        parent = ROOT / source
+        if parent.is_symlink():
+            return False
+        parent = parent.resolve()
+        if not parent.is_relative_to(CASES_ROOT.resolve()) or not parent.is_file():
+            return False
+        # A derived row may prefix its source case name, but the declared source
+        # must actually contain that named prompt. A suffix alone is not proof.
+        return any(value == prompt and (name == origin or name.endswith("_" + origin))
+            and replay(parent, origin, value, upstream, seen | {path})
+            for _, origin, value, upstream in entries(parent))
+
     for path in sorted(CASES_ROOT.iterdir()):
-        if path == exclude or not path.is_file() or path.suffix not in {".txt", ".jsonl"}:
+        if path == exclude or path.is_symlink() or not path.is_file() or path.suffix not in {".txt", ".jsonl"}:
             continue
         if path.suffix == ".jsonl":
             # JSONL corpora are generated protocol fixtures; their source NL rows
             # also live in text suites and are covered there.
             continue
-        for line_no, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            line = raw.strip()
-            if not line or line.startswith("#"):
+        for line_no, name, prompt, source in entries(path):
+            if replay(path, name, prompt, source):
                 continue
-            parts = line.split("|", 4)
-            if len(parts) < 4:
-                continue
-            prompt = parts[3].strip()
-            prompts.setdefault(normalized_prompt(prompt), []).append(
+            prompts.setdefault(prompt, []).append(
                 f"{path.relative_to(ROOT)}:{line_no}"
             )
     return prompts

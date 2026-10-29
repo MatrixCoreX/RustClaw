@@ -47,8 +47,8 @@ Live provider 测试是验收证据，不能把某个失败句子直接编码成
 打印带编号的原始 `LLM#1..N` 请求/返回字段。
 
 Release-gate 等价子集根据机器 case metadata 生成，不分析 prompt 文案。当前
-生成器选择 285 条 case，覆盖全部 217 个声明类别。分片重跑使用
-`summarize_rollout_metrics.py --dedupe-latest-case --expect-case-count 285`
+生成器选择 298 条 case，覆盖全部 507 个声明类别。分片重跑使用
+`summarize_rollout_metrics.py --dedupe-latest-case --expect-case-count 298`
 汇总；门禁记录通过率、LLM/工具调用分布、延迟、checkpoint、repair、provider
 错误、重复调用、prompt 字节、截断和语言覆盖。媒体生成保持 dry-run，
 X/Twitter live mutation 被排除；受影响的真实图片理解与音频输入合同另行验收。

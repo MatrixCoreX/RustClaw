@@ -49,7 +49,8 @@ pub(super) fn observed_step_body(step: &crate::executor::StepExecutionResult) ->
         return (!sanitized.trim().is_empty()).then_some(sanitized);
     }
     if step.skill == "run_cmd" && run_cmd_body_allows_command_output_observation(body) {
-        let observation = command_result_observation(body).unwrap_or_else(|| body.to_string());
+        let observation =
+            command_result_observation(&step.skill, body).unwrap_or_else(|| body.to_string());
         let sanitized = crate::visible_text::sanitize_user_visible_text(&observation);
         return (!sanitized.trim().is_empty())
             .then(|| format!("command_output:\n{}", sanitized.trim()));
@@ -63,9 +64,11 @@ pub(super) fn observed_step_body(step: &crate::executor::StepExecutionResult) ->
     (!sanitized.trim().is_empty()).then_some(sanitized)
 }
 
-fn command_result_observation(body: &str) -> Option<String> {
+fn command_result_observation(expected_source: &str, body: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(body).ok()?;
-    if value.get("source")?.as_str()? != "run_cmd" || value.get("schema_version")?.as_u64()? != 1 {
+    if value.get("source")?.as_str()? != expected_source
+        || value.get("schema_version")?.as_u64()? != 1
+    {
         return None;
     }
     let output = value.get("command_output")?.as_str()?;
@@ -76,13 +79,17 @@ fn command_result_observation(body: &str) -> Option<String> {
     // Keep execution facts ahead of output; echoed input must not consume the evidence budget.
     let metadata = serde_json::json!({
         "schema_version": 1,
-        "source": "run_cmd",
+        "source": expected_source,
         "exit_code": exit_code,
         "complete": value.get("complete").and_then(serde_json::Value::as_bool),
         "output_truncated": value.get("output_truncated").and_then(serde_json::Value::as_bool),
     });
     Some(format!("execution_metadata={metadata}\n{output}"))
 }
+
+#[cfg(test)]
+#[path = "observed_output_entries_source_tests.rs"]
+mod source_tests;
 
 pub(super) fn observed_step_entry(step: &crate::executor::StepExecutionResult) -> Option<String> {
     let output = observed_step_body(step)?;

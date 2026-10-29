@@ -948,6 +948,8 @@ crates/clawd/src/worker/mod.rs	invalid payload_json for task {}: {error}
 crates/clawd/src/worker/mod.rs	{prefix}\n{job_id_label}: {job_id}
 crates/clawd/src/worker/resume_replay_executor.rs	resume replay seeded agent loop failed
 crates/clawd/src/worker/run_skill_finalize.rs	run-skill:{}:async-job:{}
+# Machine checkpoint identity also used by prepared-start; not user prose.
+crates/clawd/src/async_job_contract/prepared_start.rs	run-skill:{}:async-job:{}
 crates/clawd/src/worker/run_skill_finalize.rs	run_skill:{skill_name}:async_job:{}
 crates/clawd/src/worker/run_skill_mutation.rs	run-skill:{}:mutation-reconciliation
 crates/clawd/src/worker/runtime_support/background_workers.rs	channel terminal delivery retry budget exhausted

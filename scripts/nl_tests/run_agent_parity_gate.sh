@@ -488,6 +488,7 @@ echo "AGENT_PARITY_GATE_STEP maintainability_skill_contracts"
   python3 "${ROOT_DIR}/scripts/check_builtin_capability_inventory.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_builtin_capability_inventory.py"
   python3 "${SCRIPT_DIR}/check_fresh_builtin_tool_skill_suite.py" --self-test
+  python3 -m unittest discover -s "${SCRIPT_DIR}" -p fresh_builtin_tool_skill_suite_tests.py
   python3 "${SCRIPT_DIR}/check_fresh_builtin_tool_skill_suite.py"
   python3 "${ROOT_DIR}/scripts/check_skill_hotplug_coupling_inventory.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_skill_hotplug_coupling_inventory.py"
@@ -551,6 +552,8 @@ echo "AGENT_PARITY_GATE_STEP nl_suite_checker_self_tests"
   python3 "${SCRIPT_DIR}/manual_workspace_assertions_tests.py"
   python3 "${SCRIPT_DIR}/manual_trace_evidence_tests.py"
   python3 "${SCRIPT_DIR}/manual_case_lifecycle_tests.py"
+  python3 "${SCRIPT_DIR}/check_workspace_space.py" --help > /dev/null
+  python3 "${SCRIPT_DIR}/check_workspace_space_tests.py"
   python3 "${SCRIPT_DIR}/live_suite_report_tests.py"
   python3 "${SCRIPT_DIR}/replay_verifier_candidate_tests.py"
   python3 "${SCRIPT_DIR}/../agent_loop_trace_release_gate_tests.py" 2>&1
