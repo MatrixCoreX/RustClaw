@@ -96,6 +96,14 @@ sends require an owner decision and snapshot check before retry, with manual
 confirmation distinct from provider proof. See [context and recovery](docs/architecture/03-task-state-context.md)
 and [delivery recovery](docs/architecture/11-task-artifact-delivery.md).
 
+A malformed or internally contradictory verifier audit is a verification-protocol
+failure, not proof that completed work failed. It follows the bounded
+verification-only checkpoint path; exhausted retries require user intervention.
+When canonical capability results exist, terminal synthesis and observed-output
+fallback share their ordered evidence catalog. Model views are redacted and
+budgeted, with explicit completeness and verified range references for oversized
+data; missing evidence never becomes a successful result.
+
 ### Request and Agent Loop Flow
 
 ```mermaid
@@ -160,7 +168,7 @@ flowchart TD
     Y --> AV{Answer verification}
     AV -->|not_required / passed| Z[Output-contract guard + task result]
     AV -->|failed| WR
-    AV -->|unavailable| BC
+    AV -->|provider unavailable / invalid audit| BC
     Z --> AA[Channel delivery]
     Z --> AB[Journal + session update]
     AB --> AD[Task event stream<br/>goal + context + transition + checkpoint + tool/coding/team events]

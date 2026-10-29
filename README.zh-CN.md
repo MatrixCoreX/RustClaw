@@ -84,6 +84,11 @@ UI/CLI 分开显示三种状态。结果不明的投送须由当前用户确认�
 用户确认不会冒充平台送达证明。详见[上下文与恢复](docs/architecture/03-task-state-context.zh-CN.md)
 和[投送恢复](docs/architecture/11-task-artifact-delivery.zh-CN.md)。
 
+验证器返回格式错误或内部自相矛盾的审计时，属于验证协议失败，不代表已经完成的工作失败。
+此时走有界的验证专用 checkpoint；重试耗尽后等待用户处理。有规范能力结果时，终态合成
+与 observed-output 兜底复用按执行顺序保留的证据目录。给模型的视图经过脱敏与预算限制，
+明确标记完整性，超大数据提供经验证的范围引用；缺少证据不能冒充执行成功。
+
 ### 请求与 Agent Loop 流程
 
 ```mermaid
@@ -148,7 +153,7 @@ flowchart TD
     Y --> AV{答案验证状态}
     AV -->|not_required / passed| Z[输出契约护栏 + 任务结果]
     AV -->|failed| WR
-    AV -->|unavailable| BC
+    AV -->|服务商不可用或审计协议无效| BC
     Z --> AA[通道交付]
     Z --> AB[Journal + 会话更新]
     AB --> AD[Task event stream<br/>goal + 上下文 + 状态迁移 + checkpoint + 工具/coding/team 事件]

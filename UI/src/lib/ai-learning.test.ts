@@ -268,6 +268,31 @@ test("task artifact guide is visible in operator and developer learning routes",
   }
 });
 
+test("context learning pages retain verification recovery and canonical evidence contracts", () => {
+  const root = repositoryRoot();
+  for (const file of [
+    "03-task-state-context.md",
+    "03-task-state-context.zh-CN.md",
+  ]) {
+    const pages = parseStandaloneLearningPages({
+      id: file,
+      chapterId: "architecture-guide",
+      chapterTitle: "Architecture Guide",
+      markdown: readFileSync(resolve(root, "docs/architecture", file), "utf8"),
+    });
+    const recovery = pages.find((page) => page.markdown.includes("answer_verifier_response_invalid"));
+    assert.ok(recovery, `${file}: verification protocol recovery must be visible`);
+    assert.match(recovery.markdown, /`needs_user`/);
+    const evidence = pages.find((page) => page.markdown.includes("canonical_capability_evidence"));
+    assert.ok(evidence, `${file}: canonical finalization evidence must be visible`);
+    assert.match(evidence.markdown, /`model_view_complete`/);
+    for (const page of [recovery, evidence]) {
+      assert.equal(page.stageId, "context-memory");
+      assert.deepEqual(page.audiences, ["operator", "developer"]);
+    }
+  }
+});
+
 test("applies explicit audience metadata and stage defaults", () => {
   const pages = parseReadmeLearningPages(`<!-- ai-learning-stage: foundations -->
 ## Start

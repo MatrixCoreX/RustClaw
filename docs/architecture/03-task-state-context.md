@@ -36,6 +36,15 @@ attempt. Only accepted verification publishes the candidate. Rewritten answers r
 explicit acceptance. Private checkpoint clones share an immutable snapshot rather
 than copying its full JSON tree.
 
+Invalid responses include schema failures and internally contradictory operation
+audits, such as an audit claiming success while marking the same observed method
+as blocked. The host classifies these as `answer_verifier_response_invalid`;
+it does not change an audit boolean to force acceptance. The same candidate-bound
+retry counter applies, ending in `needs_user` after exhaustion. A subprocess probe
+that successfully records an expected child-test failure is evaluated from the
+outer execution receipt and captured child result separately. This distinction
+does not turn an actual failed execution or missing method into success.
+
 The UI and CLI show execution, verification and delivery independently. Completed
 execution does not imply a verified answer or a delivered channel message.
 
@@ -104,6 +113,24 @@ unavailable, the runtime emits a flat public machine record rather than a raw
 provider body or fixed language-specific sentence. Completed actions stay
 completed and remaining actions stay paused.
 
+### Evidence Used During Finalization
+
+When the current loop has canonical capability results, terminal synthesis and
+the observed-output fallback use the same `canonical_capability_evidence`
+catalog. Each result retains its ordinal, evidence identity, digest and status,
+including early observations and errors. Raw step text cannot replace a
+canonical result. Before a model sees a result, retrieval references are verified
+and sensitive fields are removed.
+
+The catalog's `model_view_complete` describes the budgeted model view, not whether
+an operation succeeded. Oversized filtered data is stored in an immutable
+task-owned artifact and exposed through a verified range handle with explicit
+partial-view metadata. The model must not invent omitted values; unavailable or
+invalid evidence cannot be represented as a complete observation. Artifact-write
+failures remain explicit. This catalog is a finalization view, not a replacement
+for the separately authorized historical recall API or an instruction to repeat
+an operation.
+
 The teaching panel shows the included memory/KB evidence count and pages of 12
 items. Each item can reveal its complete source reference and inclusion reason;
 the raw machine record remains separately expandable. Changing the task resets
@@ -147,8 +174,8 @@ flowchart TD
     LV -->|yes| VV[Retry answer verification only]
     LV -->|no| E
     VV -->|passed| M
-    VV -->|provider wait / format retry remaining| G
-    VV -->|format retries exhausted / non-retryable| N
+    VV -->|provider wait / invalid response retries remaining| G
+    VV -->|invalid response retries exhausted / non-retryable| N
     VV -->|rejected or instruction changed| E
     F -->|needs_user| N[Persist user-input state]
     N --> J
