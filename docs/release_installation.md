@@ -158,6 +158,9 @@ and sufficient per-user quota: `release_staging_quota_exceeded` and
 `release_staging_space_exhausted` stop extraction before runtime replacement.
 Choose a user-owned native filesystem with enough staging space through `TMPDIR`;
 do not remove business data or weaken signature checks to bypass these errors.
+Rollback roots and per-update directories are owner-private (`0700`); compressed
+rollback files are created as `0600`. A symlinked rollback root is rejected before
+runtime replacement, and each update receives a unique directory.
 
 A developer Git checkout must be clean in release-managed paths and match the
 signed package's source commit. Align it through the separate developer workflow

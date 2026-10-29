@@ -296,6 +296,17 @@ import sys
 from pathlib import Path
 assert stat.S_IMODE(Path(sys.argv[1]).stat().st_mode) == 0o700
 PY
+python3 - "$RUNTIME/.release-backups" <<'PY'
+from pathlib import Path
+import stat
+import sys
+root = Path(sys.argv[1])
+assert stat.S_IMODE(root.stat().st_mode) == 0o700
+for backup in root.iterdir():
+    assert backup.is_dir() and not backup.is_symlink()
+    assert stat.S_IMODE(backup.stat().st_mode) == 0o700
+    assert stat.S_IMODE((backup / 'files.tar.gz').stat().st_mode) == 0o600
+PY
 ! grep -Fq 'release=8.0.0' <<< "$OUTPUT"
 grep -Fxq 'ubuntu-x86_64-newest' "$RUNTIME/.release-tag"
 
@@ -874,4 +885,20 @@ if "$DEPLOY_SCRIPT" --root "$GIT_RUNTIME" --platform ubuntu-x86_64 \
 fi
 grep -Fq 'source_revision_mismatch' "$TMP_ROOT/mismatched-source.log"
 grep -Fxq 'uncommitted developer work' "$GIT_RUNTIME/optional_skills/store_fixture/src/developer.rs"
+LINKED_BACKUP_RUNTIME="$TMP_ROOT/linked-backup-runtime"
+LINKED_BACKUP_TARGET="$TMP_ROOT/linked-backup-target"
+mkdir -p "$LINKED_BACKUP_RUNTIME/configs" "$LINKED_BACKUP_TARGET"
+printf 'retain-local-config\n' > "$LINKED_BACKUP_RUNTIME/configs/config.toml"
+printf 'retain-outside-backup\n' > "$LINKED_BACKUP_TARGET/marker"
+ln -s "$LINKED_BACKUP_TARGET" "$LINKED_BACKUP_RUNTIME/.release-backups"
+if "$DEPLOY_SCRIPT" --root "$LINKED_BACKUP_RUNTIME" --platform ubuntu-x86_64 \
+  --local-release-dir "$GIT_BUNDLE" --tag ubuntu-x86_64-source-fixture --force --no-restart \
+  > "$TMP_ROOT/linked-backup.log" 2>&1; then
+  echo 'symlinked rollback root unexpectedly accepted' >&2
+  exit 1
+fi
+grep -Fq 'release_backup_root_invalid' "$TMP_ROOT/linked-backup.log"
+grep -Fxq 'retain-local-config' "$LINKED_BACKUP_RUNTIME/configs/config.toml"
+grep -Fxq 'retain-outside-backup' "$LINKED_BACKUP_TARGET/marker"
+test ! -e "$LINKED_BACKUP_RUNTIME/target/release/clawd"
 echo "DEPLOY_GITHUB_RELEASE_TESTS ok"

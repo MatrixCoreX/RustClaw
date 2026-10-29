@@ -29,3 +29,14 @@ fn argument_redaction_preserves_null_empty_and_scalar_shapes() {
     }
     assert_eq!(redact(&deep, 0), Err("context_value_too_deep"));
 }
+
+#[test]
+fn credential_bearing_url_values_are_redacted_without_normalizing_public_urls() {
+    let input = json!({"url":"https://fixture-user:fixture-password@example.test/read",
+        "public":"https://example.test", "nested":["https://:fixture-password@example.test/"]});
+    assert_eq!(
+        redact(&input, 0).unwrap(),
+        json!({"url":"https://example.test/read",
+        "public":"https://example.test", "nested":["https://example.test/"]})
+    );
+}

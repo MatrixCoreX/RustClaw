@@ -323,6 +323,41 @@ fn successful_result_promotes_generic_page_retry_and_verification_metadata() {
 }
 
 #[test]
+fn shared_step_result_captures_safe_arguments_for_success_and_failure() {
+    use crate::executor::{StepExecutionResult, StepExecutionStatus};
+    for status in [StepExecutionStatus::Ok, StepExecutionStatus::Error] {
+        let ok = status == StepExecutionStatus::Ok;
+        let step = StepExecutionResult {
+            step_id: "argument_capture".into(),
+            skill: "fixture".into(),
+            status,
+            output: ok.then(|| "observed".into()),
+            error: (!ok).then(|| "fixture_failed".into()),
+            started_at: 1,
+            finished_at: 2,
+        };
+        let args = json!({"path":"README.md","mode":"head","n":1,"apiKey":"private-fixture"});
+        let envelope = super::envelope_for_step_execution("fixture", &args, &step, None).unwrap();
+        assert_eq!(
+            envelope.provenance["continuation_args"],
+            json!({"path":"README.md","mode":"head","n":1})
+        );
+        assert_eq!(
+            envelope.provenance["continuation_args_projection"]["schema_version"],
+            2
+        );
+        assert_eq!(
+            envelope.provenance["continuation_args_projection"]["truncated"],
+            false
+        );
+        assert_eq!(
+            envelope.provenance["continuation_args_projection"]["complete_fields"],
+            json!(["mode", "n", "path"])
+        );
+    }
+}
+
+#[test]
 fn weather_result_preserves_structured_fields_for_generic_synthesis() {
     let output = json!({
         "text": "provider-localized fallback",

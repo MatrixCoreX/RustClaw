@@ -103,7 +103,9 @@ fn workspace_update_nginx_scripts_cover_upgrade_disable_and_release_packaging() 
 
     let package_script = include_str!("../../../../package-release.sh");
     assert!(package_script.contains("copy_if_exists \"deploy-ui-nginx.sh\""));
-    assert!(package_script.contains("copy_if_exists \"scripts\""));
+    assert!(package_script.contains("scripts/stage_release_scripts.py"));
+    assert!(package_script.contains("\"$SCRIPT_DIR/scripts\" \"$STAGE_PROJECT_DIR/scripts\""));
+    assert!(!package_script.contains("copy_if_exists \"scripts\""));
 }
 
 #[test]

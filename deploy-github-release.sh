@@ -1393,8 +1393,30 @@ PY
 fi
 
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-BACKUP_DIR="$ROOT_DIR/.release-backups/${INSTALLED_TAG:-unversioned}-${TIMESTAMP}"
-mkdir -p "$BACKUP_DIR"
+BACKUP_DIR="$(python3 - "$ROOT_DIR/.release-backups" "${INSTALLED_TAG:-unversioned}" "$TIMESTAMP" <<'PY'
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+import tempfile
+
+root = Path(sys.argv[1])
+if not re.fullmatch(r'[A-Za-z0-9._+-]{1,160}', sys.argv[2]):
+    raise SystemExit('release_installed_tag_invalid')
+if root.is_symlink() or (root.exists() and not root.is_dir()):
+    raise SystemExit('release_backup_root_invalid')
+root.mkdir(mode=0o700, exist_ok=True)
+descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    if os.geteuid() != 0 and os.fstat(descriptor).st_uid != os.geteuid():
+        raise SystemExit('release_backup_owner_invalid')
+    os.fchmod(descriptor, 0o700)
+finally:
+    os.close(descriptor)
+print(tempfile.mkdtemp(prefix=f'{sys.argv[2]}-{sys.argv[3]}-', dir=root))
+PY
+)"
 MANAGED_PATHS_FILE="$WORK_DIR/managed-paths.txt"
 EXISTING_PATHS_FILE="$WORK_DIR/existing-paths.txt"
 NEW_CONFIG_PATHS_FILE="$WORK_DIR/new-config-paths.txt"
@@ -1502,11 +1524,14 @@ while IFS= read -r relative; do
     printf '%s\n' "$relative" >> "$EXISTING_PATHS_FILE"
   fi
 done < "$MANAGED_PATHS_FILE"
-if [[ -s "$EXISTING_PATHS_FILE" ]]; then
-  tar -czf "$BACKUP_DIR/files.tar.gz" -C "$ROOT_DIR" -T "$EXISTING_PATHS_FILE"
-else
-  tar -czf "$BACKUP_DIR/files.tar.gz" --files-from /dev/null
-fi
+(
+  umask 077
+  if [[ -s "$EXISTING_PATHS_FILE" ]]; then
+    tar -czf "$BACKUP_DIR/files.tar.gz" -C "$ROOT_DIR" -T "$EXISTING_PATHS_FILE"
+  else
+    tar -czf "$BACKUP_DIR/files.tar.gz" --files-from /dev/null
+  fi
+)
 cp "$MANAGED_PATHS_FILE" "$BACKUP_DIR/managed-paths.txt"
 cp "$EXISTING_PATHS_FILE" "$BACKUP_DIR/existing-paths.txt"
 

@@ -1588,16 +1588,6 @@ pub(super) async fn execute_prepared_skill_action(
     if let Some(provenance) = capability_result.provenance.as_object_mut() {
         provenance.insert("task_id".to_string(), json!(task.task_id));
         provenance.insert("action_fingerprint".to_string(), json!(fingerprint));
-        let (args, truncated, complete_fields) =
-            crate::routing_context::bounded_execution_argument_value(classification_args);
-        provenance.insert(
-            "continuation_args_projection".into(),
-            json!({"schema_version":2,"redacted":true,"truncated":truncated,
-                "complete_fields":complete_fields}),
-        );
-        if let Some(args) = args {
-            provenance.insert("continuation_args".to_string(), args);
-        }
         if super::workspace_action_revision::local_primitive_path(
             state,
             &crate::AgentAction::CallSkill {

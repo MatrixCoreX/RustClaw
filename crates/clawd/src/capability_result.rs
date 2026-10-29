@@ -116,25 +116,28 @@ pub(crate) fn envelope_for_step_execution(
     step: &crate::executor::StepExecutionResult,
     extra: Option<&Value>,
 ) -> Result<CapabilityResultEnvelope, CapabilityResultValidationError> {
-    if step.status == crate::executor::StepExecutionStatus::Ok {
-        if let Some(output) = step.output.as_deref() {
-            return build_successful_execution_envelope(
-                capability,
-                &step.step_id,
-                args,
-                output,
-                extra,
-            );
+    let mut envelope = match (&step.status, step.output.as_deref()) {
+        (crate::executor::StepExecutionStatus::Ok, Some(output)) => {
+            build_successful_execution_envelope(capability, &step.step_id, args, output, extra)
         }
+        _ => build_failed_execution_envelope(
+            capability,
+            &step.step_id,
+            args,
+            step.error
+                .as_deref()
+                .unwrap_or("capability_execution_failed"),
+        ),
+    }?;
+    let (args, truncated, complete_fields) =
+        crate::routing_context::bounded_execution_argument_value(args);
+    envelope.provenance["continuation_args_projection"] = json!({
+        "schema_version":2,"redacted":true,"truncated":truncated,"complete_fields":complete_fields});
+    if let Some(args) = args {
+        envelope.provenance["continuation_args"] = args;
     }
-    build_failed_execution_envelope(
-        capability,
-        &step.step_id,
-        args,
-        step.error
-            .as_deref()
-            .unwrap_or("capability_execution_failed"),
-    )
+    envelope.validate()?;
+    Ok(envelope)
 }
 
 pub(crate) fn settle_waiting_async_result(

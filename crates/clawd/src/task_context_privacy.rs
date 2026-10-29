@@ -18,9 +18,23 @@ pub(crate) fn redact(value: &Value, depth: usize) -> Result<Value, &'static str>
                 .map(|v| redact(v, depth + 1))
                 .collect::<Result<_, _>>()?,
         ),
-        Value::String(text) => Value::String(crate::visible_text::redact_sensitive_text(text)),
+        Value::String(text) => Value::String(redact_value_text(text)),
         other => other.clone(),
     })
+}
+
+fn redact_value_text(text: &str) -> String {
+    let safe = crate::visible_text::redact_sensitive_text(text);
+    let Ok(mut url) = reqwest::Url::parse(&safe) else {
+        return safe;
+    };
+    if url.username().is_empty() && url.password().is_none() {
+        return safe;
+    }
+    if url.set_username("").is_err() || url.set_password(None).is_err() {
+        return "[REDACTED]".into();
+    }
+    url.into()
 }
 
 pub(crate) fn sensitive_key(key: &str) -> bool {
