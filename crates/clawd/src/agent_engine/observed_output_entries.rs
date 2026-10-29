@@ -49,7 +49,8 @@ pub(super) fn observed_step_body(step: &crate::executor::StepExecutionResult) ->
         return (!sanitized.trim().is_empty()).then_some(sanitized);
     }
     if step.skill == "run_cmd" && run_cmd_body_allows_command_output_observation(body) {
-        let sanitized = crate::visible_text::sanitize_user_visible_text(body);
+        let observation = command_result_observation(body).unwrap_or_else(|| body.to_string());
+        let sanitized = crate::visible_text::sanitize_user_visible_text(&observation);
         return (!sanitized.trim().is_empty())
             .then(|| format!("command_output:\n{}", sanitized.trim()));
     }
@@ -60,6 +61,27 @@ pub(super) fn observed_step_body(step: &crate::executor::StepExecutionResult) ->
     }
     let sanitized = crate::visible_text::sanitize_user_visible_text(body);
     (!sanitized.trim().is_empty()).then_some(sanitized)
+}
+
+fn command_result_observation(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    if value.get("source")?.as_str()? != "run_cmd" || value.get("schema_version")?.as_u64()? != 1 {
+        return None;
+    }
+    let output = value.get("command_output")?.as_str()?;
+    let exit_code = value.get("exit_code")?;
+    if !exit_code.is_null() && exit_code.as_i64().is_none() {
+        return None;
+    }
+    // Keep execution facts ahead of output; echoed input must not consume the evidence budget.
+    let metadata = serde_json::json!({
+        "schema_version": 1,
+        "source": "run_cmd",
+        "exit_code": exit_code,
+        "complete": value.get("complete").and_then(serde_json::Value::as_bool),
+        "output_truncated": value.get("output_truncated").and_then(serde_json::Value::as_bool),
+    });
+    Some(format!("execution_metadata={metadata}\n{output}"))
 }
 
 pub(super) fn observed_step_entry(step: &crate::executor::StepExecutionResult) -> Option<String> {

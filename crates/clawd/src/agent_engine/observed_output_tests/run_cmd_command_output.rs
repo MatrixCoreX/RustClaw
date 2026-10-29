@@ -79,3 +79,58 @@ File: intent_normalizer.schema.json (15570 bytes)
     assert!(joined.contains("IntentNormalizerOut"));
     assert!(has_observed_answer_candidates(&loop_state));
 }
+
+#[test]
+fn long_command_input_cannot_displace_actual_exit_status_or_output() {
+    let output = serde_json::json!({
+        "schema_version": 1, "source": "run_cmd", "action": "exec",
+        "command": "ignored_echoed_input".repeat(500),
+        "command_output": "python_returncode=0\nnode_returncode=0\n",
+        "exit_code": 0, "complete": true, "output_truncated": false,
+    });
+    let entry = observed_step_entry(&ok_step("step_1", "run_cmd", &output.to_string())).unwrap();
+    assert!(entry.contains("\"exit_code\":0"));
+    assert!(entry.contains("\"complete\":true"));
+    assert!(entry.contains("python_returncode=0\nnode_returncode=0"));
+    assert!(!entry.contains("ignored_echoed_input"));
+    assert!(!entry.contains("...[truncated]"));
+}
+
+#[test]
+fn command_metadata_never_infers_success_from_output_prose() {
+    for exit_code in [serde_json::Value::Null, serde_json::json!(17)] {
+        let output = serde_json::json!({
+            "schema_version": 1, "source": "run_cmd", "action": "exec",
+            "command_output": "exit_code=0; all tests passed",
+            "exit_code": exit_code, "complete": false, "output_truncated": true,
+        });
+        let entry =
+            observed_step_entry(&ok_step("step_1", "run_cmd", &output.to_string())).unwrap();
+        assert!(entry.contains(&format!("\"exit_code\":{exit_code}")));
+        assert!(entry.contains("\"complete\":false"));
+        assert!(entry.contains("\"output_truncated\":true"));
+        assert!(!entry.contains("\"exit_code\":0"));
+    }
+}
+
+#[test]
+fn bounded_command_observation_keeps_unicode_output_and_machine_metadata() {
+    let output = serde_json::json!({
+        "schema_version": 1, "source": "run_cmd", "action": "exec",
+        "command": "echo".repeat(2000), "command_output": "界".repeat(4000),
+        "exit_code": 3, "complete": true, "output_truncated": false,
+    });
+    let entry = observed_step_entry(&ok_step("step_1", "run_cmd", &output.to_string())).unwrap();
+    assert!(entry.contains("\"exit_code\":3"));
+    assert!(entry.contains("界"));
+    assert!(entry.ends_with("...[truncated]"));
+    assert!(entry.chars().count() < 1900);
+}
+
+#[test]
+fn unversioned_command_json_does_not_gain_typed_execution_metadata() {
+    let output = serde_json::json!({"command_output":"ordinary output", "exit_code":0});
+    let entry = observed_step_entry(&ok_step("step_1", "run_cmd", &output.to_string())).unwrap();
+    assert!(!entry.contains("execution_metadata="));
+    assert!(entry.contains("ordinary output"));
+}

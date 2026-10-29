@@ -30,10 +30,12 @@ fi
 }
 cd "$ROOT"
 mkdir -p "$ROOT/tmp"
-STATE="$(mktemp -d "$ROOT/tmp/agent-runtime-nl-isolated-continuity-XXXXXX")"
-echo "isolated_test_state=$STATE"
 SNAPSHOT_ROOT="${NL_BINARY_SNAPSHOT_ROOT:-$ROOT/target/nl-runtime-snapshots}"
 mkdir -p "$SNAPSHOT_ROOT"
+python3 scripts/nl_tests/check_workspace_space.py --binary "$BINARY" \
+  --state-root "$ROOT/tmp" --snapshot-root "$SNAPSHOT_ROOT"
+STATE="$(mktemp -d "$ROOT/tmp/agent-runtime-nl-isolated-continuity-XXXXXX")"
+echo "isolated_test_state=$STATE"
 SNAPSHOT="$(mktemp -d "$SNAPSHOT_ROOT/run-XXXXXX")/clawd"
 cp -p "$BINARY" "$SNAPSHOT"
 python3 - "$BINARY" "$SNAPSHOT" "$STATE/binary-evidence.json" <<'PY'
