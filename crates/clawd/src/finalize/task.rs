@@ -7,7 +7,6 @@ use crate::{repo, AppState};
 #[path = "task_answer_verification.rs"]
 mod task_answer_verification;
 use task_answer_verification::apply_exact_observation_machine_field_delivery;
-pub(crate) use task_answer_verification::checkpoint_unavailable_verification;
 #[path = "task_answer_verifier_failure.rs"]
 mod task_answer_verifier_failure;
 #[path = "task_content_evidence_delivery.rs"]
@@ -736,7 +735,7 @@ pub(crate) async fn finalize_ask_result(
                     }
                 }
             }
-            if task_answer_verification::checkpoint_unavailable_verification(
+            if crate::answer_verifier::checkpoint_unavailable_verification(
                 state,
                 task,
                 &mut journal,

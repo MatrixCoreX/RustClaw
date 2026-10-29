@@ -6,6 +6,9 @@ use claw_core::skill_registry::{
 };
 use serde_json::Value;
 
+#[path = "capability_map_loader_contract.rs"]
+pub(crate) mod loader_contract;
+
 const UNGROUPED_CAPABILITY_TOKEN: &str = "ungrouped";
 const NATIVE_GROUP_DESCRIPTION_CHAR_BUDGET: usize = 2_048;
 const NATIVE_GROUP_TOOL_NAME_CHAR_BUDGET: usize = 64;
@@ -1001,10 +1004,7 @@ fn build_capability_map_for_task_with_scope(
         let loadable = planner_loadable_capability_group_names_for_task(state, task, loaded_skills);
         if !loadable.is_empty() {
             lines.push(format!("loadable_capability_groups={}", loadable.join(",")));
-            lines.push(
-                "capability_group_loader=call_tool:load_capability_groups; args=nonempty_groups[]; selected_scopes_persist=true"
-                    .to_string(),
-            );
+            lines.push(loader_contract::planner_hint(&loadable));
         }
     }
 

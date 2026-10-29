@@ -22,9 +22,7 @@ use super::{
 };
 use crate::{llm_gateway, AgentAction, AppState, ClaimedTask, PlanKind, PlanResult};
 
-#[path = "planning/native_capability_catalog_tool.rs"]
-mod native_capability_catalog_tool;
-use native_capability_catalog_tool::native_capability_loader_tool_definition;
+use crate::capability_map::loader_contract::tool_definition as native_capability_loader_tool_definition;
 #[path = "planning/context_length_recovery.rs"]
 mod context_length_recovery;
 use context_length_recovery::{compact_text_to_token_budget, context_length_recovery_request};

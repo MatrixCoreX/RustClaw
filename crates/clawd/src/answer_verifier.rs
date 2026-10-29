@@ -29,6 +29,9 @@ mod answer_verification;
 pub(crate) use answer_verification::{
     AnswerVerificationOutcome, AnswerVerificationRecord, AnswerVerificationStatus,
 };
+#[path = "answer_verification_recovery.rs"]
+mod answer_verification_recovery;
+pub(crate) use answer_verification_recovery::checkpoint_unavailable_verification;
 
 #[derive(Debug, Clone)]
 pub(crate) struct AnswerContract {

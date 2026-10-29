@@ -3,6 +3,10 @@ use super::*;
 #[test]
 fn group_loader_requires_nonempty_machine_tokens_without_an_arbitrary_count_cap() {
     assert_eq!(
+        parse_requested_groups(&json!({"nonempty_groups": ["fixture"]})).unwrap_err(),
+        "capability_group_load_groups_missing"
+    );
+    assert_eq!(
         parse_requested_groups(&json!({"groups": []})).unwrap_err(),
         "capability_group_load_count_invalid"
     );
@@ -61,7 +65,7 @@ fn group_loader_expands_only_exact_registry_groups() {
         &state,
         &task,
         &mut loop_state,
-        &json!({"groups": [&group]}),
+        &json!({"op": "load_groups", "groups": [&group]}),
         &format!("load:{group}"),
         1,
         1,

@@ -4,7 +4,7 @@
 # Run:
 #   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt --prompt-reply-only --quality-guard
 # include_risky=False
-# stats=files_seen=263 files_skipped_risky=3 files_skipped_temp=0 rows_deduped=2455 rows_emitted=2479 rows_expect_dropped=1592 rows_output=2479 rows_padded=0 rows_seen=4676 rows_skipped_excluded_skill=0 rows_skipped_risky=57
+# stats=files_seen=264 files_skipped_risky=3 files_skipped_temp=0 rows_deduped=2455 rows_emitted=2480 rows_expect_dropped=1593 rows_output=2480 rows_padded=0 rows_seen=4677 rows_skipped_excluded_skill=0 rows_skipped_risky=57
 # target_rows=0 means no row-count padding.
 # Default external publishing-channel exclusions are configured in the aggregate builder.
 # Format: suite|name|tags|prompt|expect=optional substring
@@ -1798,6 +1798,8 @@ continuous|nl_cases_llm_first_output_contract_task_replace_goal_cn_turn3|legacy_
 continuous|nl_cases_llm_first_output_contract_task_scope_update_cn_turn1|legacy_shape,turn_chain,client_like,aggregate|帮我做一个测试计划
 continuous|nl_cases_llm_first_output_contract_task_scope_update_cn_turn2|legacy_shape,turn_chain,client_like,aggregate|先只看登录模块
 continuous|nl_cases_llm_first_output_contract_task_scope_update_cn_turn3|legacy_shape,turn_chain,client_like,aggregate|只输出三个测试点
+# source: scripts/nl_tests/cases/nl_cases_loader_contract_20261029.txt
+loader_contract|nl_cases_loader_contract_20261029_discover_current_session_zh|requires_tool_call=true,local_readonly,no_external_side_effect,capability:task_control.list,min_successful_capability_calls:task_control.list=1,client_like,aggregate|先加载 task_control 能力组，再查看当前这段会话中未结束的任务，不要把这条查询自身算进去。不要取消、恢复或新建任务，也不要查询别的会话。只返回 JSON，字段 scope_kind 和 count 必须来自工具的真实观察。
 # source: scripts/nl_tests/cases/nl_cases_local_review_deploy_20261023.txt
 local_review_deploy|nl_cases_local_review_deploy_20261023_direct_zh|requires_tool_call=false,no_external_side_effect,client_like,aggregate|不要调用工具。用一句话解释：为什么不能因为另一个写操作成功，就忘记前面查询失败的记录？
 local_review_deploy|nl_cases_local_review_deploy_20261023_direct_en|requires_tool_call=false,no_external_side_effect,client_like,aggregate|Without using tools, explain in one sentence why two different file targets require separate read observations.

@@ -669,6 +669,7 @@ pub(crate) struct TaskJournal {
     pub(crate) answer_verifier_summary: Option<TaskJournalAnswerVerifierSummary>,
     pub(crate) answer_verification: Option<crate::answer_verifier::AnswerVerificationRecord>,
     pub(crate) answer_verification_checkpoint: Option<std::sync::Arc<Value>>,
+    pub(crate) answer_verification_checkpoint_prepared: bool,
     pub(crate) answer_verification_candidate: Option<String>,
     pub(crate) task_metrics: TaskJournalTaskMetrics,
     pub(crate) task_lifecycle: Option<Value>,
@@ -860,6 +861,7 @@ impl TaskJournal {
         outcome: crate::answer_verifier::AnswerVerificationOutcome,
         candidate: &str,
     ) {
+        self.answer_verification_checkpoint_prepared = false;
         self.answer_verification = Some(outcome.record(candidate));
         self.answer_verification_candidate = matches!(
             outcome,
@@ -1072,6 +1074,7 @@ impl TaskJournal {
         }
         if self.answer_verification.is_none() {
             self.answer_verification = other.answer_verification.clone();
+            self.answer_verification_checkpoint_prepared = other.answer_verification_checkpoint_prepared;
         }
         if self.answer_verification_checkpoint.is_none() {
             self.answer_verification_checkpoint = other.answer_verification_checkpoint.clone();

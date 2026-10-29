@@ -6,7 +6,7 @@ use super::{
     LoopState,
 };
 
-pub(super) const RUNTIME_CAPABILITY_LOADER_TOOL: &str = "load_capability_groups";
+pub(super) use crate::capability_map::loader_contract::LOADER_TOOL as RUNTIME_CAPABILITY_LOADER_TOOL;
 
 const REGISTRY_SCOPE_PREFIX: &str = "registry.";
 const MCP_SCOPE_PREFIX: &str = "mcp_capability.";

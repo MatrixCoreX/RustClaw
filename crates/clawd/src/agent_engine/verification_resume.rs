@@ -174,7 +174,7 @@ pub(super) async fn try_resume(
     journal.record_answer_verification(outcome, &candidate);
     journal.record_runtime_llm_metrics(state, &task.task_id);
     if unavailable {
-        crate::finalize::checkpoint_unavailable_verification(state, task, &mut journal);
+        crate::answer_verifier::checkpoint_unavailable_verification(state, task, &mut journal);
         journal.record_final_answer("");
         return Ok(Some(
             AskReply::non_llm(String::new()).with_task_journal(journal),

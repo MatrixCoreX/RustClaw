@@ -122,6 +122,14 @@ jobs:
           cargo test -p clawd --bin clawd secure_workspace_fs::tests
           cargo test -p clawd --bin clawd skill_output_artifact::evidence_storage::tests
 
+      - name: Test capability loading and verification-only recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p clawd --bin clawd capability_map -- --test-threads=2
+          cargo test -p clawd --bin clawd capability_discovery -- --test-threads=2
+          cargo test -p clawd --bin clawd verification -- --test-threads=2
+
       - name: Precompile native Skill Store packages
         shell: bash
         run: |

@@ -26,8 +26,13 @@ requires user intervention. Recovery first checks the candidate, evidence,
 request and conversation-revision bindings, current authorization and task claim.
 Unchanged work resumes answer verification without a planner or tool turn. A
 changed instruction or rejected candidate returns to the agent loop with the
-completed mutation fingerprints intact. Unavailable verification remains waiting;
-only accepted verification publishes the candidate. Rewritten answers require
+completed mutation fingerprints intact. Provider outages respect the provider's
+cooldown, or wait 60 seconds when no cooldown is available. Invalid verifier
+responses use candidate-bound counts persisted in the checkpoint: the first two
+failures schedule verification-only retries after 2 and 5 seconds; a third leaves
+the checkpoint in `needs_user`. Non-retryable errors and malformed retry metadata
+also require user intervention. Repeated finalization does not consume another
+attempt. Only accepted verification publishes the candidate. Rewritten answers require
 explicit acceptance. Private checkpoint clones share an immutable snapshot rather
 than copying its full JSON tree.
 
@@ -142,7 +147,8 @@ flowchart TD
     LV -->|yes| VV[Retry answer verification only]
     LV -->|no| E
     VV -->|passed| M
-    VV -->|unavailable| G
+    VV -->|provider wait / format retry remaining| G
+    VV -->|format retries exhausted / non-retryable| N
     VV -->|rejected or instruction changed| E
     F -->|needs_user| N[Persist user-input state]
     N --> J

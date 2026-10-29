@@ -78,6 +78,7 @@ fn missing_configuration_requires_user_without_automatic_retry() {
     ));
     let lifecycle = journal.task_lifecycle.as_ref().unwrap();
     assert_eq!(lifecycle["state"], "needs_user");
+    assert_eq!(lifecycle["manual_resume_required"], true);
     assert!(lifecycle["next_check_after"].is_null());
     let _: crate::task_lifecycle::TaskCheckpoint =
         serde_json::from_value(journal.task_checkpoint.clone().unwrap()).unwrap();
@@ -95,6 +96,138 @@ fn accepted_verification_does_not_create_a_waiting_task() {
         &mut journal
     ));
     assert!(journal.task_lifecycle.is_none());
+}
+
+#[test]
+fn duplicate_finalization_counts_one_invalid_response_and_survives_merge() {
+    let state = AppState::test_default_with_fixture_provider();
+    let task = task();
+    let mut journal = TaskJournal::for_task(&task.task_id, "ask", "fixture");
+    journal.record_answer_verification(
+        AnswerVerificationOutcome::Unavailable {
+            error_code: "answer_verifier_response_invalid",
+            retryable: true,
+        },
+        "candidate",
+    );
+    assert!(checkpoint_unavailable_verification(
+        &state,
+        &task,
+        &mut journal
+    ));
+    let first = journal.task_checkpoint.clone().unwrap();
+    assert_eq!(
+        first["boundary_context"]["verification_retry"]["invalid_response_count"],
+        1
+    );
+    assert!(
+        journal.task_lifecycle.as_ref().unwrap()["next_check_after"]
+            .as_i64()
+            .unwrap()
+            <= crate::now_ts_u64() as i64 + 2
+    );
+    assert!(checkpoint_unavailable_verification(
+        &state,
+        &task,
+        &mut journal
+    ));
+    assert_eq!(journal.task_checkpoint.as_ref().unwrap(), &first);
+    let mut merged = TaskJournal::for_task(&task.task_id, "ask", "fixture");
+    merged.merge_from(&journal);
+    assert!(checkpoint_unavailable_verification(
+        &state,
+        &task,
+        &mut merged
+    ));
+    assert_eq!(merged.task_checkpoint.as_ref().unwrap(), &first);
+}
+
+#[test]
+fn new_verifier_results_increment_durable_count_but_repeated_finalize_does_not() {
+    let state = AppState::test_default_with_fixture_provider();
+    let task = task();
+    let mut previous = None;
+    for count in 1..=3 {
+        let mut journal = TaskJournal::for_task(&task.task_id, "ask", "fixture");
+        journal.task_checkpoint = previous;
+        journal.record_answer_verification(
+            AnswerVerificationOutcome::Unavailable {
+                error_code: "answer_verifier_response_invalid",
+                retryable: true,
+            },
+            "candidate",
+        );
+        assert!(checkpoint_unavailable_verification(
+            &state,
+            &task,
+            &mut journal
+        ));
+        assert_eq!(
+            journal.task_checkpoint.as_ref().unwrap()["boundary_context"]["verification_retry"]
+                ["invalid_response_count"],
+            count
+        );
+        let lifecycle = journal.task_lifecycle.as_ref().unwrap();
+        if count == 3 {
+            assert_eq!(lifecycle["state"], "needs_user");
+            assert!(lifecycle["next_check_after"].is_null());
+            assert_eq!(
+                lifecycle["reason_code"],
+                "answer_verifier_response_retry_exhausted"
+            );
+        } else {
+            assert_eq!(lifecycle["state"], "waiting");
+        }
+        assert!(journal.task_checkpoint.as_ref().unwrap()["pending_action"].is_null());
+        assert!(checkpoint_unavailable_verification(
+            &state,
+            &task,
+            &mut journal
+        ));
+        assert_eq!(
+            journal.task_checkpoint.as_ref().unwrap()["boundary_context"]["verification_retry"]
+                ["invalid_response_count"],
+            count
+        );
+        previous = Some(
+            serde_json::from_slice(&serde_json::to_vec(&journal.task_checkpoint.unwrap()).unwrap())
+                .unwrap(),
+        );
+    }
+}
+
+#[test]
+fn short_retry_never_overrides_the_provider_cooldown() {
+    let state = AppState::test_default_with_fixture_provider();
+    let task = task();
+    state.note_task_provider_blocker(
+        &task.task_id,
+        crate::TaskProviderBlocker {
+            provider: "fixture".into(),
+            status_code: "quota_exhausted".into(),
+            retry_after_seconds: 900,
+            external_provider_blocked: true,
+            message_key: "provider.quota_exhausted".into(),
+        },
+    );
+    let mut journal = TaskJournal::for_task(&task.task_id, "ask", "fixture");
+    journal.record_answer_verification(
+        AnswerVerificationOutcome::Unavailable {
+            error_code: "answer_verifier_response_invalid",
+            retryable: true,
+        },
+        "candidate",
+    );
+    let before = crate::now_ts_u64() as i64;
+    assert!(checkpoint_unavailable_verification(
+        &state,
+        &task,
+        &mut journal
+    ));
+    let lifecycle = journal.task_lifecycle.as_ref().unwrap();
+    assert!(lifecycle["next_check_after"].as_i64().unwrap() >= before + 900);
+    assert_eq!(lifecycle["provider_blocker_active"], true);
+    assert_eq!(lifecycle["verification_retry"]["invalid_response_count"], 1);
 }
 
 #[tokio::test]
@@ -127,7 +260,7 @@ async fn finalization_persists_waiting_instead_of_success_after_completed_effect
         "candidate",
     );
     let reply = crate::AskReply::non_llm("candidate".into()).with_task_journal(journal);
-    super::super::finalize_ask_result(
+    crate::finalize::finalize_ask_result(
         &state,
         &task,
         &json!({}),

@@ -239,3 +239,218 @@ async fn provider_recovery_resumes_persisted_verification_without_replaying_tool
         .is_err());
     assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
+
+async fn format_retry_scenario(invalid_calls: usize) {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let calls = Arc::new(AtomicUsize::new(0));
+    let count = calls.clone();
+    let app = axum::Router::new().fallback(move |axum::Json(body): axum::Json<Value>| {
+        let count = count.clone();
+        async move {
+            assert!(body.get("tools").is_none(), "resume must not invoke a planner/tool turn");
+            let call = count.fetch_add(1, Ordering::SeqCst);
+            let mut verdict = json!({"operation_checks":[],"output_field_checks":[],"pass":true,
+                "missing_evidence_fields":[],"answer_incomplete_reason":"","should_retry":false,
+                "retry_instruction":"","confidence":0.99});
+            if call < invalid_calls {
+                verdict["unexpected_field"] = json!(true);
+            }
+            axum::Json(json!({"choices":[{"message":{"role":"assistant","content":verdict.to_string()},
+                "finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":10,"total_tokens":20}}))
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    struct Server(tokio::task::JoinHandle<()>);
+    impl Drop for Server {
+        fn drop(&mut self) {
+            self.0.abort();
+        }
+    }
+    let _server = Server(tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap()
+    }));
+    let mut state = AppState::test_default_with_fixture_provider()
+        .with_seeded_db_schema()
+        .with_prompt_layers_installed();
+    let mut provider = crate::providers::fixture_replay::build_fixture_replay_runtime(
+        "verification-format-fixture",
+    );
+    let p = Arc::get_mut(&mut provider).unwrap();
+    p.config.provider_type = "openai_compat".into();
+    p.config.base_url = base;
+    p.client = reqwest::Client::builder().no_proxy().build().unwrap();
+    state.core.llm_providers = vec![provider];
+    state.core.active_provider_type = Some("openai_compat".into());
+    state.seed_test_auth_identity("verification-owner", "admin");
+    let identity = crate::resolve_auth_identity_by_key(&state, "verification-owner")
+        .unwrap()
+        .unwrap();
+    let (_, mut task, _) = bound();
+    task.user_key = Some(identity.user_key.clone());
+    state.core.db.get().unwrap().execute("INSERT INTO tasks(task_id,user_id,chat_id,user_key,principal_id,channel,kind,payload_json,status,created_at,updated_at,lease_owner,claim_attempt) VALUES (?1,1,2,?2,?3,'ui','ask',?4,'running','1','1',?5,1)",rusqlite::params![task.task_id,identity.user_key,identity.principal_id,task.payload_json,state.worker.worker_id]).unwrap();
+    let mut prior = LoopState::default();
+    prior
+        .successful_action_fingerprints
+        .insert("completed-write".into(), 1);
+    prior.tool_calls_total = 1;
+    prior
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: "step_1".into(),
+            skill: "fs_basic".into(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(r#"{"extra":{"action":"stat","exists":true}}"#.into()),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+    let mut journal = crate::finalize::build_from_loop_state(
+        &task,
+        "fixture",
+        &prior,
+        None,
+        None,
+        true,
+        "candidate",
+        TaskJournalFinalStatus::Success,
+    );
+    journal.record_answer_verification(
+        AnswerVerificationOutcome::Unavailable {
+            error_code: "answer_verifier_response_invalid",
+            retryable: true,
+        },
+        "candidate",
+    );
+    crate::answer_verifier::checkpoint_unavailable_verification(&state, &task, &mut journal);
+    let mut checkpoint: crate::task_lifecycle::TaskCheckpoint =
+        serde_json::from_value(journal.task_checkpoint.unwrap()).unwrap();
+    for attempt in 0..2 {
+        let reply = run_agent_with_tools_seeded(
+            &state,
+            &task,
+            "fixture",
+            "fixture",
+            None,
+            &checkpoint,
+            &[],
+        )
+        .await
+        .unwrap();
+        let journal = reply.task_journal.as_ref().unwrap();
+        assert_eq!(journal.step_results.len(), 1);
+        if attempt >= invalid_calls {
+            assert_eq!(reply.text, "candidate");
+            assert_eq!(
+                journal.answer_verification.as_ref().unwrap().status,
+                crate::answer_verifier::AnswerVerificationStatus::Passed
+            );
+            break;
+        }
+        assert!(reply.text.is_empty());
+        let expected_count = attempt + 2;
+        assert_eq!(
+            journal.task_checkpoint.as_ref().unwrap()["boundary_context"]["verification_retry"]
+                ["invalid_response_count"],
+            expected_count
+        );
+        crate::finalize::finalize_ask_result(
+            &state,
+            &task,
+            &json!({}),
+            "fixture",
+            "fixture context",
+            None,
+            "fixture",
+            None,
+            &[],
+            None,
+            Ok(reply),
+        )
+        .await
+        .unwrap();
+        let stored: String = state
+            .core
+            .db
+            .get()
+            .unwrap()
+            .query_row(
+                "SELECT result_json FROM tasks WHERE task_id=?1",
+                [&task.task_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let stored: Value = serde_json::from_str(&stored).unwrap();
+        checkpoint = crate::task_lifecycle::task_checkpoint_from_result_json(&stored).unwrap();
+        assert_eq!(
+            checkpoint.boundary_context["verification_retry"]["invalid_response_count"],
+            expected_count
+        );
+        assert_eq!(
+            checkpoint.completed_side_effect_refs,
+            vec!["completed-write"]
+        );
+        assert!(checkpoint.pending_action.is_none());
+        if expected_count == 3 {
+            let lifecycle = &stored["task_journal"]["summary"]["task_lifecycle"];
+            assert_eq!(lifecycle["state"], "needs_user");
+            assert!(lifecycle["next_check_after"].is_null());
+            assert_eq!(
+                lifecycle["reason_code"],
+                "answer_verifier_response_retry_exhausted"
+            );
+            assert!(crate::repo::claim_due_paused_checkpoint_task_internal(
+                &state,
+                &task.task_id,
+                &checkpoint.checkpoint_id,
+                crate::now_ts_u64() as i64 + 86_400,
+                30,
+            )
+            .unwrap()
+            .is_none());
+        } else {
+            assert!(
+                !crate::repo::is_task_claim_active(&state, &task.task_id, task.claim_attempt)
+                    .unwrap()
+            );
+            let due = stored["task_journal"]["summary"]["task_lifecycle"]["next_check_after"]
+                .as_i64()
+                .unwrap();
+            assert!(crate::repo::claim_due_paused_checkpoint_task_internal(
+                &state,
+                &task.task_id,
+                &checkpoint.checkpoint_id,
+                due - 1,
+                30,
+            )
+            .unwrap()
+            .is_none());
+            let claimed = crate::repo::claim_due_paused_checkpoint_task_internal(
+                &state,
+                &task.task_id,
+                &checkpoint.checkpoint_id,
+                due,
+                30,
+            )
+            .unwrap()
+            .expect("due verification checkpoint must acquire a fresh worker claim");
+            assert_eq!(claimed.claim_attempt, task.claim_attempt + 1);
+            task.claim_attempt = claimed.claim_attempt;
+            checkpoint = claimed.task_checkpoint;
+        }
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn invalid_verifier_response_recovers_after_checkpoint_without_replaying_tools() {
+    format_retry_scenario(1).await;
+}
+
+#[tokio::test]
+async fn repeated_invalid_verifier_responses_stop_automatic_resume_after_restart() {
+    format_retry_scenario(2).await;
+}
