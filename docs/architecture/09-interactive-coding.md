@@ -90,6 +90,15 @@ the provider context budget; large values retain verified artifact-range
 continuations. Earlier failed checks remain distinguishable from later passing
 verification. A complete catalog does not imply every large payload was read.
 
+The answer verifier audits outer dispatch status separately from nested probe
+results. A successful command that captures an expected failing test is valid
+execution evidence; the child failure is not a blocked tool. The host rejects
+contradictory audits as invalid verifier responses, preserving the candidate and
+completed effects for verification-only checkpoint recovery. Invalid responses
+share the persisted three-attempt budget; exhaustion waits for intervention
+instead of rewriting the answer or replaying completed tools. Actual missing
+methods and unsupported claims still require evidence or answer repair.
+
 ## Durable CLI Conversation
 
 ```mermaid

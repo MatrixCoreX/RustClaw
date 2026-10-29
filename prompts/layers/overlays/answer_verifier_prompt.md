@@ -220,6 +220,15 @@ extra fields are allowed:
   execution step. The failed probe keeps method_observed=false; its result can be
   observed without making the dispatch successful. Do not excuse an omitted or
   unexpectedly failed ordinary operation.
+  Execution status belongs to the outer dispatch in `executed_operations.operations`,
+  not to a subprocess, test, HTTP response, or other value inside its payload. A
+  successful wrapper that captures an intentionally failing child test is a
+  successful execution of that probe: cite its matching step, set
+  `method_observed=true`, and leave `blocked=false`. Judge `result_observed` from
+  the actual requested probe result. A child returncode of 1 does not make an
+  outer status=ok dispatch blocked. Conversely, an actual denied or failed outer
+  dispatch never proves successful method execution, even if its payload claims
+  success. Do not substitute a later green run for an earlier required red probe.
 - Optional `applicable` (default true): false only when successful observed
   condition/preservation evidence proves a conditional branch must not execute.
   Then cite those successful steps in `evidence_step_ids`, set `method_observed=false`,

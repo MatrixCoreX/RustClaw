@@ -166,6 +166,15 @@ pub(crate) async fn verify_answer_observe_only(
             // obligations by interpreting prose from the user request.
             model.output_field_checks = output_field_checks.clone();
             let verdict = operation_audit::validate_operation_audit(model, journal);
+            if verdict.answer_incomplete_reason == "verification_audit_invalid" {
+                // A contradictory audit is a verifier protocol failure, not
+                // evidence that the candidate or completed operations are wrong.
+                tracing::warn!(task_id = %task.task_id, "answer_verifier_operation_audit_invalid");
+                return AnswerVerificationOutcome::Unavailable {
+                    error_code: "answer_verifier_response_invalid",
+                    retryable: true,
+                };
+            }
             operation_audit::validate_output_field_audit(
                 verdict,
                 &output_field_checks,

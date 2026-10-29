@@ -240,7 +240,7 @@ async fn provider_recovery_resumes_persisted_verification_without_replaying_tool
     assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
 
-async fn format_retry_scenario(invalid_calls: usize) {
+async fn format_retry_scenario(invalid_calls: usize, invalid_audit: bool) {
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -255,7 +255,14 @@ async fn format_retry_scenario(invalid_calls: usize) {
             let mut verdict = json!({"operation_checks":[],"output_field_checks":[],"pass":true,
                 "missing_evidence_fields":[],"answer_incomplete_reason":"","should_retry":false,
                 "retry_instruction":"","confidence":0.99});
-            if call < invalid_calls {
+            if invalid_audit {
+                verdict["operation_checks"] = json!([{
+                    "requested_operation":"Observe the expected nonzero child probe",
+                    "required_dispatches":[{"action_type":"call_capability","action_ref":"system.run_command"}],
+                    "evidence_step_ids":["step_1"],"method_observed":call>=invalid_calls,
+                    "result_observed":true,"blocked":call<invalid_calls,
+                }]);
+            } else if call < invalid_calls {
                 verdict["unexpected_field"] = json!(true);
             }
             axum::Json(json!({"choices":[{"message":{"role":"assistant","content":verdict.to_string()},
@@ -308,6 +315,22 @@ async fn format_retry_scenario(invalid_calls: usize) {
             started_at: 1,
             finished_at: 2,
         });
+    if invalid_audit {
+        prior.executed_step_results[0].skill = "run_cmd".into();
+        prior.executed_step_results[0].output = Some(
+            json!({
+                "extra":{"exit_code":0,"stdout":"{\"returncode\":1}"}
+            })
+            .to_string(),
+        );
+        prior.task_observations.push(json!({
+            "schema_version":1,"owner_layer":"task_journal",
+            "observation_kind":"checkpoint_step_provenance","step_id":"step_1",
+            "requested_action_type":"call_capability","requested_capability":"system.run_command",
+            "resolved_capability":"system.run_command","resolved_tool_or_skill":"run_cmd",
+            "dispatch_executed":true,
+        }));
+    }
     let mut journal = crate::finalize::build_from_loop_state(
         &task,
         "fixture",
@@ -447,10 +470,20 @@ async fn format_retry_scenario(invalid_calls: usize) {
 
 #[tokio::test]
 async fn invalid_verifier_response_recovers_after_checkpoint_without_replaying_tools() {
-    format_retry_scenario(1).await;
+    format_retry_scenario(1, false).await;
 }
 
 #[tokio::test]
 async fn repeated_invalid_verifier_responses_stop_automatic_resume_after_restart() {
-    format_retry_scenario(2).await;
+    format_retry_scenario(2, false).await;
+}
+
+#[tokio::test]
+async fn invalid_verifier_audit_recovers_without_rewriting_answer_or_replaying_tools() {
+    format_retry_scenario(1, true).await;
+}
+
+#[tokio::test]
+async fn repeated_invalid_verifier_audits_exhaust_the_same_persisted_retry_budget() {
+    format_retry_scenario(2, true).await;
 }
