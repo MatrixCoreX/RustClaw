@@ -97,6 +97,16 @@ source/WAV metadata, configured-backend selection and transcript artifact.
 `video_speech_acceptance_tests.py` protects these assertions offline; those tests
 and direct skill protocol smoke do not count as live NL or real STT acceptance.
 
+Use `capability_result_json` for complete structured-result assertions that may
+not fit a step's bounded `observed_evidence` preview. It selects a version-1,
+untruncated canonical envelope by exact capability, action and status, then binds
+it to a unique actual runtime step and the current task when a task binding is
+present. `fields` uses JSON pointers with type-sensitive values; `present`
+requires non-null fields. Duplicate results cannot satisfy an exact `count`,
+one step cannot be counted twice, and prose, summaries, historical provenance
+or fields joined from unrelated invocations cannot replace the envelope. This
+does not increase runtime evidence budgets or create missing canonical data.
+
 ## Unified Tool
 
 Primary entry point:

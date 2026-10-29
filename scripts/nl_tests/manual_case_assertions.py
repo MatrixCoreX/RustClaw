@@ -787,6 +787,61 @@ def structural_assertions(
     return details
 
 
+def capability_result_json_assertion(spec: str, result: dict[str, Any]) -> dict[str, Any]:
+    detail: dict[str, Any] = {"kind": "capability_result_json", "ok": False, "matched_step_ids": []}
+    try:
+        contract = json.loads(spec)
+        required = {"capability", "action", "status", "fields"}
+        if (not isinstance(contract, dict) or not required <= set(contract)
+                or set(contract) - required - {"present", "count"}):
+            return detail
+        capability, action, status = (contract[key] for key in ("capability", "action", "status"))
+        fields, present, count = contract["fields"], contract.get("present", []), contract.get("count", 1)
+        if (not all(isinstance(value, str) and value for value in (capability, action))
+                or status not in {"ok", "error"} or not isinstance(fields, dict) or not fields
+                or not isinstance(present, list) or type(count) is not int or count < 1
+                or any(not isinstance(pointer, str) or not pointer.startswith("/")
+                       or re.search(r"~(?![01])", pointer)
+                       for pointer in [*fields, *present])):
+            return detail
+        trace = (result.get("task_journal") or {}).get("trace") or {}
+        caps = trace.get("capability_results")
+        if not isinstance(caps, list) or any(not isinstance(cap, dict) for cap in caps):
+            return detail
+        selected = [cap for cap in caps if cap.get("capability") == capability
+                    and cap.get("action") == action and cap.get("status") == status]
+        if len(selected) != count:
+            return detail
+        calls = actual_call_steps(result)
+        for cap in selected:
+            provenance = cap.get("provenance") or {}
+            if (type(cap.get("schema_version")) is not int or cap["schema_version"] != 1
+                    or cap.get("truncated") is not False or provenance.get("source") != "runtime_step"
+                    or not isinstance(provenance.get("step_id"), str) or not provenance["step_id"]
+                    or ("task_id" in provenance and provenance["task_id"] != trace.get("task_id"))):
+                return detail
+            bound = [step for step in calls if step.get("step_id") == provenance.get("step_id")]
+            if (len(bound) != 1 or not step_matches_capability(bound[0], capability)
+                    or bound[0].get("status") != status
+                    or (status == "ok" and not successful_call_step(bound[0]))):
+                return detail
+            for pointer, expected in fields.items():
+                actual = json_pointer_get(cap, pointer)
+                if actual is _MISSING or json.dumps(actual, sort_keys=True, allow_nan=False) \
+                        != json.dumps(expected, sort_keys=True, allow_nan=False):
+                    return detail
+            if any(json_pointer_get(cap, pointer) is _MISSING or json_pointer_get(cap, pointer) is None
+                   for pointer in present):
+                return detail
+            if bound[0]["step_id"] in detail["matched_step_ids"]:
+                return detail
+            detail["matched_step_ids"].append(bound[0]["step_id"])
+        detail["ok"] = True
+    except (ValueError, KeyError, TypeError, AttributeError):
+        pass
+    return detail
+
+
 def skill_outcome_json_assertion(spec: str, text: str, result: dict[str, Any]) -> dict[str, Any]:
     detail: dict[str, Any] = {"kind": "skill_outcome_json", "ok": False}
     try:
@@ -873,7 +928,11 @@ def evaluate_expectations(
         details.append({"kind": "invalid_expectation", "error_code": str(exc), "ok": False})
         return "fail", details
     for raw in directives:
-        if raw.startswith("step_contract_json:"):
+        if raw.startswith("capability_result_json:"):
+            detail = capability_result_json_assertion(raw[len("capability_result_json:"):], result)
+            details.append(detail)
+            ok = detail["ok"]
+        elif raw.startswith("step_contract_json:"):
             detail = step_contract_assertion(raw[len("step_contract_json:"):], actual_call_steps(result))
             details.append(detail)
             ok = detail["ok"]

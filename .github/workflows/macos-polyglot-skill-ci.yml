@@ -21,6 +21,8 @@ name: Polyglot Skill macOS CI
       - "scripts/skill_store_packages.py"
       - "scripts/nl_tests/run_manual_test.sh"
       - "scripts/nl_tests/manual_case_observation*.py"
+      - "scripts/nl_tests/manual_*assertions*.py"
+      - "scripts/nl_tests/expectation_directives*.py"
       - "scripts/nl_tests/coding_observation_chain*.py"
       - "scripts/nl_tests/audit_multilang_coding_restart*.py"
       - "scripts/nl_tests/*probe*.py"
@@ -52,6 +54,8 @@ name: Polyglot Skill macOS CI
       - "scripts/skill_store_packages.py"
       - "scripts/nl_tests/run_manual_test.sh"
       - "scripts/nl_tests/manual_case_observation*.py"
+      - "scripts/nl_tests/manual_*assertions*.py"
+      - "scripts/nl_tests/expectation_directives*.py"
       - "scripts/nl_tests/coding_observation_chain*.py"
       - "scripts/nl_tests/audit_multilang_coding_restart*.py"
       - "scripts/nl_tests/*probe*.py"
@@ -133,6 +137,8 @@ jobs:
           python3 scripts/nl_tests/manual_case_observation_tests.py
           python3 scripts/nl_tests/manual_case_lifecycle_tests.py
           python3 scripts/nl_tests/coding_observation_chain_tests.py
+          python3 scripts/nl_tests/manual_capability_assertions_tests.py
+          python3 scripts/nl_tests/expectation_directives_tests.py
           python3 scripts/nl_tests/video_speech_acceptance_tests.py
           python3 scripts/nl_tests/authenticated_probe_http_tests.py
           python3 scripts/nl_tests/concurrent_health_probe_tests.py

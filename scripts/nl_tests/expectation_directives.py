@@ -2,7 +2,7 @@
 import json
 
 
-_JSON_PAYLOADS = {"step_contract_json", "skill_outcome_json", "workspace_file_cycle",
+_JSON_PAYLOADS = {"step_contract_json", "capability_result_json", "skill_outcome_json", "workspace_file_cycle",
                   "result_text_json_records_eq"}
 _JSON_EQUALS = {"result_text_json_eq", "result_text_json_one_of", "json_eq"}
 

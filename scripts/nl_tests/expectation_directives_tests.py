@@ -31,7 +31,7 @@ class ExpectationDirectivesTests(unittest.TestCase):
                          ['contains:unclosed "quote', 'contains:two'])
 
     def test_nested_json_and_escaped_characters(self):
-        for prefix in ("step_contract_json:", "skill_outcome_json:", "workspace_file_cycle:",
+        for prefix in ("step_contract_json:", "capability_result_json:", "skill_outcome_json:", "workspace_file_cycle:",
                        "result_text_json_records_eq:", "result_text_json_one_of:/x=",
                        "result_text_json_eq:/x=", "json_eq:/x="):
             payload = {"items": ['false; printf \'%s\' $?', 'quote";backslash\\;', {";": "; "}]}

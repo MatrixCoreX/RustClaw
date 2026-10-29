@@ -40,10 +40,17 @@ class VideoSpeechAcceptanceTests(unittest.TestCase):
             step("audio.preview_transcribe", "audio_transcribe", {"extra.provider": "fixture-provider"}),
             step("audio.transcribe", "audio_transcribe", {"extra.text": SPEECH, "extra.provider": "fixture-provider"}),
         ]
+        self.cap = {"schema_version": 1, "capability": "video.extract_audio", "action": "extract_audio",
+                    "status": "ok", "truncated": False, "data": {"extra": {"action": "extract_audio",
+                        "extracted_audio": {"sample_rate": 16000, "channels": 1, "deliver_to_user": False,
+                                            "path": "/workspace/artifacts/video_audio.wav"}}},
+                    "provenance": {"source": "runtime_step", "step_id": "video.extract_audio"}}
+        self.steps[0]["observed_evidence"] = None
         self.text = json.dumps({"text": SPEECH, "provider": "fixture-provider"})
 
     def accepted(self):
         obj = result_with_steps(self.steps, text=self.text)
+        obj["data"]["result_json"]["task_journal"]["trace"]["capability_results"] = [self.cap]
         return evaluate_expectations(self.expectation, self.tags, obj, "succeeded", self.text,
                                      obj["data"]["result_json"], {})[0] == "pass"
 
@@ -75,14 +82,18 @@ class VideoSpeechAcceptanceTests(unittest.TestCase):
         fields = {"extra.action": "other", "extra.extracted_audio.sample_rate": 8000,
                   "extra.extracted_audio.channels": 2, "extra.extracted_audio.deliver_to_user": True,
                   "extra.extracted_audio.path": None}
-        original = copy.deepcopy(self.steps)
+        original = copy.deepcopy(self.cap)
         for field, wrong in fields.items():
             with self.subTest(field=field):
-                self.steps = copy.deepcopy(original)
-                items = self.steps[0]["observed_evidence"]["items"]
-                items[:] = [item for item in items if item["field"] != field]
-                if wrong is not None:
-                    items.append(observed(field, wrong))
+                self.cap = copy.deepcopy(original)
+                owner = self.cap["data"]
+                parts = field.split(".")
+                for part in parts[:-1]:
+                    owner = owner[part]
+                if wrong is None:
+                    del owner[parts[-1]]
+                else:
+                    owner[parts[-1]] = wrong
                 self.assertFalse(self.accepted())
 
     def test_provider_failure_is_not_a_positive_acceptance(self):
