@@ -14,6 +14,12 @@ Environment proxy behavior is preserved except for the read-latency probe's
 explicit loopback-only proxy opt-out. This policy does not change runtime web
 browsing or ordinary public content downloads.
 
+The standalone `scripts/auth-key.sh webd-set` account-management command also
+rejects every redirect, without depending on the NL test transport module. Use
+the canonical management API URL: account credentials must not be forwarded or
+account changes replayed at a redirect target. `auth_key_http_tests.py` exercises
+the actual CLI with isolated SQLite, loopback servers and fixture credentials.
+
 ## Exact Argument Recall Acceptance
 
 Run `cases/nl_cases_exact_argument_recall_20261029.txt` in a fresh conversation,

@@ -143,11 +143,17 @@ def webd_set_via_http(
             "X-Agent-Key": admin_key,
         },
     )
+    class RejectCredentialRedirects(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    opener = urllib.request.build_opener(RejectCredentialRedirects())
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with opener.open(req, timeout=60) as resp:
             raw = resp.read().decode("utf-8")
     except urllib.error.HTTPError as e:
-        raw = e.read().decode("utf-8", errors="replace")
+        with e:
+            raw = e.read().decode("utf-8", errors="replace")
         raise SystemExit(f"HTTP {e.code}: {raw}") from None
     except OSError as e:
         raise SystemExit(
