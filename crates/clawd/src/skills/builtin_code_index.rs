@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::{BufRead, BufReader, Read};
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
@@ -15,9 +15,11 @@ use syn::visit::{self, Visit};
 
 #[path = "builtin_code_index/language_parsers.rs"]
 mod language_parsers;
+#[path = "builtin_code_index/large_rust_source.rs"]
+mod large_rust_source;
 
 const INDEX_SCHEMA_VERSION: u32 = 1;
-const PARSER_REVISION: u32 = 1;
+const PARSER_REVISION: u32 = 2;
 const INDEX_RELATIVE_PATH: &str = ".agent-runtime/index/repository-v1.json";
 const MAX_SOURCE_BYTES: u64 = 2 * 1024 * 1024;
 const DEFAULT_MAX_FILES: usize = 20_000;
@@ -510,51 +512,17 @@ fn index_large_rust_source(
     workspace_root: &Path,
     candidate: &SourceCandidate,
 ) -> Result<IndexedFile, CodeIndexError> {
-    let mut hasher = Sha256::new();
-    let mut file = crate::secure_workspace_fs::open_workspace_file(workspace_root, &candidate.path)
-        .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let read = file
-            .read(&mut buffer)
-            .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-
     let file = crate::secure_workspace_fs::open_workspace_file(workspace_root, &candidate.path)
         .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
-    let mut symbols = Vec::new();
-    for (index, line) in BufReader::new(file).lines().enumerate() {
-        let line =
-            line.map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
-        if let Some((kind, name)) = rust_definition_from_line(&line) {
-            symbols.push(SymbolDefinition {
-                name: name.clone(),
-                qualified_name: name,
-                kind: kind.to_string(),
-                line: index + 1,
-                end_line: index + 1,
-                visibility: line
-                    .trim_start()
-                    .starts_with("pub")
-                    .then_some("public")
-                    .unwrap_or("private")
-                    .to_string(),
-                is_test: false,
-                source: "range_line_candidate".to_string(),
-            });
-        }
-    }
+    let scanned = large_rust_source::scan(file)
+        .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
     Ok(IndexedFile {
         language: candidate.language.to_string(),
         size_bytes: candidate.size_bytes,
         modified_ns: candidate.modified_ns,
-        sha256: format!("{:x}", hasher.finalize()),
-        parse_status: "range_indexed".to_string(),
-        symbols,
+        sha256: scanned.sha256,
+        parse_status: scanned.status.to_string(),
+        symbols: scanned.symbols,
         references: Vec::new(),
     })
 }

@@ -17,6 +17,8 @@ if [[ $# == 0 ]]; then
   )
 fi
 CASE_FILE="${NL_CASE_FILE:-scripts/nl_tests/cases/nl_cases_correctness_continuity_20261027.txt}"
+WAIT_SECONDS="${NL_WAIT_SECONDS:-1800}"
+[[ "$WAIT_SECONDS" =~ ^[1-9][0-9]*$ ]] || { echo 'NL_WAIT_SECONDS must be a positive integer.' >&2; exit 1; }
 if [[ -n "${NL_CASE_NAME:-}" ]]; then
   set -- --case-name "$NL_CASE_NAME"
 else
@@ -95,7 +97,7 @@ if [[ -n "${NL_CASE_SEQUENCE:-}" ]]; then
     position=$((position + 1))
     bash scripts/nl_tests/run_manual_test.sh --base-url "http://127.0.0.1:$PORT" \
       --case-file "$CASE_FILE" --case-name "$case_name" --reuse-chat-id-base --chat-id "$PORT" \
-      --log-root "$STATE/results" --wait-seconds 900 --provider-retries 0 --fail-fast 1 --full-text
+      --log-root "$STATE/results" --wait-seconds "$WAIT_SECONDS" --provider-retries 0 --fail-fast 1 --full-text
     if [[ "$position" == "${NL_RESTART_AFTER_CASE:-0}" && "$position" -lt "${#sequence[@]}" ]]; then
       old_pid="$SERVER_PID"
       kill "$SERVER_PID"
@@ -119,5 +121,5 @@ if [[ -n "${NL_CASE_SEQUENCE:-}" ]]; then
 else
   bash scripts/nl_tests/run_manual_test.sh --base-url "http://127.0.0.1:$PORT" \
     --case-file "$CASE_FILE" "$@" \
-    --log-root "$STATE/results" --wait-seconds 900 --provider-retries 0 --fail-fast 1 --full-text
+    --log-root "$STATE/results" --wait-seconds "$WAIT_SECONDS" --provider-retries 0 --fail-fast 1 --full-text
 fi

@@ -49,6 +49,11 @@ bounded source ranges.
   chunks without building a syntax tree; large Rust files retain the explicit
   range-index fallback. Each Tree-sitter parse and traversal has a 250ms budget
   and a 50,000-entry ceiling; callers can use source-range tools for omitted work.
+- Large Rust fallback hashes the complete file once through the same descriptor.
+  It retains at most 24 KiB per line, 2 MiB of symbol-name bytes and 50,000
+  candidates. Oversized/invalid UTF-8 lines are skipped as whole lines; subsequent
+  line numbers remain accurate and `range_index_budget_exceeded` discloses the
+  partial result. It never treats a retained line prefix as a complete symbol.
 - Unchanged files are reused by size and nanosecond modification fingerprint;
   changed files receive a new SHA-256 and parser pass.
 - Symlinks and generated/cache directories are excluded. Index paths are

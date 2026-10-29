@@ -7,7 +7,7 @@ use tree_sitter::{Language, Node, ParseOptions, Parser};
 use super::{SymbolDefinition, SymbolReference};
 
 const PARSE_BUDGET: Duration = Duration::from_millis(250);
-const MAX_ENTRIES: usize = 50_000;
+pub(super) const MAX_ENTRIES: usize = 50_000;
 
 pub(super) struct ParsedSource {
     pub(super) status: &'static str,

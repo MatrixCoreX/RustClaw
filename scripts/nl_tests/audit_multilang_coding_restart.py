@@ -1,17 +1,80 @@
 #!/usr/bin/env python3
 """Inspect real journals and validate generated project only inside a read-only sandbox."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
 import platform
 import shutil
 import subprocess
+import tempfile
 
 from manual_trace_evidence import restore_execution_streams
 
 
 CASE_NAMES = ("create_project", "index_project", "amend_after_restart", "verify_retained_project")
+MAX_VALIDATOR_OUTPUT_BYTES = 64 * 1024
+
+
+def run_validator(command: list[str]) -> subprocess.CompletedProcess:
+    # These commands already require the Linux read-only, network-isolated sandbox.
+    import resource
+
+    def limit_output():
+        resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_VALIDATOR_OUTPUT_BYTES, MAX_VALIDATOR_OUTPUT_BYTES))
+
+    with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        result = subprocess.run(command, stdout=stdout, stderr=stderr, timeout=60, preexec_fn=limit_output)
+        stdout.seek(0)
+        stderr.seek(0)
+        out = stdout.read(MAX_VALIDATOR_OUTPUT_BYTES)
+        err = stderr.read(MAX_VALIDATOR_OUTPUT_BYTES)
+        if len(out) >= MAX_VALIDATOR_OUTPUT_BYTES or len(err) >= MAX_VALIDATOR_OUTPUT_BYTES:
+            raise ValueError("independent_validator_output_budget_exceeded")
+        return subprocess.CompletedProcess(command, result.returncode,
+            out.decode("utf-8", errors="replace"), err.decode("utf-8", errors="replace"))
+
+
+def initial_implementations(journal: dict) -> dict[str, str]:
+    sources = {}
+    for item in journal.get("capability_results", []):
+        if item.get("capability") != "filesystem.write_file" or item.get("status") != "ok":
+            continue
+        provenance = item.get("provenance") or {}
+        content = (provenance.get("continuation_args") or {}).get("content")
+        projection = provenance.get("continuation_args_projection") or {}
+        if not isinstance(content, str) or projection.get("truncated"):
+            continue
+        data = item.get("data") or {}
+        for after in (data.get("output") or {}).get("after", []):
+            path = Path(after.get("path", ""))
+            if path.name not in ("pricing.py", "pricing.mjs") or path.parts[-3:-1] != ("tmp", "multilang_project_20261029"):
+                continue
+            raw = content.encode("utf-8")
+            if len(raw) > 2 * 1024 * 1024 or after.get("size_bytes") != len(raw) \
+                    or after.get("sha256") != "sha256:" + hashlib.sha256(raw).hexdigest():
+                raise ValueError("initial_implementation_evidence_digest_mismatch")
+            sources[path.name] = content
+    if set(sources) != {"pricing.py", "pricing.mjs"}:
+        raise ValueError("initial_implementation_execution_evidence_missing")
+    return sources
+
+
+def check_red_suite(project: Path, initial: dict[str, str]) -> dict:
+    with tempfile.TemporaryDirectory(prefix="agent-independent-red-") as directory:
+        staged = Path(directory)
+        for name, content in initial.items():
+            (staged / name).write_text(content, encoding="utf-8")
+        for name in ("test_pricing.py", "test_pricing.mjs"):
+            (staged / name).write_bytes((project / name).read_bytes())
+        # Only the existing read-only, network-isolated validator executes code.
+        result = run_validator(project_commands(staged)[0])
+        if result.returncode != 1:
+            raise ValueError("updated_tests_do_not_reject_initial_implementation")
+        return {"returncode": result.returncode, "stdout": result.stdout[-4096:],
+                "stderr": result.stderr[-4096:], "authority": "independent_read_only_sandbox",
+                "historical_probe_chronology_verified": False}
 
 
 def project_commands(project: Path) -> list[list[str]]:
@@ -73,9 +136,10 @@ def audit(state: Path) -> dict:
     red = json.loads((project / "red_phase.json").read_text())
     assert isinstance(red["returncode"], int) and red["returncode"] != 0
     assert red["command"] and (red["stdout"] or red["stderr"])
+    independent_red = check_red_suite(project, initial_implementations(journals[0]))
     checks = []
     for command in project_commands(project):
-        result = subprocess.run(command, text=True, capture_output=True, timeout=60)
+        result = run_validator(command)
         checks.append({"returncode": result.returncode, "stdout": result.stdout[-4096:], "stderr": result.stderr[-4096:]})
         if result.returncode != 0:
             raise ValueError("independent_project_verification_failed:" + result.stderr[-1024:])
@@ -84,7 +148,8 @@ def audit(state: Path) -> dict:
     assert restart["after_case"] == "index_project" and restart["old_pid"] != restart["new_pid"]
     return {"status": "passed", "cases": 4, "real_restart": restart,
             "llm_counts": {row["case_name"]: sum(call.get("task_id") == row["task_id"] for call in calls) for row in rows},
-            "independent_read_only_sandbox_checks": checks}
+            "independent_read_only_sandbox_checks": checks,
+            "independent_red_suite": independent_red}
 
 
 if __name__ == "__main__":
