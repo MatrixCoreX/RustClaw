@@ -11,7 +11,7 @@ name: Polyglot Skill macOS CI
       - "crates/clawd/**"
       - "crates/skill-runner/**"
       - "crates/skill-sdk/**"
-      - "crates/skills/**/skill.toml"
+      - "crates/skills/**"
       - "docs/schemas/**"
       - "optional_skills/**"
       - "scripts/check_on_demand_skill_builds.py"
@@ -31,7 +31,7 @@ name: Polyglot Skill macOS CI
       - "crates/clawd/**"
       - "crates/skill-runner/**"
       - "crates/skill-sdk/**"
-      - "crates/skills/**/skill.toml"
+      - "crates/skills/**"
       - "docs/schemas/**"
       - "optional_skills/**"
       - "scripts/check_on_demand_skill_builds.py"
@@ -102,7 +102,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo check -p claw-core -p clawd -p skill-runner
+          cargo check --workspace
+
+      - name: Test native immutable evidence publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p clawd --bin clawd secure_workspace_fs::tests
+          cargo test -p clawd --bin clawd skill_output_artifact::evidence_storage::tests
 
       - name: Precompile native Skill Store packages
         shell: bash

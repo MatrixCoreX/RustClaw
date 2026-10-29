@@ -214,6 +214,55 @@ fn structured_pre_dispatch_failure_is_recorded_as_not_applied() {
 }
 
 #[test]
+fn execution_no_effect_proof_requires_known_phase_and_explicit_false() {
+    for (phase, applied, accepted) in [
+        ("execution_no_effect", false, true),
+        ("execution_no_effect", true, false),
+        ("unknown_phase", false, false),
+    ] {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let task = task_fixture();
+        insert_active_task_claim(&state, &task);
+        let MutationExecutionGuard::Acquired(lease) = prepare_mutation_execution(
+            &state,
+            &task,
+            "fixture_writer",
+            &serde_json::json!({"action":"write"}),
+            "fixture:write:no-effect",
+            crate::execution_recipe::ActionEffect::mutate(),
+        )
+        .expect("prepare mutation") else {
+            panic!("expected mutation lease")
+        };
+        let error = crate::skills::structured_skill_error_from_parts(
+            "fixture_writer",
+            "input_missing",
+            "fixture rejection",
+            None,
+            Some(
+                serde_json::json!({"failure_phase":phase,"side_effect_applied":applied,"retryable":false}),
+            ),
+        );
+        assert_eq!(
+            settle_verified_not_applied_mutation(&state, &lease, &error),
+            accepted
+        );
+        let db = state.core.db.get().unwrap();
+        let reconciliation: Option<String> = db.query_row(
+            "SELECT reconciliation_json FROM task_mutation_ledger WHERE task_id=?1 AND fingerprint_hash=?2",
+            rusqlite::params![task.task_id, lease.record.fingerprint_hash], |row| row.get(0),
+        ).unwrap();
+        if accepted {
+            let value: serde_json::Value = serde_json::from_str(&reconciliation.unwrap()).unwrap();
+            assert_eq!(value["disposition"], "not_applied");
+            assert_eq!(value["failure_phase"], "execution_no_effect");
+        } else {
+            assert!(reconciliation.is_none());
+        }
+    }
+}
+
+#[test]
 fn workspace_occurrence_mismatch_is_recorded_as_not_applied() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = task_fixture();

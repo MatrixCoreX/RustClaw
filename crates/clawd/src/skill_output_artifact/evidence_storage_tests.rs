@@ -100,14 +100,57 @@ fn hardlinks_and_nonprivate_existing_files_are_rejected() {
 #[test]
 fn concurrent_identical_publications_remain_verified_without_temporary_residue() {
     let root = TestWorkspace::new("evidence-concurrent");
-    std::thread::scope(|scope| {
-        for _ in 0..8 {
-            let workspace = root.path();
-            scope.spawn(move || publish(workspace, &target(workspace), b"verified").unwrap());
-        }
-    });
+    for round in 0..24 {
+        let path = target(root.path()).with_file_name(format!("{round}.json"));
+        let barrier = std::sync::Barrier::new(8);
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let (path, barrier) = (&path, &barrier);
+                let workspace = root.path();
+                scope.spawn(move || {
+                    barrier.wait();
+                    publish(workspace, path, b"verified").unwrap();
+                });
+            }
+        });
+        verify(root.path(), &path, b"verified").unwrap();
+        assert_eq!(
+            fs::read_dir(path.parent().unwrap()).unwrap().count(),
+            round + 1
+        );
+    }
+}
+
+#[test]
+fn conflicting_concurrent_publications_reject_the_loser_without_overwriting() {
+    let root = TestWorkspace::new("evidence-conflict");
     let path = target(root.path());
-    assert_eq!(fs::read(&path).unwrap(), b"verified");
+    let barrier = std::sync::Barrier::new(8);
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..8u8)
+            .map(|value| {
+                let (path, barrier) = (&path, &barrier);
+                let workspace = root.path();
+                scope.spawn(move || {
+                    barrier.wait();
+                    match publish(workspace, path, &[value]) {
+                        Ok(()) => Some(value),
+                        Err(error) => {
+                            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                            None
+                        }
+                    }
+                })
+            })
+            .collect();
+        let winners: Vec<_> = workers
+            .into_iter()
+            .filter_map(|worker| worker.join().unwrap())
+            .collect();
+        assert_eq!(winners.len(), 1);
+        verify(root.path(), &path, &winners).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), winners);
+    });
     assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
 }
 

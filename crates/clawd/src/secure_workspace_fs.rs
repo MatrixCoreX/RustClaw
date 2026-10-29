@@ -186,6 +186,96 @@ pub(crate) fn atomic_write_workspace_file_with_options(
     bytes: &[u8],
     create_missing_parents: bool,
 ) -> io::Result<()> {
+    atomic_publish_workspace_file(
+        workspace_root,
+        target,
+        bytes,
+        create_missing_parents,
+        Publication::Replace,
+    )
+}
+
+#[derive(Clone, Copy)]
+#[cfg(unix)]
+enum Publication {
+    Replace,
+    CreateNew,
+}
+
+#[cfg(unix)]
+pub(crate) fn atomic_create_workspace_file(
+    workspace_root: &Path,
+    target: &Path,
+    bytes: &[u8],
+) -> io::Result<()> {
+    atomic_publish_workspace_file(workspace_root, target, bytes, true, Publication::CreateNew)
+}
+
+#[cfg(unix)]
+fn sync_directory(directory: &OwnedFd) -> io::Result<()> {
+    // SAFETY: the caller owns this directory descriptor throughout the call.
+    if unsafe { libc::fsync(directory.as_raw_fd()) } == 0 {
+        return Ok(());
+    }
+    let error = io::Error::last_os_error();
+    if matches!(
+        error.raw_os_error(),
+        Some(libc::EINVAL) | Some(libc::ENOTSUP)
+    ) {
+        Ok(())
+    } else {
+        Err(error)
+    }
+}
+
+#[cfg(unix)]
+fn rename_without_replacement(parent: &OwnedFd, from: &CString, to: &CString) -> io::Result<()> {
+    #[cfg(target_os = "linux")]
+    // SAFETY: both names and the shared directory descriptor remain valid.
+    let renamed = unsafe {
+        libc::renameat2(
+            parent.as_raw_fd(),
+            from.as_ptr(),
+            parent.as_raw_fd(),
+            to.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    #[cfg(target_os = "macos")]
+    // SAFETY: same descriptor-relative contract as the Linux implementation.
+    let renamed = unsafe {
+        libc::renameatx_np(
+            parent.as_raw_fd(),
+            from.as_ptr(),
+            parent.as_raw_fd(),
+            to.as_ptr(),
+            libc::RENAME_EXCL,
+        )
+    };
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    return if renamed == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    };
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = (parent, from, to);
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "workspace_atomic_create_unsupported",
+        ))
+    }
+}
+
+#[cfg(unix)]
+fn atomic_publish_workspace_file(
+    workspace_root: &Path,
+    target: &Path,
+    bytes: &[u8],
+    create_missing_parents: bool,
+    publication: Publication,
+) -> io::Result<()> {
     let (parent, filename) = open_parent_directory(workspace_root, target, create_missing_parents)?;
     let temporary_name = CString::new(format!(
         ".agent-write-{}.tmp",
@@ -193,6 +283,15 @@ pub(crate) fn atomic_write_workspace_file_with_options(
     ))
     .expect("generated filename");
     let existing_mode = match open_workspace_file(workspace_root, target) {
+        Ok(_) if matches!(publication, Publication::CreateNew) => {
+            // Another publisher may not have synced its rename yet. Make reuse
+            // durable before the caller verifies and publishes its reference.
+            sync_directory(&parent)?;
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "workspace_file_exists",
+            ));
+        }
         Ok(file) => Some(file.metadata()?.permissions().mode() & 0o7777),
         Err(error) if error.kind() == io::ErrorKind::NotFound => None,
         Err(error) => return Err(error),
@@ -217,33 +316,36 @@ pub(crate) fn atomic_write_workspace_file_with_options(
         file.flush()?;
         file.sync_all()?;
         drop(file);
-        // SAFETY: both names are relative to the same open directory. renameat
-        // replaces a link entry itself and never follows the target symlink.
-        let renamed = unsafe {
-            libc::renameat(
-                parent.as_raw_fd(),
-                temporary_name.as_ptr(),
-                parent.as_raw_fd(),
-                filename.as_ptr(),
-            )
+        let renamed = match publication {
+            Publication::CreateNew => {
+                rename_without_replacement(&parent, &temporary_name, &filename)
+            }
+            Publication::Replace => {
+                // SAFETY: both names are relative to the same open directory;
+                // renameat replaces the link entry without following it.
+                if unsafe {
+                    libc::renameat(
+                        parent.as_raw_fd(),
+                        temporary_name.as_ptr(),
+                        parent.as_raw_fd(),
+                        filename.as_ptr(),
+                    )
+                } == 0
+                {
+                    Ok(())
+                } else {
+                    Err(io::Error::last_os_error())
+                }
+            }
         };
-        if renamed != 0 {
-            return Err(io::Error::last_os_error());
+        if renamed
+            .as_ref()
+            .is_err_and(|error| error.kind() == io::ErrorKind::AlreadyExists)
+        {
+            sync_directory(&parent)?;
         }
-        // SAFETY: `parent` remains open and owned for the duration of this call.
-        let synced = unsafe { libc::fsync(parent.as_raw_fd()) };
-        if synced == 0 {
-            return Ok(());
-        }
-        let error = io::Error::last_os_error();
-        if matches!(
-            error.raw_os_error(),
-            Some(libc::EINVAL) | Some(libc::ENOTSUP)
-        ) {
-            Ok(())
-        } else {
-            Err(error)
-        }
+        renamed?;
+        sync_directory(&parent)
     })();
     if result.is_err() {
         // SAFETY: unlinkat receives the same trusted directory and generated name.
@@ -252,6 +354,18 @@ pub(crate) fn atomic_write_workspace_file_with_options(
         }
     }
     result
+}
+
+#[cfg(not(unix))]
+pub(crate) fn atomic_create_workspace_file(
+    _workspace_root: &Path,
+    _target: &Path,
+    _bytes: &[u8],
+) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "workspace_atomic_create_unsupported",
+    ))
 }
 
 #[cfg(not(unix))]

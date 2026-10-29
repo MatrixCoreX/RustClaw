@@ -8,12 +8,11 @@ pub(super) fn publish(workspace_root: &Path, path: &Path, bytes: &[u8]) -> io::R
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "evidence_parent_missing"))?;
     crate::secure_workspace_fs::ensure_private_workspace_directory(workspace_root, parent)?;
-    match verify(workspace_root, path, bytes) {
-        Ok(()) => return Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+    match crate::secure_workspace_fs::atomic_create_workspace_file(workspace_root, path, bytes) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
         Err(error) => return Err(error),
     }
-    crate::secure_workspace_fs::atomic_write_workspace_file(workspace_root, path, bytes)?;
     verify(workspace_root, path, bytes)
 }
 

@@ -27,9 +27,14 @@ def step_contract_assertion(spec, calls):
         fields = contract["fields"]
         present = contract.get("present", [])
         count = contract.get("count", 1)
+        total_calls = contract.get("total_calls")
         if (not isinstance(skill, str) or not skill or status not in {"ok", "error"}
                 or not isinstance(fields, dict) or not fields or type(count) is not int or count < 1
                 or not isinstance(present, list) or any(not isinstance(x, str) for x in present)):
+            return detail
+        if "total_calls" in contract and (
+            type(total_calls) is not int or total_calls < count or len(calls) != total_calls
+        ):
             return detail
         for step in calls:
             if step.get("executed_skill") != skill or step.get("status") != status:

@@ -33,6 +33,7 @@
 - Errors return `status=error`, readable `error_text`, and canonical `extra.{schema_version,source_skill,status,error_code,message_key,retryable}`.
 - Stable error codes include `invalid_input`, `video_input_missing`, `video_path_outside_workspace`, `ffprobe_unavailable`, `video_stream_missing`, `audio_stream_missing`, `ffmpeg_unavailable`, `audio_extraction_failed`, `extracted_audio_empty`, and `audio_artifact_finalize_failed`.
 - Runtime and planner decisions must use the structured fields, not `text` or `error_text`.
+- Input and stream-probe failures occur before creating the output directory and include `side_effect_applied=false` and `failure_phase=execution_no_effect`. Errors after filesystem mutation do not claim this proof; partial or ambiguous extraction/finalization outcomes remain subject to host reconciliation.
 
 ## Configuration and Dependencies
 
@@ -57,5 +58,5 @@ Response:
 Failure:
 
 ```json
-{"request_id":"video-2","status":"error","text":"","error_text":"the video does not contain an audio stream","extra":{"schema_version":1,"source_skill":"video_transcribe","status":"error","error_code":"audio_stream_missing","message_key":"skill.video_transcribe.audio_stream_missing","retryable":false}}
+{"request_id":"video-2","status":"error","text":"","error_text":"the video does not contain an audio stream","extra":{"schema_version":1,"source_skill":"video_transcribe","status":"error","error_code":"audio_stream_missing","message_key":"skill.video_transcribe.audio_stream_missing","retryable":false,"side_effect_applied":false,"failure_phase":"execution_no_effect"}}
 ```

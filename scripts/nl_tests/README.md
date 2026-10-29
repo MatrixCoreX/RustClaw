@@ -741,6 +741,10 @@ check and does not require live provider generation. After running
   manifests are not executable NL, and explicit canonical metadata is not
   expanded into user turns by a legacy case-name prefix.
   A `skill:<name>` tag normally requires that exact skill family to execute.
+  For a failed dispatch, `step_contract_json` binds the executed skill, status
+  and typed observed fields in one invocation. Its optional integer `total_calls`
+  also limits all actual tool/skill/capability dispatches, not terminal responses;
+  use it to reject replay or an unintended follow-up without matching reply prose.
   Add `direct_allowed` only when the complete input and transformation rules
   are already in the turn: the quality guard then accepts either that skill or
   a zero-tool direct answer, but still rejects execution through an unrelated

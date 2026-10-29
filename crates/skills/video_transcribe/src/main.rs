@@ -32,6 +32,7 @@ struct SkillFailure {
     message: String,
     retryable: bool,
     details: Option<Value>,
+    no_effect: bool,
 }
 
 impl SkillFailure {
@@ -41,11 +42,17 @@ impl SkillFailure {
             message: message.into(),
             retryable,
             details: None,
+            no_effect: false,
         }
     }
 
     fn with_details(mut self, details: Value) -> Self {
         self.details = Some(details);
+        self
+    }
+
+    fn without_effect(mut self) -> Self {
+        self.no_effect = true;
         self
     }
 }
@@ -59,7 +66,8 @@ fn main() -> anyhow::Result<()> {
             Ok(request) => response_for(request),
             Err(error) => error_response(
                 "unknown".to_string(),
-                SkillFailure::new("invalid_input", format!("invalid input: {error}"), false),
+                SkillFailure::new("invalid_input", format!("invalid input: {error}"), false)
+                    .without_effect(),
             ),
         };
         writeln!(stdout, "{}", serde_json::to_string(&response)?)?;
@@ -90,6 +98,10 @@ fn error_response(request_id: String, error: SkillFailure) -> Response {
         "message_key": format!("skill.{SKILL_NAME}.{}", error.code),
         "retryable": error.retryable,
     });
+    if error.no_effect {
+        extra["side_effect_applied"] = json!(false);
+        extra["failure_phase"] = json!("execution_no_effect");
+    }
     if let (Some(object), Some(details)) = (extra.as_object_mut(), error.details) {
         object.insert("details".to_string(), details);
     }
@@ -114,11 +126,12 @@ fn execute(args: &Value, context: Option<&Value>) -> Result<Value, SkillFailure>
             "invalid_input",
             format!("unsupported action: {action}"),
             false,
-        ));
+        )
+        .without_effect());
     }
 
     let raw_input = video_input(args).ok_or_else(|| {
-        SkillFailure::new("invalid_input", "a local video path is required", false)
+        SkillFailure::new("invalid_input", "a local video path is required", false).without_effect()
     })?;
     let workspace_root = context
         .and_then(|value| value.get("workspace_root"))
@@ -131,8 +144,15 @@ fn execute(args: &Value, context: Option<&Value>) -> Result<Value, SkillFailure>
         .and_then(Value::as_bool)
         .unwrap_or(false)
         || std::env::var("APP_ALLOW_PATH_OUTSIDE_WORKSPACE").is_ok_and(|value| value == "1");
-    let input_path = resolve_input_path(&workspace_root, &raw_input, allow_outside)?;
-    let output_directory = artifact_output_directory(context)?;
+    let input_path = resolve_input_path(&workspace_root, &raw_input, allow_outside)
+        .map_err(SkillFailure::without_effect)?;
+    let output_directory =
+        artifact_output_directory(context).map_err(SkillFailure::without_effect)?;
+    // All input/probe checks precede the first filesystem mutation.
+    ensure_stream(&input_path, "v:0", "video_stream_missing")
+        .map_err(SkillFailure::without_effect)?;
+    ensure_stream(&input_path, "a:0", "audio_stream_missing")
+        .map_err(SkillFailure::without_effect)?;
     fs::create_dir_all(&output_directory).map_err(|error| {
         SkillFailure::new(
             "artifact_directory_unavailable",
@@ -140,9 +160,6 @@ fn execute(args: &Value, context: Option<&Value>) -> Result<Value, SkillFailure>
             true,
         )
     })?;
-
-    ensure_stream(&input_path, "v:0", "video_stream_missing")?;
-    ensure_stream(&input_path, "a:0", "audio_stream_missing")?;
 
     let output_path = output_directory.join("video_audio.wav");
     let partial_path = output_directory.join("video_audio.partial.wav");

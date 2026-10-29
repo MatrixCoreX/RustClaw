@@ -54,6 +54,28 @@ class ExecutionContractTests(unittest.TestCase):
     def test_duplicate_execution(self):
         self.assertFalse(self.check([self.step, copy.deepcopy(self.step)]))
 
+    def test_total_calls_rejects_an_additional_unrelated_dispatch(self):
+        self.spec["total_calls"] = 1
+        self.assertTrue(self.check())
+        other = {"step_id":"s2", "executed_skill":"other_fixture", "status":"ok"}
+        self.assertFalse(self.check([self.step, other]))
+
+    def test_total_calls_is_a_strict_non_boolean_count(self):
+        for value in (True, False, "1", 0, -1, None):
+            self.spec["total_calls"] = value
+            self.assertFalse(self.check())
+
+    def test_error_contract_can_bind_one_failed_dispatch(self):
+        self.spec = {"skill":"fixture", "status":"error", "count":1, "total_calls":1,
+                     "fields":{"error_code":"input_missing", "retryable":False}}
+        self.step["status"] = "error"
+        self.step["observed_evidence"] = {"items":[
+            {"field":"error_code", "kind":"string", "excerpt":"input_missing"},
+            {"field":"retryable", "kind":"bool", "excerpt":"false"}]}
+        self.assertTrue(self.check())
+        self.step["observed_evidence"]["items"].pop()
+        self.assertFalse(self.check())
+
     def test_model_claims_cannot_replace_evidence(self):
         self.step["observed_evidence"] = {"items": []}
         self.step["output_excerpt"] = json.dumps(self.spec["fields"])

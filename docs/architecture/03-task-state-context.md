@@ -70,7 +70,10 @@ use the same publisher. A stale worker claim cannot publish a new reference.
 The result keeps only the manifest identity and bounds; index reads load that
 manifest, while exact field reads open only the selected entries. Directory-fd
 no-follow operations, private permissions and digest checks apply to publication
-and reuse. Limits are 4,096 entries, 1 MiB per object and 32 MiB per archive;
+and reuse. Publication atomically creates the destination only if absent; it
+never replaces an existing evidence object. Concurrent identical publishers
+verify and reuse the retained object; conflicting content fails explicitly.
+Limits are 4,096 entries, 1 MiB per object and 32 MiB per archive;
 budget/write failures are explicit unavailable records, not complete histories.
 Task-owned deletion removes these objects. Missing or corrupted archived objects
 return explicit errors. Earlier histories without a complete archive return
