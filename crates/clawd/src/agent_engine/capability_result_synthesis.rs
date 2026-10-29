@@ -1130,7 +1130,7 @@ fn delivery_constraints(agent_run_context: Option<&AgentRunContext>) -> Value {
     })
 }
 
-fn synthesis_evidence_catalog(
+pub(super) fn synthesis_evidence_catalog(
     state: &AppState,
     task: &ClaimedTask,
     results: &[CapabilityResultEnvelope],

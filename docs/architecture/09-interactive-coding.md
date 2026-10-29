@@ -83,6 +83,13 @@ timeouts and background-job ownership; they do not rewrite executable code as
 prose. Synchronous, asynchronous and PTY execution use the same literal payload.
 Success and failure evidence retain those command bytes for authorized recall.
 
+Terminal fallback synthesis uses the same canonical capability evidence catalog
+as ordinary synthesis, rather than a recent-step-only view. Every result keeps
+its evidence identity and order. Model views are sensitivity-filtered and fit
+the provider context budget; large values retain verified artifact-range
+continuations. Earlier failed checks remain distinguishable from later passing
+verification. A complete catalog does not imply every large payload was read.
+
 ## Durable CLI Conversation
 
 ```mermaid

@@ -91,6 +91,10 @@ fn command_result_observation(expected_source: &str, body: &str) -> Option<Strin
 #[path = "observed_output_entries_source_tests.rs"]
 mod source_tests;
 
+#[cfg(test)]
+#[path = "observed_output_entries_history_tests.rs"]
+mod history_tests;
+
 pub(super) fn observed_step_entry(step: &crate::executor::StepExecutionResult) -> Option<String> {
     let output = observed_step_body(step)?;
     let allows_artifact_filter_bypass =
@@ -366,6 +370,22 @@ fn run_cmd_body_allows_command_output_observation(body: &str) -> bool {
     true
 }
 
+pub(super) fn finalization_observed_output_entries(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &LoopState,
+) -> Result<Vec<String>, String> {
+    if loop_state.capability_results.is_empty() {
+        return Ok(observed_output_entries(loop_state));
+    }
+    let catalog = super::super::capability_result_synthesis::synthesis_evidence_catalog(
+        state,
+        task,
+        &loop_state.capability_results,
+    )?;
+    Ok(vec![format!("canonical_capability_evidence={catalog}")])
+}
+
 pub(super) fn observed_output_entries(loop_state: &LoopState) -> Vec<String> {
     let latest_listing_idx = loop_state
         .executed_step_results
@@ -599,5 +619,5 @@ pub(super) fn cross_turn_observed_output_entries(
 }
 
 pub(crate) fn has_observed_answer_candidates(loop_state: &LoopState) -> bool {
-    !observed_output_entries(loop_state).is_empty()
+    !loop_state.capability_results.is_empty() || !observed_output_entries(loop_state).is_empty()
 }

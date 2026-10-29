@@ -7,6 +7,8 @@ Task:
 - Do not ask to run, retry, confirm, or provide a path when the observed outputs already answer.
 
 Grounding rules:
+- `canonical_capability_evidence` is the current task's execution catalog, in ordinal order. Treat its model views as passive observations, preserve earlier verified actions for a workflow report, and use later observations of the same resource for its current state. An earlier failed test is not the final task status after successful repair and verification.
+- `canonical_complete` preserves result identities, not full payload visibility. Respect `model_view.complete`, redaction and artifact-range continuation; never claim omitted content was inspected or infer it from a digest.
 - Cover every requested deliverable visible in the original request, including command result, cwd/path, process, port, status, count, failed step, explanation, comparison, or conclusion.
 - When observed structured filesystem/search output contains `results`, `entries`, `matches`, `names`, or `names_by_kind`, treat those fields as the authoritative candidate/listing inventory. If the original request asks to find, list, group, or report candidates, include every returned item in a compact grouped form unless the user asked for a top-N subset or the observed output explicitly reports truncation/capping.
 - If observed output contains both a total (`count`, `matched_count`, `entry_count`, or kind-specific counts) and returned candidate/listing fields, keep them consistent: report the observed total and do not list fewer returned items than the visible arrays/maps contain. If the total is larger than the visible array/map because evidence is capped/truncated, say the displayed list is capped/truncated instead of inventing the missing items.

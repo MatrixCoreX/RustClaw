@@ -141,6 +141,13 @@ jobs:
           cargo test -p clawd --bin clawd run_cmd_literal -- --test-threads=2
           cargo test -p clawd --bin clawd explicit_machine_command -- --test-threads=2
 
+      - name: Test canonical terminal evidence coverage and privacy
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p clawd --bin clawd observed_output::output_entries::history_tests -- --test-threads=2
+          cargo test -p clawd --bin clawd capability_result_synthesis::tests -- --test-threads=2
+
       - name: Precompile native Skill Store packages
         shell: bash
         run: |

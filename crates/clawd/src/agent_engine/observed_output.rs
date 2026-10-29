@@ -72,10 +72,12 @@ pub(super) use output_entries::latest_structured_capability_observation;
 pub(super) use output_entries::structured_capability_observation;
 use output_entries::{
     compound_listing_content_delivery_guard_entry, cross_turn_observed_output_entries,
-    observed_output_entries,
+    finalization_observed_output_entries,
 };
 #[cfg(test)]
-use output_entries::{observed_step_entry, recent_generated_output_from_user_request};
+use output_entries::{
+    observed_output_entries, observed_step_entry, recent_generated_output_from_user_request,
+};
 
 #[path = "observed_output_direct_scalar.rs"]
 mod output_direct_scalar;
@@ -712,7 +714,7 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
         )));
     }
 
-    let mut observed_entries = observed_output_entries(loop_state);
+    let mut observed_entries = finalization_observed_output_entries(state, task, loop_state)?;
     if let Some(guard) = multi_count_observation_guard_entry(loop_state) {
         observed_entries.insert(0, guard);
     }
