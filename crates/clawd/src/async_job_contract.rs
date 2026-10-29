@@ -2,6 +2,9 @@ use serde_json::{json, Value};
 
 use crate::task_lifecycle::{AsyncJobRef, AsyncJobStatus};
 
+mod prepared_start;
+pub(crate) use prepared_start::persist_prepared_direct_start;
+
 pub(crate) const ASYNC_POLL_ADAPTER_RESULT_KEY: &str = "async_poll_adapter_result";
 pub(crate) const ASYNC_POLL_ADAPTER_KINDS: &[&str] = &[
     "skill_poll",

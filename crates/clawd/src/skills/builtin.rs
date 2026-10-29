@@ -880,6 +880,16 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                     })
                     .saturating_sub(crate::now_ts_u64() as i64)
                     .max(1) as u64;
+                if let Some(task) = task {
+                    crate::async_job_contract::persist_prepared_direct_start(
+                        state, task,
+                        super::builtin_success_extra(&state.skill_rt.workspace_root, "run_cmd", args),
+                    ).await.map_err(|_| super::structured_skill_error_from_parts(
+                        "run_cmd", "async_start_checkpoint_unavailable", "async_start_checkpoint_unavailable",
+                        Some(std::env::consts::OS),
+                        Some(serde_json::json!({"side_effect_applied":false,"failure_phase":"pre_dispatch","retryable":true})),
+                    ))?;
+                }
                 return start_async_command(
                     &cwd_path,
                     &sanitized_command,

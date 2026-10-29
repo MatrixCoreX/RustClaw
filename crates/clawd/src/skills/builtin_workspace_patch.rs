@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 
+use super::builtin_workspace_mutation::pre_dispatch_replan_error;
 use crate::{AppState, ClaimedTask};
 
 #[path = "builtin_workspace_patch_transaction.rs"]
@@ -89,10 +90,11 @@ fn apply_patch(
     task_id: &str,
     args: &Map<String, Value>,
 ) -> Result<String, String> {
-    ensure_only_keys(args, &["action", "patch", "precondition_hashes"])?;
-    let patch = required_string(args, "patch")?;
+    ensure_only_keys(args, &["action", "patch", "precondition_hashes"])
+        .map_err(pre_dispatch_replan_error)?;
+    let patch = required_string(args, "patch").map_err(pre_dispatch_replan_error)?;
     if patch.is_empty() || patch.len() > MAX_PATCH_BYTES {
-        return Err(patch_error(
+        return Err(pre_dispatch_replan_error(patch_error(
             "invalid_patch_size",
             "workspace.patch.invalid_size",
             serde_json::json!({
@@ -106,21 +108,22 @@ fn apply_patch(
                     "max_shard_bytes": MAX_PATCH_BYTES,
                 },
             }),
-        ));
+        )));
     }
 
-    let root = canonical_workspace_root(workspace_root)?;
+    let root = canonical_workspace_root(workspace_root).map_err(pre_dispatch_replan_error)?;
     let checkpoint_id = format!("patch_{}", uuid::Uuid::new_v4().simple());
-    let checkpoint_dir = create_checkpoint_dir(&root, &checkpoint_id)?;
+    let checkpoint_dir =
+        create_checkpoint_dir(&root, &checkpoint_id).map_err(pre_dispatch_replan_error)?;
     restrict_directory_permissions(&checkpoint_dir);
     let patch_file = checkpoint_dir.join("change.patch");
     if let Err(err) = fs::write(&patch_file, patch.as_bytes()) {
         remove_checkpoint_dir(&checkpoint_dir);
-        return Err(patch_io_error(
+        return Err(pre_dispatch_replan_error(patch_io_error(
             "patch_stage_failed",
             "workspace.patch.stage_failed",
             err,
-        ));
+        )));
     }
 
     let git_workspace = is_git_workspace(&root);
@@ -130,7 +133,7 @@ fn apply_patch(
             Ok(stats) => stats,
             Err(err) => {
                 remove_checkpoint_dir(&checkpoint_dir);
-                return Err(err);
+                return Err(pre_dispatch_replan_error(err));
             }
         }
     } else {
@@ -148,47 +151,51 @@ fn apply_patch(
             }
             Err(err) => {
                 remove_checkpoint_dir(&checkpoint_dir);
-                return Err(err);
+                return Err(pre_dispatch_replan_error(err));
             }
         }
     };
     if stats.is_empty() {
         remove_checkpoint_dir(&checkpoint_dir);
-        return Err(patch_error(
+        return Err(pre_dispatch_replan_error(patch_error(
             "empty_patch",
             "workspace.patch.empty",
             Value::Null,
-        ));
+        )));
     }
     for stat in &stats {
         if let Err(err) = validate_relative_patch_path(&root, &stat.path) {
             remove_checkpoint_dir(&checkpoint_dir);
-            return Err(err);
+            return Err(pre_dispatch_replan_error(err));
         }
     }
     if let Err(err) = verify_preconditions(&root, args, &stats) {
         remove_checkpoint_dir(&checkpoint_dir);
-        return Err(err);
+        return Err(pre_dispatch_replan_error(err));
     }
 
     let mut files = match snapshot_files(&root, &checkpoint_dir, &stats) {
         Ok(files) => files,
         Err(err) => {
             remove_checkpoint_dir(&checkpoint_dir);
-            return Err(err);
+            return Err(pre_dispatch_replan_error(err));
         }
     };
     if git_workspace {
         let check = git_apply(&root, &patch_file, true).map_err(|err| {
-            patch_io_error("patch_check_failed", "workspace.patch.check_failed", err)
+            pre_dispatch_replan_error(patch_io_error(
+                "patch_check_failed",
+                "workspace.patch.check_failed",
+                err,
+            ))
         })?;
         if !check.status.success() {
             remove_checkpoint_dir(&checkpoint_dir);
-            return Err(command_error(
+            return Err(pre_dispatch_replan_error(command_error(
                 "patch_context_mismatch",
                 "workspace.patch.context_mismatch",
                 &check,
-            ));
+            )));
         }
 
         let applied = git_apply(&root, &patch_file, false).map_err(|err| {

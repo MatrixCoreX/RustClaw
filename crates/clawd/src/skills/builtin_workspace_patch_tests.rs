@@ -45,6 +45,36 @@ fn write(path: &Path, content: &str) {
 }
 
 #[test]
+fn malformed_patch_is_recoverable_only_before_any_workspace_write() {
+    let workspace = TestWorkspace::new();
+    write(&workspace.root.join("keep.txt"), "original\n");
+    let malformed = "diff --git a/new.txt b/new.txt\\n--- /dev/null\\n+++ b/new.txt\\n@@ -0,0 +1 @@\\n+value\\n";
+    let error = workspace
+        .run(json!({"action":"apply_patch","patch":malformed}))
+        .unwrap_err();
+    let structured =
+        crate::skills::parse_structured_skill_error(&error).expect("structured patch error");
+    let extra = structured.extra.expect("phase facts");
+    assert_eq!(extra["side_effect_applied"], false);
+    assert_eq!(extra["failure_phase"], "pre_dispatch");
+    assert_eq!(extra["recovery_action"], "replan_arguments");
+    assert_eq!(extra["retryable"], true);
+    assert!(!workspace.root.join("new.txt").exists());
+    assert_eq!(
+        fs::read_to_string(workspace.root.join("keep.txt")).unwrap(),
+        "original\n"
+    );
+    workspace
+        .run(json!({"action":"apply_patch","patch":
+        "diff --git a/new.txt b/new.txt\n--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1 @@\n+value\n"}))
+        .expect("fresh corrected patch");
+    assert_eq!(
+        fs::read_to_string(workspace.root.join("new.txt")).unwrap(),
+        "value\n"
+    );
+}
+
+#[test]
 fn applies_multi_file_patch_and_rewinds_checkpoint() {
     let workspace = TestWorkspace::new();
     write(&workspace.root.join("src/a.txt"), "alpha\n");

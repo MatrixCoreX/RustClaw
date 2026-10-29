@@ -61,7 +61,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--wait-seconds",
         type=int,
-        default=90,
+        default=600,
         help="maximum wait per lifecycle boundary.",
     )
     return parser.parse_args(argv)
