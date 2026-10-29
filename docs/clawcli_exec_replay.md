@@ -7,6 +7,16 @@ code, and can write machine-readable artifacts for CI.
 `clawcli replay` exports and inspects recorded task bundles without calling live
 model providers or tools by default.
 
+## API Connection
+
+Set `--base-url` to the final API origin, without a `/v1` suffix. Credential-bearing
+requests never follow HTTP redirects, including same-origin redirects, health
+checks, task mutations, and event streams. If the server redirects HTTP to HTTPS
+or to a different host, configure that final URL explicitly instead. A redirect
+is not a successful task submission and does not replay a mutation at its target.
+Ordinary requests keep their 60-second timeout; event streams retain their
+command-specific timeout or unbounded read setting.
+
 ## Exec Basics
 
 Run an ask task and wait until terminal:

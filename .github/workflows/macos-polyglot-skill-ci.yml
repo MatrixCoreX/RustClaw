@@ -8,6 +8,7 @@ name: Polyglot Skill macOS CI
       - "Cargo.toml"
       - "configs/skills_registry.toml"
       - "crates/claw-core/**"
+      - "crates/clawcli/**"
       - "crates/clawd/**"
       - "crates/skill-runner/**"
       - "crates/skill-sdk/**"
@@ -43,6 +44,7 @@ name: Polyglot Skill macOS CI
       - "Cargo.toml"
       - "configs/skills_registry.toml"
       - "crates/claw-core/**"
+      - "crates/clawcli/**"
       - "crates/clawd/**"
       - "crates/skill-runner/**"
       - "crates/skill-sdk/**"
@@ -156,6 +158,10 @@ jobs:
           set -euo pipefail
           cargo test -p agent-skill-sdk
           cargo test -p skill-runner
+
+      - name: Test CLI transport and task continuity
+        shell: bash
+        run: cargo test -p clawcli
 
       - name: Check shared runtime integration
         shell: bash
