@@ -285,6 +285,7 @@ OUTPUT="$(
       --no-restart
 )"
 grep -Fq 'release_checksum=verified' <<< "$OUTPUT"
+grep -Fq 'release_download_cache=released_after_verification' <<< "$OUTPUT"
 grep -Fq 'release_update_status=deployed' <<< "$OUTPUT"
 ! grep -Fq 'release=8.0.0' <<< "$OUTPUT"
 grep -Fxq 'ubuntu-x86_64-newest' "$RUNTIME/.release-tag"
@@ -335,6 +336,7 @@ SPLIT_OUTPUT="$(
       --no-restart
 )"
 grep -Fq 'release_checksum=verified' <<< "$SPLIT_OUTPUT"
+grep -Fq 'release_download_cache=released_after_verification' <<< "$SPLIT_OUTPUT"
 grep -Fq 'release_update_status=deployed' <<< "$SPLIT_OUTPUT"
 grep -Fxq 'ubuntu-x86_64-split' "$SPLIT_RUNTIME/.release-tag"
 grep -Fxq 'local-secret = "preserve-split"' "$SPLIT_RUNTIME/configs/config.toml"
@@ -354,6 +356,8 @@ LOCAL_OUTPUT="$(
 )"
 grep -Fq 'release_source=local_signed_bundle' <<< "$LOCAL_OUTPUT"
 grep -Fq 'release_signature=verified' <<< "$LOCAL_OUTPUT"
+! grep -Fq 'release_download_cache=released_after_verification' <<< "$LOCAL_OUTPUT"
+[[ "$(sha256sum "$ARCHIVE" | awk '{print $1}')" == "$ARCHIVE_HASH" ]]
 grep -Fxq 'ubuntu-x86_64-test' "$LOCAL_RUNTIME/.release-tag"
 grep -Fxq 'local-secret = "preserve-local"' "$LOCAL_RUNTIME/configs/config.toml"
 cmp /bin/true "$LOCAL_RUNTIME/target/release/clawd"

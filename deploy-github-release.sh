@@ -877,6 +877,14 @@ fi
 python3 "$SCRIPT_DIR/scripts/verify_release_binary.py" \
   "$PACKAGE_DIR/target/release/clawd" "$RUST_TARGET"
 
+# Drop only our download after admission, before backup and atomic-copy peaks.
+# A caller-supplied signed bundle remains available for reuse and recovery.
+if [[ -z "$LOCAL_RELEASE_DIR" && "$ARCHIVE_PATH" == "$WORK_DIR/$ARCHIVE_NAME" && \
+      -f "$ARCHIVE_PATH" && ! -L "$ARCHIVE_PATH" ]]; then
+  rm -f -- "$ARCHIVE_PATH"
+  printf 'release_download_cache=released_after_verification\n'
+fi
+
 skillctl_error_code() {
   python3 -c '
 import json

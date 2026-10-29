@@ -128,6 +128,24 @@ class ReleaseInstallationTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, package_source)
 
+    def test_owned_archive_cleanup_is_after_admission_before_backup(self):
+        source = (ROOT / "deploy-github-release.sh").read_text()
+        cleanup = source.index('rm -f -- "$ARCHIVE_PATH"')
+        for admission in (
+            'release_signature=verified',
+            'release_checksum=verified',
+            'python3 - "$ARCHIVE_PATH" "$EXTRACT_DIR"',
+            'release_package_version_manifest_mismatch',
+            'python3 "$SCRIPT_DIR/scripts/verify_release_binary.py"',
+        ):
+            self.assertLess(source.index(admission), cleanup)
+        self.assertLess(cleanup, source.index('MANAGED_PATHS_FILE="$WORK_DIR/managed-paths.txt"'))
+        guard = source[source.rfind('if [[', 0, cleanup):cleanup]
+        self.assertIn('-z "$LOCAL_RELEASE_DIR"', guard)
+        self.assertIn('"$ARCHIVE_PATH" == "$WORK_DIR/$ARCHIVE_NAME"', guard)
+        self.assertIn('-f "$ARCHIVE_PATH" && ! -L "$ARCHIVE_PATH"', guard)
+        self.assertEqual(source.count('rm -f -- "$ARCHIVE_PATH"'), 1)
+
     def test_missing_assets_fail_before_installing_links(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
