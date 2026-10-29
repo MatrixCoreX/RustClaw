@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import threading
@@ -92,6 +93,13 @@ def invoke(root, source, base, *extra):
 
 
 class ObservationTests(unittest.TestCase):
+    def test_embedded_python_compiles_on_the_supported_interpreter(self):
+        blocks = re.findall(r"<<'PY'\n(.*?)\nPY(?:\n|$)", SCRIPT.read_text(), re.S)
+        self.assertTrue(blocks)
+        for index, block in enumerate(blocks, 1):
+            with self.subTest(heredoc=index):
+                compile(block, f"{SCRIPT}:heredoc#{index}", "exec")
+
     def test_observes_original_task_until_success_without_any_post(self):
         with tempfile.TemporaryDirectory(prefix="nl-observation-") as directory:
             root = Path(directory)

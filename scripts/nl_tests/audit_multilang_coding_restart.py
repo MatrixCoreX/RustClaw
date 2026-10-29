@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 
 from manual_trace_evidence import restore_execution_streams
+from coding_observation_chain import apply_observations
 
 
 CASE_NAMES = ("create_project", "index_project", "amend_after_restart", "verify_retained_project")
@@ -96,7 +97,7 @@ def project_commands(project: Path) -> list[list[str]]:
                        "import {price_total} from './pricing.mjs'; import assert from 'node:assert/strict'; assert.equal(price_total([2,-3,4]),6); assert.equal(price_total([-2]),0); assert.equal(price_total([]),0);"]]
 
 
-def audit(state: Path) -> dict:
+def audit(state: Path, observation_runs=()) -> dict:
     os.environ["NL_RUNTIME_TRACE_LOG"] = str(state / "server.log")
     rows = []
     for summary in sorted((state / "results").glob("*/summary.jsonl")):
@@ -106,6 +107,7 @@ def audit(state: Path) -> dict:
             rows.append(row)
     if tuple(row.get("case_name") for row in rows) != CASE_NAMES:
         raise ValueError("continuous_case_sequence_incomplete")
+    rows, observations = apply_observations(state, rows, observation_runs)
     if any(row.get("assertion") != "pass" or row.get("status") != "succeeded" for row in rows):
         raise ValueError("case_not_accepted")
     calls = [json.loads(line) for line in (state / "workspace/logs/model_io.log").read_text().splitlines()]
@@ -151,7 +153,8 @@ def audit(state: Path) -> dict:
     restart_log = (state / "restart-evidence.json").read_text()
     restart = json.loads(restart_log)
     assert restart["after_case"] == "index_project" and restart["old_pid"] != restart["new_pid"]
-    return {"status": "passed", "cases": 4, "real_restart": restart,
+    return {"status": "passed", "cases": 4, "attempt_rows": len(rows) + len(observations),
+            "observations": observations, "real_restart": restart,
             "llm_counts": {row["case_name"]: sum(call.get("task_id") == row["task_id"] for call in calls) for row in rows},
             "independent_read_only_sandbox_checks": checks,
             "independent_red_suite": independent_red}
@@ -160,9 +163,10 @@ def audit(state: Path) -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--state", type=Path, required=True)
+    parser.add_argument("--observation-run", type=Path, action="append", default=[])
     args = parser.parse_args()
     try:
-        print(json.dumps(audit(args.state.resolve()), ensure_ascii=False, sort_keys=True))
+        print(json.dumps(audit(args.state.resolve(), args.observation_run), ensure_ascii=False, sort_keys=True))
     except (AssertionError, ValueError, KeyError, OSError, subprocess.TimeoutExpired) as error:
         print(json.dumps({"status": "failed", "error_type": type(error).__name__, "detail": str(error)}))
         raise SystemExit(1)

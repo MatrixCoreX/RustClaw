@@ -292,7 +292,8 @@ error_text = str(data.get("error_text") or "")
 
 print(f"  [final] status={status}")
 if error_text:
-    print(f"  [error] {error_text.replace(chr(10), '\\n')}")
+    escaped_error = error_text.replace("\n", "\\n")
+    print(f"  [error] {escaped_error}")
 if text:
     if mode == "full":
         print("  [text]")

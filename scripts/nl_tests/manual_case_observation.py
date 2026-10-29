@@ -26,13 +26,11 @@ def read_source(path):
     return json.loads(raw), hashlib.sha256(raw).hexdigest()
 
 
-def bind_case(case_dir, output, source_line, name, tags, prompt, expectation):
+def source_binding(case_dir, source_line, name, tags, prompt, expectation):
     if case_dir.is_symlink() or not case_dir.is_dir():
         raise ValueError("case_directory_required")
     case_dir = case_dir.resolve()
     source_run = case_dir.parent
-    if output.resolve().is_relative_to(source_run):
-        raise ValueError("source_run_is_readonly")
     submit, submit_hash = read_source(case_dir / "submit.json")
     task_id = canonical_task_id(object_value(object_value(submit).get("data")).get("task_id"))
     final, final_hash = read_source(case_dir / "final.json")
@@ -60,14 +58,20 @@ def bind_case(case_dir, output, source_line, name, tags, prompt, expectation):
             or row.get("prompt") != prompt or row.get("mode") != "ask"
             or recorded_expectation != expectation):
         raise ValueError("case_contract_mismatch")
-    evidence = {"schema_version": 1, "mode": "existing_task_readonly", "task_id": task_id,
-                "source_case": str(case_dir), "source_run": str(source_run),
-                "source_sha256": {"submit.json": submit_hash, "final.json": final_hash,
-                                  "summary.jsonl": summary_hash.hexdigest()}}
+    return {"schema_version": 1, "mode": "existing_task_readonly", "task_id": task_id,
+            "source_case": str(case_dir), "source_run": str(source_run),
+            "source_sha256": {"submit.json": submit_hash, "final.json": final_hash,
+                              "summary.jsonl": summary_hash.hexdigest()}}
+
+
+def bind_case(case_dir, output, source_line, name, tags, prompt, expectation):
+    evidence = source_binding(case_dir, source_line, name, tags, prompt, expectation)
+    if output.resolve().is_relative_to(Path(evidence["source_run"])):
+        raise ValueError("source_run_is_readonly")
     with output.open("x", encoding="utf-8") as stream:
         json.dump(evidence, stream, ensure_ascii=False, sort_keys=True)
         stream.write("\n")
-    return task_id
+    return evidence["task_id"]
 
 
 def check_reply(task_id, path):

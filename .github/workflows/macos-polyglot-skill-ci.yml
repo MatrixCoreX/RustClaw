@@ -21,6 +21,8 @@ name: Polyglot Skill macOS CI
       - "scripts/skill_store_packages.py"
       - "scripts/nl_tests/run_manual_test.sh"
       - "scripts/nl_tests/manual_case_observation*.py"
+      - "scripts/nl_tests/coding_observation_chain*.py"
+      - "scripts/nl_tests/audit_multilang_coding_restart*.py"
   push:
     branches:
       - main
@@ -43,6 +45,8 @@ name: Polyglot Skill macOS CI
       - "scripts/skill_store_packages.py"
       - "scripts/nl_tests/run_manual_test.sh"
       - "scripts/nl_tests/manual_case_observation*.py"
+      - "scripts/nl_tests/coding_observation_chain*.py"
+      - "scripts/nl_tests/audit_multilang_coding_restart*.py"
   workflow_dispatch:
 
 permissions:
@@ -114,6 +118,7 @@ jobs:
           bash -n scripts/nl_tests/run_manual_test.sh
           python3 scripts/nl_tests/manual_case_observation_tests.py
           python3 scripts/nl_tests/manual_case_lifecycle_tests.py
+          python3 scripts/nl_tests/coding_observation_chain_tests.py
 
       - name: Test SDK and runner
         shell: bash

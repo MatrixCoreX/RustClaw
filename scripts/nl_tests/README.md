@@ -50,6 +50,23 @@ digest-bound execution evidence. Continue subsequent untouched cases only
 after this task actually succeeds; audit the original and supplemental records
 together without rewriting the original history.
 
+For the four-turn multilingual coding/restart suite, keep observations outside
+the original `results/` tree and pass each accepted supplemental run explicitly:
+
+```bash
+python3 scripts/nl_tests/audit_multilang_coding_restart.py --state <retained-state> \
+  --observation-run <supplemental-run-directory>
+```
+
+The audit still requires all four logical cases and independent sandbox
+verification. Only a nonterminal provider wait or polling timeout can be
+supplemented by the same task's verified success. It rechecks the source hashes,
+exact case contract, live response identity/status and order before the next
+turn. It reports both logical-case and attempt counts and preserves the original
+blocked row. Terminal failures, a replacement task, changed source records or
+missing turns cannot be converted into success. Create a new run for subsequent
+cases too; appending to an original summary would invalidate its pinned hash.
+
 ## Unified Tool
 
 Primary entry point:
