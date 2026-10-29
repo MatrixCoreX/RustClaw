@@ -72,6 +72,17 @@ Replay is decided before execution by the runtime idempotency ledger. Reusing
 the same idempotency key returns the recorded result; a fresh invocation runs
 against current filesystem state and may return `replacement_target_not_found`.
 
+## Literal Command Execution
+
+Structured command arguments are passed to the shell unchanged, including
+terminal punctuation, shell quotes, backticks, and leading/trailing whitespace.
+An explicit backtick-delimited command in the user's request is retained as a
+machine boundary hint without rewriting its contents. Runtime checks reject
+empty or over-budget input and still enforce permissions, sandboxing, sudo,
+timeouts and background-job ownership; they do not rewrite executable code as
+prose. Synchronous, asynchronous and PTY execution use the same literal payload.
+Success and failure evidence retain those command bytes for authorized recall.
+
 ## Durable CLI Conversation
 
 ```mermaid

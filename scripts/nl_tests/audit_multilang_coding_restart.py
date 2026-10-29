@@ -122,11 +122,14 @@ def audit(state: Path) -> dict:
     indexed = journals[1]["capability_results"]
     required = {"code.find_definitions", "code.find_references", "code.list_tests"}
     assert required <= {item["capability"] for item in indexed if item["status"] == "ok"}
-    index_reads = required | {"code.search_symbols", "code.retrieve_context",
+    index_reads = required | {"code.refresh_index", "code.search_symbols", "code.retrieve_context",
                               "filesystem.read_text_range", "filesystem.stat_paths", "filesystem.list_paths",
                               "task.plan_read"}
     if any(item["capability"] not in index_reads for item in indexed):
         raise ValueError("index_phase_non_read_or_unknown_capability")
+    if any(item.get("effect") != "observe" or item.get("action") != "refresh"
+           for item in indexed if item["capability"] == "code.refresh_index"):
+        raise ValueError("index_refresh_contract_invalid")
     project = state / "workspace/tmp/multilang_project_20261029"
     if project.is_symlink() or not project.resolve().is_relative_to((state / "workspace").resolve()):
         raise ValueError("project_path_unsafe")

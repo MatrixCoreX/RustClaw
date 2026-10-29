@@ -14,6 +14,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 #[path = "builtin_run_cmd_preflight_tests.rs"]
 mod run_cmd_preflight;
 
+#[path = "builtin_run_cmd_literal_tests.rs"]
+mod run_cmd_literal;
+
 struct TempDirGuard {
     path: PathBuf,
 }

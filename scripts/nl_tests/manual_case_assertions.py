@@ -13,6 +13,7 @@ from typing import Any
 from manual_workspace_assertions import workspace_file_cycle_assertion
 from manual_execution_assertions import step_contract_assertion
 from manual_trace_evidence import restore_execution_streams
+from expectation_directives import split_expectation_directives
 
 try:
     import yaml
@@ -866,7 +867,12 @@ def evaluate_expectations(
             },
         )
 
-    for raw in [part.strip() for part in spec_text.split(";") if part.strip()]:
+    try:
+        directives = split_expectation_directives(spec_text)
+    except ValueError as exc:
+        details.append({"kind": "invalid_expectation", "error_code": str(exc), "ok": False})
+        return "fail", details
+    for raw in directives:
         if raw.startswith("step_contract_json:"):
             detail = step_contract_assertion(raw[len("step_contract_json:"):], actual_call_steps(result))
             details.append(detail)

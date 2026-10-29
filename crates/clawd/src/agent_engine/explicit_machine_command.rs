@@ -73,7 +73,7 @@ fn backtick_command_segment(request: &str) -> Option<String> {
     parts.next();
     parts
         .step_by(2)
-        .map(|segment| crate::bootstrap::config_loaders::trim_command_text(segment.to_string()))
+        .map(str::to_string)
         .find(|segment| concrete_command_segment(segment, true))
 }
 

@@ -2,7 +2,7 @@
 # Do not edit by hand; regenerate with scripts/nl_tests/build_release_gate_subset.py.
 # Selection uses suite/name/tags/source metadata only, not natural-language prompt matching.
 # source=scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt
-# selected_rows=299 coverage_categories=508 missing_categories=0
+# selected_rows=300 coverage_categories=509 missing_categories=0
 # Run:
 #   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file scripts/nl_tests/cases/nl_cases_client_like_release_gate_equivalent.txt --skip-smoke --prompt-reply-only --quality-guard --exclude-case-tag x --exclude-case-tag twitter --exclude-case-tag tweet --exclude-case-tag x_api --exclude-case-tag post_tweet --exclude-case-tag publish_tweet
 # Format: suite|name|tags|prompt|expect=optional substring
@@ -256,6 +256,8 @@ interactive_coding_final|nl_cases_interactive_coding_final_additions_20260726_co
 interactive_coding_final|nl_cases_interactive_coding_final_additions_20260726_code_find_references_zh|covers:code_index,code.find_references,read,zh,capability:code.find_references,requires_tool_call=true,local_readonly,client_like,aggregate|用代码索引查找 run_agent_with_tools 的引用，最多 5 条，只返回 symbol、references 和 page。
 interactive_coding_final|nl_cases_interactive_coding_final_additions_20260726_fs_mtime_sort_en|covers:fs_search,filesystem.find_entries,mtime_sort,read,en,capability:filesystem.find_entries,requires_tool_call=true,local_readonly,client_like,aggregate|Find up to 5 Rust files under crates/clawd/src ordered by mtime_desc; return only sort_by, results, and page machine fields.
 interactive_coding_final|nl_cases_interactive_coding_final_additions_20260726_exact_replace_roundtrip_en|covers:coding,exact_replace,checkpoint,verification,diff,rewind,cleanup,en,capability:workspace.replace_text,requires_tool_call=true,local_side_effect,client_like,aggregate|Create tmp/nl_interactive_final/exact.txt with exactly two lines, alpha and beta. Preview an exact replacement of alpha with gamma, apply it with expected_occurrences=1, run a focused Python assertion that the file is exactly "gamma\nbeta\n", and inspect the workspace diff plus checkpoint evidence. Rewind that checkpoint, read the file to prove alpha and beta were restored, then remove tmp/nl_interactive_final. Return only changed_path, occurrence_count, verification_status, checkpoint_id, rewind_status, restored_content, and cleanup_status.
+# source: scripts/nl_tests/cases/nl_cases_literal_command_20261029.txt
+literal_command|nl_cases_literal_command_20261029_preserve_shell_exit_parameter_zh|group:literal-command,requires_tool_call=true,local_side_effect,capability:system.run_command,min_successful_capability_calls:system.run_command=1,client_like,aggregate|在当前隔离工作区，只调用一次 system.run_command，原样执行 `false; printf '%s' $?`。不要加前后缀、不要改写命令，也不要创建文件或联网。最后只返回 JSON：value 是命令实际 stdout 的完整内容，不要把工具自身的退出码当成 value。
 # source: scripts/nl_tests/cases/nl_cases_llm_first_convergence_20260511.txt
 llm_first|nl_cases_llm_first_convergence_20260511_workspace_article_after_wrong_locator_cn|skill:system_basic,client_like,aggregate|帮我写一篇关于 Agent Runtime 的长文
 llm_first|nl_cases_llm_first_convergence_20260511_missing_then_bounded_fallback_cn|skill:fs_search,client_like,aggregate|读取 plan/definitely_missing_20260511.md；如果不存在，就在 plan 目录里搜索 execution_intent 相关的 md 文件，并只返回找到的路径

@@ -11,6 +11,21 @@ fn backticks_define_an_explicit_machine_command() {
 }
 
 #[test]
+fn backtick_machine_payload_preserves_punctuation_and_shell_quoting() {
+    for command in [
+        "false; printf '%s' $?",
+        "\"printf literal\"",
+        "printf literal!",
+        " printf literal \n",
+    ] {
+        assert_eq!(
+            backtick_command_segment(&format!("run `{command}`")),
+            Some(command.into())
+        );
+    }
+}
+
+#[test]
 fn unresolved_templates_are_not_commands() {
     assert_eq!(backtick_command_segment("run `cargo test <crate>`"), None);
 }

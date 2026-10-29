@@ -642,8 +642,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 builtin_allows_path_outside_workspace(state, task),
             )?;
             let command = optional_string(map, "command")
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
+                .filter(|s| !s.trim().is_empty())
                 .map(str::to_string)
                 .ok_or_else(|| {
                     pre_dispatch_replan_error(builtin_error(
@@ -655,21 +654,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                         None,
                     ))
                 })?;
-            let sanitized_command = crate::bootstrap::sanitize_command_before_execute(
-                &state.policy.command_intent,
-                &command,
-            );
-            if sanitized_command.is_empty() {
-                return Err(pre_dispatch_replan_error(builtin_error(
-                    skill_name,
-                    "invalid_input",
-                    "run_cmd.empty_command",
-                    None,
-                    None,
-                    None,
-                )));
-            }
-            if sanitized_command.len() > state.skill_rt.max_cmd_length {
+            if command.len() > state.skill_rt.max_cmd_length {
                 return Err(pre_dispatch_replan_error(builtin_error(
                     skill_name,
                     "invalid_input",
@@ -677,17 +662,10 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                     None,
                     None,
                     Some(serde_json::json!({"details": {
-                        "actual_bytes": sanitized_command.len(),
+                        "actual_bytes": command.len(),
                         "max_bytes": state.skill_rt.max_cmd_length,
                     }})),
                 )));
-            }
-            if sanitized_command != command.trim() {
-                tracing::info!(
-                    "run_cmd sanitized command: before={} after={}",
-                    crate::truncate_for_log(&command),
-                    crate::truncate_for_log(&sanitized_command)
-                );
             }
             if action == "exec" && map.get("timeout_seconds").is_some() {
                 return Err(builtin_error(
@@ -804,7 +782,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 }
                 let prepared = prepare_durable_pty_command(
                     &cwd_path,
-                    &sanitized_command,
+                    &command,
                     execution_policy.sandbox_mode,
                     state.skill_rt.tools_policy.sandbox_backend,
                     &state.skill_rt.workspace_root,
@@ -812,7 +790,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 .map_err(|err| match err {
                     RunSafeCommandError::Policy(text) => text,
                     RunSafeCommandError::Command(failure) => {
-                        let extra = failure.extra(&sanitized_command, &cwd_path);
+                        let extra = failure.extra(&command, &cwd_path);
                         super::structured_skill_error_from_parts(
                             "run_cmd",
                             failure.kind,
@@ -860,10 +838,9 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                     )
                 });
             }
-            let unmanaged_detached_background =
-                looks_detached_background_command(&sanitized_command);
+            let unmanaged_detached_background = looks_detached_background_command(&command);
             let faked_runtime_checkpoint =
-                run_cmd_claims_runtime_checkpoint_without_async_start(&sanitized_command);
+                run_cmd_claims_runtime_checkpoint_without_async_start(&command);
             if !async_start && (unmanaged_detached_background || faked_runtime_checkpoint) {
                 return Err(builtin_error(
                     "run_cmd",
@@ -878,8 +855,8 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                             "poll_after_seconds",
                             "expires_in_seconds"
                         ],
-                        "detected_machine_fields": run_cmd_checkpoint_claim_markers(&sanitized_command),
-                        "has_background_operator": command_has_shell_background_operator(&sanitized_command),
+                        "detected_machine_fields": run_cmd_checkpoint_claim_markers(&command),
+                        "has_background_operator": command_has_shell_background_operator(&command),
                         "unmanaged_detached_background": unmanaged_detached_background,
                         "faked_runtime_checkpoint": faked_runtime_checkpoint
                     })),
@@ -921,7 +898,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 }
                 return start_async_command(
                     &cwd_path,
-                    &sanitized_command,
+                    &command,
                     state.skill_rt.max_cmd_length,
                     async_runtime_timeout_seconds,
                     retention_seconds,
@@ -937,7 +914,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 .map_err(|err| match err {
                     RunSafeCommandError::Policy(text) => text,
                     RunSafeCommandError::Command(failure) => {
-                        let extra = failure.extra(&sanitized_command, &cwd_path);
+                        let extra = failure.extra(&command, &cwd_path);
                         super::structured_skill_error_from_parts(
                             "run_cmd",
                             failure.kind,
@@ -950,7 +927,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
             }
             let success = run_safe_command_detailed(
                 &cwd_path,
-                &sanitized_command,
+                &command,
                 state.skill_rt.max_cmd_length,
                 timeout_seconds,
                 idle_timeout_seconds,
@@ -965,7 +942,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
             .map_err(|err| match err {
                 RunSafeCommandError::Policy(text) => text,
                 RunSafeCommandError::Command(failure) => {
-                    let extra = failure.extra(&sanitized_command, &cwd_path);
+                    let extra = failure.extra(&command, &cwd_path);
                     super::structured_skill_error_from_parts(
                         "run_cmd",
                         failure.kind,
@@ -975,9 +952,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                     )
                 }
             })?;
-            Ok(success
-                .machine_projection(&sanitized_command, &cwd_path)
-                .to_string())
+            Ok(success.machine_projection(&command, &cwd_path).to_string())
         }
         "make_dir" => {
             ensure_only_keys(map, &["path", "parents", "recursive"])?;

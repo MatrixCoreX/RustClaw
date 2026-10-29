@@ -255,7 +255,7 @@ impl CommandRunSuccess {
             "source": "run_cmd",
             "status": "ok",
             "action": "exec",
-            "command": command.trim(),
+            "command": command,
             "cwd": cwd.display().to_string(),
             "shell_mode": "bash_pipefail",
             "exit_code": self.exit_code,
@@ -325,7 +325,7 @@ impl CommandRunFailure {
 
     pub(super) fn extra(&self, command: &str, cwd: &Path) -> Value {
         let mut extra = serde_json::json!({
-            "command": command.trim(),
+            "command": command,
             "cwd": cwd.display().to_string(),
             "exit_code": self.exit_code,
             "exit_category": self.exit_category,

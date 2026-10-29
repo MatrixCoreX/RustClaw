@@ -427,11 +427,14 @@ merge_task_reply_events() {
 result_text_contains() {
   local file="$1"
   local expected="$2"
-  python3 - "$file" "$expected" <<'PY'
+  python3 - "$file" "$expected" "$NL_TEST_SCRIPT_DIR" <<'PY'
 import json
 import sys
 import unicodedata
 from pathlib import Path
+
+sys.path.insert(0, sys.argv[3])
+from expectation_directives import split_expectation_directives
 
 obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 expected = sys.argv[2]
@@ -499,7 +502,7 @@ def compare_text(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 ok = True
-for raw in [part.strip() for part in expected.split(";") if part.strip()]:
+for raw in split_expectation_directives(expected):
     if raw.startswith("contains:"):
         needle = raw[len("contains:"):]
         part_ok = contains_text(joined, needle)
@@ -1514,11 +1517,14 @@ load_case_rows() {
   local group_limit="$7"
   local include_group_context="$8"
   local include_any_tags="$9"
-  python3 - "$case_file" "$case_limit" "$case_start" "$exclude_tags" "$include_tags" "$include_groups" "$group_limit" "$include_group_context" "$include_any_tags" <<'PY'
+  python3 - "$case_file" "$case_limit" "$case_start" "$exclude_tags" "$include_tags" "$include_groups" "$group_limit" "$include_group_context" "$include_any_tags" "$NL_TEST_SCRIPT_DIR" <<'PY'
 import hashlib
 import re
 import sys
 from pathlib import Path
+
+sys.path.insert(0, sys.argv[10])
+from expectation_directives import separate_confirmation
 
 case_files = [Path(part) for part in sys.argv[1].split("\x1e") if part]
 limit_raw = sys.argv[2].strip()
@@ -1601,14 +1607,7 @@ for case_file in case_files:
         expect_marker = "|expect="
         if expect_marker in prompt:
             prompt, expect = prompt.rsplit(expect_marker, 1)
-            directives = [part.strip() for part in expect.split(";") if part.strip()]
-            kept = []
-            for directive in directives:
-                if directive.startswith("confirm:"):
-                    confirm = directive[len("confirm:"):].strip()
-                else:
-                    kept.append(directive)
-            expect = ";".join(kept)
+            expect, confirm = separate_confirmation(expect)
         seen += 1
         group_key = group_key_for_name(name, tags)
         rows.append({

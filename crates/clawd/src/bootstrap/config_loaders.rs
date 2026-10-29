@@ -318,30 +318,6 @@ pub(crate) fn load_memory_runtime_config(
     }
 }
 
-pub(crate) fn trim_command_text(mut s: String) -> String {
-    s = s.trim().to_string();
-    while s.ends_with(|c: char| {
-        matches!(
-            c,
-            '。' | '，' | ',' | ';' | '；' | ':' | '：' | '!' | '！' | '?' | '？'
-        )
-    }) {
-        s.pop();
-        s = s.trim_end().to_string();
-    }
-    if (s.starts_with('`') && s.ends_with('`')) || (s.starts_with('"') && s.ends_with('"')) {
-        s = s[1..s.len().saturating_sub(1)].trim().to_string();
-    }
-    s
-}
-
-pub(crate) fn sanitize_command_before_execute(
-    _runtime: &CommandIntentRuntime,
-    command: &str,
-) -> String {
-    trim_command_text(command.trim().to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

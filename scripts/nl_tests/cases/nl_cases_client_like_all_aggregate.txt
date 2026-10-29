@@ -4,7 +4,7 @@
 # Run:
 #   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt --prompt-reply-only --quality-guard
 # include_risky=False
-# stats=files_seen=264 files_skipped_risky=3 files_skipped_temp=0 rows_deduped=2455 rows_emitted=2480 rows_expect_dropped=1593 rows_output=2480 rows_padded=0 rows_seen=4677 rows_skipped_excluded_skill=0 rows_skipped_risky=57
+# stats=files_seen=265 files_skipped_risky=3 files_skipped_temp=0 rows_deduped=2455 rows_emitted=2481 rows_expect_dropped=1594 rows_output=2481 rows_padded=0 rows_seen=4678 rows_skipped_excluded_skill=0 rows_skipped_risky=57
 # target_rows=0 means no row-count padding.
 # Default external publishing-channel exclusions are configured in the aggregate builder.
 # Format: suite|name|tags|prompt|expect=optional substring
@@ -1757,6 +1757,8 @@ interactive_coding_final|nl_cases_interactive_coding_final_additions_20260726_me
 interactive_coding_final|nl_cases_interactive_coding_final_additions_20260726_memory_alias_turn2_zh|group:interactive_memory_alias,covers:memory,turn_chain,followup,read,zh,requires_tool_call=true,local_readonly,client_like,aggregate|读取目标文档第一行，只返回解析后的 path 和第一行。
 interactive_coding_final|nl_cases_interactive_coding_final_additions_20260726_correction_turn1_en|group:interactive_correction,covers:multi_turn,correction,turn_chain,en,requires_tool_call=false,local_readonly,client_like,aggregate|Write one short deployment sentence saying the runtime requires Python 3.10.
 interactive_coding_final|nl_cases_interactive_coding_final_additions_20260726_correction_turn2_en|group:interactive_correction,covers:multi_turn,correction,followup,turn_chain,en,requires_tool_call=false,local_readonly,client_like,aggregate|Correction: change only Python 3.10 to Python 3.11 and output the final sentence.
+# source: scripts/nl_tests/cases/nl_cases_literal_command_20261029.txt
+literal_command|nl_cases_literal_command_20261029_preserve_shell_exit_parameter_zh|group:literal-command,requires_tool_call=true,local_side_effect,capability:system.run_command,min_successful_capability_calls:system.run_command=1,client_like,aggregate|在当前隔离工作区，只调用一次 system.run_command，原样执行 `false; printf '%s' $?`。不要加前后缀、不要改写命令，也不要创建文件或联网。最后只返回 JSON：value 是命令实际 stdout 的完整内容，不要把工具自身的退出码当成 value。
 # source: scripts/nl_tests/cases/nl_cases_llm_first_convergence_20260511.txt
 llm_first|nl_cases_llm_first_convergence_20260511_workspace_article_after_wrong_locator_cn|skill:system_basic,client_like,aggregate|帮我写一篇关于 Agent Runtime 的长文
 llm_first|nl_cases_llm_first_convergence_20260511_strict_json_metadata_compare_en|skill:system_basic,client_like,aggregate|Compare README.md and AGENTS.md by size and return JSON only with keys larger_file and size_delta_bytes.

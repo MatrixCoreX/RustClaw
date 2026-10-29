@@ -213,11 +213,15 @@ load_case_rows() {
   # Emit one row per case as: source_line\x1f case_name \x1f tags \x1f prompt \x1f expect \x1f confirm
   # Backwards compatible: 4-field rows (suite|name|tags|prompt) still parse.
   # New 5th field is optional and looks like `expect=<substring>` (literal substring assertion).
-  python3 - "$case_file" <<'PY'
+  python3 - "$case_file" "$SCRIPT_DIR" <<'PY'
 import sys
 from pathlib import Path
 
+sys.path.insert(0, sys.argv[2])
+from expectation_directives import separate_confirmation
+
 path = Path(sys.argv[1])
+rows = []
 for idx, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
     line = raw.strip()
     if not line or line.startswith("#"):
@@ -238,14 +242,7 @@ for idx, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1
             if len(parts) == 5:
                 tail = parts[4].strip()
                 if tail.startswith("expect="):
-                    directives = tail[len("expect="):]
-                    kept = []
-                    for directive in [part.strip() for part in directives.split(";") if part.strip()]:
-                        if directive.startswith("confirm:"):
-                            confirm = directive[len("confirm:"):].strip()
-                        else:
-                            kept.append(directive)
-                    expect = ";".join(kept)
+                    expect, confirm = separate_confirmation(tail[len("expect="):])
                 # else: silently ignore unknown 5th field for forward-compat
         else:
             prompt = parts[-1]
@@ -253,7 +250,9 @@ for idx, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1
     if not prompt:
         continue
     # Use \x1f as delimiter — never appears in user prompts.
-    print(f"{idx}\x1f{case_name}\x1f{tags}\x1f{prompt}\x1f{expect}\x1f{confirm}")
+    rows.append(f"{idx}\x1f{case_name}\x1f{tags}\x1f{prompt}\x1f{expect}\x1f{confirm}")
+for row in rows:
+    print(row)
 PY
 }
 

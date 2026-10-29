@@ -81,6 +81,28 @@ class CodingAcceptanceTests(unittest.TestCase):
                  self.assertRaisesRegex(ValueError, "do_not_reject_initial"):
                 audit(root)
 
+    def test_index_refresh_is_observation_only_and_never_a_source_write(self):
+        for defect in (None, "effect", "action"):
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                self.fixture(root)
+                path = root / "results/run1/case_1_index_project/final.json"
+                value = json.loads(path.read_text())
+                capability = {"capability":"code.refresh_index", "status":"ok",
+                              "effect":"observe", "action":"refresh"}
+                if defect == "effect": capability["effect"] = "mutate"
+                if defect == "action": capability["action"] = "write"
+                value["data"]["result_json"]["task_journal"]["trace"]["capability_results"].append(capability)
+                path.write_text(json.dumps(value))
+                with patch("audit_multilang_coding_restart.project_commands", return_value=[["fixture-sandbox"]]), \
+                     patch("audit_multilang_coding_restart.subprocess.run", side_effect=[
+                         subprocess.CompletedProcess([],1,"","red"), subprocess.CompletedProcess([],0,"ok","")]):
+                    if defect is None:
+                        self.assertEqual(audit(root)["status"], "passed")
+                    else:
+                        with self.assertRaisesRegex(ValueError, "index_refresh_contract_invalid"):
+                            audit(root)
+
     def test_initial_implementation_requires_host_output_digest_and_complete_arguments(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
