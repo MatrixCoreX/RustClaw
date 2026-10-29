@@ -520,7 +520,7 @@ impl OpenAiStreamAccumulator {
     }
 }
 
-async fn read_openai_stream(
+pub(super) async fn read_openai_stream(
     provider: &LlmProviderRuntime,
     response: reqwest::Response,
     request_payload: Value,

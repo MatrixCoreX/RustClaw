@@ -1094,8 +1094,8 @@ pub struct LlmProviderParams {
     /// 透传给 OpenAI compat / Gemini / Anthropic 的 `top_p`（核采样）。
     #[serde(default)]
     pub top_p: Option<f64>,
-    /// 是否走 SSE 流式响应。默认 false（clawd 当前不消费 stream，留作未来用）。
-    /// 仅 OpenAI compat 协议下生效；Gemini/Anthropic 路由暂忽略此字段。
+    /// Aggregate streamed text responses with the native SSE/NDJSON reader; default false.
+    /// OpenAI-compatible text calls only; native turns use their own stream flag.
     #[serde(default)]
     pub stream: Option<bool>,
 }

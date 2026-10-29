@@ -39,7 +39,7 @@ pub(super) async fn call_openai_compat(
     let effective_temperature = hints.temperature.or(params.default_temperature);
     let effective_max_tokens = hints.max_tokens.or(params.default_max_tokens);
     let effective_top_p = params.top_p;
-    // stream 默认 false（clawd 当前不消费流式响应），允许 toml 显式覆盖。
+    // Text calls aggregate configured streaming through the native turn reader.
     let effective_stream = params.stream.unwrap_or(false);
 
     let mut req_body = json!({
@@ -105,6 +105,33 @@ pub(super) async fn call_openai_compat(
 
     let status = resp.status();
     let headers = resp.headers().clone();
+    if status.is_success() && effective_stream {
+        let output =
+            super::openai_model_turn::read_openai_stream(&provider, resp, req_body, None).await?;
+        if !output.turn.tool_calls.is_empty() {
+            return Err(ProviderError::non_retryable_with_response(
+                "openai_text_response_tool_calls_unexpected".to_string(),
+                output.request_payload,
+                output.raw_response,
+                output.turn.usage,
+            ));
+        }
+        if output.turn.finish_reason == claw_core::model_turn::ModelFinishReason::Length {
+            warn!(
+                "openai_compat response truncated: finish_reason=length model={}",
+                provider.config.model
+            );
+        }
+        return Ok(LlmProviderResponse {
+            text: output.turn.text,
+            request_payload: output.request_payload,
+            raw_response: output.raw_response,
+            usage: output.turn.usage,
+            attempts: output.attempts,
+            retryable_error_count: output.retryable_error_count,
+            last_retry_error_kind: output.last_retry_error_kind,
+        });
+    }
     let body_text = resp.text().await.map_err(|err| {
         ProviderError::retryable(format!("read response failed: {err}"), req_body.clone())
     })?;
@@ -168,3 +195,7 @@ pub(super) async fn call_openai_compat(
         last_retry_error_kind: None,
     })
 }
+
+#[cfg(test)]
+#[path = "openai_compat_tests.rs"]
+mod tests;

@@ -119,6 +119,22 @@ it never falls back to an unsandboxed browser or a persistent personal profile.
 Read-only observations can run without confirmation, while external or
 mutating interactions still pass the resolver/verifier policy.
 
+## Text and Native Model Streams
+
+OpenAI-compatible text calls use complete JSON responses by default. With the
+provider's `params.stream=true`, they aggregate SSE or NDJSON using the same
+reader as native model turns. Internal synthesis and answer verification receive
+the complete text, not a partial success. Native turns choose streaming through
+their own request flag; changing the text setting does not disable native tools.
+
+The shared reader retains structured provider failures and available usage,
+rejects a stream that ends without a completion signal, and filters hidden
+reasoning from public logs. A streamed text-only response cannot invoke tools: unsolicited
+tool calls cause an explicit error, including replies that also contain text.
+Cancellation releases the provider's concurrency permit. Missing usage remains
+unknown rather than zero. These transport rules do not bypass answer verification
+or turn internal verifier output into a user-visible token stream.
+
 ## Model Catalog and Readiness
 
 Model capabilities are projected through a catalog rather than inferred from

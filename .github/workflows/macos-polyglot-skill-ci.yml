@@ -130,6 +130,10 @@ jobs:
           cargo test -p clawd --bin clawd capability_discovery -- --test-threads=2
           cargo test -p clawd --bin clawd verification -- --test-threads=2
 
+      - name: Test OpenAI-compatible text and native streaming
+        shell: bash
+        run: cargo test -p clawd --bin clawd providers::openai_ -- --test-threads=2
+
       - name: Precompile native Skill Store packages
         shell: bash
         run: |

@@ -100,6 +100,18 @@ flowchart TD
 和快照 generation 内有效；它不会回退到无沙箱浏览器，也不会使用持久化个人 profile。
 只读观察可免确认，外部交互或写入动作仍必须通过 resolver/verifier policy。
 
+## 文本与原生模型流
+
+OpenAI-compatible 文本调用默认读取完整 JSON 响应。配置 provider 的
+`params.stream=true` 时，文本调用与原生模型轮次共用同一 SSE/NDJSON 读取器，
+内部合成和答案验证收到完整文本，不会把部分结果当作成功。原生轮次通过自己的请求字段
+选择流式传输；修改文本设置不会关闭原生工具调用。
+
+共享读取器保留结构化 provider 错误和实际返回的 usage；流在没有完成信号时结束会报错，
+隐藏推理字段不会进入公开日志。流式纯文本响应不能调用工具：即使同时返回文字，意外的工具
+调用也会明确失败。取消读取会释放 provider 并发名额；缺失的 usage 保持未知，不补成零。
+这些传输规则不会绕过答案验证，也不会把内部验证器输出当作面向用户的逐字回复。
+
 ## 模型能力目录与就绪状态
 
 模型能力通过 catalog 投影，不能根据模型名称短语猜测。Catalog 明确提供 provider/model 身份、API style、可选模型、输入/输出模态、上下文长度、超时、凭据状态、多媒体理解/生成能力、当前文本 provider 状态，以及 async/dry-run 元数据；UI、CLI 和 runtime readiness 检查直接消费这些机器字段。
