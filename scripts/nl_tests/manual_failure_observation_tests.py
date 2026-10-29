@@ -39,6 +39,8 @@ class FailureObservationTests(unittest.TestCase):
     def test_failed_observation_can_complete_reporting_goal(self):
         self.assertEqual(self.check(), "pass")
         self.assertNotIn("allow_terminal_failure", self.tags)
+        self.error["status"] = "failed"
+        self.assertEqual(self.check(), "pass")
 
     def test_discovery_may_precede_business_dispatch(self):
         for discovery_status in ("ok", "error"):
@@ -84,8 +86,9 @@ class FailureObservationTests(unittest.TestCase):
         self.assertEqual(self.check(), "fail")
 
     def test_final_report_must_not_claim_success(self):
-        self.error["status"] = "ok"
-        self.assertEqual(self.check(), "fail")
+        for status in ("ok", "succeeded", "unknown", None, False, 0):
+            self.error["status"] = status
+            self.assertEqual(self.check(), "fail")
 
     def test_genuine_failed_goal_is_a_distinct_contract(self):
         self.assertEqual(self.check(status="failed"), "fail")

@@ -938,6 +938,21 @@ def evaluate_expectations(
             )
             details.append({"kind": "result_text_json_records_eq", "expected": expected_text,
                             "actual_values": actual_values, "ok": ok})
+        elif raw.startswith("result_text_json_one_of:"):
+            pointer, sep, expected = raw[len("result_text_json_one_of:"):].partition("=")
+            try:
+                choices = json.loads(expected)
+                encoded_choices = [json.dumps(choice, allow_nan=False) for choice in choices] \
+                    if isinstance(choices, list) else []
+                decoded = json.loads(str(result.get("text") or ""))
+                actual = json_pointer_get(decoded, pointer)
+                ok = bool(sep) and bool(encoded_choices) and any(
+                    json_value_matches_expected(actual, choice) for choice in encoded_choices
+                )
+            except (ValueError, TypeError):
+                actual, ok = _MISSING, False
+            details.append({"kind": "result_text_json_one_of", "pointer": pointer,
+                            "expected": expected, "actual": value_to_compare_text(actual), "ok": ok})
         elif raw.startswith("result_text_json_eq:"):
             expr = raw[len("result_text_json_eq:") :]
             pointer, sep, expected = expr.partition("=")

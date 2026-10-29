@@ -752,6 +752,14 @@ check and does not require live provider generation. After running
   status, exact error/retry fields and effect-free proof separately; genuine
   unrecovered execution goals must still assert task failure. A model-authored
   error JSON alone is not proof that the tool ran or that no effect occurred.
+  `result_text_json_one_of:/status=["error","failed"]` checks a finite set of
+  allowed JSON values without rewriting the response. Comparisons preserve
+  JSON types, reject absent fields/malformed output, and never imply tool success.
+  Historical capability evidence may come from an intact retained trace or its
+  immutable canonical archive. Do not require archive I/O when the retained
+  stream is already complete. Audit the reported source against the actual
+  stored stream/archive, including artifact digests and absence of source replay;
+  accepting either source token alone does not prove evidence completeness.
   Add `direct_allowed` only when the complete input and transformation rules
   are already in the turn: the quality guard then accepts either that skill or
   a zero-tool direct answer, but still rejects execution through an unrelated
