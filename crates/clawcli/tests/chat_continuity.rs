@@ -122,6 +122,92 @@ fn write_pty_line(writer: &mut dyn Write, line: &str) {
     writer.flush().expect("flush PTY enter");
 }
 
+#[test]
+fn pty_chat_consumes_burst_exit_without_an_extra_keypress() {
+    assert_burst_input_exits(b"/exit\r");
+}
+
+#[test]
+fn pty_chat_preserves_typeahead_across_prompts() {
+    assert_burst_input_exits(b"/help\r/exit\r");
+}
+
+fn assert_burst_input_exits(input: &[u8]) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("owned unused API endpoint");
+    listener.set_nonblocking(true).unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
+    let session_store = std::env::temp_dir().join(format!(
+        "clawcli_burst_input_{}_{}.json",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: 24,
+            cols: 100,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .unwrap();
+    let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_clawcli"));
+    command.args([
+        "--base-url",
+        &base_url,
+        "--key",
+        "fixture-terminal",
+        "chat",
+        "--new",
+    ]);
+    command.env("APP_CLAWCLI_SESSION_STORE", &session_store);
+    command.env("TERM", "xterm-256color");
+    command.cwd(std::env::current_dir().unwrap());
+    let mut child = pair.slave.spawn_command(command).unwrap();
+    drop(pair.slave);
+    let mut writer = pair.master.take_writer().unwrap();
+    let mut reader = pair.master.try_clone_reader().unwrap();
+    let transcript = Arc::new(Mutex::new(Vec::new()));
+    let captured = Arc::clone(&transcript);
+    let reader_thread = thread::spawn(move || {
+        let mut bytes = [0; 4096];
+        while let Ok(count) = reader.read(&mut bytes) {
+            if count == 0 {
+                break;
+            }
+            captured.lock().unwrap().extend_from_slice(&bytes[..count]);
+        }
+    });
+    wait_for_pty_prompt(&transcript, 1);
+    writer.write_all(input).unwrap();
+    writer.flush().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break Some(status);
+        }
+        if Instant::now() >= deadline {
+            child.kill().unwrap();
+            let _ = child.wait();
+            break None;
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    drop(writer);
+    reader_thread.join().unwrap();
+    let output = String::from_utf8_lossy(&transcript.lock().unwrap()).to_string();
+    assert!(
+        status.is_some_and(|status| status.success()),
+        "burst exit stalled: {output}"
+    );
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    let _ = std::fs::remove_file(session_store);
+}
+
 fn wait_for_pty_text(transcript: &Arc<Mutex<Vec<u8>>>, expected: &str) {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
@@ -143,7 +229,7 @@ fn wait_for_pty_prompt(transcript: &Arc<Mutex<Vec<u8>>>, minimum_count: usize) {
     loop {
         let snapshot =
             String::from_utf8_lossy(&transcript.lock().expect("transcript lock")).to_string();
-        if snapshot.matches("\u{1b}[?2026l").count() >= minimum_count {
+        if snapshot.matches("\u{1b}[?2004h").count() >= minimum_count {
             return;
         }
         assert!(
@@ -1054,6 +1140,9 @@ fn accept_request(listener: &TcpListener) -> MockRequest {
             Err(error) => panic!("accept request: {error}"),
         }
     };
+    stream
+        .set_nonblocking(false)
+        .expect("blocking accepted mock socket");
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
         .expect("mock request read timeout");

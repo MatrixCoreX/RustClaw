@@ -17,6 +17,15 @@ is not a successful task submission and does not replay a mutation at its target
 Ordinary requests keep their 60-second timeout; event streams retain their
 command-specific timeout or unbounded read setting.
 
+## Interactive Input
+
+`clawcli chat` keeps terminal editing independent of background task updates.
+Buffered keystrokes, including Return, are consumed without requiring another
+keypress; unread typeahead is retained across successive prompts. Non-terminal
+line/JSONL input keeps its separate machine-readable contract. `/exit` detaches
+the chat client without sending a task cancellation; `/cancel` requests server
+cancellation explicitly.
+
 ## Exec Basics
 
 Run an ask task and wait until terminal:

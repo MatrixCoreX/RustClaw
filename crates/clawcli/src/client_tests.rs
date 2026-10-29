@@ -30,9 +30,6 @@ impl FixtureServer {
             while !stopping.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
-                        stream
-                            .set_read_timeout(Some(Duration::from_secs(3)))
-                            .unwrap();
                         let request = read_request(&mut stream);
                         let headers = request.to_ascii_lowercase();
                         captured.lock().unwrap().push(
@@ -73,11 +70,20 @@ impl FixtureServer {
 impl Drop for FixtureServer {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
-        self.thread.take().unwrap().join().unwrap();
+        if let Err(error) = self.thread.take().unwrap().join() {
+            if !thread::panicking() {
+                std::panic::resume_unwind(error);
+            }
+        }
     }
 }
 
 fn read_request(stream: &mut TcpStream) -> String {
+    // Accepted sockets can inherit O_NONBLOCK on macOS, unlike Linux.
+    stream.set_nonblocking(false).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
     let mut bytes = Vec::new();
     let mut chunk = [0; 1024];
     let end = loop {
@@ -171,6 +177,28 @@ fn probe(name: &str, url: &str, mode: &str, method: &str, status: u16) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn nonblocking_fixture_socket_waits_for_delayed_headers() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    thread::scope(|scope| {
+        let writer = scope.spawn(move || {
+            let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(3)).unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            thread::sleep(Duration::from_millis(25));
+            stream
+                .write_all(b"GET /delayed HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                .unwrap();
+        });
+        let (mut stream, _) = listener.accept().unwrap();
+        stream.set_nonblocking(true).unwrap();
+        assert!(read_request(&mut stream).starts_with("GET /delayed HTTP/1.1\r\n"));
+        writer.join().unwrap();
+    });
 }
 
 #[test]

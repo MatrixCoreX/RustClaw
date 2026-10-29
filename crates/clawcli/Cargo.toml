@@ -18,7 +18,7 @@ clap_complete = "4"
 ctrlc = "3"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
-rustyline = "16"
+rustyline = { version = "19", features = ["buffer-redux"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2.workspace = true
