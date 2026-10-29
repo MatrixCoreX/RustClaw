@@ -14,6 +14,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Iterator
 from model_log_payload import decode_model_log_payload
+from authenticated_probe_http import authenticated_urlopen
 
 
 TERMINAL_STATUSES = {"succeeded", "failed", "canceled", "cancelled"}
@@ -65,11 +66,19 @@ class ApiClient:
             headers=headers,
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+            with authenticated_urlopen(request, timeout=self.timeout_seconds) as response:
                 return response.status, json.loads(response.read())
         except urllib.error.HTTPError as error:
-            raw = error.read().decode("utf-8", errors="replace")
-            return error.code, json.loads(raw) if raw else {"ok": False, "error": str(error)}
+            with error:
+                raw = error.read().decode("utf-8", errors="replace")
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = None
+            if not isinstance(payload, dict):
+                payload = {"ok": False, "error": {
+                    "code": "http_error_response_invalid", "status_code": error.code}}
+            return error.code, payload
 
     def task_events(self, task_id: str, timeout_seconds: float) -> Iterator[dict[str, Any]]:
         headers = {"Accept": "text/event-stream", "Last-Event-ID": "0"}
@@ -81,7 +90,7 @@ class ApiClient:
             headers=headers,
         )
         data_lines: list[str] = []
-        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+        with authenticated_urlopen(request, timeout=timeout_seconds) as response:
             for raw_line in response:
                 line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
                 if line.startswith("data:"):

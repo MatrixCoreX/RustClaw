@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import tempfile
+import io
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 from concurrent_health_probe import NOT_READY_EXIT, active_async_context, probe
 
@@ -55,7 +57,7 @@ class ConcurrentHealthProbeTest(unittest.TestCase):
             )
             self.assertFalse(output_path.exists())
 
-    @patch("concurrent_health_probe.urlopen", return_value=FakeResponse())
+    @patch("concurrent_health_probe.authenticated_urlopen", return_value=FakeResponse())
     def test_probe_records_health_without_recording_key(self, _urlopen: object) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             task_path = Path(tmp) / "task.json"
@@ -77,6 +79,17 @@ class ConcurrentHealthProbeTest(unittest.TestCase):
             self.assertIn('"health_ok": true', evidence)
             self.assertIn('"task_status": "running"', evidence)
             self.assertNotIn("secret", evidence)
+
+    def test_consumed_http_error_response_is_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            task = Path(directory) / "task.json"
+            output = Path(directory) / "output.json"
+            task.write_text('{"data":{"status":"running","result_json":{"task_checkpoint":'
+                            '{"checkpoint_id":"fixture","pending_async_job":{"job_id":"job"}}}}}')
+            error = HTTPError("http://127.0.0.1/v1/health", 302, "redirect", {}, io.BytesIO())
+            with patch("concurrent_health_probe.authenticated_urlopen", side_effect=error):
+                self.assertEqual(probe(task, output, "http://127.0.0.1", "fixture-key"), 1)
+            self.assertTrue(error.fp.closed)
 
 
 if __name__ == "__main__":

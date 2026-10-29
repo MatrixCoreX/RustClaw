@@ -10,6 +10,7 @@ import tomllib
 import urllib.request
 import urllib.error
 from jsonschema import Draft202012Validator
+from authenticated_probe_http import authenticated_urlopen
 from model_log_payload import decode_model_log_payload
 
 
@@ -88,10 +89,11 @@ def public_response(raw):
 
 def receive_response(request, log, payload):
     try:
-        with urllib.request.urlopen(request, timeout=300) as response:
+        with authenticated_urlopen(request, timeout=300) as response:
             raw = public_response(json.loads(response.read()))
     except urllib.error.HTTPError as error:
-        body = error.read().decode("utf-8", errors="replace")
+        with error:
+            body = error.read().decode("utf-8", errors="replace")
         try:
             raw = public_response(json.loads(body))
         except ValueError:

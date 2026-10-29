@@ -6,6 +6,7 @@ import sqlite3
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
+from authenticated_probe_http import authenticated_urlopen
 
 
 def main():
@@ -26,7 +27,7 @@ def main():
     def request(body=None):
         req = urllib.request.Request(endpoint, data=None if body is None else json.dumps(body).encode(),
                                      headers={"X-Agent-Key": key, "Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=30) as response:
+        with authenticated_urlopen(req, timeout=30) as response:
             value = json.load(response)
         if not value.get("ok"):
             raise RuntimeError("isolated_memory_settings_failed")

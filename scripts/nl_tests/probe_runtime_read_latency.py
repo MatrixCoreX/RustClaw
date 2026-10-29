@@ -11,7 +11,9 @@ import sqlite3
 import time
 import tomllib
 import urllib.request
+from urllib.error import HTTPError
 from urllib.parse import urlsplit
+from authenticated_probe_http import authenticated_opener
 
 
 def timing_summary(values: list[float]) -> dict[str, float | int]:
@@ -56,7 +58,7 @@ def probe(root: Path, samples: int, base_url: str = "http://127.0.0.1:8787") -> 
                 timings.append((time.perf_counter() - start) * 1000)
             report[f"recovery_query_offset_{offset}"] = {**timing_summary(timings), "rows": returned}
     if key:
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        opener = authenticated_opener(disable_proxy=True)
         timings = []
         failures = 0
         for _ in range(samples):
@@ -66,6 +68,9 @@ def probe(root: Path, samples: int, base_url: str = "http://127.0.0.1:8787") -> 
                 with opener.open(request, timeout=30) as response:
                     if not json.loads(response.read(64 * 1024)).get("ok"):
                         failures += 1
+            except HTTPError as error:
+                error.close()
+                failures += 1
             except Exception:
                 failures += 1
             timings.append((time.perf_counter() - start) * 1000)

@@ -10,7 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request
+from authenticated_probe_http import authenticated_urlopen
 
 
 NOT_READY_EXIT = 3
@@ -69,10 +70,12 @@ def probe(task_path: Path, output_path: Path, base_url: str, user_key: str) -> i
         **context,
     }
     try:
-        with urlopen(request, timeout=5) as response:
+        with authenticated_urlopen(request, timeout=5) as response:
             health = json.loads(response.read().decode("utf-8"))
             evidence["health_http_status"] = int(response.status)
     except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+        if isinstance(exc, HTTPError):
+            exc.close()
         evidence.update(
             {
                 "status": "fail",

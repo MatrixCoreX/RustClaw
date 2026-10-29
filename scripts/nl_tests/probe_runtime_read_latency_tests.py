@@ -5,6 +5,7 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from urllib.error import HTTPError
 from unittest.mock import patch
 
 from probe_runtime_read_latency import probe, timing_summary
@@ -50,6 +51,23 @@ class ReadProbeTests(unittest.TestCase):
             for private in ("private-test-key", "private-task-id", "private-task-body"):
                 self.assertNotIn(private, encoded)
             self.assertEqual({request.full_url for request in requests}, {"http://127.0.0.1:8787/v1/health"})
+
+    def test_consumed_http_error_response_is_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "configs").mkdir()
+            (root / "configs/config.toml").write_text('[database]\nsqlite_path="tasks.sqlite"\n')
+            with sqlite3.connect(root / "tasks.sqlite") as db:
+                db.executescript("""CREATE TABLE auth_keys(user_key TEXT,role TEXT,enabled INTEGER);
+                    CREATE TABLE tasks(task_id TEXT,status TEXT,result_json TEXT,
+                      lease_expires_at INTEGER,updated_at TEXT,created_at TEXT);
+                    INSERT INTO auth_keys VALUES('fixture-only-key','admin',1);""")
+            error = HTTPError("http://127.0.0.1/v1/health", 302, "redirect", {}, io.BytesIO())
+            with patch("authenticated_probe_http.urllib.request.build_opener") as build:
+                build.return_value.open.side_effect = error
+                report = probe(root, 1)
+            self.assertEqual(report["health"]["failures"], 1)
+            self.assertTrue(error.fp.closed)
 
 
 if __name__ == "__main__":

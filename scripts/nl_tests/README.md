@@ -2,6 +2,18 @@
 
 All natural-language test scripts are centralized in this directory.
 
+## Authenticated Operator HTTP
+
+Install the pinned Python test dependencies in `requirements.txt`, including
+the JSON Schema validator used by verifier replay. Credential-bearing health
+probes, steering API/events, isolated memory setup and verifier replay share
+`authenticated_probe_http.py`. They reject HTTP redirects rather than forwarding
+management/provider credentials or replaying a POST at another endpoint. Use the
+actual canonical API URL; a redirect is an error, not a successful health check.
+Environment proxy behavior is preserved except for the read-latency probe's
+explicit loopback-only proxy opt-out. This policy does not change runtime web
+browsing or ordinary public content downloads.
+
 ## Exact Argument Recall Acceptance
 
 Run `cases/nl_cases_exact_argument_recall_20261029.txt` in a fresh conversation,

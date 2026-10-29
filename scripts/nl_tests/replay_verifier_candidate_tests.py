@@ -106,13 +106,14 @@ class ReplayVerifierTests(unittest.TestCase):
         error = urllib.error.HTTPError("https://example.invalid",429,"quota",{},
                                        io.BytesIO(json.dumps(raw).encode()))
         log = io.StringIO('{"status":"requesting"}')
-        with patch("urllib.request.urlopen", side_effect=error):
+        with patch("replay_verifier_candidate.authenticated_urlopen", side_effect=error):
             with self.assertRaises(urllib.error.HTTPError):
                 receive_response(object(), log, {"model":"fixture"})
         saved = json.loads(log.getvalue())
         self.assertEqual(saved["http_status"], 429)
         self.assertEqual(saved["raw_response"], raw)
         self.assertEqual(saved["status"], "provider_http_error")
+        self.assertTrue(error.fp.closed)
 
     def test_operation_projection_is_bound_to_the_captured_task(self):
         record = {"task_id":"task-a", "request_payload":{"stream":False, "messages":[{
