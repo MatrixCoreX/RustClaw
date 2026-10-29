@@ -79,6 +79,24 @@ blocked row. Terminal failures, a replacement task, changed source records or
 missing turns cannot be converted into success. Create a new run for subsequent
 cases too; appending to an original summary would invalidate its pinned hash.
 
+## Positive Video Speech Acceptance
+
+`cases/nl_cases_video_speech_positive_20261030.txt` uses the tiny locally generated
+speech video under `crates/skills/video_transcribe/tests/fixtures/`. The fixture
+README records its source and regeneration command. Run it only in an isolated
+workspace with current admitted receipts for video preparation, transcription
+preview and the backend selected by the real audio configuration. Do not change
+providers or enable a local fallback to make the test pass.
+
+The case requires a successful explicit `video.extract_audio`, its mono 16 kHz
+private-output contract, successful `audio.preview_transcribe` and a real STT
+completion. The JSON transcript and provider must match observed fields. Its
+expected speech is absent from the planner request; a reply-only claim, duplicate
+extraction or provider failure is not a positive pass. Also inspect the actual
+source/WAV metadata, configured-backend selection and transcript artifact.
+`video_speech_acceptance_tests.py` protects these assertions offline; those tests
+and direct skill protocol smoke do not count as live NL or real STT acceptance.
+
 ## Unified Tool
 
 Primary entry point:

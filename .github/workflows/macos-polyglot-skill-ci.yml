@@ -28,6 +28,8 @@ name: Polyglot Skill macOS CI
       - "scripts/nl_tests/configure_isolated_nl_memory.py"
       - "scripts/nl_tests/replay_verifier_candidate*.py"
       - "scripts/nl_tests/requirements.txt"
+      - "scripts/nl_tests/video_speech_acceptance_tests.py"
+      - "scripts/nl_tests/cases/nl_cases_video_speech_positive_20261030.txt"
   push:
     branches:
       - main
@@ -57,6 +59,8 @@ name: Polyglot Skill macOS CI
       - "scripts/nl_tests/configure_isolated_nl_memory.py"
       - "scripts/nl_tests/replay_verifier_candidate*.py"
       - "scripts/nl_tests/requirements.txt"
+      - "scripts/nl_tests/video_speech_acceptance_tests.py"
+      - "scripts/nl_tests/cases/nl_cases_video_speech_positive_20261030.txt"
   workflow_dispatch:
 
 permissions:
@@ -129,6 +133,7 @@ jobs:
           python3 scripts/nl_tests/manual_case_observation_tests.py
           python3 scripts/nl_tests/manual_case_lifecycle_tests.py
           python3 scripts/nl_tests/coding_observation_chain_tests.py
+          python3 scripts/nl_tests/video_speech_acceptance_tests.py
           python3 scripts/nl_tests/authenticated_probe_http_tests.py
           python3 scripts/nl_tests/concurrent_health_probe_tests.py
           python3 scripts/nl_tests/probe_runtime_read_latency_tests.py
