@@ -127,10 +127,14 @@ fn apply_patch(
     }
 
     let git_workspace = is_git_workspace(&root);
+    let mut git_path_strip = 1;
     let mut pure_patch = None;
     let stats = if git_workspace {
         match inspect_patch(&root, &patch_file) {
-            Ok(stats) => stats,
+            Ok((stats, path_strip)) => {
+                git_path_strip = path_strip;
+                stats
+            }
             Err(err) => {
                 remove_checkpoint_dir(&checkpoint_dir);
                 return Err(pre_dispatch_replan_error(err));
@@ -182,7 +186,7 @@ fn apply_patch(
         }
     };
     if git_workspace {
-        let check = git_apply(&root, &patch_file, true).map_err(|err| {
+        let check = git_apply(&root, &patch_file, true, git_path_strip).map_err(|err| {
             pre_dispatch_replan_error(patch_io_error(
                 "patch_check_failed",
                 "workspace.patch.check_failed",
@@ -198,7 +202,7 @@ fn apply_patch(
             )));
         }
 
-        let applied = git_apply(&root, &patch_file, false).map_err(|err| {
+        let applied = git_apply(&root, &patch_file, false, git_path_strip).map_err(|err| {
             patch_io_error("patch_apply_failed", "workspace.patch.apply_failed", err)
         })?;
         if !applied.status.success() {
@@ -425,11 +429,11 @@ fn rewind(workspace_root: &Path, args: &Map<String, Value>) -> Result<String, St
     }))
 }
 
-fn inspect_patch(root: &Path, patch_file: &Path) -> Result<Vec<PatchStat>, String> {
+fn inspect_patch(root: &Path, patch_file: &Path) -> Result<(Vec<PatchStat>, u8), String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(root)
-        .args(["apply", "--numstat", "-z", "--"])
+        .args(["apply", "--numstat", "-z", "-p0", "--"])
         .arg(patch_file)
         .output()
         .map_err(|err| {
@@ -446,7 +450,25 @@ fn inspect_patch(root: &Path, patch_file: &Path) -> Result<Vec<PatchStat>, Strin
             &output,
         ));
     }
-    parse_numstat(&output.stdout)
+    let mut stats = parse_numstat(&output.stdout)?;
+    let prefixed = stats
+        .iter()
+        .filter(|stat| stat.path.starts_with("a/") || stat.path.starts_with("b/"))
+        .count();
+    if prefixed != 0 && prefixed != stats.len() {
+        return Err(patch_error(
+            "mixed_patch_path_conventions",
+            "workspace.patch.mixed_path_conventions",
+            Value::Null,
+        ));
+    }
+    let strip = u8::from(prefixed != 0);
+    if strip == 1 {
+        for stat in &mut stats {
+            stat.path = stat.path[2..].to_string();
+        }
+    }
+    Ok((stats, strip))
 }
 
 fn parse_numstat(bytes: &[u8]) -> Result<Vec<PatchStat>, String> {
@@ -743,9 +765,15 @@ fn restore_snapshot_strict(
     Ok(())
 }
 
-fn git_apply(root: &Path, patch_file: &Path, check: bool) -> std::io::Result<Output> {
+fn git_apply(
+    root: &Path,
+    patch_file: &Path,
+    check: bool,
+    path_strip: u8,
+) -> std::io::Result<Output> {
     let mut command = Command::new("git");
     command.arg("-C").arg(root).arg("apply");
+    command.arg(format!("-p{path_strip}"));
     if check {
         command.arg("--check");
     }
@@ -757,10 +785,18 @@ fn is_git_workspace(root: &Path) -> bool {
     Command::new("git")
         .arg("-C")
         .arg(root)
-        .args(["rev-parse", "--is-inside-work-tree"])
+        .args(["rev-parse", "--show-toplevel"])
         .output()
         .is_ok_and(|output| {
-            output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "true"
+            if !output.status.success() {
+                return false;
+            }
+            let Ok(path) = std::str::from_utf8(&output.stdout) else {
+                return false;
+            };
+            Path::new(path.trim_end_matches(['\r', '\n']))
+                .canonicalize()
+                .is_ok_and(|git_root| git_root == root)
         })
 }
 

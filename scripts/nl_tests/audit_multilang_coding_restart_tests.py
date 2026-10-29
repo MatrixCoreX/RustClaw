@@ -46,6 +46,8 @@ class CodingAcceptanceTests(unittest.TestCase):
             (run / "summary.jsonl").write_text(json.dumps({"case_name":name,"status":"succeeded","assertion":"pass","task_id":str(index)}))
             capabilities = [{"capability":capability,"status":"ok"} for capability in
                             ("code.find_definitions","code.find_references","code.list_tests")]
+            if index == 1:
+                capabilities.append({"capability":"task_plan.read","status":"ok"})
             if index == 0:
                 capabilities = []
                 for filename, content in (("pricing.py", "def price_total(values): return sum(values)\n"),
@@ -97,16 +99,18 @@ class CodingAcceptanceTests(unittest.TestCase):
                     initial_implementations(value)
 
     def test_false_red_phase_or_missing_execution_or_restart_never_passes(self):
-        for defect in ("red", "index", "restart", "independent"):
+        for defect in ("red", "index", "index_write", "restart", "independent"):
             with self.subTest(defect=defect), tempfile.TemporaryDirectory() as temp:
                 root = Path(temp)
                 self.fixture(root)
                 if defect == "red":
                     (root / "workspace/tmp/multilang_project_20261029/red_phase.json").write_text(json.dumps({"returncode":0}))
-                elif defect == "index":
+                elif defect in ("index", "index_write"):
                     path = root / "results/run1/case_1_index_project/final.json"
                     value = json.loads(path.read_text())
-                    value["data"]["result_json"]["task_journal"]["trace"]["capability_results"] = []
+                    caps = value["data"]["result_json"]["task_journal"]["trace"]["capability_results"]
+                    if defect == "index": caps.clear()
+                    else: caps.append({"capability":"filesystem.write_file","status":"ok"})
                     path.write_text(json.dumps(value))
                 elif defect == "restart":
                     (root / "restart-evidence.json").write_text(json.dumps({"after_case":"index_project","old_pid":100,"new_pid":100}))

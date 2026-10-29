@@ -831,7 +831,6 @@ fn step_action_records(index: usize, step: &TaskJournalStepTrace) -> Vec<StepAct
     let action = extra
         .get("action")
         .and_then(Value::as_str)
-        .or_else(|| action_from_text_output(&value))
         .unwrap_or(step.skill.as_str())
         .to_string();
     let path = ["resolved_path", "effective_path", "path"]
@@ -856,18 +855,13 @@ fn step_action_records(index: usize, step: &TaskJournalStepTrace) -> Vec<StepAct
     }]
 }
 
-fn action_from_text_output(value: &Value) -> Option<&str> {
-    let text = value.get("text").and_then(Value::as_str)?;
-    if text.starts_with("written ") {
-        Some("write_text")
-    } else {
-        None
-    }
-}
-
 fn is_validation_skill(skill: &str) -> bool {
     matches!(skill, "run_cmd" | "process_basic")
 }
+
+#[cfg(test)]
+#[path = "loop_control_post_write_evidence_guard_tests.rs"]
+mod structured_action_tests;
 
 fn validation_step_failed(step: &TaskJournalStepTrace) -> bool {
     is_validation_skill(&step.skill) && step.status == crate::executor::StepExecutionStatus::Error

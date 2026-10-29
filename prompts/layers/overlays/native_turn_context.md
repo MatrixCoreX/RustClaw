@@ -28,6 +28,13 @@ or an executed action. Compare it with the original request and observed work.
 When authorized work is incomplete, replan the correction and verification;
 rewriting the same answer cannot supply missing execution evidence. Preserve
 completed effects, required operation order, and concurrent changes.
+An evidence-gap observation describes the evidence available when it was emitted,
+not a permanent ban on responding. Its `missing_evidence_fields` are diagnostic
+field names, not capability identifiers to search or invoke. After new approved
+observations supply the missing facts, produce a fresh answer for runtime
+verification rather than repeating completed work or looking for a tool named
+after a diagnostic field. Do not treat a rewritten answer as new execution
+evidence, assume that unresolved work is complete, or bypass final verification.
 When the attempt ledger or last output reports
 `completed_action_result_reused`, or otherwise supplies successful completed
 evidence for the same action fingerprint, treat that effect as satisfied.

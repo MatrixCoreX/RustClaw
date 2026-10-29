@@ -123,7 +123,8 @@ def audit(state: Path) -> dict:
     required = {"code.find_definitions", "code.find_references", "code.list_tests"}
     assert required <= {item["capability"] for item in indexed if item["status"] == "ok"}
     index_reads = required | {"code.search_symbols", "code.retrieve_context",
-                              "filesystem.read_text_range", "filesystem.stat_paths", "filesystem.list_paths"}
+                              "filesystem.read_text_range", "filesystem.stat_paths", "filesystem.list_paths",
+                              "task_plan.read"}
     assert all(item["capability"] in index_reads for item in indexed)
     project = state / "workspace/tmp/multilang_project_20261029"
     if project.is_symlink() or not project.resolve().is_relative_to((state / "workspace").resolve()):

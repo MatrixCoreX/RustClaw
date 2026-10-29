@@ -5,7 +5,8 @@ This hidden adapter backs planner-owned `fs_basic` actions: `workspace.preview_r
 ## Machine contract
 - `preview_replace_text` defaults to one exact UTF-8 match and returns bounded diff/hash evidence without writing. `replace_all=true` explicitly selects every match; `expected_occurrences` may pin the exact count up to 10,000.
 - `replace_text` accepts either top-level `old_text`/`new_text` or a non-empty `edits[]` array. Batch edits run sequentially in memory and commit once, so any failed edit leaves the file unchanged. Successful writes preserve coherent CRLF files and return one checkpoint.
-- `apply_patch` validates a bounded unified diff with Git when the workspace is a Git worktree. A non-Git workspace uses the bounded pure-Rust unified-diff engine. Both verify exact context and optional `precondition_hashes`, snapshot every target, and return patch/checkpoint evidence.
+- `apply_patch` validates a bounded unified diff with Git when the workspace itself is the Git worktree root. Other workspaces, including subdirectories of a parent repository, use the bounded pure-Rust unified-diff engine. Both verify exact context and optional `precondition_hashes`, snapshot every target, and return patch/checkpoint evidence.
+- Use one consistent path convention per patch: Git-style `a/`/`b/` prefixes are removed; other workspace-relative paths retain every component. The Git engine rejects mixed conventions before writing. Validation or context rejection with `failure_phase=pre_dispatch` and `side_effect_applied=false` permits a fresh corrected patch; it never justifies replaying an already applied patch.
 - `diff` returns checkpoint evidence for every replacement/edit/patch path, or a bounded current Git diff when no checkpoint is supplied.
 - `rewind` restores a checkpoint only when every target still has its recorded post-patch hash.
 - Paths are workspace-relative. Parent traversal, runtime state paths, unsupported file types, and

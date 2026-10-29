@@ -32,6 +32,24 @@ cd "$ROOT"
 mkdir -p "$ROOT/tmp"
 STATE="$(mktemp -d "$ROOT/tmp/agent-runtime-nl-isolated-continuity-XXXXXX")"
 echo "isolated_test_state=$STATE"
+SNAPSHOT_ROOT="${NL_BINARY_SNAPSHOT_ROOT:-$ROOT/target/nl-runtime-snapshots}"
+mkdir -p "$SNAPSHOT_ROOT"
+SNAPSHOT="$(mktemp -d "$SNAPSHOT_ROOT/run-XXXXXX")/clawd"
+cp -p "$BINARY" "$SNAPSHOT"
+python3 - "$BINARY" "$SNAPSHOT" "$STATE/binary-evidence.json" <<'PY'
+import hashlib,json,sys
+from pathlib import Path
+source,snapshot,evidence=map(Path,sys.argv[1:])
+with snapshot.open('rb') as stream:
+    digest=hashlib.file_digest(stream,'sha256').hexdigest()
+with source.open('rb') as stream:
+    if hashlib.file_digest(stream,'sha256').hexdigest() != digest:
+        raise SystemExit('test_binary_changed_during_snapshot')
+evidence.write_text(json.dumps({'source_binary':str(source),'pinned_binary':str(snapshot),
+    'sha256':digest,'size_bytes':snapshot.stat().st_size})+'\n')
+print('pinned_runtime_binary='+str(snapshot)+' sha256='+digest)
+PY
+BINARY="$SNAPSHOT"
 WORKSPACE="$STATE/workspace"
 mkdir -p "$WORKSPACE" "$WORKSPACE/logs" "$WORKSPACE/data/skills"
 git ls-files -z --cached --others --exclude-standard configs prompts crates/skills optional_skills README.md Cargo.toml Cargo.lock \
@@ -65,6 +83,14 @@ cleanup() {
 }
 trap cleanup EXIT
 start_server() {
+  python3 - "$STATE/binary-evidence.json" <<'PY'
+import hashlib,json,sys
+from pathlib import Path
+evidence=json.loads(Path(sys.argv[1]).read_text())
+with Path(evidence['pinned_binary']).open('rb') as stream:
+    if hashlib.file_digest(stream,'sha256').hexdigest() != evidence['sha256']:
+        raise SystemExit('test_binary_snapshot_digest_changed')
+PY
   (
     cd "$WORKSPACE"
     exec "$BINARY" --config "$STATE/config.toml"

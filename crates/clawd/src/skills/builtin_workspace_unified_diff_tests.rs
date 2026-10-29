@@ -94,6 +94,77 @@ fn git_workspace_keeps_git_check_and_apply_engine() {
 }
 
 #[test]
+fn bare_nested_patch_paths_are_identical_in_git_and_non_git_workspaces() {
+    for git in [false, true] {
+        let workspace = Workspace::new();
+        if git {
+            assert!(Command::new("git")
+                .args(["init", "-q"])
+                .current_dir(workspace.path())
+                .status()
+                .unwrap()
+                .success());
+        }
+        let result = workspace
+            .run(json!({"action":"apply_patch","patch":
+            "--- /dev/null\n+++ tmp/project/new.txt\n@@ -0,0 +1 @@\n+repaired\n"}))
+            .unwrap();
+        assert_eq!(result["changed_files"][0], "tmp/project/new.txt");
+        assert_eq!(
+            fs::read(workspace.path().join("tmp/project/new.txt")).unwrap(),
+            b"repaired\n"
+        );
+        assert!(!workspace.path().join("project/new.txt").exists());
+        workspace
+            .run(json!({"action":"rewind","checkpoint_id":result["checkpoint_id"]}))
+            .unwrap();
+        assert!(!workspace.path().join("tmp/project/new.txt").exists());
+    }
+}
+
+#[test]
+fn a_parent_git_repository_does_not_change_a_nested_workspace_patch_root() {
+    let parent = Workspace::new();
+    assert!(Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(parent.path())
+        .status()
+        .unwrap()
+        .success());
+    let workspace = Workspace {
+        root: parent.path().join("nested/workspace"),
+    };
+    fs::create_dir_all(workspace.path()).unwrap();
+    let result = workspace.run(json!({"action":"apply_patch","patch":
+        "diff --git a/tmp/project/new.txt b/tmp/project/new.txt\nnew file mode 100644\n--- /dev/null\n+++ b/tmp/project/new.txt\n@@ -0,0 +1 @@\n+repaired\n"})).unwrap();
+    assert_eq!(result["patch_engine"], "pure_rust");
+    assert_eq!(
+        fs::read(workspace.path().join("tmp/project/new.txt")).unwrap(),
+        b"repaired\n"
+    );
+    assert!(!parent.path().join("tmp/project/new.txt").exists());
+}
+
+#[test]
+fn git_rejects_mixed_path_prefix_conventions_before_writing_any_file() {
+    let workspace = Workspace::new();
+    assert!(Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(workspace.path())
+        .status()
+        .unwrap()
+        .success());
+    let error = workspace.run(json!({"action":"apply_patch","patch":
+        "--- /dev/null\n+++ b/first.txt\n@@ -0,0 +1 @@\n+one\n--- /dev/null\n+++ tmp/second.txt\n@@ -0,0 +1 @@\n+two\n"})).unwrap_err();
+    let error = crate::skills::parse_structured_skill_error(&error).unwrap();
+    let extra = error.extra.unwrap();
+    assert_eq!(extra["error_code"], "mixed_patch_path_conventions");
+    assert_eq!(extra["side_effect_applied"], false);
+    assert!(!workspace.path().join("first.txt").exists());
+    assert!(!workspace.path().join("tmp/second.txt").exists());
+}
+
+#[test]
 fn pure_rust_parser_preserves_no_newline_marker() {
     let workspace = Workspace::new();
     fs::write(workspace.path().join("note.txt"), "before").expect("fixture");
