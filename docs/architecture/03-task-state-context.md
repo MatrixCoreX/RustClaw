@@ -60,6 +60,25 @@ Prior execution summaries expose `prior_context_projection` with preview,
 truncation and source-compaction flags plus an authorized discovery reference.
 An omitted preview value is not an absent historical value or proof of failure.
 
+An invalid/expired cursor or changed snapshot returns structured, effect-free
+`replan_arguments` facts. The loop may rediscover the same source index without
+the old cursor/digest, within its existing recovery budget. It must not repeat
+the stale call or re-execute the source task. Revoked authorization and missing
+or compacted evidence do not grant automatic retry.
+
+Failure state is independent from its presentation. The model may explain a
+failure in the user's language or return explicitly requested JSON. Structured
+JSON is bounded and checked for credentials, internal payloads and nested error
+wrappers; the response-contract validator still applies. If presentation is
+unavailable, the runtime emits a flat public machine record rather than a raw
+provider body or fixed language-specific sentence. Completed actions stay
+completed and remaining actions stay paused.
+
+The teaching panel shows the included memory/KB evidence count and pages of 12
+items. Each item can reveal its complete source reference and inclusion reason;
+the raw machine record remains separately expandable. Changing the task resets
+the evidence page, and displayed references are data, not executable links.
+
 ```mermaid
 flowchart LR
     A[Bounded prior-task reference] --> B[Planner selects explicit fields]
@@ -67,6 +86,8 @@ flowchart LR
     C -->|allowed| D[Redacted fields or bounded index page]
     D -->|has_more and signed cursor| C
     C -->|denied or unavailable| E[Structured observation]
+    E -->|stale read boundary and bounded recovery| R[Rediscover same source index]
+    R --> C
     D --> F[Planner applies current user constraints]
     F --> G[Normal resolver and permission checks]
     E --> F

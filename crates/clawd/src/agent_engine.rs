@@ -797,19 +797,36 @@ fn user_safe_step_error(err: &str, _prefer_english: bool) -> String {
 
 fn resume_step_failed_machine_payload(
     failed_index: usize,
-    failed_action: &str,
-    err: &str,
+    structured_error: Option<&Value>,
     has_remaining_actions: bool,
 ) -> String {
-    json!({
+    let mut value = json!({
+        "schema_version": 1,
+        "status": "error",
         "message_key": "clawd.msg.execution.step_failed",
         "reason_code": "execution_step_failed",
         "failed_index": failed_index,
-        "failed_action": failed_action,
-        "error": err,
+        "presentation_status": "unavailable",
         "remaining_actions_paused": has_remaining_actions,
-    })
-    .to_string()
+    });
+    if let Some(code) = structured_error
+        .and_then(|error| {
+            error
+                .pointer("/extra/error_code")
+                .or_else(|| error.get("error_code"))
+        })
+        .and_then(Value::as_str)
+        .filter(|code| {
+            !code.is_empty()
+                && code.len() <= 128
+                && code
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+        })
+    {
+        value["error_code"] = json!(code);
+    }
+    value.to_string()
 }
 
 fn resume_context_structured_skill_error(raw_err: Option<&str>) -> Option<Value> {
@@ -887,6 +904,38 @@ fn resume_failure_machine_facts(structured_error: Option<&Value>) -> (Vec<String
         facts.push("cleanup_status: not_created".to_string());
     }
     (facts, proven_not_applied)
+}
+
+fn resume_failure_policy_boundaries(
+    structured_error_present: bool,
+    proven_not_applied: bool,
+    has_remaining_actions: bool,
+) -> Vec<String> {
+    let mut boundary = vec![
+        "expose_internal_details=false".to_string(),
+        "failed_step_success_claim_allowed=false".to_string(),
+        "response_focus=failed_step_and_recovery_path".to_string(),
+        "failure_facts_are_not_output_schema=true".to_string(),
+        "unobserved_failure_fields_claim_allowed=false".to_string(),
+    ];
+    if structured_error_present {
+        boundary.push("failure_facts_source=structured_error".to_string());
+    }
+    if proven_not_applied {
+        boundary.push("cleanup_not_created_claim_supported=true".to_string());
+    }
+    if has_remaining_actions {
+        boundary.extend([
+            "remaining_steps_state=paused".to_string(),
+            "resume_available=true".to_string(),
+        ]);
+    } else {
+        boundary.extend([
+            "remaining_work_claim_allowed=false".to_string(),
+            "continuation_option_claim_allowed=false".to_string(),
+        ]);
+    }
+    boundary
 }
 
 async fn build_resume_context_error(
@@ -971,8 +1020,7 @@ async fn build_resume_context_error(
     let safe_err = user_safe_step_error(err, prefer_english);
     let fallback_user_error = resume_step_failed_machine_payload(
         failed_index,
-        failed_action,
-        &safe_err,
+        structured_error.as_ref(),
         has_remaining_actions,
     );
     let mut observed_facts = vec![
@@ -987,27 +1035,11 @@ async fn build_resume_context_error(
     if !completed_steps.is_empty() {
         observed_facts.push(format!("completed_steps_count: {}", completed_steps.len()));
     }
-    let mut policy_boundary = vec![
-        "expose_internal_details=false".to_string(),
-        "failed_step_success_claim_allowed=false".to_string(),
-        "response_focus=failed_step_and_recovery_path".to_string(),
-    ];
-    if structured_error.is_some() {
-        policy_boundary.push(
-            "preserve_observed_failure_fields=status,error_code,failure_phase,retryable,side_effect_applied"
-                .to_string(),
-        );
-    }
-    if proven_not_applied {
-        policy_boundary.push("preserve_observed_failure_fields+=cleanup_status".to_string());
-    }
-    if has_remaining_actions {
-        policy_boundary.push("remaining_steps_state=paused".to_string());
-        policy_boundary.push("resume_available=true".to_string());
-    } else {
-        policy_boundary.push("remaining_work_claim_allowed=false".to_string());
-        policy_boundary.push("continuation_option_claim_allowed=false".to_string());
-    }
+    let policy_boundary = resume_failure_policy_boundaries(
+        structured_error.is_some(),
+        proven_not_applied,
+        has_remaining_actions,
+    );
     let contract = crate::fallback::UserResponseContract::tool_failure(
         if has_remaining_actions {
             "resume_step_failed_with_remaining"

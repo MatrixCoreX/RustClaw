@@ -1,6 +1,32 @@
 use super::*;
 use std::collections::HashSet;
 
+#[test]
+fn tool_failure_shape_accepts_public_model_json_without_relaxing_clarification() {
+    let reply = r#"{"status":"error","error_code":"context_source_compacted","total":null}"#;
+    let contract = UserResponseContract::tool_failure(
+        "fixture",
+        "fixture",
+        "fixture",
+        vec![],
+        vec![],
+        "brief_failure",
+        "en",
+    );
+    assert!(user_response_contract_local_shape_satisfied(
+        &contract, reply
+    ));
+    let clarification = UserResponseContract {
+        kind: UserResponseKind::Clarify,
+        response_shape: "one_short_clarification".into(),
+        ..Default::default()
+    };
+    assert!(!user_response_contract_local_shape_satisfied(
+        &clarification,
+        reply
+    ));
+}
+
 fn test_state(locale: &str, schedule_locale: &str) -> AppState {
     let mut state = AppState::test_default_with_fixture_provider();
     state.policy.command_intent.default_locale = locale.to_string();
@@ -428,16 +454,16 @@ fn user_response_contract_validator_rejects_clarification_without_missing_target
 }
 
 #[test]
-fn user_response_contract_validator_low_confidence_fails_open() {
+fn user_response_contract_validator_low_confidence_format_uncertainty_stays_open() {
     let contract = UserResponseContract {
         response_shape: "one_short_clarification".to_string(),
         ..UserResponseContract::default()
     };
     let validation = UserResponseContractValidationOut {
         satisfies_contract: false,
-        false_claims: true,
+        false_claims: false,
         asks_for_missing_target: false,
-        mentions_internal_details: true,
+        mentions_internal_details: false,
         confidence: 0.2,
         reason: "uncertain".to_string(),
     };
@@ -446,6 +472,29 @@ fn user_response_contract_validator_low_confidence_fails_open() {
         &contract,
         &validation
     ));
+}
+
+#[test]
+fn low_confidence_never_overrides_explicit_false_claim_or_internal_disclosure() {
+    let contract = UserResponseContract::default();
+    for confidence in [0.0, 0.2, 0.54, 0.55, 1.0] {
+        for (false_claims, mentions_internal_details) in
+            [(true, false), (false, true), (true, true)]
+        {
+            let validation = UserResponseContractValidationOut {
+                satisfies_contract: true,
+                false_claims,
+                asks_for_missing_target: true,
+                mentions_internal_details,
+                confidence,
+                reason: "fixture_safety_rejection".into(),
+            };
+            assert!(!user_response_contract_validation_accepts(
+                &contract,
+                &validation
+            ));
+        }
+    }
 }
 
 #[test]

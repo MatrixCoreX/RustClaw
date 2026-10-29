@@ -1,4 +1,5 @@
 import { ChevronLeft, ChevronRight, Database, Loader2, RefreshCw, Workflow } from "lucide-react";
+import { TaskEvidenceList } from "./TaskEvidenceList";
 
 import {
   taskLlmDebugCallEntry,
@@ -405,33 +406,7 @@ export function TaskLlmTracePanel({
                   </span>
                 ))}
               </div>
-              {recalledEvidence.length > 0 ? (
-                <div className="mt-3 grid gap-2">
-                  {recalledEvidence.slice(0, 12).map((item, index) => (
-                    <div
-                      key={`${item.sourceKind}:${item.sourceRef}:${index}`}
-                      className="grid min-w-0 gap-2 rounded-md border border-white/10 bg-black/20 px-3 py-2 text-[11px] md:grid-cols-[8rem_minmax(0,1fr)_6rem]"
-                    >
-                      <span className="font-medium text-emerald-100">{item.sourceKind}</span>
-                      <span className="truncate font-mono text-white/65" title={item.sourceRef}>
-                        {item.sourceRef}
-                      </span>
-                      <span className="font-mono text-white/55">
-                        {item.score == null ? "score=--" : `score=${item.score.toFixed(4)}`}
-                      </span>
-                      {item.reason ? (
-                        <span className="min-w-0 truncate text-white/45 md:col-span-3" title={item.reason}>
-                          {t("纳入依据", "Included because")}: {item.reason}
-                        </span>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-3 text-[11px] text-white/45">
-                  {t("本轮没有纳入记忆或知识库证据。", "No memory or knowledge-base evidence was included in this turn.")}
-                </p>
-              )}
+              <TaskEvidenceList key={taskResult.task_id} rows={recalledEvidence} t={t} />
               <details className="mt-3 rounded-md border border-white/10 bg-black/20 p-2">
                 <summary className="cursor-pointer text-[11px] text-white/55">
                   {t("原始机器字段", "Raw machine fields")}

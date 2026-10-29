@@ -61,3 +61,49 @@ fn pagination_options_preserve_opaque_values_and_validate_types() {
     assert!(Options::parse(&json!({"field_paths":["/request"],"page_size":1})).is_err());
     assert!(Options::parse(&json!({"field_paths":["/request"]})).is_ok());
 }
+
+#[test]
+fn only_stale_read_boundaries_offer_effect_free_argument_replanning() {
+    for code in [
+        "context_cursor_invalid",
+        "context_cursor_expired",
+        "context_snapshot_changed",
+        "context_reference_unauthorized",
+        "context_source_compacted",
+        "context_field_compacted",
+        "context_source_unavailable",
+        "unauthorized",
+    ] {
+        let output = decode_response(
+            false,
+            crate::ApiResponse {
+                ok: false,
+                data: None,
+                error: Some(code.into()),
+            },
+        )
+        .unwrap();
+        let extra = output.extra.unwrap();
+        let recoverable = matches!(
+            code,
+            "context_cursor_invalid" | "context_cursor_expired" | "context_snapshot_changed"
+        );
+        assert_eq!(extra["retryable"], recoverable, "{code}");
+        if recoverable {
+            assert_eq!(extra["failure_phase"], "pre_dispatch");
+            assert_eq!(extra["side_effect_applied"], false);
+            assert_eq!(extra["recovery_action"], "replan_arguments");
+            assert_eq!(
+                extra["recovery_context"]["source_task_reexecution_allowed"],
+                false
+            );
+            assert_eq!(
+                extra["recovery_context"]["discard_argument_fields"],
+                json!(["cursor", "source_digest"])
+            );
+        } else {
+            assert!(extra.get("recovery_action").is_none(), "{code}");
+        }
+        assert_eq!(output.error_text.as_deref(), Some(code));
+    }
+}

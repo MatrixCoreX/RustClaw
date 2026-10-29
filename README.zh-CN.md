@@ -75,7 +75,9 @@ Agent Runtime 主自然语言路径使用接近 Codex / Claude 的 agent loop。
 `answer_verification.status`，验证状态分为 `not_required`、`passed`、`failed`、
 `unavailable`。验证服务不可用时保存已完成工作，不把未验证答案视为通过。
 同会话历史引用可通过 `task_control.recall_context` 重新鉴权回查，能力索引支持绑定快照的
-有界分页；预览摘要明确标记截断状态并提供同作用域回查引用。多部分通信端投送只重试
+有界分页；预览摘要明确标记截断状态并提供同作用域回查引用。失效游标通过有界参数重规划
+恢复，不重跑源任务；失败说明交给模型生成，支持用户要求的公开 JSON，不暴露多层内部
+错误包装。多部分通信端投送只重试
 明确可重试的拒绝项，不重复已接受部分或工具执行。内容未变的验证 checkpoint 只重试验证；
 UI/CLI 分开显示三种状态。结果不明的投送须由当前用户确认，并核对快照后才能补发，
 用户确认不会冒充平台送达证明。详见[上下文与恢复](docs/architecture/03-task-state-context.zh-CN.md)

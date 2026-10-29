@@ -44,8 +44,17 @@ pub(crate) fn parse_resume_context_error(error_text: &str) -> Option<(String, Va
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .unwrap_or("Task execution failed")
-        .to_string();
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            serde_json::json!({
+                "schema_version": 1,
+                "status": "error",
+                "message_key": "clawd.msg.execution.step_failed",
+                "reason_code": "execution_step_failed",
+                "presentation_status": "unavailable",
+            })
+            .to_string()
+        });
     Some((user_error, value))
 }
 
@@ -232,3 +241,7 @@ pub(crate) fn normalize_external_id_opt(raw: Option<&str>) -> Option<String> {
         .filter(|v| !v.is_empty())
         .map(ToString::to_string)
 }
+
+#[cfg(test)]
+#[path = "app_helpers_tests.rs"]
+mod tests;

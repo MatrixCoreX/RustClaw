@@ -84,6 +84,9 @@ instead of accepting an unchecked answer. Same-conversation references can be
 recalled through `task_control.recall_context` after fresh ownership checks.
 Historical capability indices support bounded, snapshot-bound pagination;
 preview summaries report truncation and provide scoped recall references.
+Stale read cursors return bounded argument-replanning facts rather than replaying
+the source task. Failure explanations remain model-authored, including requested
+public JSON, without exposing nested internal error wrappers.
 Multi-part channel delivery retries explicitly retryable rejected parts without
 replaying accepted parts or tool execution. Unchanged verification checkpoints
 resume verification only. UI/CLI display the three facts separately; ambiguous

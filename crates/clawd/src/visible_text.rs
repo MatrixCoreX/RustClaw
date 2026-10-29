@@ -359,7 +359,7 @@ fn strip_ansi_sequences(text: &str) -> String {
         .into_owned()
 }
 
-fn sensitive_key_name(key: &str) -> bool {
+pub(crate) fn sensitive_key_name(key: &str) -> bool {
     let normalized = key
         .trim()
         .trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_' && ch != '-')

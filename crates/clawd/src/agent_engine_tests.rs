@@ -1237,6 +1237,76 @@ fn resume_failure_machine_facts_preserve_proven_not_created_fields() {
 }
 
 #[test]
+fn resume_failure_unavailable_presentation_is_flat_and_never_serializes_raw_error() {
+    let error = serde_json::json!({
+        "error_code":"execution_failed",
+        "extra":{"error_code":"context_source_compacted","private_key":"do-not-copy","raw_response":"provider-body"}
+    });
+    let raw = resume_step_failed_machine_payload(3, Some(&error), true);
+    let public: Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(public["status"], "error");
+    assert_eq!(public["error_code"], "context_source_compacted");
+    assert_eq!(public["failed_index"], 3);
+    assert_eq!(public["remaining_actions_paused"], true);
+    assert_eq!(public["presentation_status"], "unavailable");
+    assert!(!raw.contains("do-not-copy"));
+    assert!(!raw.contains("provider-body"));
+    for code in ["raw provider body", "UPPER", "", "wrong/code"] {
+        let error = serde_json::json!({"error_code":code});
+        let public: Value =
+            serde_json::from_str(&resume_step_failed_machine_payload(1, Some(&error), false))
+                .unwrap();
+        assert!(public.get("error_code").is_none());
+        assert_eq!(public["remaining_actions_paused"], false);
+    }
+}
+
+#[test]
+fn failure_facts_do_not_override_requested_presentation_fields_or_effect_truth() {
+    for structured in [true, false] {
+        for proven_not_applied in [true, false] {
+            for remaining in [true, false] {
+                let boundary =
+                    resume_failure_policy_boundaries(structured, proven_not_applied, remaining);
+                assert!(boundary
+                    .iter()
+                    .any(|item| item == "failure_facts_are_not_output_schema=true"));
+                assert!(boundary
+                    .iter()
+                    .any(|item| item == "failed_step_success_claim_allowed=false"));
+                assert!(!boundary
+                    .iter()
+                    .any(|item| item.starts_with("preserve_observed_failure_fields")));
+                assert_eq!(
+                    boundary
+                        .iter()
+                        .any(|item| item == "failure_facts_source=structured_error"),
+                    structured
+                );
+                assert_eq!(
+                    boundary
+                        .iter()
+                        .any(|item| item == "cleanup_not_created_claim_supported=true"),
+                    proven_not_applied
+                );
+                assert_eq!(
+                    boundary
+                        .iter()
+                        .any(|item| item == "remaining_steps_state=paused"),
+                    remaining
+                );
+                assert_eq!(
+                    boundary
+                        .iter()
+                        .any(|item| item == "continuation_option_claim_allowed=false"),
+                    !remaining
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn browser_session_leases_are_preserved_only_for_checkpoint_handoffs() {
     let terminal = crate::AskReply::non_llm(String::new());
     assert!(!reply_preserves_browser_session_leases(&terminal));

@@ -882,6 +882,33 @@ suite|name|tags|prompt|expect=<substring>
 
 ## Logs
 
+### Scoped Context Recovery and Failure Presentation
+
+The isolated `nl_cases_context_failure_recovery_20261029.txt` suite performs two
+real file reads, observes an intentionally invalid read cursor and rediscovers
+the same historical index, then requests a missing field. Its negative case must
+remain failed and deliver public model-authored JSON instead of an escaped
+internal wrapper. It must never repeat the source operations. Run with the
+current `clawd` and `task-control-skill` binaries:
+
+```bash
+NL_CASE_FILE=scripts/nl_tests/cases/nl_cases_context_failure_recovery_20261029.txt \
+  bash scripts/nl_tests/run_correctness_continuity.sh
+python3 scripts/nl_tests/audit_context_failure_recovery.py --state <retained_test_state>
+```
+
+With no positional binary arguments, the runner incrementally builds the two
+exact Cargo targets separately before creating receipts. Supplying explicit
+binary paths tests those selected artifacts without compiling them; ensure they
+match the intended source/version. Do not combine both packages with only
+`--bin clawd`, which does not rebuild the task-control executable.
+
+Keep failed attempts as well as passing runs. The runner prints numbered public
+LLM return records; private provider reasoning and credentials are not teaching
+output. `probe_runtime_read_latency.py --root <installation> --samples 10` is an
+independent read-only aggregate probe; zero-candidate SQL timings are not a load
+or fairness benchmark.
+
 - `scripts/nl_suite_logs/manual/<timestamp>/`
 - `scripts/nl_suite_logs/full/<timestamp>/`
 - `scripts/nl_suite_logs/trace/<timestamp>/`

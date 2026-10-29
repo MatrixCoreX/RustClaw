@@ -18,9 +18,27 @@ pub(super) fn decode_response(
                     .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
         })
         .unwrap_or_else(|| "context_recall_api_failed".into());
+    let mut extra = super::error_extra(&code);
+    if matches!(
+        code.as_str(),
+        "context_cursor_invalid" | "context_cursor_expired" | "context_snapshot_changed"
+    ) {
+        extra["retryable"] = Value::Bool(true);
+        extra["side_effect_applied"] = Value::Bool(false);
+        extra["failure_phase"] = Value::String("pre_dispatch".into());
+        extra["recovery_action"] = Value::String("replan_arguments".into());
+        extra["recovery_context"] = serde_json::json!({
+            "operation":"rediscover_context_index",
+            "discard_argument_fields":["cursor", "source_digest"],
+            "preserve_argument_fields":["context_ref"],
+            "field_paths":["/capabilities"],
+            "source_task_reexecution_allowed":false,
+            "historical_instruction_authority":"none",
+        });
+    }
     Ok(super::SkillOutput {
         text: String::new(),
-        extra: Some(super::error_extra(&code)),
+        extra: Some(extra),
         error_text: Some(code),
     })
 }

@@ -1643,7 +1643,7 @@ capabilities = ["net", "exec"]
 
 [[skills]]
 name = "task_control"
-package_version = "0.1.10"
+package_version = "0.1.11"
 resource_request = { class = "general", cpu_cores = 1, memory_mb = 64 }
 enabled = true
 planner_eager_load = false

@@ -47,6 +47,13 @@ Use the exact `next_cursor` and unchanged field selection/page size while
 first page remain readable. Pass the returned `source_digest` when reading
 selected fields to reject a changed snapshot. Cursors expire after 15 minutes
 or a runtime restart; restart index discovery then. Every page rechecks current
+ownership. `context_cursor_invalid`, `context_cursor_expired` and
+`context_snapshot_changed` carry effect-free `replan_arguments` recovery facts:
+discard the old cursor/digest, discover `/capabilities` again using the same
+`context_ref`, and use the newly observed snapshot. The agent chooses that read
+within its existing bounded recovery budget; never repeat the stale call or
+re-execute the source task. Authorization failure and missing/compacted evidence
+are not retryable read boundaries. Every page also rechecks
 ownership, conversation and agent scope. An altered capability stream returns
 `context_source_compacted`, not a partial index or reconstructed log data;
 when only other trace fields were compacted, the unchanged capability stream

@@ -375,6 +375,41 @@ fn recovery_uses_action_effect_instead_of_whole_skill_read_allowlist() {
     ));
 }
 
+#[test]
+fn stale_context_read_uses_generic_bounded_replan_only_with_not_applied_proof() {
+    let state = test_state_with_registry();
+    let args = serde_json::json!({"action":"recall_context"});
+    for retryable in [true, false] {
+        for side_effect_applied in [true, false] {
+            let err = crate::skills::structured_skill_error_from_parts(
+                "task_control",
+                "context_cursor_expired",
+                "context_cursor_expired",
+                None,
+                Some(serde_json::json!({
+                    "retryable":retryable,"side_effect_applied":side_effect_applied,
+                    "failure_phase":"pre_dispatch","recovery_action":"replan_arguments"
+                })),
+            );
+            let result = classify_skill_failure_recovery(
+                &state,
+                &[],
+                0,
+                8,
+                "task_control",
+                Some(&args),
+                &err,
+            );
+            if retryable && !side_effect_applied {
+                assert_eq!(result, Some("recoverable_failure_continue_round"));
+            } else {
+                assert_ne!(result, Some("recoverable_failure_continue_round"));
+                assert_ne!(result, Some("recoverable_failure_continue_in_round"));
+            }
+        }
+    }
+}
+
 fn test_state_with_registry_excluding(disabled: &[&str]) -> AppState {
     let agents_by_id = HashMap::from([(
         DEFAULT_AGENT_ID.to_string(),

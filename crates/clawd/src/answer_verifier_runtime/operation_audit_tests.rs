@@ -589,6 +589,53 @@ fn blocked_closeout_requires_actual_failure_evidence() {
 }
 
 #[test]
+fn failed_probe_and_successful_recovery_are_independent_evidence_not_promoted_success() {
+    let mut journal = journal();
+    journal.step_results[0].status = crate::executor::StepExecutionStatus::Error;
+    journal
+        .step_results
+        .push(TaskJournalStepTrace::ok("s3", "fs_basic", "{}"));
+    journal.task_observations.push(json!({
+        "schema_version":1,"owner_layer":"task_journal","observation_kind":"checkpoint_step_provenance",
+        "step_id":"s3","requested_action_type":"call_capability",
+        "requested_capability":"fixture.inspect","resolved_capability":"fixture.inspect",
+        "resolved_tool_or_skill":"fs_basic","dispatch_executed":true,
+    }));
+    let failed = json!({"requested_operation":"requested failed probe","evidence_step_ids":["s1"],
+        "required_dispatches":[{"action_type":"call_capability","action_ref":"fixture.inspect"}],
+        "method_observed":false,"result_observed":true,"blocked":true});
+    let recovered = json!({"requested_operation":"fresh recovery read","evidence_step_ids":["s3"],
+        "required_dispatches":[{"action_type":"call_capability","action_ref":"fixture.inspect"}],
+        "method_observed":true,"result_observed":true});
+    assert!(
+        validate_operation_audit(model(json!([failed.clone(), recovered.clone()])), &journal).pass
+    );
+    for (key, value) in [
+        ("blocked", json!(false)),
+        ("method_observed", json!(true)),
+        ("evidence_step_ids", json!(["unknown"])),
+        (
+            "required_dispatches",
+            json!([{"action_type":"call_capability","action_ref":"fixture.other"}]),
+        ),
+    ] {
+        let mut invalid = failed.clone();
+        invalid[key] = value;
+        assert!(
+            !validate_operation_audit(model(json!([invalid, recovered.clone()])), &journal).pass,
+            "{key}"
+        );
+    }
+    let mut unexecuted_recovery = recovered;
+    unexecuted_recovery["evidence_step_ids"] = json!(["s1"]);
+    assert!(!validate_operation_audit(model(json!([failed, unexecuted_recovery])), &journal).pass);
+    assert_eq!(
+        journal.step_results[0].status,
+        crate::executor::StepExecutionStatus::Error
+    );
+}
+
+#[test]
 fn schema_requires_audit_and_does_not_coerce_boolean_or_allow_extra_fields() {
     let base = json!({"operation_checks":[],"output_field_checks":[],"pass":true,"missing_evidence_fields":[],
                      "answer_incomplete_reason":"","should_retry":false,"retry_instruction":"","confidence":0.9});

@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "task_control"
-version = "0.1.10"
+version = "0.1.11"
 description = "List, inspect, cancel, resume, and pause agent tasks through the local task control API, bind planner-selected session aliases through structured state evidence, and expose no-mutation lifecycle previews. Read-only preview actions project provider-failure recovery, retryable tool-failure observations, missing-field and blocked repair envelopes, and coding repair-loop machine contracts without calling a provider, executing a command, or mutating the workspace."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

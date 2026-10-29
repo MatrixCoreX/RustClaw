@@ -7,6 +7,15 @@ source "$ROOT/scripts/shell_compat.sh"
 configure_platform_command_path
 BINARY="${1:-$ROOT/target/debug/clawd}"
 SKILL_BINARY_DIR="${2:-$ROOT/target/debug}"
+if [[ $# == 0 ]]; then
+  echo 'Preparing current local binaries with separate exact Cargo targets...'
+  (
+    cd "$ROOT"
+    export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
+    cargo build -p clawd --bin clawd
+    cargo build -p task-control-skill --bin task-control-skill
+  )
+fi
 CASE_FILE="${NL_CASE_FILE:-scripts/nl_tests/cases/nl_cases_correctness_continuity_20261027.txt}"
 if [[ -n "${NL_CASE_NAME:-}" ]]; then
   set -- --case-name "$NL_CASE_NAME"

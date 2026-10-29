@@ -15,6 +15,9 @@ use crate::AppState;
 use serde::Deserialize;
 use serde_json::json;
 
+#[path = "fallback_failure_presentation.rs"]
+mod failure_presentation;
+
 pub(crate) const USER_RESPONSE_COMPOSER_PROMPT_LOGICAL_PATH: &str =
     "prompts/user_response_composer_prompt.md";
 const USER_RESPONSE_CONTRACT_VALIDATOR_PROMPT_LOGICAL_PATH: &str =
@@ -622,8 +625,12 @@ fn user_response_contract_local_shape_satisfied(
     reply: &str,
 ) -> bool {
     let trimmed = reply.trim();
-    if trimmed.is_empty() || trimmed.starts_with('{') || trimmed.starts_with('[') {
+    if trimmed.is_empty() {
         return false;
+    }
+    if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        return contract.kind == UserResponseKind::ToolFailure
+            && failure_presentation::public_failure_object_allowed(trimmed);
     }
     if trimmed.contains("```") {
         return false;
@@ -642,13 +649,13 @@ fn user_response_contract_validation_accepts(
     contract: &UserResponseContract,
     validation: &UserResponseContractValidationOut,
 ) -> bool {
+    if validation.false_claims || validation.mentions_internal_details {
+        return false;
+    }
     if validation.confidence < 0.55 {
         return true;
     }
-    if !validation.satisfies_contract
-        || validation.false_claims
-        || validation.mentions_internal_details
-    {
+    if !validation.satisfies_contract {
         return false;
     }
     if contract.response_shape.trim() == "one_short_clarification"
