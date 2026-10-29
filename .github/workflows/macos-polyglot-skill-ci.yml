@@ -4,6 +4,8 @@ name: Polyglot Skill macOS CI
   pull_request:
     paths:
       - ".github/workflows/macos-polyglot-skill-ci.yml"
+      - ".github/workflows/ubuntu-x86_64-release.yml"
+      - ".github/workflows/pi-aarch64-release.yml"
       - "Cargo.lock"
       - "Cargo.toml"
       - "configs/skills_registry.toml"
@@ -21,6 +23,7 @@ name: Polyglot Skill macOS CI
       - "scripts/project_skill_receipts.py"
       - "scripts/auth-key.sh"
       - "scripts/nl_tests/auth_key_http_tests.py"
+      - "scripts/nl_tests/release_candidate_workflow_tests.py"
       - "scripts/skill_store_packages.py"
       - "scripts/nl_tests/run_manual_test.sh"
       - "scripts/nl_tests/manual_case_observation*.py"
@@ -40,6 +43,8 @@ name: Polyglot Skill macOS CI
       - main
     paths:
       - ".github/workflows/macos-polyglot-skill-ci.yml"
+      - ".github/workflows/ubuntu-x86_64-release.yml"
+      - ".github/workflows/pi-aarch64-release.yml"
       - "Cargo.lock"
       - "Cargo.toml"
       - "configs/skills_registry.toml"
@@ -57,6 +62,7 @@ name: Polyglot Skill macOS CI
       - "scripts/project_skill_receipts.py"
       - "scripts/auth-key.sh"
       - "scripts/nl_tests/auth_key_http_tests.py"
+      - "scripts/nl_tests/release_candidate_workflow_tests.py"
       - "scripts/skill_store_packages.py"
       - "scripts/nl_tests/run_manual_test.sh"
       - "scripts/nl_tests/manual_case_observation*.py"
@@ -148,6 +154,7 @@ jobs:
           python3 scripts/nl_tests/video_speech_acceptance_tests.py
           python3 scripts/nl_tests/authenticated_probe_http_tests.py
           python3 scripts/nl_tests/auth_key_http_tests.py
+          python3 scripts/nl_tests/release_candidate_workflow_tests.py
           python3 scripts/nl_tests/concurrent_health_probe_tests.py
           python3 scripts/nl_tests/probe_runtime_read_latency_tests.py
           python3 scripts/nl_tests/replay_verifier_candidate_tests.py

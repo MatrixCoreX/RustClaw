@@ -18,20 +18,33 @@ triggers `Build Ubuntu x86_64 Release` and publishes a normal GitHub Release.
 The workflow can also be started manually; set `prerelease=true` only for a
 package that must not become the normal update source.
 
+For a signed acceptance candidate without creating or updating a GitHub Release:
+
+```bash
+gh workflow run ubuntu-x86_64-release.yml -f publish_release=false
+```
+
+Record the returned run's source SHA and download its `agent-runtime-ubuntu-x86_64`
+Actions artifact after the complete run succeeds. This mode keeps the same build,
+tests, signing, SBOM and provenance checks; it does not deploy, create tags, publish
+or clean up Releases. `prerelease=true` alone still publishes a Release and is not
+an artifact-only mode. Manual runs default to publishing; explicit tag pushes
+also publish as usual.
+
 The workflow builds:
 
 - Rust workspace binaries for `x86_64-unknown-linux-gnu`
 - `UI/dist`
-- a runtime archive named `Agent Runtime-ubuntu-x86_64-<tag>.tar.gz`
-  (`Agent Runtime-<tag>.tar.gz` when the tag already starts with `ubuntu-x86_64-`)
-- a matching `.sha256` checksum file
+- a runtime archive whose name uses the selected product identity's
+  `release_artifact_id`, platform and tag
+- matching `.sha256`, `.spdx.json`, `.manifest.json` and `.manifest.json.sig` files
 
-The archive is uploaded both as a workflow artifact and as a GitHub Release
-asset.
+The archive is uploaded as a workflow artifact and, when publishing is enabled,
+as a GitHub Release asset.
 
-After a successful publish, the workflow automatically keeps the newest
-`ubuntu-x86_64-*` Release and deletes older Ubuntu Releases and their associated
-tags. Raspberry Pi Releases use a separate prefix and are not deleted.
+Old Releases are retained unless a maintainer explicitly runs the separate
+cleanup workflow. Verify a replacement before removing any platform's older
+Release; artifact-only candidate builds never invoke that cleanup.
 
 ## Update Notes
 

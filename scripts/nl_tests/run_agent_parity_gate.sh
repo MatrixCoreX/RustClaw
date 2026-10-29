@@ -564,6 +564,7 @@ echo "AGENT_PARITY_GATE_STEP nl_suite_checker_self_tests"
   python3 "${SCRIPT_DIR}/coding_observation_chain_tests.py"
   python3 "${SCRIPT_DIR}/authenticated_probe_http_tests.py"
   python3 "${SCRIPT_DIR}/auth_key_http_tests.py"
+  python3 "${SCRIPT_DIR}/release_candidate_workflow_tests.py"
   python3 "${SCRIPT_DIR}/concurrent_health_probe_tests.py"
   python3 "${SCRIPT_DIR}/probe_runtime_read_latency_tests.py"
   python3 "${SCRIPT_DIR}/check_workspace_space.py" --help > /dev/null

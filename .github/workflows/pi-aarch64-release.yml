@@ -12,6 +12,11 @@ name: Build Pi aarch64 Release
         required: true
         default: false
         type: boolean
+      publish_release:
+        description: "Publish a GitHub Release; false uploads only the verified workflow artifact."
+        required: true
+        default: true
+        type: boolean
   push:
     tags:
       - "pi-aarch64-*"
@@ -139,6 +144,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test_python="${pythonLocation:?setup-python root missing}/bin/python3"
+          "${test_python}" -m pip install --requirement scripts/nl_tests/requirements.txt
+          "${test_python}" scripts/nl_tests/release_candidate_workflow_tests.py
           python3 -m unittest discover -s scripts/security -p test_release_config_guard.py
           python3 -m unittest discover -s scripts/tests -p test_release_skill_sources.py
           python3 scripts/check_polyglot_skill_contracts.py --self-test
@@ -236,6 +244,7 @@ jobs:
           } > release-notes.md
 
       - name: Publish GitHub Release
+        if: ${{ (github.event_name == 'push' && github.ref_type == 'tag') || (github.event_name == 'workflow_dispatch' && inputs.publish_release) }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}

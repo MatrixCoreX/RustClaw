@@ -14,16 +14,28 @@ Agent Runtime 可以通过 GitHub Actions 发布预编译 Ubuntu x86_64 runtime 
 
 脚本创建并推送下一个 `ubuntu-x86_64-YYYYMMDD[-N]` tag，触发 `Build Ubuntu x86_64 Release` 并发布正式 GitHub Release。也可以手动运行 workflow；只有测试包不应成为普通更新源时才设置 `prerelease=true`。
 
+只构建签名验收候选包、不创建或更新 GitHub Release：
+
+```bash
+gh workflow run ubuntu-x86_64-release.yml -f publish_release=false
+```
+
+记录该次运行的源码 SHA，整轮成功后下载 `agent-runtime-ubuntu-x86_64` Actions artifact。
+此模式保留相同的构建、测试、签名、SBOM 和 provenance 校验，不部署、不创建 tag、
+不发布或清理 Release。仅设置 `prerelease=true` 仍会发布 Release，并非只构建模式。
+手动运行默认仍发布；显式推送发布 tag 的行为也保持不变。
+
 Workflow 构建：
 
 - `x86_64-unknown-linux-gnu` Rust workspace 二进制；
 - `UI/dist`；
-- `Agent Runtime-ubuntu-x86_64-<tag>.tar.gz`（tag 已以 `ubuntu-x86_64-` 开头时为 `Agent Runtime-<tag>.tar.gz`）；
-- 对应 `.sha256`。
+- 依据所选 product identity 的 `release_artifact_id`、平台和 tag 命名的 runtime archive；
+- 对应 `.sha256`、`.spdx.json`、`.manifest.json` 和 `.manifest.json.sig`。
 
-Archive 同时上传为 workflow artifact 和 GitHub Release asset。
+Archive 上传为 workflow artifact；仅在启用发布时上传为 GitHub Release asset。
 
-发布成功后，workflow 自动只保留最新一个 `ubuntu-x86_64-*` Release，并删除旧 Ubuntu Release 及关联 tag。`pi-aarch64-*` 使用独立前缀，不会被删除。
+旧 Release 默认保留，只有维护者显式运行独立清理 workflow 才会删除。删除某个平台的
+旧版前须验证替代版本；只构建候选包不会触发清理。
 
 ## 更新说明
 

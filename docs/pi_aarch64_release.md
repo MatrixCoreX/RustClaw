@@ -18,20 +18,33 @@ It creates and pushes the next `pi-aarch64-YYYYMMDD[-N]` tag. The tag triggers
 can also be started manually; set `prerelease=true` only for a package that
 must not become the normal update source.
 
+For a signed acceptance candidate without creating or updating a GitHub Release:
+
+```bash
+gh workflow run pi-aarch64-release.yml -f publish_release=false
+```
+
+Record the returned run's source SHA and download its `agent-runtime-pi-aarch64`
+Actions artifact after the complete run succeeds. All cross-build, dependency,
+receipt, signing, SBOM and provenance checks still run. Candidate mode does not
+deploy, create tags, publish or clean up Releases. `prerelease=true` alone still
+publishes a Release. Manual runs default to publishing; explicit tag pushes
+also publish as usual.
+
 The workflow builds:
 
 - Rust workspace binaries for `aarch64-unknown-linux-gnu`
 - `UI/dist`
-- a runtime archive named `Agent Runtime-pi-aarch64-<tag>.tar.gz`
-  (`Agent Runtime-<tag>.tar.gz` when the tag already starts with `pi-aarch64-`)
-- a matching `.sha256` checksum file
+- a runtime archive whose name uses the selected product identity's
+  `release_artifact_id`, platform and tag
+- matching `.sha256`, `.spdx.json`, `.manifest.json` and `.manifest.json.sig` files
 
-The archive is uploaded both as a workflow artifact and as a GitHub Release
-asset.
+The archive is uploaded as a workflow artifact and, when publishing is enabled,
+as a GitHub Release asset.
 
-After a successful publish, the workflow automatically keeps the newest
-`pi-aarch64-*` Release and deletes older Pi Releases and their associated tags.
-Ubuntu x86_64 Releases use a separate prefix and are not deleted.
+Old Releases are retained unless a maintainer explicitly runs the separate
+cleanup workflow. Verify a replacement before removing any platform's older
+Release; artifact-only candidate builds never invoke that cleanup.
 
 ## Pi Update Notes
 

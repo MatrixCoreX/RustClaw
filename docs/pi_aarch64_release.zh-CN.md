@@ -14,16 +14,28 @@ Agent Runtime 可以通过 GitHub Actions 发布预编译树莓派包，树莓�
 
 脚本创建并推送下一个 `pi-aarch64-YYYYMMDD[-N]` tag，触发 `Build Pi aarch64 Release` 并发布正式 GitHub Release。也可以手动运行 workflow；只有测试包不应成为普通更新源时才设置 `prerelease=true`。
 
+只构建签名验收候选包、不创建或更新 GitHub Release：
+
+```bash
+gh workflow run pi-aarch64-release.yml -f publish_release=false
+```
+
+记录该次运行的源码 SHA，整轮成功后下载 `agent-runtime-pi-aarch64` Actions artifact。
+交叉编译、依赖、receipt、签名、SBOM 和 provenance 校验仍完整执行。不部署、不创建
+tag、不发布或清理 Release。仅设置 `prerelease=true` 仍会发布 Release，并非只构建模式。
+手动运行默认仍发布；显式推送发布 tag 的行为也保持不变。
+
 Workflow 构建：
 
 - `aarch64-unknown-linux-gnu` Rust workspace 二进制；
 - `UI/dist`；
-- `Agent Runtime-pi-aarch64-<tag>.tar.gz`（tag 已以 `pi-aarch64-` 开头时为 `Agent Runtime-<tag>.tar.gz`）；
-- 对应 `.sha256`。
+- 依据所选 product identity 的 `release_artifact_id`、平台和 tag 命名的 runtime archive；
+- 对应 `.sha256`、`.spdx.json`、`.manifest.json` 和 `.manifest.json.sig`。
 
-Archive 同时上传为 workflow artifact 和 GitHub Release asset。
+Archive 上传为 workflow artifact；仅在启用发布时上传为 GitHub Release asset。
 
-发布成功后，workflow 自动只保留最新一个 `pi-aarch64-*` Release，并删除旧 Pi Release 及关联 tag。`ubuntu-x86_64-*` 使用独立前缀，不会被删除。
+旧 Release 默认保留，只有维护者显式运行独立清理 workflow 才会删除。删除某个平台的
+旧版前须验证替代版本；只构建候选包不会触发清理。
 
 ## 树莓派更新说明
 
