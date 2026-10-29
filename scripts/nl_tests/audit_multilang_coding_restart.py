@@ -124,8 +124,9 @@ def audit(state: Path) -> dict:
     assert required <= {item["capability"] for item in indexed if item["status"] == "ok"}
     index_reads = required | {"code.search_symbols", "code.retrieve_context",
                               "filesystem.read_text_range", "filesystem.stat_paths", "filesystem.list_paths",
-                              "task_plan.read"}
-    assert all(item["capability"] in index_reads for item in indexed)
+                              "task.plan_read"}
+    if any(item["capability"] not in index_reads for item in indexed):
+        raise ValueError("index_phase_non_read_or_unknown_capability")
     project = state / "workspace/tmp/multilang_project_20261029"
     if project.is_symlink() or not project.resolve().is_relative_to((state / "workspace").resolve()):
         raise ValueError("project_path_unsafe")

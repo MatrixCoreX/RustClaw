@@ -22,6 +22,8 @@ def check_space(requirements):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
+    parser.add_argument("--skill-binary", type=Path, required=True)
+    parser.add_argument("--case-file", type=Path, required=True)
     parser.add_argument("--state-root", type=Path, required=True)
     parser.add_argument("--snapshot-root", type=Path, required=True)
     args = parser.parse_args()
@@ -32,6 +34,7 @@ def main():
     block = os.statvfs(args.state_root).f_frsize
     sizes = [(root / os.fsdecode(name)).lstat().st_size for name in set(names) if name]
     source_bytes = sum(((size + block - 1) // block + 1) * block for size in sizes)
+    source_bytes += args.skill_binary.stat().st_size + args.case_file.stat().st_size
     binary_bytes = args.binary.stat().st_size
     check_space([(args.state_root, source_bytes), (args.snapshot_root, binary_bytes)])
     print(json.dumps({"copy_space_preflight": "passed", "source_estimated_bytes": source_bytes,

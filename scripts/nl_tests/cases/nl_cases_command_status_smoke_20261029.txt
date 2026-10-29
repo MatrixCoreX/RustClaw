@@ -1,0 +1,2 @@
+# Ordinary positive NL acceptance; length-failure diagnostics are retained separately.
+command_evidence|actual_short_command_status|group:command-observation-smoke,requires_tool_call=true,local_readonly,capability:system.run_command|请在当前隔离工作区实际执行且只执行一次 python3 -c "print('bounded-command-evidence-ok')"，不要写文件、安装依赖或访问网络。观察实际 stdout 和结构化进程退出码后，只返回 JSON，两个字段为 marker 和 exit_code；不要把回显的命令当成执行结果。|expect=json_eq:/data/status=succeeded;result_text_json_eq:/marker="bounded-command-evidence-ok";result_text_json_eq:/exit_code=0

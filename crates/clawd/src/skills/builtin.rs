@@ -645,13 +645,42 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(str::to_string)
-                .ok_or_else(|| "run_cmd.command_required".to_string())?;
+                .ok_or_else(|| {
+                    pre_dispatch_replan_error(builtin_error(
+                        "run_cmd",
+                        "invalid_input",
+                        "run_cmd.command_required",
+                        None,
+                        None,
+                        None,
+                    ))
+                })?;
             let sanitized_command = crate::bootstrap::sanitize_command_before_execute(
                 &state.policy.command_intent,
                 &command,
             );
             if sanitized_command.is_empty() {
-                return Err("empty command after sanitize".to_string());
+                return Err(pre_dispatch_replan_error(builtin_error(
+                    "run_cmd",
+                    "invalid_input",
+                    "run_cmd.empty_command",
+                    None,
+                    None,
+                    None,
+                )));
+            }
+            if sanitized_command.len() > state.skill_rt.max_cmd_length {
+                return Err(pre_dispatch_replan_error(builtin_error(
+                    "run_cmd",
+                    "invalid_input",
+                    "run_cmd.command_too_long",
+                    None,
+                    None,
+                    Some(serde_json::json!({"details": {
+                        "actual_bytes": sanitized_command.len(),
+                        "max_bytes": state.skill_rt.max_cmd_length,
+                    }})),
+                )));
             }
             if sanitized_command != command.trim() {
                 tracing::info!(

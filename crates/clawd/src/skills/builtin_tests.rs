@@ -11,6 +11,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+#[path = "builtin_run_cmd_preflight_tests.rs"]
+mod run_cmd_preflight;
+
 struct TempDirGuard {
     path: PathBuf,
 }

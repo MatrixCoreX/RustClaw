@@ -178,3 +178,70 @@ fn unavailable_storage_never_publishes_an_available_reference() {
     );
     assert_eq!(std::fs::read(&blocked).unwrap(), b"not a directory");
 }
+
+#[test]
+fn interrupted_object_sequence_has_no_manifest_and_retries_immutably() {
+    let workspace = TestWorkspace::new("context-archive-partial-sequence");
+    let task_id = uuid::Uuid::new_v4().to_string();
+    let original = items(2);
+    let mut interrupted = original.clone();
+    interrupted[1] = json!({"data":"x".repeat(MAX_ITEM_BYTES)});
+    assert_eq!(
+        publish(workspace.path(), &task_id, &interrupted),
+        Err("context_archive_budget_exceeded")
+    );
+    let directory = claw_core::workspace_state::workspace_artifacts_root(workspace.path())
+        .join("canonical-evidence")
+        .join(&task_id);
+    let paths = std::fs::read_dir(&directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(paths.len(), 1);
+    let first_bytes = std::fs::read(&paths[0]).unwrap();
+    assert!(serde_json::from_slice::<Manifest>(&first_bytes).is_err());
+    let reference = publish(workspace.path(), &task_id, &original).unwrap();
+    assert_eq!(std::fs::read(&paths[0]).unwrap(), first_bytes);
+    let selected = read_selected(
+        workspace.path(),
+        &task_id,
+        &reference,
+        &["/capabilities/1/data/index".into()],
+    )
+    .unwrap();
+    assert_eq!(selected[1]["data"]["index"], 1);
+}
+
+#[test]
+fn manifest_publication_failure_does_not_claim_success_or_overwrite_corruption() {
+    let workspace = TestWorkspace::new("context-archive-manifest-publication");
+    let task_id = uuid::Uuid::new_v4().to_string();
+    let original = items(2);
+    let reference = publish(workspace.path(), &task_id, &original).unwrap();
+    let manifest = object_path(
+        workspace.path(),
+        &task_id,
+        reference["manifest_sha256"].as_str().unwrap(),
+    )
+    .unwrap();
+    std::fs::write(&manifest, b"corrupt-manifest").unwrap();
+    assert_eq!(
+        publish(workspace.path(), &task_id, &original),
+        Err("context_archive_write_unavailable")
+    );
+    assert_eq!(std::fs::read(&manifest).unwrap(), b"corrupt-manifest");
+    assert_eq!(
+        read_selected(
+            workspace.path(),
+            &task_id,
+            &reference,
+            &["/capabilities".into()]
+        ),
+        Err("context_archive_corrupt")
+    );
+    std::fs::remove_file(&manifest).unwrap();
+    assert_eq!(
+        publish(workspace.path(), &task_id, &original).unwrap(),
+        reference
+    );
+}

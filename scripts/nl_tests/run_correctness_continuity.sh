@@ -33,9 +33,23 @@ mkdir -p "$ROOT/tmp"
 SNAPSHOT_ROOT="${NL_BINARY_SNAPSHOT_ROOT:-$ROOT/target/nl-runtime-snapshots}"
 mkdir -p "$SNAPSHOT_ROOT"
 python3 scripts/nl_tests/check_workspace_space.py --binary "$BINARY" \
+  --skill-binary "$SKILL_BINARY_DIR/task-control-skill" --case-file "$CASE_FILE" \
   --state-root "$ROOT/tmp" --snapshot-root "$SNAPSHOT_ROOT"
 STATE="$(mktemp -d "$ROOT/tmp/agent-runtime-nl-isolated-continuity-XXXXXX")"
 echo "isolated_test_state=$STATE"
+SOURCE_CASE_FILE="$CASE_FILE"
+CASE_FILE="$STATE/cases.txt"
+cp "$SOURCE_CASE_FILE" "$CASE_FILE"
+python3 - "$SOURCE_CASE_FILE" "$CASE_FILE" "$STATE/case-evidence.json" <<'PY'
+import hashlib,json,sys
+from pathlib import Path
+source,snapshot,evidence=map(Path,sys.argv[1:])
+digest=hashlib.sha256(snapshot.read_bytes()).hexdigest()
+if hashlib.sha256(source.read_bytes()).hexdigest() != digest:
+    raise SystemExit('test_case_file_changed_during_snapshot')
+evidence.write_text(json.dumps({'source_case_file':str(source),'pinned_case_file':str(snapshot),
+    'sha256':digest,'size_bytes':snapshot.stat().st_size})+'\n')
+PY
 SNAPSHOT="$(mktemp -d "$SNAPSHOT_ROOT/run-XXXXXX")/clawd"
 cp -p "$BINARY" "$SNAPSHOT"
 python3 - "$BINARY" "$SNAPSHOT" "$STATE/binary-evidence.json" <<'PY'
