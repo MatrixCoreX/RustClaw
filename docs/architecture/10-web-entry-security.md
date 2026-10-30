@@ -133,6 +133,15 @@ generation. A confirmed binding remains confirmed if its follow-up status read
 is unavailable; pre-confirmation reads cannot overwrite that result, and the
 generation request is not replayed.
 
+WhatsApp Web status, QR visibility and sign-out requests share the authenticated
+endpoint and login epoch too. Captured QR-panel callbacks cannot open or close
+a new owner's view. Foreground refreshes share pending reads; the 2s QR-panel
+poll and 5s background poll do not overlap, and periodic reads pause while hidden.
+Sign-out clicks share one pending POST. Older reads cannot overwrite its later
+status, and the settle-delay continuation checks ownership before proceeding.
+An accepted sign-out remains accepted if the secondary status read fails. These
+UI boundaries do not change the bridge's account model or backend permissions.
+
 ```mermaid
 flowchart TD
     A[Channel admin control] --> B{Current authenticated scope}

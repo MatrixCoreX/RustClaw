@@ -1,15 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type SetStateAction } from "react";
 
 import { sleep } from "../lib/display-format";
+import { useRequestOwner } from "./useRequestOwner";
 import type { ApiResponse, ServiceActionNotice, WhatsappWebLoginStatus } from "../types/api";
 
 type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
+type LoginRequest = { token: symbol; promise: Promise<void> };
+type StatusRequest = LoginRequest & { foreground: boolean };
 
 export interface UseWhatsappWebRuntimeParams {
   apiFetch: ApiFetch;
   t: Translate;
   apiBase: string;
+  requestScope: string;
   uiAuthReady: boolean;
   whatsappWebHealthy: boolean;
   statusPollingEnabled?: boolean;
@@ -36,87 +40,129 @@ export function useWhatsappWebRuntime({
   apiFetch,
   t,
   apiBase,
+  requestScope,
   uiAuthReady,
   whatsappWebHealthy,
   statusPollingEnabled = true,
   setServiceActionMessage,
 }: UseWhatsappWebRuntimeParams) {
-  const [waLoginDialogOpen, setWaLoginDialogOpen] = useState(false);
+  const isCurrent = useRequestOwner(uiAuthReady ? requestScope : "", apiBase);
+  const requests = useMemo(() => ({ status: null as StatusRequest | null,
+    logout: null as LoginRequest | null, dialogOpen: false }), [isCurrent]);
+  const [waLoginDialogOpen, setDialogOpen] = useState(false);
   const [waLoginLoading, setWaLoginLoading] = useState(false);
   const [waLoginError, setWaLoginError] = useState<string | null>(null);
   const [waLoginStatus, setWaLoginStatus] = useState<WhatsappWebLoginStatus | null>(null);
   const [waWebBridgeReachable, setWaWebBridgeReachable] = useState(false);
   const [waLogoutLoading, setWaLogoutLoading] = useState(false);
-  const statusRequestRef = useRef<Promise<void> | null>(null);
+  useEffect(() => {
+    setDialogOpen(false);
+    setWaLoginLoading(false);
+    setWaLoginError(null);
+    setWaLoginStatus(null);
+    setWaWebBridgeReachable(false);
+    setWaLogoutLoading(false);
+  }, [isCurrent]);
 
-  const fetchWhatsappWebLoginStatus = (silent = false): Promise<void> => {
-    if (statusRequestRef.current) return statusRequestRef.current;
-    const request = (async () => {
+  const setWaLoginDialogOpen = useCallback((value: SetStateAction<boolean>) => {
+    if (!isCurrent()) return;
+    requests.dialogOpen = typeof value === "function" ? value(requests.dialogOpen) : value;
+    setDialogOpen(requests.dialogOpen);
+  }, [isCurrent, requests]);
+
+  const readLoginStatus = (silent = false, logoutToken?: symbol): Promise<void> => {
+    if (!isCurrent() || (requests.logout && requests.logout.token !== logoutToken)) return Promise.resolve();
+    if (requests.status) {
+      if (!silent) {
+        requests.status.foreground = true;
+        setWaLoginLoading(true);
+        setWaLoginError(null);
+      }
+      return requests.status.promise;
+    }
+    const token = Symbol("whatsapp-status");
+    const ownsRead = () => isCurrent() && requests.status?.token === token;
     if (!silent) {
       setWaLoginLoading(true);
       setWaLoginError(null);
     }
-    try {
-      const res = await apiFetch(`/v1/whatsapp-web/login-status`);
-      const body = (await res.json()) as ApiResponse<WhatsappWebLoginStatus>;
-      if (!res.ok || !body.ok || !body.data) {
-        throw new Error(whatsappWebRequestError(t, body.error));
+    const promise = Promise.resolve().then(async () => {
+      if (!ownsRead()) return;
+      try {
+        const res = await apiFetch(`/v1/whatsapp-web/login-status`);
+        const body = (await res.json()) as ApiResponse<WhatsappWebLoginStatus>;
+        if (!ownsRead()) return;
+        if (!res.ok || !body.ok || !body.data) {
+          throw new Error(whatsappWebRequestError(t, body.error));
+        }
+        setWaLoginStatus(body.data);
+        setWaWebBridgeReachable(true);
+        if (requests.status?.foreground) setWaLoginError(null);
+      } catch (err) {
+        if (!ownsRead()) return;
+        setWaWebBridgeReachable(false);
+        const message = err instanceof Error
+          ? err.message
+          : whatsappWebRequestError(t, "whatsapp_web.login_status_unavailable");
+        if (requests.status?.foreground) setWaLoginError(message);
+      } finally {
+        if (ownsRead()) {
+          if (requests.status?.foreground) setWaLoginLoading(false);
+          requests.status = null;
+        }
       }
-      setWaLoginStatus(body.data);
-      setWaWebBridgeReachable(true);
-      if (!silent) {
-        setWaLoginError(null);
-      }
-    } catch (err) {
-      setWaWebBridgeReachable(false);
-      const message = err instanceof Error
-        ? err.message
-        : whatsappWebRequestError(t, "whatsapp_web.login_status_unavailable");
-      if (!silent) {
-        setWaLoginError(message);
-      }
-    } finally {
-      if (!silent) {
-        setWaLoginLoading(false);
-      }
-    }
-    })();
-    statusRequestRef.current = request;
-    void request.finally(() => {
-      if (statusRequestRef.current === request) statusRequestRef.current = null;
     });
-    return request;
+    requests.status = { token, promise, foreground: !silent };
+    return promise;
   };
+  const fetchWhatsappWebLoginStatus = (silent = false) => readLoginStatus(silent);
 
-  const logoutWhatsappWeb = async () => {
+  const logoutWhatsappWeb = (): Promise<void> => {
+    if (!isCurrent()) return Promise.resolve();
+    if (requests.logout) return requests.logout.promise;
+    const token = Symbol("whatsapp-logout");
+    const ownsLogout = () => isCurrent() && requests.logout?.token === token;
+    requests.status = null;
+    setWaLoginLoading(false);
     setWaLogoutLoading(true);
     setWaLoginError(null);
-    try {
-      const res = await apiFetch(`/v1/whatsapp-web/logout`, {
-        method: "POST",
-      });
-      const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
-      if (!res.ok || !body.ok) {
-        throw new Error(whatsappWebRequestError(t, body.error || "whatsapp_web.logout_failed"));
+    const promise = Promise.resolve().then(async () => {
+      if (!ownsLogout()) return;
+      try {
+        try {
+          const res = await apiFetch(`/v1/whatsapp-web/logout`, { method: "POST" });
+          const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
+          if (!ownsLogout()) return;
+          if (!res.ok || !body.ok) {
+            throw new Error(whatsappWebRequestError(t, body.error || "whatsapp_web.logout_failed"));
+          }
+        } catch (err) {
+          if (ownsLogout()) setWaLoginError(err instanceof Error
+            ? err.message : whatsappWebRequestError(t, "whatsapp_web.logout_failed"));
+          return;
+        }
+        await sleep(1200);
+        if (!ownsLogout()) return;
+        setServiceActionMessage({
+          tone: "success",
+          text: t("已发起 WhatsApp Web 退出登录。", "WhatsApp Web logout requested."),
+        });
+        // The accepted logout is independent of this secondary status read.
+        await Promise.allSettled([readLoginStatus(false, token)]);
+      } finally {
+        if (ownsLogout()) {
+          requests.logout = null;
+          setWaLogoutLoading(false);
+        }
       }
-      await sleep(1200);
-      await fetchWhatsappWebLoginStatus();
-      setServiceActionMessage({
-        tone: "success",
-        text: t("已发起 WhatsApp Web 退出登录。", "WhatsApp Web logout requested."),
-      });
-    } catch (err) {
-      const message = err instanceof Error
-        ? err.message
-        : whatsappWebRequestError(t, "whatsapp_web.logout_failed");
-      setWaLoginError(message);
-    } finally {
-      setWaLogoutLoading(false);
-    }
+    });
+    requests.logout = { token, promise };
+    return promise;
   };
 
   useEffect(() => {
     if (!uiAuthReady || !statusPollingEnabled) return;
+    if (!isCurrent() || waLoginDialogOpen !== requests.dialogOpen) return;
     if (!waLoginDialogOpen) return;
     if (!whatsappWebHealthy) {
       setWaWebBridgeReachable(false);
@@ -134,10 +180,11 @@ export function useWhatsappWebRuntime({
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [waLoginDialogOpen, apiBase, uiAuthReady, whatsappWebHealthy, statusPollingEnabled]);
+  }, [waLoginDialogOpen, apiBase, uiAuthReady, whatsappWebHealthy, statusPollingEnabled, isCurrent]);
 
   useEffect(() => {
     if (!uiAuthReady || !statusPollingEnabled) return;
+    if (!isCurrent()) return;
     if (waLoginDialogOpen) return;
     if (!whatsappWebHealthy) {
       setWaWebBridgeReachable(false);
@@ -154,7 +201,7 @@ export function useWhatsappWebRuntime({
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiBase, uiAuthReady, whatsappWebHealthy, statusPollingEnabled, waLoginDialogOpen]);
+  }, [apiBase, uiAuthReady, whatsappWebHealthy, statusPollingEnabled, waLoginDialogOpen, isCurrent]);
 
   return {
     waLoginDialogOpen,

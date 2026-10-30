@@ -1294,6 +1294,7 @@ export default function App() {
     apiFetch,
     t,
     apiBase,
+    requestScope: activeUiRequestScope,
     uiAuthReady,
     whatsappWebHealthy: health?.whatsapp_web_healthy === true,
     statusPollingEnabled: currentPage === "dashboard" || currentPage === "services",

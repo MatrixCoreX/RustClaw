@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { wechatLoginHarness, qrStart } from "../../test/helpers/wechat-login-harness";
+import { whatsappLoginHarness, whatsappStatus } from "../../test/helpers/whatsapp-login-harness";
 
 function source(relativePath: string): string {
   return readFileSync(new URL(relativePath, import.meta.url), "utf8");
@@ -23,7 +24,7 @@ test("high-frequency page polling pauses while the browser document is hidden", 
   }
 });
 
-test("channel login polling uses a single visible polling lane", async (t) => {
+test("WeChat login polling uses a single visible polling lane", async (t) => {
   const h = await wechatLoginHarness(t); t.after(() => h.dispose());
   const qr = qrStart("fixture-session");
   const status = { connected: false, qr_ready: true, ...qr };
@@ -47,9 +48,23 @@ test("channel login polling uses a single visible polling lane", async (t) => {
   await h.visibility("hidden"); await h.advance(10000);
   assert.equal(h.pending.length, 7);
 
-  const whatsapp = source("../hooks/useWhatsappWebRuntime.ts");
-  assert.match(whatsapp, /statusRequestRef/);
-  assert.match(whatsapp, /if \(waLoginDialogOpen\) return/);
+});
+
+test("WhatsApp QR panel and background status use independent non-overlapping visible lanes", async (t) => {
+  const h = await whatsappLoginHarness(t); t.after(() => h.dispose());
+  await h.visibility("visible"); assert.equal(h.pending.length, 1);
+  await h.reply(0, whatsappStatus());
+  await h.dialog(true); assert.equal(h.pending.length, 2);
+  await h.reply(1, whatsappStatus());
+  await h.advance(2000); assert.equal(h.pending.length, 3); await h.reply(2, whatsappStatus());
+  await h.advance(2000); assert.equal(h.pending.length, 4); await h.reply(3, whatsappStatus());
+  await h.advance(1000); assert.equal(h.pending.length, 4, "the ordinary 5s lane must not run alongside the QR panel lane");
+  await h.dialog(false); assert.equal(h.pending.length, 5); await h.reply(4, whatsappStatus());
+  await h.advance(2000); assert.equal(h.pending.length, 5);
+  await h.advance(3000); assert.equal(h.pending.length, 6); await h.reply(5, whatsappStatus());
+  await h.visibility("hidden"); await h.advance(10000); assert.equal(h.pending.length, 6);
+  await h.dialog(true); assert.equal(h.pending.length, 7, "explicitly opening the panel keeps its initial status load");
+  await h.reply(6, whatsappStatus()); await h.advance(10000); assert.equal(h.pending.length, 7);
 });
 
 test("log discovery is server-paged instead of materializing the full directory", () => {
