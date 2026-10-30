@@ -56,6 +56,13 @@ export interface FeishuSetupGuidance {
 
 type ApiFetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
+export function channelBindPollDelayMs(intervalSeconds: unknown): number {
+  if (typeof intervalSeconds !== "number" || !Number.isFinite(intervalSeconds)) return 5000;
+  const delay = Math.max(1, intervalSeconds) * 1000;
+  // Window timers convert to signed 32-bit milliseconds before scheduling.
+  return delay <= 2_147_483_647 ? delay : 5000;
+}
+
 export function channelBindRecoveryGuidance(
   cause: unknown,
   t: (zh: string, en: string) => string,

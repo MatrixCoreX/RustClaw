@@ -153,6 +153,11 @@ or reset is independent of secondary configuration/health reads: both refreshes
 are attempted while still owned, and neither can replay the primary operation.
 These frontend checks do not replace server authorization or registration
 idempotency, and do not imply automatic retry of a failed registration poll.
+Before scheduling, the browser accepts only finite numeric poll intervals and
+checks the signed-32-bit millisecond timer range. Missing, malformed or oversized
+values use the existing five-second default; valid intervals retain the
+one-second minimum. The same check applies to every refreshed session and does
+not infer expiration or success from the browser clock.
 
 Authenticated users can read communication status/configuration metadata without
 receiving application secrets: Feishu/Lark clear the secret field for non-admin

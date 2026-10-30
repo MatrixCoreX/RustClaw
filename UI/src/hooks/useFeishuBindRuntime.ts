@@ -3,6 +3,7 @@ import QRCode from "qrcode";
 
 import { useUiDialog } from "../components/UiDialogProvider";
 import {
+  channelBindPollDelayMs,
   channelBindRecoveryGuidance,
   fetchChannelBindSession,
   isFeishuBindTerminalStatus,
@@ -227,14 +228,13 @@ export function useChannelBindRuntime({
     let cancelled = false;
     let timer: number | undefined;
     const scheduleNextPoll = (session: FeishuBindSessionResponse) => {
-      const intervalSeconds = Math.max(1, session.poll_interval_seconds ?? 5);
       timer = window.setTimeout(async () => {
         if (cancelled) return;
         const refreshed = await refreshBindSession(session.session_id, generation);
         if (!cancelled && refreshed && !isFeishuBindTerminalStatus(refreshed.status)) {
           scheduleNextPoll(refreshed);
         }
-      }, intervalSeconds * 1000);
+      }, channelBindPollDelayMs(session.poll_interval_seconds));
     };
     scheduleNextPoll(bindSession);
     return () => {

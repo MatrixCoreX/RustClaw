@@ -217,6 +217,7 @@ jobs:
           UI_BROWSER_ARTIFACTS="$UI_BROWSER_ARTIFACTS/whatsapp-login" node UI/test/whatsapp-login-ownership.browser.mjs
           UI_BROWSER_ARTIFACTS="$UI_BROWSER_ARTIFACTS/whatsapp-app" node UI/test/whatsapp-login-app.browser.mjs
           UI_BROWSER_ARTIFACTS="$UI_BROWSER_ARTIFACTS/channel-bind" node UI/test/channel-bind-ownership.browser.mjs
+          UI_BROWSER_ARTIFACTS="$UI_BROWSER_ARTIFACTS/channel-bind-polling" node UI/test/channel-bind-polling.browser.mjs
           UI_BROWSER_ARTIFACTS="$UI_BROWSER_ARTIFACTS/channel-bind-app" node UI/test/channel-bind-app.browser.mjs
 
       - name: Upload browser authentication evidence

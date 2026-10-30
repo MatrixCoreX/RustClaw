@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  channelBindPollDelayMs,
   type FeishuBindSessionResponse,
   getChannelBindStatusCopy,
   getChannelSetupGuidance,
@@ -12,6 +13,29 @@ import {
   fetchChannelBindSession,
   startChannelBindSession,
 } from "./feishu-bind";
+
+for (const [label, value, expected] of [
+  ["omitted", undefined, 5000],
+  ["null", null, 5000],
+  ["NaN", NaN, 5000],
+  ["infinity", Infinity, 5000],
+  ["negative infinity", -Infinity, 5000],
+  ["numeric string", "9", 5000],
+  ["boolean", true, 5000],
+  ["object", {}, 5000],
+  ["array", [], 5000],
+  ["zero", 0, 1000],
+  ["negative", -4, 1000],
+  ["fractional", 2.5, 2500],
+  ["normal", 9, 9000],
+  ["largest browser timer", 2_147_483.647, 2_147_483_647],
+  ["first overflowing timer", 2_147_483.648, 5000],
+  ["huge", Number.MAX_VALUE, 5000],
+] as const) {
+  test(`binding poll delay validates ${label} before the browser timer`, () => {
+    assert.equal(channelBindPollDelayMs(value), expected);
+  });
+}
 
 test("waiting status copy guides user to scan", () => {
   const copy = getFeishuBindStatusCopy("pending");
