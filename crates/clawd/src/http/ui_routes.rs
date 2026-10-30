@@ -570,6 +570,10 @@ mod llm_credentials_tests;
 mod model_control_plane_tests;
 
 #[cfg(test)]
+#[path = "ui_routes/health_runtime_tests.rs"]
+mod health_runtime_tests;
+
+#[cfg(test)]
 #[path = "ui_routes/slo_metrics_tests.rs"]
 mod slo_metrics_tests;
 

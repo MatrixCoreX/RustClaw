@@ -33,45 +33,109 @@ async fn whatsapp_web_bridge_healthy(state: &AppState) -> Option<bool> {
     )
 }
 
+struct HealthReadSnapshot {
+    queue_length: usize,
+    running_length: usize,
+    running_oldest_age_seconds: u64,
+    processes: crate::system_health::DaemonProcessSnapshot,
+    user_count: usize,
+    bound_channel_count: usize,
+    bound_channels: Vec<String>,
+    telegram_configured_bot_names: Vec<String>,
+    telegram_bot_statuses: Vec<TelegramBotRuntimeStatus>,
+    gateway_instance_statuses_by_scope: HashMap<String, GatewayInstanceRuntimeStatus>,
+}
+
+fn read_health_snapshot(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<HealthReadSnapshot, (StatusCode, Json<ApiResponse<Value>>)> {
+    let identity = require_ui_identity(state, headers)?;
+    let system_scope = identity.role == "admin";
+    let queue_length = if system_scope {
+        task_count_by_status(state, "queued")
+    } else {
+        task_count_by_status_for_user(state, "queued", identity.user_id)
+    }
+    .unwrap_or_default();
+    let running_length = if system_scope {
+        active_running_task_count(state)
+    } else {
+        active_running_task_count_for_user(state, identity.user_id)
+    }
+    .unwrap_or_default();
+    let running_oldest_age_seconds = if system_scope {
+        oldest_running_task_age_seconds(state)
+    } else {
+        oldest_running_task_age_seconds_for_user(state, identity.user_id)
+    }
+    .unwrap_or(0);
+    let processes = crate::system_health::DaemonProcessSnapshot::capture();
+    let (user_count, bound_channel_count, bound_channels) =
+        auth_user_summary_counts(state).unwrap_or_default();
+    let telegram_configured_bot_names = state
+        .channels
+        .telegram_configured_bot_names
+        .as_ref()
+        .clone();
+    let telegram_bot_statuses = read_telegram_bot_statuses(
+        &state.skill_rt.workspace_root,
+        &telegram_configured_bot_names,
+    );
+    let gateway_instance_statuses_by_scope =
+        read_gateway_instance_statuses(&state.skill_rt.workspace_root);
+    Ok(HealthReadSnapshot {
+        queue_length,
+        running_length,
+        running_oldest_age_seconds,
+        processes,
+        user_count,
+        bound_channel_count,
+        bound_channels,
+        telegram_configured_bot_names,
+        telegram_bot_statuses,
+        gateway_instance_statuses_by_scope,
+    })
+}
+
 async fn health(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> (StatusCode, Json<ApiResponse<HealthResponse>>) {
-    let identity = match require_ui_identity(&state, &headers) {
-        Ok(identity) => identity,
-        Err((status, Json(resp))) => {
+    let read_state = state.clone();
+    let snapshot = tokio::task::spawn_blocking(move || read_health_snapshot(&read_state, &headers))
+        .await
+        .unwrap_or_else(|error| {
+            tracing::warn!(%error, "health_snapshot_join_failed");
+            Err(crate::api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "health_snapshot_unavailable",
+            ))
+        });
+    let HealthReadSnapshot {
+        queue_length,
+        running_length,
+        running_oldest_age_seconds,
+        processes,
+        user_count,
+        bound_channel_count,
+        bound_channels,
+        telegram_configured_bot_names,
+        telegram_bot_statuses,
+        mut gateway_instance_statuses_by_scope,
+    } = match snapshot {
+        Ok(snapshot) => snapshot,
+        Err((status, Json(response))) => {
             return (
                 status,
                 Json(ApiResponse {
-                    ok: resp.ok,
+                    ok: response.ok,
                     data: None,
-                    error: resp.error,
+                    error: response.error,
                 }),
             );
         }
     };
-    let system_scope = identity.role == "admin";
-    let queue_length = if system_scope {
-        task_count_by_status(&state, "queued")
-    } else {
-        task_count_by_status_for_user(&state, "queued", identity.user_id)
-    }
-    .unwrap_or_default();
-    let running_length = if system_scope {
-        active_running_task_count(&state)
-    } else {
-        active_running_task_count_for_user(&state, identity.user_id)
-    }
-    .unwrap_or_default();
-    let running_oldest_age_seconds = if system_scope {
-        oldest_running_task_age_seconds(&state)
-    } else {
-        oldest_running_task_age_seconds_for_user(&state, identity.user_id)
-    }
-    .unwrap_or(0);
-    let processes = tokio::task::spawn_blocking(crate::system_health::DaemonProcessSnapshot::capture)
-        .await
-        .unwrap_or_default();
     let legacy_telegramd_stats = processes.stats("telegramd");
     let channel_gateway_stats = processes.stats("channel-gateway");
     let whatsappd_stats = processes.stats("whatsappd");
@@ -113,19 +177,6 @@ async fn health(
     let larkd_stats = processes.stats("larkd");
     let larkd_process_count_raw = larkd_stats.map(|(count, _)| count);
     let larkd_memory_rss_bytes_raw = larkd_stats.map(|(_, rss_bytes)| rss_bytes);
-    let (user_count, bound_channel_count, bound_channels) =
-        auth_user_summary_counts(&state).unwrap_or_default();
-    let telegram_configured_bot_names = state
-        .channels
-        .telegram_configured_bot_names
-        .as_ref()
-        .clone();
-    let telegram_bot_statuses = read_telegram_bot_statuses(
-        &state.skill_rt.workspace_root,
-        &telegram_configured_bot_names,
-    );
-    let mut gateway_instance_statuses_by_scope =
-        read_gateway_instance_statuses(&state.skill_rt.workspace_root);
     let whatsapp_cloud_gateway_healthy = gateway_instance_statuses_by_scope
         .get("whatsapp_cloud:primary")
         .map(|s| s.healthy);
