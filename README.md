@@ -1381,6 +1381,7 @@ or create a second login session.
 - `install-agent-cmd.sh` is the most convenient operator-facing entry because it can handle both launcher installation and optional UI/nginx deployment
 - the installer verifies Python 3.11+ with `tomllib`; on macOS it installs the current Homebrew `python` formula when missing, and runtime/build entrypoints select that interpreter without replacing the chosen Rust toolchain
 - if you only want to rebuild the local UI, use `build-ui-nginx.sh`; use `deploy-ui-nginx.sh` only for an nginx-hosted server
+- UI build reuse and the displayed UI version share one content fingerprint. It includes UI source/assets/build configuration, the selected product identity, both root READMEs and the numbered `docs/architecture/*.md` pages imported by Learning/Maintenance. Documentation-only changes rebuild those embedded pages; unchanged inputs reuse the existing build. Deploying a Release's prebuilt UI does not require Node.js or source files.
 - if you are integrating skills, run `python3 scripts/sync_skill_docs.py` explicitly; startup scripts no longer sync skill docs for you
 - many helper and regression scripts live in `scripts/`
 - for the local `ops_closed_loop` regression stack, run `bash scripts/regression_ops_closed_loop.sh`

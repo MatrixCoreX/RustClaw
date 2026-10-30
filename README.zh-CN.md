@@ -1141,6 +1141,7 @@ cd pi_app && ./open-small-screen.sh
 - 如果你是部署或体验使用者，`install-agent-cmd.sh` 是更直接的入口，因为它会同时处理启动器安装和可选的 UI/nginx 部署
 - 安装器会校验带 `tomllib` 的 Python 3.11+；macOS 缺失时安装当前 Homebrew `python` 公式，运行和编译入口会精确选择该解释器，同时不替换已经选定的 Rust 工具链
 - 如果只想重建本地 UI，使用 `build-ui-nginx.sh`；只有 nginx 托管的服务器才使用 `deploy-ui-nginx.sh`
+- UI 构建复用和界面版本显示使用同一个内容指纹，覆盖 UI 源码、资源、构建配置、选定的产品身份、根目录中英文 README，以及「学习/维护」导入的 `docs/architecture/*.md` 编号页面。只修改这些文档也会重建内嵌页面；输入不变则复用已有产物。部署 Release 自带的预编译 UI 不需要 Node.js 或源码。
 - 如果你在做技能接入，记得显式执行 `python3 scripts/sync_skill_docs.py`，不要依赖启动脚本帮你同步
 - 各类回归和辅助脚本主要集中在 `scripts/`
 - 如果要跑本地 `ops_closed_loop` 闭环回归，执行 `bash scripts/regression_ops_closed_loop.sh`

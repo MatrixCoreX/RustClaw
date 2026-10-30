@@ -1,9 +1,9 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import crypto from 'node:crypto';
 import fs from 'fs';
 import path from 'path';
 import {defineConfig, loadEnv} from 'vite';
+import {computeUiBuildFingerprint} from './build-inputs.mjs';
 
 function productIdentityConfig(): {configPath: string; displayName: string} {
   const configPath = process.env.APP_PRODUCT_IDENTITY_CONFIG
@@ -34,42 +34,7 @@ function productIdentityConfig(): {configPath: string; displayName: string} {
 }
 
 function uiSourceVersion(identityConfigPath: string): string {
-  const digest = crypto.createHash('sha256');
-  const appendFile = (absolutePath: string, relativePath: string) => {
-    digest.update(relativePath);
-    digest.update('\0');
-    digest.update(fs.readFileSync(absolutePath));
-    digest.update('\0');
-  };
-  const fixedFiles = [
-    'index.html',
-    'package.json',
-    'package-lock.json',
-    'tsconfig.json',
-    'vite.config.ts',
-  ];
-  for (const relativePath of fixedFiles) {
-    const absolutePath = path.resolve(__dirname, relativePath);
-    if (fs.existsSync(absolutePath)) appendFile(absolutePath, relativePath);
-  }
-  for (const rootName of ['public', 'src']) {
-    const rootPath = path.resolve(__dirname, rootName);
-    const pending = [rootPath];
-    const discovered: string[] = [];
-    while (pending.length > 0) {
-      const current = pending.pop()!;
-      for (const entry of fs.readdirSync(current, {withFileTypes: true})) {
-        const entryPath = path.join(current, entry.name);
-        if (entry.isDirectory()) pending.push(entryPath);
-        if (entry.isFile()) discovered.push(entryPath);
-      }
-    }
-    for (const absolutePath of discovered.sort()) {
-      appendFile(absolutePath, path.relative(__dirname, absolutePath));
-    }
-  }
-  appendFile(identityConfigPath, 'product_identity.toml');
-  return digest.digest('hex').slice(0, 12);
+  return computeUiBuildFingerprint(__dirname, identityConfigPath).slice(0, 12);
 }
 
 export default defineConfig(({mode}) => {

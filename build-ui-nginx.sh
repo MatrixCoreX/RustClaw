@@ -205,47 +205,7 @@ hash_file() {
 }
 
 compute_ui_build_fingerprint() {
-  local manifest
-  manifest="$(mktemp)"
-  trap 'rm -f "$manifest"' RETURN
-
-  local candidate
-  local fixed_files=(
-    "$UI_DIR/package.json"
-    "$UI_DIR/package-lock.json"
-    "$UI_DIR/index.html"
-    "$UI_DIR/tsconfig.json"
-    "$UI_DIR/tsconfig.app.json"
-    "$UI_DIR/tsconfig.node.json"
-    "$UI_DIR/vite.config.ts"
-    "$UI_DIR/vite.config.js"
-    "$UI_DIR/tailwind.config.js"
-    "$UI_DIR/tailwind.config.ts"
-    "$UI_DIR/postcss.config.js"
-    "$UI_DIR/postcss.config.cjs"
-  )
-
-  for candidate in "${fixed_files[@]}"; do
-    if [[ -f "$candidate" ]]; then
-      printf '%s  %s\n' "$(hash_file "$candidate")" "${candidate#$UI_DIR/}" >> "$manifest"
-    fi
-  done
-
-  printf '%s  %s\n' \
-    "$(hash_file "$APP_PRODUCT_IDENTITY_CONFIG")" \
-    "product_identity.toml" >> "$manifest"
-
-  local dir
-  for dir in "$UI_DIR/src" "$UI_DIR/public"; do
-    if [[ -d "$dir" ]]; then
-      while IFS= read -r candidate; do
-        [[ -f "$candidate" ]] || continue
-        printf '%s  %s\n' "$(hash_file "$candidate")" "${candidate#$UI_DIR/}" >> "$manifest"
-      done < <(find "$dir" -type f | sort)
-    fi
-  done
-
-  hash_file "$manifest"
+  node "$UI_DIR/build-fingerprint.mjs" "$UI_DIR" "$APP_PRODUCT_IDENTITY_CONFIG"
 }
 
 nginx_conf_path() {

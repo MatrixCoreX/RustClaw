@@ -153,6 +153,7 @@ jobs:
           npm ci
           npm audit --audit-level=high
           npm run lint
+          node --test test/build-inputs.test.mjs
           npm run build
 
       - name: Verify polyglot skill contracts
