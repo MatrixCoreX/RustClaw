@@ -265,6 +265,7 @@ export default function App() {
     apiBase,
   );
   const activeUiRequestScope = activeConversationHistoryScope ? JSON.stringify([activeConversationHistoryScope, authFlowEpochRef.current, authIdentity?.role]) : "";
+  const isCurrentChannelSetup = useRequestOwner(activeUiRequestScope);
   const isCurrentApiRequest = useRequestOwner(apiBase, JSON.stringify([authMode, uiKey, authFlowEpochRef.current]));
   const safeFetch = async (path: string, init?: RequestInit, withAuth = true) => {
     const requestAuthEpoch = authFlowEpochRef.current;
@@ -1265,6 +1266,8 @@ export default function App() {
   } = useServiceActionsRuntime({
     apiFetch,
     t,
+    requestScope: activeUiRequestScope,
+    isAdminIdentity,
     onHealthRefresh: async () => {
       await fetchHealth();
     },
@@ -1315,11 +1318,13 @@ export default function App() {
   });
 
   const enableAndStartWechat = async () => {
+    if (!isAdminIdentity || !isCurrentChannelSetup()) return;
     const enabled = await setWechatEnabled(true);
-    if (!enabled) return;
+    if (!enabled || !isCurrentChannelSetup()) return;
     const started = await controlService("wechatd", "start");
+    if (!isCurrentChannelSetup()) return;
     await fetchWechatConfig();
-    if (started) {
+    if (started && isCurrentChannelSetup()) {
       await startWechatQrLogin(true);
     }
   };

@@ -99,6 +99,39 @@ reads its actual operation state again.
 Portaled confirmation, choice and input dialogs read semantic theme colors
 directly, so their warnings and controls remain legible in either theme.
 
+## Channel Control Ownership
+
+Channel start, stop, restart and reset controls share the current authenticated
+UI scope, including endpoint, principal, role and login epoch. Reset confirmation
+and response-body processing recheck that scope. Per-service claims prevent
+duplicate or conflicting local submissions while allowing different services
+to proceed independently. Backend administrator checks remain authoritative.
+
+The shared notice follows the latest dispatched action or current explicit
+notice update, rather than whichever older response arrives last. Success comes
+from the service response: health/config refresh failures do not undo it or replay
+the mutation. Scope changes clear local feedback, not accepted server work.
+The WeChat enable/start/config/QR continuation checks ownership between steps,
+so a new sign-in or device selection cannot continue the former setup request.
+
+```mermaid
+flowchart TD
+    A[Channel admin control] --> B{Current authenticated scope}
+    B -->|no| Z[Ignore obsolete UI command]
+    B -->|yes| C[Reset confirmation if needed]
+    C --> D{Scope still current}
+    D -->|no| Z
+    D -->|yes| E[POST service operation]
+    E --> F[Backend authorization and service control]
+    F --> G{Reply still owned}
+    G -->|no| Z
+    G -->|yes| H{Operation accepted}
+    H -->|no| I[Localized action error]
+    H -->|yes| J[Keep successful operation result]
+    J --> K[Owned health and config refresh]
+    K --> L[Separate read feedback<br/>no mutation replay]
+```
+
 ## Deployment Rules
 
 - Native Linux/macOS: `clawd` is loopback-only; `webd` is the browser entry.
