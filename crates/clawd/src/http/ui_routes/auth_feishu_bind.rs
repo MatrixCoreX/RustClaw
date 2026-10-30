@@ -404,6 +404,24 @@ async fn maybe_complete_official_scan(
     platform: AgentAppChannel,
     session: PendingChannelBindSession,
 ) -> anyhow::Result<PendingChannelBindSession> {
+    maybe_complete_official_scan_with_start(
+        state,
+        platform,
+        session,
+        start_service_if_needed(state, platform.service()),
+    )
+    .await
+}
+
+async fn maybe_complete_official_scan_with_start<Start>(
+    state: &AppState,
+    platform: AgentAppChannel,
+    session: PendingChannelBindSession,
+    start: Start,
+) -> anyhow::Result<PendingChannelBindSession>
+where
+    Start: std::future::Future<Output = anyhow::Result<()>>,
+{
     if !matches!(session.status.as_str(), "pending" | "detected") {
         return Ok(session);
     }
@@ -442,15 +460,35 @@ async fn maybe_complete_official_scan(
             .filter(|value| !value.is_empty()),
     ) {
         write_generated_credentials(state, platform, client_id, client_secret)?;
-        if let Err(err) = start_service_if_needed(state, platform.service()).await {
-            let mut db = state
-                .core
-                .db
-                .get()
-                .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-            return mark_pending_channel_bind_session_failed(&mut db, session.id, &err.to_string());
+        let start_result = start.await;
+        let current = refresh_registration_session(state, platform, &session)?;
+        if !matches!(current.status.as_str(), "pending" | "detected")
+            || current.install_device_code != session.install_device_code
+        {
+            return Ok(current);
         }
-        return Ok(session);
+        if let Err(err) = start_result {
+            let failed = {
+                let mut db = state
+                    .core
+                    .db
+                    .get()
+                    .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+                mark_pending_channel_bind_session_failed(&mut db, session.id, &err.to_string())
+            };
+            return failed.or_else(|error| {
+                // Conditional failure may lose to a binding finalized concurrently.
+                let latest = refresh_registration_session(state, platform, &session)?;
+                if !matches!(latest.status.as_str(), "pending" | "detected")
+                    || latest.install_device_code != session.install_device_code
+                {
+                    Ok(latest)
+                } else {
+                    Err(error)
+                }
+            });
+        }
+        return Ok(current);
     }
 
     let Some(error_code) = poll

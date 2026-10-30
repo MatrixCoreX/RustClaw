@@ -164,6 +164,14 @@ separate from account-owned QR login and binding. Configuration read failures
 return machine error codes, never credential-bearing parser source excerpts;
 diagnostic events contain only the channel and safe error code.
 
+After a registration-triggered service start finishes, the backend rereads the
+actor and current session before returning status or recording startup failure.
+Completed binding, terminal state and a replaced registration attempt take
+precedence over the old request; a conditional failure write cannot overwrite a
+binding completed concurrently. Credential application, service availability and
+bot-side account binding remain separate facts. This state refresh is not a
+durable one-shot application or a configuration/service ordering guarantee.
+
 After official registration init/begin or poll I/O returns, the backend rereads
 the active key, administrator role and owned platform/session before attaching
 registration metadata or applying credentials. It

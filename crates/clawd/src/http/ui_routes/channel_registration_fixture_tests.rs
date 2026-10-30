@@ -15,7 +15,7 @@ use axum::{
     Json, Router,
 };
 use serde_json::{json, Value};
-use tokio::sync::Notify;
+use tokio::sync::{Notify, Semaphore};
 
 use super::super::*;
 
@@ -24,7 +24,7 @@ pub(super) const ADMIN_KEY: &str = "fixture-channel-registration-admin";
 #[derive(Clone)]
 struct RegistrationServer {
     entered: Arc<Notify>,
-    release: Arc<Notify>,
+    release: Arc<Semaphore>,
     requests: Arc<AtomicUsize>,
     result: Value,
     action: &'static str,
@@ -64,7 +64,7 @@ async fn registration(
         assert!(!form.contains_key("device_code"));
     }
     state.entered.notify_one();
-    state.release.notified().await;
+    state.release.acquire().await.unwrap().forget();
     Json(state.result)
 }
 
@@ -74,7 +74,7 @@ pub(super) struct Fixture {
     pub(super) platform: AgentAppChannel,
     pub(super) session_id: i64,
     entered: Arc<Notify>,
-    release: Arc<Notify>,
+    release: Arc<Semaphore>,
     requests: Arc<AtomicUsize>,
     server: tokio::task::JoinHandle<()>,
     env_name: String,
@@ -153,7 +153,7 @@ impl Fixture {
             session.id
         };
         let entered = Arc::new(Notify::new());
-        let release = Arc::new(Notify::new());
+        let release = Arc::new(Semaphore::new(0));
         let requests = Arc::new(AtomicUsize::new(0));
         let server_state = RegistrationServer {
             entered: entered.clone(),
@@ -223,7 +223,7 @@ impl Fixture {
     }
 
     pub(super) fn release_response(&self) {
-        self.release.notify_one();
+        self.release.add_permits(1);
     }
     pub(super) fn requests(&self) -> usize {
         self.requests.load(Ordering::SeqCst)
