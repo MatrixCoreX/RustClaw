@@ -28,6 +28,10 @@ name: Polyglot Skill macOS CI
       - "scripts/check_polyglot_skill_contracts.py"
       - "scripts/precompile_skill_store.sh"
       - "scripts/project_skill_receipts.py"
+      - "package-release.sh"
+      - "scripts/stage_release_pi_app.py"
+      - "scripts/verify_release_binary.py"
+      - "scripts/tests/test_release_native_libraries.py"
       - "scripts/auth-key.sh"
       - "scripts/nl_tests/auth_key_http_tests.py"
       - "scripts/nl_tests/release_candidate_workflow_tests.py"
@@ -74,6 +78,10 @@ name: Polyglot Skill macOS CI
       - "scripts/check_polyglot_skill_contracts.py"
       - "scripts/precompile_skill_store.sh"
       - "scripts/project_skill_receipts.py"
+      - "package-release.sh"
+      - "scripts/stage_release_pi_app.py"
+      - "scripts/verify_release_binary.py"
+      - "scripts/tests/test_release_native_libraries.py"
       - "scripts/auth-key.sh"
       - "scripts/nl_tests/auth_key_http_tests.py"
       - "scripts/nl_tests/release_candidate_workflow_tests.py"
@@ -153,6 +161,7 @@ jobs:
           python3 scripts/check_polyglot_skill_contracts.py --require-all
           python3 scripts/check_on_demand_skill_builds.py
           python3 scripts/check_cross_platform_contracts.py
+          python3 -m unittest discover -s scripts/tests -p 'test_release_native_libraries.py'
 
       - name: Test retained-task acceptance without resubmission
         shell: bash

@@ -266,7 +266,8 @@ copy_if_exists "prompts"
 copy_if_exists "migrations"
 python3 "$SCRIPT_DIR/scripts/stage_release_scripts.py" \
   "$SCRIPT_DIR/scripts" "$STAGE_PROJECT_DIR/scripts"
-copy_if_exists "pi_app"
+python3 "$SCRIPT_DIR/scripts/stage_release_pi_app.py" \
+  "$SCRIPT_DIR/pi_app" "$STAGE_PROJECT_DIR/pi_app" "$APP_PACKAGE_TARGET"
 copy_if_exists "services/wa-web-bridge/index.js"
 copy_if_exists "services/wa-web-bridge/media-preflight.js"
 copy_if_exists "services/wa-web-bridge/package.json"

@@ -25,6 +25,14 @@ requirements. A 32-bit Pi OS cannot run the aarch64 package. There is no implici
 cross-platform or source-build fallback. Install Bash, Python 3.11+, curl, tar,
 and OpenSSH's `ssh-keygen`; individual skills can require additional runtimes.
 
+The publisher stages optional chip libraries against the selected target using
+the same native-header verifier as installation. Matching libraries retain their
+contents; recognized libraries for other architectures are excluded, while invalid
+headers or unsafe aliases stop packaging. This does not remove source libraries
+or install a substitute on the device. A system/configured native library can
+still be used; without one, chip operations report the existing unavailable
+status and non-hardware features remain available.
+
 ## First Installation
 
 Download `install-latest-release.sh` from the trusted release repository, then run
