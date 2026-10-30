@@ -718,7 +718,7 @@ pub(crate) fn create_pending_channel_bind_session(
 }
 
 pub(crate) fn attach_pending_channel_bind_session_install_flow(
-    db: &mut Connection,
+    db: &Connection,
     session_id: i64,
     device_code: &str,
     verification_url: &str,

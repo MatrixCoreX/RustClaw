@@ -560,18 +560,16 @@ async fn start_channel_bind_session(
             );
         }
     };
-    if let Err(error) = crate::repo::channel_registration::record_registration_device(
-        &mut db, &session, &begin.device_code, &config_digest,
-    ) {
-        return channel_registration_failure_response(&error, "channel_bind_state_unavailable".into());
-    }
-    match attach_pending_channel_bind_session_install_flow(
+    match crate::repo::channel_registration::attach_registration_install_flow(
         &mut db,
-        session.id,
-        &begin.device_code,
-        &begin.verification_uri_complete,
-        begin.interval.unwrap_or(5) as i64,
-        &session_expires_at,
+        &session,
+        crate::repo::channel_registration::RegistrationInstallFlow {
+            device_code: &begin.device_code,
+            verification_url: &begin.verification_uri_complete,
+            poll_interval_seconds: begin.interval.unwrap_or(5) as i64,
+            expires_at: &session_expires_at,
+        },
+        &config_digest,
     ) {
         Ok(session) => (
             StatusCode::OK,

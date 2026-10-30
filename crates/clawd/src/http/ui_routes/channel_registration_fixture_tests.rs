@@ -143,7 +143,7 @@ impl Fixture {
                 &expiry,
             )
             .unwrap();
-            attach_pending_channel_bind_session_install_flow(
+            crate::repo::auth::attach_pending_channel_bind_session_install_flow(
                 &mut db,
                 session.id,
                 "fixture-device-code",

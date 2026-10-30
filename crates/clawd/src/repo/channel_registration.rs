@@ -219,8 +219,55 @@ pub(crate) fn validate_registration_preparation(
     Ok(())
 }
 
+pub(crate) struct RegistrationInstallFlow<'a> {
+    pub device_code: &'a str,
+    pub verification_url: &'a str,
+    pub poll_interval_seconds: i64,
+    pub expires_at: &'a str,
+}
+
+pub(crate) fn attach_registration_install_flow(
+    db: &mut Connection,
+    session: &PendingChannelBindSession,
+    flow: RegistrationInstallFlow<'_>,
+    observed_config_digest: &str,
+) -> anyhow::Result<PendingChannelBindSession> {
+    ensure_schema(db)?;
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    record_registration_device_in_transaction(
+        &tx,
+        session,
+        flow.device_code,
+        observed_config_digest,
+    )?;
+    let attached = super::auth::attach_pending_channel_bind_session_install_flow(
+        &tx,
+        session.id,
+        flow.device_code,
+        flow.verification_url,
+        flow.poll_interval_seconds,
+        flow.expires_at,
+    )?;
+    tx.commit()?;
+    Ok(attached)
+}
+
+#[cfg(test)]
 pub(crate) fn record_registration_device(
     db: &mut Connection,
+    session: &PendingChannelBindSession,
+    device_code: &str,
+    observed_config_digest: &str,
+) -> anyhow::Result<()> {
+    ensure_schema(db)?;
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    record_registration_device_in_transaction(&tx, session, device_code, observed_config_digest)?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn record_registration_device_in_transaction(
+    db: &Connection,
     session: &PendingChannelBindSession,
     device_code: &str,
     observed_config_digest: &str,
@@ -230,9 +277,7 @@ pub(crate) fn record_registration_device(
     if device_code.trim().is_empty() {
         return Err(RegistrationJournalError::InvalidIdentity.into());
     }
-    ensure_schema(db)?;
-    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let changed = tx.execute(
+    let changed = db.execute(
         "UPDATE channel_registration_applications SET device_digest = ?2, updated_at = ?3
          WHERE flow_digest = ?1 AND phase = 'prepared' AND config_digest = ?4
            AND (device_digest IS NULL OR device_digest = ?2)
@@ -243,7 +288,6 @@ pub(crate) fn record_registration_device(
     if changed != 1 {
         return Err(RegistrationJournalError::Superseded.into());
     }
-    tx.commit()?;
     Ok(())
 }
 

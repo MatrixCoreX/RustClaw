@@ -181,7 +181,7 @@ use providers::{
     ChatRequestHints,
 };
 pub(crate) use repo::{
-    attach_pending_channel_bind_session_install_flow, bind_channel_identity,
+    bind_channel_identity,
     build_channel_ingress_snapshot, build_conversation_chat_id, build_submit_task_payload,
     cancel_one_task_for_user_chat, cancel_task_by_id, cancel_tasks_for_user_chat,
     check_submit_task_access, check_submit_task_limits, check_task_view_access, create_auth_key,

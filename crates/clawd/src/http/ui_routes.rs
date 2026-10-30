@@ -21,7 +21,7 @@ use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 
 use super::super::{
     active_running_task_count, active_running_task_count_for_user,
-    attach_pending_channel_bind_session_install_flow, bind_channel_identity,
+    bind_channel_identity,
     channel_gateway_process_stats, create_auth_key, create_pending_channel_bind_session,
     daemon_process_pids_by_name, delete_auth_key_by_id,
     exchange_credential_status_for_user_key, factory_reset_auth_state, feishud_process_stats,

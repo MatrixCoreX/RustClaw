@@ -37,7 +37,7 @@ pub(crate) use approval_scope::{
 };
 pub(crate) use audit::{insert_audit_log, insert_audit_log_raw};
 pub(crate) use auth::{
-    attach_pending_channel_bind_session_install_flow, bind_channel_identity, create_auth_key,
+    bind_channel_identity, create_auth_key,
     create_pending_channel_bind_session, delete_auth_key_by_id, ensure_bootstrap_admin_key,
     ensure_key_auth_schema, exchange_credential_status_for_user_key, factory_reset_auth_state,
     finalize_pending_channel_bind_session, get_auth_key_value_by_id,

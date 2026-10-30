@@ -310,3 +310,77 @@ async fn channel_registration_actual_mutations_wait_and_recheck_actor_before_eff
         }
     }
 }
+
+#[tokio::test]
+async fn channel_registration_begin_attachment_is_atomic_and_explicit_restart_recovers() {
+    let _env_lock = crate::fixture_replay_e2e::fixture_env_lock();
+    let mut failures = Vec::new();
+    for platform in [AgentAppChannel::Feishu, AgentAppChannel::Lark] {
+        let mut fixture = Fixture::for_begin(
+            platform,
+            json!({
+                "device_code": "fixture-begin-code",
+                "verification_uri_complete": "https://registration.example.test/new",
+                "interval": 1, "expire_in": 600,
+            }),
+        )
+        .await;
+        let before = fixture.snapshot();
+        {
+            let db = fixture.state.core.db.get().unwrap();
+            db.execute_batch(
+                "CREATE TRIGGER reject_install_attachment
+                BEFORE UPDATE OF install_device_code ON pending_channel_bind_sessions
+                BEGIN SELECT RAISE(ABORT, 'fixture_attach_rejected'); END;",
+            )
+            .unwrap();
+        }
+        let request = fixture.begin();
+        fixture.wait_for_response_gate().await;
+        fixture.release_response();
+        let (status, Json(body)) = request.await.unwrap();
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(!body.ok);
+        assert!(body.data.is_none());
+        fixture.reopen_database();
+        let session = fixture.latest_session();
+        assert!(session.install_device_code.is_none());
+        {
+            let db = fixture.state.core.db.get().unwrap();
+            let (phase, device): (String, Option<String>) = db.query_row(
+                "SELECT phase, device_digest FROM channel_registration_applications WHERE session_id = ?1",
+                [session.id], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).unwrap();
+            assert_eq!(phase, "prepared");
+            if device.is_some() {
+                failures.push(platform.channel());
+            }
+            db.execute_batch("DROP TRIGGER reject_install_attachment")
+                .unwrap();
+        }
+        let replacement = fixture.begin();
+        fixture.wait_for_response_gate().await;
+        fixture.release_response();
+        let (status, Json(body)) = replacement.await.unwrap();
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.ok);
+        assert!(body.data.unwrap().session_id > session.id);
+        let fresh = fixture.latest_session();
+        assert_eq!(
+            fresh.install_device_code.as_deref(),
+            Some("fixture-begin-code")
+        );
+        let db = fixture.state.core.db.get().unwrap();
+        assert!(matches!(
+            crate::repo::channel_registration::registration_gate(&db, &fresh).unwrap(),
+            crate::repo::channel_registration::RegistrationGate::Ready { .. }
+        ));
+        assert_eq!(fixture.requests(), 4);
+        assert_eq!(fixture.snapshot(), before);
+        assert!(!fixture.root.join("logs").exists());
+    }
+    assert!(
+        failures.is_empty(),
+        "registration_begin_partial_attachment={failures:?}"
+    );
+}

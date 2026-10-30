@@ -190,6 +190,11 @@ lock and database transactions; their responses must still match the current
 administrator, session, registration attempt, revision and both configuration
 copies before credentials can be applied.
 
+After an official begin response, the device-code digest and session installation
+fields commit in one database transaction. If either write fails, both roll back;
+an explicit new begin remains available. Network requests, configuration writes
+and service startup are never held inside this transaction.
+
 The auth-owned application journal records a durable claim before the first
 configuration write. It stores digests, revisions and machine outcomes, not
 credentials or registration codes. A completed receipt prevents repeated polls
