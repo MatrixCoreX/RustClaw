@@ -48,8 +48,8 @@ export async function channelBindHarness(context: TestContext, platform: AgentAp
       await act(async () => { completion = runtime.beginBind(); });
       return { index, completion };
     },
-    async reply(index: number, data: unknown, status = 200) {
-      await act(async () => { pending[index].resolve(new Response(JSON.stringify({ ok: status === 200, data, error: status === 200 ? null : "fixture_unavailable" }),
+    async reply(index: number, data: unknown, status = 200, error = "fixture_unavailable") {
+      await act(async () => { pending[index].resolve(new Response(JSON.stringify({ ok: status === 200, data, error: status === 200 ? null : error }),
         { status, headers: { "Content-Type": "application/json" } })); });
     },
     async reject(index: number) { await act(async () => { pending[index].reject(new TypeError("fixture_network_unavailable")); }); },

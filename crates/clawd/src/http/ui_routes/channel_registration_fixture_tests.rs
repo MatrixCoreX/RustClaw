@@ -122,7 +122,9 @@ impl Fixture {
         // A failed old implementation may attempt a shell; no launch script or
         // channel executable exists in this owned workspace.
         assert!(!root.join("component_start").exists());
-        let mut state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+        let mut state = AppState::test_default_with_fixture_provider();
+        state.core.db = Self::database_pool(&root);
+        let mut state = state.with_seeded_db_schema();
         state.skill_rt.workspace_root = root.clone();
         state.core.http_client = reqwest::Client::builder()
             .no_proxy()
@@ -152,6 +154,22 @@ impl Fixture {
             .unwrap();
             session.id
         };
+        {
+            let digest = channel_configuration_fingerprint(&state, platform).unwrap();
+            let mut db = state.core.db.get().unwrap();
+            let session = get_pending_channel_bind_session_by_id(&db, session_id)
+                .unwrap()
+                .unwrap();
+            crate::repo::channel_registration::prepare_registration(&mut db, &session, &digest)
+                .unwrap();
+            crate::repo::channel_registration::record_registration_device(
+                &mut db,
+                &session,
+                "fixture-device-code",
+                &digest,
+            )
+            .unwrap();
+        }
         let entered = Arc::new(Notify::new());
         let release = Arc::new(Semaphore::new(0));
         let requests = Arc::new(AtomicUsize::new(0));
@@ -192,6 +210,25 @@ impl Fixture {
         let mut headers = HeaderMap::new();
         headers.insert("x-agent-key", HeaderValue::from_str(key).unwrap());
         headers
+    }
+
+    fn database_pool(root: &std::path::Path) -> r2d2::Pool<r2d2_sqlite::SqliteConnectionManager> {
+        let manager = r2d2_sqlite::SqliteConnectionManager::file(root.join("registration.db"))
+            .with_init(|connection| {
+                connection.pragma_update(None, "foreign_keys", "ON")?;
+                connection.busy_timeout(Duration::from_secs(10))?;
+                Ok(())
+            });
+        r2d2::Pool::builder().max_size(2).build(manager).unwrap()
+    }
+
+    pub(super) fn reopen_database(&mut self) {
+        let placeholder = r2d2::Pool::builder()
+            .max_size(1)
+            .build(r2d2_sqlite::SqliteConnectionManager::memory())
+            .unwrap();
+        drop(std::mem::replace(&mut self.state.core.db, placeholder));
+        self.state.core.db = Self::database_pool(&self.root);
     }
 
     pub(super) fn poll(

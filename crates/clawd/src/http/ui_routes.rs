@@ -533,6 +533,8 @@ include!("ui_routes/nni_asset_transfer.rs");
 include!("ui_routes/nni_skill_gateway.rs");
 include!("ui_routes/auth_feishu_bind.rs");
 include!("ui_routes/channel_registration_guard.rs");
+include!("ui_routes/channel_configuration_operations.rs");
+include!("ui_routes/channel_registration_application.rs");
 include!("ui_routes/factory_reset.rs");
 include!("ui_routes/channel_config.rs");
 include!("ui_routes/teaching_trace_security.rs");

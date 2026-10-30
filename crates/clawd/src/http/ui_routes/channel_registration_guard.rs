@@ -6,6 +6,12 @@ enum ChannelRegistrationRejection {
     AdministratorRequired,
     #[error("channel_bind_session_not_found")]
     SessionNotFound,
+    #[error("channel_bind_application_recovery_required")]
+    ApplicationRecoveryRequired,
+    #[error("channel_bind_registration_superseded")]
+    RegistrationSuperseded,
+    #[error("channel_bind_registration_prepare_required")]
+    RegistrationPrepareRequired,
 }
 
 impl ChannelRegistrationRejection {
@@ -14,24 +20,52 @@ impl ChannelRegistrationRejection {
             Self::OwnerUnavailable => StatusCode::UNAUTHORIZED,
             Self::AdministratorRequired => StatusCode::FORBIDDEN,
             Self::SessionNotFound => StatusCode::NOT_FOUND,
+            Self::ApplicationRecoveryRequired
+            | Self::RegistrationSuperseded
+            | Self::RegistrationPrepareRequired => StatusCode::CONFLICT,
         }
     }
 }
 
-fn channel_registration_failure_response(
+fn channel_registration_failure_response<T>(
     error: &anyhow::Error,
     fallback: String,
-) -> (
-    StatusCode,
-    Json<ApiResponse<FeishuBindSessionStatusResponse>>,
-) {
+) -> (StatusCode, Json<ApiResponse<T>>) {
     let rejection = error.downcast_ref::<ChannelRegistrationRejection>();
+    let journal =
+        error.downcast_ref::<crate::repo::channel_registration::RegistrationJournalError>();
+    let configuration = error.downcast_ref::<ChannelConfigurationOperationError>();
+    let status = rejection
+        .map(|cause| cause.status())
+        .or_else(|| journal.map(|_| StatusCode::CONFLICT))
+        .or_else(|| configuration.map(|_| StatusCode::INTERNAL_SERVER_ERROR))
+        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    let code = rejection
+        .map(ToString::to_string)
+        .or_else(|| {
+            journal.map(|cause| {
+                use crate::repo::channel_registration::RegistrationJournalError;
+                match cause {
+                    RegistrationJournalError::Superseded => {
+                        ChannelRegistrationRejection::RegistrationSuperseded.to_string()
+                    }
+                    RegistrationJournalError::AlreadyPrepared => {
+                        ChannelRegistrationRejection::RegistrationPrepareRequired.to_string()
+                    }
+                    RegistrationJournalError::ClaimLost => {
+                        ChannelRegistrationRejection::ApplicationRecoveryRequired.to_string()
+                    }
+                    _ => cause.to_string(),
+                }
+            })
+        })
+        .or_else(|| configuration.map(ToString::to_string));
     (
-        rejection.map_or(StatusCode::INTERNAL_SERVER_ERROR, |cause| cause.status()),
+        status,
         Json(ApiResponse {
             ok: false,
             data: None,
-            error: Some(rejection.map_or_else(|| fallback, ToString::to_string)),
+            error: Some(code.unwrap_or(fallback)),
         }),
     )
 }
@@ -41,11 +75,7 @@ fn refresh_registration_session(
     platform: AgentAppChannel,
     expected: &PendingChannelBindSession,
 ) -> anyhow::Result<PendingChannelBindSession> {
-    let identity = resolve_auth_identity_by_key(state, &expected.user_key)?
-        .ok_or(ChannelRegistrationRejection::OwnerUnavailable)?;
-    if !identity.role.eq_ignore_ascii_case("admin") {
-        return Err(ChannelRegistrationRejection::AdministratorRequired.into());
-    }
+    require_current_registration_admin(state, &expected.user_key)?;
     let mut db = state
         .core
         .db
@@ -57,4 +87,16 @@ fn refresh_registration_session(
         })
         .ok_or(ChannelRegistrationRejection::SessionNotFound)?;
     maybe_expire_channel_bind_session(&mut db, current)
+}
+
+fn require_current_registration_admin(
+    state: &AppState,
+    actor_key: &str,
+) -> anyhow::Result<AuthIdentity> {
+    let identity = resolve_auth_identity_by_key(state, actor_key)?
+        .ok_or(ChannelRegistrationRejection::OwnerUnavailable)?;
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return Err(ChannelRegistrationRejection::AdministratorRequired.into());
+    }
+    Ok(identity)
 }

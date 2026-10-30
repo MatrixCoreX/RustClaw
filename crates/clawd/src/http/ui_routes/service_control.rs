@@ -561,6 +561,13 @@ async fn control_service(
         );
     }
 
+    let _configuration_operation = match official_registration_service_platform(service.as_str()) {
+        Some(platform) => match begin_channel_configuration_mutation(&state, platform, &identity.user_key).await {
+            Ok(guard) => Some(guard),
+            Err(error) => return channel_registration_failure_response(&error, "service_configuration_mutation_failed".into()),
+        },
+        None => None,
+    };
     match action {
         ServiceAction::Start => {
             if let Err(err) = validate_service_start_readiness(&state, service.as_str()) {

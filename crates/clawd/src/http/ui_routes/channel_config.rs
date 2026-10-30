@@ -462,7 +462,7 @@ fn load_feishu_config_response(
         app_secret: app_secret.clone(),
         verification_token_configured: !verification_token.is_empty(),
         encrypt_key_configured: !encrypt_key.is_empty(),
-        bind_ready: !app_id.is_empty() && !app_secret.is_empty(),
+        bind_ready: channel_configuration_is_ready(state, AgentAppChannel::Feishu, &app_id, &app_secret),
         current_key_bound,
         restart_required: true,
     })
@@ -522,7 +522,7 @@ fn load_lark_config_response(
         app_secret: app_secret.clone(),
         verification_token_configured: !string_value("verification_token").is_empty(),
         encrypt_key_configured: !string_value("encrypt_key").is_empty(),
-        bind_ready: !app_id.is_empty() && !app_secret.is_empty(),
+        bind_ready: channel_configuration_is_ready(state, AgentAppChannel::Lark, &app_id, &app_secret),
         current_key_bound,
         restart_required: true,
     })
@@ -815,6 +815,10 @@ async fn update_feishu_config(
         }
     };
 
+    let _operation = match begin_channel_configuration_mutation(&state, AgentAppChannel::Feishu, &identity.user_key).await {
+        Ok(guard) => guard,
+        Err(error) => return channel_registration_failure_response(&error, "channel_configuration_mutation_failed".into()),
+    };
     let raw = match read_feishu_config_raw(&state) {
         Ok(raw) => raw,
         Err(err) => {
@@ -895,6 +899,10 @@ async fn reset_feishu_config_handler(
         );
     }
 
+    let _operation = match begin_channel_configuration_mutation(&state, AgentAppChannel::Feishu, &identity.user_key).await {
+        Ok(guard) => guard,
+        Err(error) => return channel_registration_failure_response(&error, "channel_configuration_mutation_failed".into()),
+    };
     let raw = match read_feishu_config_raw(&state) {
         Ok(raw) => raw,
         Err(err) => {
@@ -980,6 +988,10 @@ async fn update_lark_config(
             );
         }
     };
+    let _operation = match begin_channel_configuration_mutation(&state, AgentAppChannel::Lark, &identity.user_key).await {
+        Ok(guard) => guard,
+        Err(error) => return channel_registration_failure_response(&error, "channel_configuration_mutation_failed".into()),
+    };
     let raw = match read_lark_config_raw(&state) {
         Ok(raw) => raw,
         Err(err) => {
@@ -1059,6 +1071,10 @@ async fn reset_lark_config_handler(
             }),
         );
     }
+    let _operation = match begin_channel_configuration_mutation(&state, AgentAppChannel::Lark, &identity.user_key).await {
+        Ok(guard) => guard,
+        Err(error) => return channel_registration_failure_response(&error, "channel_configuration_mutation_failed".into()),
+    };
     let raw = match read_lark_config_raw(&state) {
         Ok(raw) => raw,
         Err(err) => {

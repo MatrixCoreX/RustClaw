@@ -301,6 +301,8 @@ pub(crate) fn factory_reset_auth_state(state: &AppState) -> anyhow::Result<Facto
     let channel_bindings_deleted = delete_all_rows_if_exists(&tx, "channel_bindings")?;
     let pending_bind_sessions_deleted =
         delete_all_rows_if_exists(&tx, "pending_channel_bind_sessions")?;
+    delete_all_rows_if_exists(&tx, "channel_registration_applications")?;
+    delete_all_rows_if_exists(&tx, "channel_configuration_revisions")?;
     let _ = delete_all_rows_if_exists(&tx, "credential_bindings")?;
     let _ = delete_all_rows_if_exists(&tx, "memory_runtime_settings")?;
     let _ = delete_all_rows_if_exists(&tx, "principals")?;

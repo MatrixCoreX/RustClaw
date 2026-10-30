@@ -23,7 +23,7 @@ INVENTORY_PATH = ROOT / "configs/adaptive_limits_inventory.toml"
 FIXTURE_PATH = ROOT / "scripts/fixtures/adaptive_limits/p0_cases.toml"
 BASELINE_PATH = ROOT / "scripts/baselines/adaptive_semantic_limits_baseline.txt"
 
-EXPECTED_IDS = {f"HL-{index:02d}" for index in range(1, 17)}
+EXPECTED_IDS = {f"HL-{index:02d}" for index in range(1, 18)}
 EXPECTED_P0_CASES = {
     "productive_model_call_41",
     "capability_25_and_schema_field_9",
@@ -342,6 +342,16 @@ def run_self_test() -> None:
         source.write_text(source.read_text(encoding="utf-8") + "fn cut(mut v: Vec<u8>) { v.truncate(3); }\n", encoding="utf-8")
         new_rows, _ = compare_baseline(scan_candidates(root), baseline)
         assert len(new_rows) == 1 and "\ttruncate\t" in new_rows[0]
+        entries = [
+            {"id": limit_id, "title": "fixture", "owner": "fixture",
+             "terminal_behavior": "fixture", "acceptance_case": "fixture",
+             "class": "safety", "disposition": "external_constraint", "recovery": "none",
+             "locations": ["crates/example/src/lib.rs::bounded"]}
+            for limit_id in sorted(EXPECTED_IDS)
+        ]
+        assert validate_inventory(root, {"schema_version": 1, "limits": entries}) == []
+        missing = validate_inventory(root, {"schema_version": 1, "limits": entries[:-1]})
+        assert any(finding.startswith("inventory_ids_invalid:") for finding in missing)
     print("ADAPTIVE_LIMIT_CONTRACT_SELF_TEST ok")
 
 

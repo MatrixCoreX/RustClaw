@@ -3,6 +3,7 @@ import QRCode from "qrcode";
 
 import { useUiDialog } from "../components/UiDialogProvider";
 import {
+  channelBindRecoveryGuidance,
   fetchChannelBindSession,
   isFeishuBindTerminalStatus,
   startChannelBindSession,
@@ -96,7 +97,8 @@ export function useChannelBindRuntime({
         requests.session = session;
         setBindSession(session);
       } catch (err) {
-        if (ownsBegin()) setBindError(formatUiError(err, t, `${channelLabel}绑定未能开始。`, `${channelLabel} binding could not start.`));
+        if (ownsBegin()) setBindError(channelBindRecoveryGuidance(err, t)
+          ?? formatUiError(err, t, `${channelLabel}绑定未能开始。`, `${channelLabel} binding could not start.`));
       } finally {
         if (ownsBegin()) {
           requests.begin = null;
@@ -123,7 +125,9 @@ export function useChannelBindRuntime({
       setBindSession(session);
       if (session.status === "bound") await refreshAcceptedView(ownsRead);
       return session;
-    } catch {
+    } catch (err) {
+      const guidance = channelBindRecoveryGuidance(err, t);
+      if (ownsRead() && guidance) setBindError(guidance);
       return null;
     } finally {
       if (ownsRead()) requests.read = null;

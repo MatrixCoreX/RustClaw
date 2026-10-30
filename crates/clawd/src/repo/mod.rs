@@ -4,6 +4,7 @@ pub(crate) mod auth;
 pub(crate) mod channel_delivery_outbox;
 pub(crate) mod channel_delivery_receipt;
 pub(crate) mod channel_event_admission;
+pub(crate) mod channel_registration;
 mod child_approval;
 pub(crate) mod child_patch;
 pub(crate) mod child_task_control;

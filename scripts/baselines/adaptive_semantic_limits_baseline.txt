@@ -229,6 +229,9 @@ crates/clawd/src/http/ui_routes/aipp.rs	take	.take(max_chars)
 crates/clawd/src/http/ui_routes/aipp.rs	truncate	.truncate(limit + 1)
 crates/clawd/src/http/ui_routes/aipp.rs	truncate	.truncate(limit)
 crates/clawd/src/http/ui_routes/aipp.rs	truncate	.truncate(limit)
+# Reviewed 2026-10-30: HL-17 host configuration input safety; whole-input rejection, never prefix parsing.
+crates/clawd/src/http/ui_routes/channel_configuration_operations.rs	hard_count	MAX_BYTES
+crates/clawd/src/http/ui_routes/channel_configuration_operations.rs	take	.take(MAX_BYTES + 1)
 crates/clawd/src/http/ui_routes/host_dependencies.rs	take	.take(512)
 crates/clawd/src/http/ui_routes/host_dependencies.rs	take	.take(DEPENDENCY_VERSION_LIMIT)
 crates/clawd/src/http/ui_routes/host_dependencies.rs	take	.take(DEPENDENCY_VERSION_LIMIT)

@@ -1,6 +1,6 @@
 schema_version = 1
-reviewed_at = "2026-10-29"
-source_audit = "plan/reports/model_capability_hard_limits_audit_20260728.md"
+reviewed_at = "2026-10-30"
+source_audit = "docs/adaptive_limit_review.md"
 
 # `locations` are source anchors, not enforcement configuration. The checker
 # verifies that every active migration anchor still exists until its entry is
@@ -332,4 +332,22 @@ boundary_tests = [
   "crates/skill-sdk/src/prebuilt_tests.rs::archive_traversal_and_links_are_rejected",
   "crates/skill-sdk/src/installer_tests.rs::prebuilt_adapter_rejects_digest_mismatch_before_activation",
   "crates/clawd/src/providers/model_log_payload_tests.rs::corrupted_or_expanding_payloads_fail_closed",
+]
+
+[[limits]]
+id = "HL-17"
+priority = "p1"
+title = "channel configuration input memory ceiling"
+class = "safety"
+owner = "channel_setup_service"
+disposition = "retain_with_recovery"
+recovery = "none"
+terminal_behavior = "Read each configuration copy completely or reject it with a machine error. Never parse a prefix, expose credential bytes, spill secrets to artifacts or modify stored input. An administrator can correct the configuration and retry explicitly."
+acceptance_case = "channel_configuration_input_ceiling"
+locations = [
+  "crates/clawd/src/http/ui_routes/channel_configuration_operations.rs::read_registration_configuration",
+]
+boundary_tests = [
+  "crates/clawd/src/http/ui_routes/channel_configuration_operation_tests.rs::channel_configuration_unreadable_and_oversized_input_returns_only_a_machine_error",
+  "crates/clawd/src/http/ui_routes/channel_configuration_operation_tests.rs::channel_configuration_fifo_is_rejected_without_waiting_for_a_writer",
 ]

@@ -56,6 +56,28 @@ export interface FeishuSetupGuidance {
 
 type ApiFetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
+export function channelBindRecoveryGuidance(
+  cause: unknown,
+  t: (zh: string, en: string) => string,
+): string | null {
+  const code = cause instanceof Error ? cause.message : cause;
+  switch (code) {
+    case "channel_bind_application_recovery_required":
+      return t(
+        "上次接入可能只完成了一部分，已停止自动处理。请检查并保存通信端配置，或重置接入后重新扫码。",
+        "The previous setup may be incomplete. Automatic processing has stopped. Review and save the channel configuration, or reset setup and scan again.",
+      );
+    case "channel_bind_registration_superseded":
+    case "channel_bind_registration_prepare_required":
+      return t(
+        "接入配置已经变化，请重新开始扫码；当前保存的配置不会被旧请求覆盖。",
+        "Setup configuration has changed. Start a new scan; the old request will not overwrite your saved configuration.",
+      );
+    default:
+      return null;
+  }
+}
+
 function channelNames(platform: AgentAppChannel) {
   return platform === "lark"
     ? { zh: "Lark", en: "Lark" }

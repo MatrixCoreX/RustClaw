@@ -169,8 +169,7 @@ actor and current session before returning status or recording startup failure.
 Completed binding, terminal state and a replaced registration attempt take
 precedence over the old request; a conditional failure write cannot overwrite a
 binding completed concurrently. Credential application, service availability and
-bot-side account binding remain separate facts. This state refresh is not a
-durable one-shot application or a configuration/service ordering guarantee.
+bot-side account binding remain separate facts.
 
 After official registration init/begin or poll I/O returns, the backend rereads
 the active key, administrator role and owned platform/session before attaching
@@ -181,8 +180,48 @@ role changes return machine-coded authorization/not-found errors; expired,
 already-bound or replaced registrations retain their current stored state
 without applying the delayed result. A delayed upstream expiry or begin error
 cannot replace an already-bound session or turn its response into a failure.
-This eligibility check is not an atomic application
-receipt or a guarantee of ordering against every concurrent configuration write.
+
+### Registration Application and Recovery
+
+Each platform shares an operation lock across begin, credential updates, reset
+and service start/stop/restart/reset. Accepted mutations advance a persistent
+configuration revision before effects. Official network requests run outside the
+lock and database transactions; their responses must still match the current
+administrator, session, registration attempt, revision and both configuration
+copies before credentials can be applied.
+
+The auth-owned application journal records a durable claim before the first
+configuration write. It stores digests, revisions and machine outcomes, not
+credentials or registration codes. A completed receipt prevents repeated polls
+from applying credentials or starting the service again, including after an
+explicit stop. A claimed or uncertain receipt is never automatically replayed
+after cancellation, a failed write or database reopening. Both configuration
+copies must match and no current uncertain application may remain before setup
+is shown as ready. An administrator can explicitly review/save configuration or
+reset setup and begin again; the UI retains the session and shows localized
+recovery guidance without silently retrying the mutation.
+
+This provides safe non-replay rather than exactly-once external process effects.
+The lock orders these runtime HTTP producers, not independent programs editing
+configuration files. Application completion is not bot-side account binding;
+the pending/detected/bound handshake remains separate.
+
+```mermaid
+flowchart TD
+    A[Prepare owned registration and revision] --> B[Official network request outside operation lock]
+    B --> C[Acquire platform lock and reread authority]
+    C --> D{Session, attempt, revision and copies current}
+    D -->|no| E[Preserve current state or reject obsolete result]
+    D -->|yes| F{Durable application receipt}
+    F -->|applied| G[Return current session without replay]
+    F -->|claimed or uncertain| H[Explicit administrator recovery]
+    F -->|prepared| I[Persist claim before file effects]
+    I --> J[Write and verify both configuration copies]
+    J -->|failure| H
+    J -->|verified| K[Start service and record outcome]
+    K --> L[Reread actor and current session]
+    L --> M[Bot handshake remains independent]
+```
 
 ```mermaid
 flowchart TD
