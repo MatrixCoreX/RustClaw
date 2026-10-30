@@ -5,6 +5,7 @@ import { ApiResponseFormatError, readJsonApiResponse } from "../lib/api-response
 import { sleep } from "../lib/display-format";
 import { formatSystemActionError } from "../lib/system-actions";
 import { formatUiError } from "../lib/ui-error";
+import { PageRequestLifecycle } from "../lib/page-request-lifecycle";
 import {
   formatWorkspaceUpdateApiError,
   shouldReloadAfterWorkspaceBuild,
@@ -92,34 +93,72 @@ export function useSystemRuntime({
   const [webdExposureUpdating, setWebdExposureUpdating] = useState(false);
   const [webdExposureError, setWebdExposureError] = useState<string | null>(null);
   const [webdExposureMessage, setWebdExposureMessage] = useState<string | null>(null);
+  const hostSummaryLifecycle = useRef(new PageRequestLifecycle());
+  const hostDependenciesLifecycle = useRef(new PageRequestLifecycle());
+  const hostReadScopeRef = useRef({ apiBase, uiAuthReady, isAdminIdentity });
+  if (
+    hostReadScopeRef.current.apiBase !== apiBase
+    || hostReadScopeRef.current.uiAuthReady !== uiAuthReady
+    || hostReadScopeRef.current.isAdminIdentity !== isAdminIdentity
+  ) {
+    hostReadScopeRef.current = { apiBase, uiAuthReady, isAdminIdentity };
+  }
+  const hostReadScope = hostReadScopeRef.current;
+
+  useEffect(() => {
+    hostSummaryLifecycle.current.invalidate();
+    hostDependenciesLifecycle.current.invalidate();
+    setHostSystemSummary(null);
+    setHostSystemLoading(false);
+    setHostSystemErrorCode(null);
+    setHostDependencies(null);
+    setHostDependenciesLoading(false);
+    setHostDependenciesErrorCode(null);
+    return () => {
+      hostSummaryLifecycle.current.invalidate();
+      hostDependenciesLifecycle.current.invalidate();
+    };
+  }, [apiBase, uiAuthReady, isAdminIdentity]);
+
   const workspaceUpdateUiLang = (): "zh" | "en" => (t("__zh__", "__en__") === "__zh__" ? "zh" : "en");
   const workspaceUpdateApiErrorMessage = (error: string | null | undefined): string =>
     formatWorkspaceUpdateApiError(error, workspaceUpdateUiLang());
 
   const fetchHostSystemSummary = async () => {
+    if (!uiAuthReady || hostReadScopeRef.current !== hostReadScope) return;
+    const requestId = hostSummaryLifecycle.current.begin(false)!;
+    const isCurrent = () => hostReadScopeRef.current === hostReadScope
+      && hostSummaryLifecycle.current.isCurrent(requestId);
     setHostSystemLoading(true);
     setHostSystemErrorCode(null);
     try {
       const res = await apiFetch("/v1/system/host-summary");
       const body = (await res.json()) as ApiResponse<HostSystemSummary>;
+      if (!isCurrent()) return;
       if (!res.ok || !body.ok || !body.data) {
         setHostSystemErrorCode(res.status === 401 || res.status === 403 ? "permission_denied" : "unavailable");
         return;
       }
       setHostSystemSummary(body.data);
     } catch {
-      setHostSystemErrorCode("disconnected");
+      if (isCurrent()) setHostSystemErrorCode("disconnected");
     } finally {
-      setHostSystemLoading(false);
+      if (isCurrent() && hostSummaryLifecycle.current.finish(requestId)) setHostSystemLoading(false);
     }
   };
 
   const fetchHostDependencies = async (silent = false): Promise<HostDependenciesSnapshot | null> => {
+    if (!uiAuthReady || hostReadScopeRef.current !== hostReadScope) return null;
+    const requestId = hostDependenciesLifecycle.current.begin(silent);
+    if (requestId === null) return null;
+    const isCurrent = () => hostReadScopeRef.current === hostReadScope
+      && hostDependenciesLifecycle.current.isCurrent(requestId);
     if (!silent) setHostDependenciesLoading(true);
     setHostDependenciesErrorCode(null);
     try {
       const res = await apiFetch("/v1/system/dependencies");
       const body = (await res.json()) as ApiResponse<HostDependenciesSnapshot>;
+      if (!isCurrent()) return null;
       if (!res.ok || !body.ok || !body.data) {
         setHostDependenciesErrorCode(res.status === 401 || res.status === 403 ? "permission_denied" : "unavailable");
         return null;
@@ -127,10 +166,10 @@ export function useSystemRuntime({
       setHostDependencies(body.data);
       return body.data;
     } catch {
-      setHostDependenciesErrorCode("disconnected");
+      if (isCurrent()) setHostDependenciesErrorCode("disconnected");
       return null;
     } finally {
-      if (!silent) setHostDependenciesLoading(false);
+      if (isCurrent() && hostDependenciesLifecycle.current.finish(requestId)) setHostDependenciesLoading(false);
     }
   };
 
