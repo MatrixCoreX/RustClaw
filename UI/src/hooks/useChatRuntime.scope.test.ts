@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import test from "node:test";
 import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
@@ -11,13 +12,16 @@ const response = (data: unknown) => new Response(JSON.stringify({ ok: true, data
 const history = () => ({ schema_version: 1, status: "ok", turns: [], truncated: true,
   next_cursor: "earlier", content_sha256: createHash("sha256").update("[]").digest("hex") });
 
-async function probe() {
+async function probe(initialHistoryGate?: Promise<void>) {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const requests: Array<{ path: string; resolve: (response: Response) => void }> = [];
   const params: UseChatRuntimeParams = {
     apiFetch: async path => {
       if (path === "/v1/ui/attachment-constraints") return response(DEFAULT_CHAT_ATTACHMENT_CONSTRAINTS);
-      if (path.startsWith("/v1/tasks/conversation-history") && !path.includes("cursor=")) return response(history());
+      if (path.startsWith("/v1/tasks/conversation-history") && !path.includes("cursor=")) {
+        await initialHistoryGate;
+        return response(history());
+      }
       if (path.startsWith("/v1/conversation-inputs?")) return response({ schema_version: 1, items: [], next_after_input_seq: null });
       if (path.includes("/events?")) return new Response(new ReadableStream({ start() {} }), { headers: { "content-type": "text/event-stream" } });
       return new Promise(resolve => requests.push({ path, resolve }));
@@ -35,6 +39,13 @@ async function probe() {
   await act(async () => { renderer = create(tree()); });
   return {
     get runtime() { return runtime; }, requests,
+    waitForHistory: async () => {
+      const deadline = performance.now() + 5000;
+      while (runtime.chatHistoryLoading || !runtime.chatHistoryHasMore) {
+        assert.ok(performance.now() < deadline, "fixture history did not become ready");
+        await act(async () => { await yieldToEventLoop(); });
+      }
+    },
     update: async (change: Partial<UseChatRuntimeParams>) => {
       Object.assign(params, change);
       await act(async () => { renderer.update(tree()); });
@@ -47,6 +58,7 @@ for (const mode of ["owner", "node", "logout", "roundtrip", "login-epoch"] as co
   test(`chat history and teaching responses cannot cross scope: ${mode}`, async t => {
     const p = await probe();
     t.after(() => p.close());
+    await p.waitForHistory();
     const old = p.runtime;
     let page!: Promise<unknown>;
     let trace!: Promise<unknown>;
@@ -80,6 +92,39 @@ for (const mode of ["owner", "node", "logout", "roundtrip", "login-epoch"] as co
     assert.equal(p.runtime.chatTeachingLlmDebugLoading, false);
   });
 }
+
+test("scope fixture waits for initial history readiness without bypassing digest verification", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const p = await probe(gate);
+  try {
+    assert.equal(p.runtime.chatHistoryLoading, true);
+    assert.equal(p.runtime.chatHistoryHasMore, false);
+    let trace!: Promise<unknown>;
+    await act(async () => {
+      await p.runtime.loadEarlierConversationHistory();
+      trace = p.runtime.queryChatTeachingLlmDebug("fixture-task");
+    });
+    assert.equal(p.requests.length, 1, "pagination stays suppressed while initial history is pending");
+    await act(async () => {
+      p.requests[0].resolve(response({ calls: [], call_count: 0 }));
+      await trace;
+      release();
+    });
+    await p.waitForHistory();
+    let earlier!: Promise<unknown>;
+    await act(async () => { earlier = p.runtime.loadEarlierConversationHistory(); });
+    assert.equal(p.requests.length, 2);
+    assert.ok(p.requests[1].path.includes("cursor=earlier"));
+    await act(async () => {
+      p.requests[1].resolve(response({ ...history(), truncated: false, next_cursor: null }));
+      await earlier;
+    });
+    assert.equal(p.runtime.chatHistoryLoading, false);
+    assert.equal(p.runtime.chatHistoryHasMore, false);
+    assert.equal(p.runtime.chatError, null);
+  } finally { release(); await p.close(); }
+});
 
 test("newer teaching selection wins and unmount invalidates saved callbacks", async () => {
   const p = await probe();

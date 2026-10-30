@@ -1,76 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import React from "react";
-import { act, create, type ReactTestRenderer } from "react-test-renderer";
-
-import { UiDialogProvider } from "../components/UiDialogProvider";
-import { useSystemRuntime, type UseSystemRuntimeParams } from "./useSystemRuntime";
-
-type PendingRequest = {
-  path: string;
-  resolve: (response: Response) => void;
-  reject: (error: Error) => void;
-};
-
-async function harness() {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-  const pending: PendingRequest[] = [];
-  const noop = () => undefined;
-  let props: UseSystemRuntimeParams = {
-    apiFetch: (path) => new Promise<Response>((resolve, reject) => pending.push({ path, resolve, reject })),
-    t: (zh) => zh,
-    apiBase: "http://localhost:8788",
-    uiAuthReady: true,
-    isAdminIdentity: false,
-    currentPage: "chat",
-    fetchHealth: async () => undefined,
-    setHealth: noop,
-    setError: noop,
-    clearLlmConfigError: noop,
-    clearSkillsConfigError: noop,
-    fetchLlmConfig: noop,
-    fetchMultimodalConfig: noop,
-    fetchSkillsConfig: noop,
-    fetchSkills: noop,
-  };
-  let current!: ReturnType<typeof useSystemRuntime>;
-  function Probe() { current = useSystemRuntime(props); return null; }
-  const element = () => React.createElement(UiDialogProvider, null, React.createElement(Probe));
-  let renderer!: ReactTestRenderer;
-  let disposed = false;
-  await act(async () => { renderer = create(element()); });
-  return {
-    get current() { return current; },
-    pending,
-    async update(change: Partial<UseSystemRuntimeParams>) {
-      props = { ...props, ...change };
-      await act(async () => { renderer.update(element()); });
-    },
-    async start(kind: "summary" | "dependencies", silent = false) {
-      const index = pending.length;
-      await act(async () => {
-        if (kind === "summary") void current.fetchHostSystemSummary();
-        else void current.fetchHostDependencies(silent);
-      });
-      return index;
-    },
-    async respond(index: number, data: unknown, status = 200) {
-      await act(async () => {
-        pending[index].resolve(new Response(JSON.stringify({ ok: status === 200, data, error: null }), {
-          status, headers: { "Content-Type": "application/json" },
-        }));
-      });
-    },
-    async reject(index: number) {
-      await act(async () => { pending[index].reject(new Error("fixture transport failure")); });
-    },
-    async dispose() {
-      if (disposed) return;
-      disposed = true;
-      await act(async () => { renderer.unmount(); });
-    },
-  };
-}
+import { act } from "react-test-renderer";
+import { systemRuntimeHarness as harness } from "../../test/helpers/system-runtime-harness";
 
 function summary(architecture: string) { return { schema_version: 4, architecture }; }
 function dependencies(platform: string) {

@@ -13,6 +13,14 @@ export class PageRequestLifecycle {
     return id === this.sequence;
   }
 
+  hasForegroundRequest(): boolean {
+    return this.foreground !== null;
+  }
+
+  currentRequestId(): number {
+    return this.sequence;
+  }
+
   finish(id: number): boolean {
     if (id !== this.foreground) return false;
     this.foreground = null;

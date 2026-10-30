@@ -208,6 +208,7 @@ jobs:
           node UI/test/authentication-ownership.browser.mjs
           node UI/test/authentication-concurrency.browser.mjs
           node UI/test/system-host-ownership.browser.mjs
+          node UI/test/system-admin-ownership.browser.mjs
 
       - name: Upload browser authentication evidence
         if: ${{ always() }}

@@ -67,6 +67,7 @@ export function useSystemRuntime({
   const workspaceUpdateWasActiveRef = useRef(false);
   const workspaceUpdateActiveModeRef = useRef<WorkspaceUpdateMode | string | undefined>(undefined);
   const workspaceUpdateReloadScheduledRef = useRef(false);
+  const workspaceUpdateReloadTimerRef = useRef<number | null>(null);
   const [systemRestarting, setSystemRestarting] = useState(false);
   const [systemRestartMessage, setSystemRestartMessage] = useState<string | null>(null);
   const [hostSystemSummary, setHostSystemSummary] = useState<HostSystemSummary | null>(null);
@@ -95,28 +96,60 @@ export function useSystemRuntime({
   const [webdExposureMessage, setWebdExposureMessage] = useState<string | null>(null);
   const hostSummaryLifecycle = useRef(new PageRequestLifecycle());
   const hostDependenciesLifecycle = useRef(new PageRequestLifecycle());
-  const hostReadScopeRef = useRef({ apiBase, uiAuthReady, isAdminIdentity });
+  const workspaceStatusLifecycle = useRef(new PageRequestLifecycle());
+  const nginxStatusLifecycle = useRef(new PageRequestLifecycle());
+  const webdStatusLifecycle = useRef(new PageRequestLifecycle());
+  const hardwareStatusLifecycle = useRef(new PageRequestLifecycle());
+  const systemReadsActiveRef = useRef(true);
+  const systemReadScopeRef = useRef({ apiBase, uiAuthReady, isAdminIdentity });
   if (
-    hostReadScopeRef.current.apiBase !== apiBase
-    || hostReadScopeRef.current.uiAuthReady !== uiAuthReady
-    || hostReadScopeRef.current.isAdminIdentity !== isAdminIdentity
+    systemReadScopeRef.current.apiBase !== apiBase
+    || systemReadScopeRef.current.uiAuthReady !== uiAuthReady
+    || systemReadScopeRef.current.isAdminIdentity !== isAdminIdentity
   ) {
-    hostReadScopeRef.current = { apiBase, uiAuthReady, isAdminIdentity };
+    systemReadScopeRef.current = { apiBase, uiAuthReady, isAdminIdentity };
   }
-  const hostReadScope = hostReadScopeRef.current;
+  const systemReadScope = systemReadScopeRef.current;
+  const isSystemReadScopeCurrent = () => systemReadsActiveRef.current
+    && systemReadScopeRef.current === systemReadScope;
 
   useEffect(() => {
-    hostSummaryLifecycle.current.invalidate();
-    hostDependenciesLifecycle.current.invalidate();
+    const lifecycles = [hostSummaryLifecycle.current, hostDependenciesLifecycle.current,
+      workspaceStatusLifecycle.current, nginxStatusLifecycle.current,
+      webdStatusLifecycle.current, hardwareStatusLifecycle.current];
+    const invalidate = () => {
+      for (const lifecycle of lifecycles) lifecycle.invalidate();
+      if (workspaceUpdateReloadTimerRef.current !== null) {
+        window.clearTimeout(workspaceUpdateReloadTimerRef.current);
+        workspaceUpdateReloadTimerRef.current = null;
+      }
+    };
+    systemReadsActiveRef.current = true;
+    invalidate();
     setHostSystemSummary(null);
     setHostSystemLoading(false);
     setHostSystemErrorCode(null);
     setHostDependencies(null);
     setHostDependenciesLoading(false);
     setHostDependenciesErrorCode(null);
+    setWorkspaceUpdateStatus(null);
+    setWorkspaceUpdateLoading(false);
+    setWorkspaceUpdateMessage(null);
+    setNginxStatus(null);
+    setNginxStatusLoading(false);
+    setNginxStatusError(null);
+    setWebdExposureStatus(null);
+    setWebdExposureLoading(false);
+    setWebdExposureError(null);
+    setPiAppStatus(null);
+    // Build history and scheduled navigation belong to one authenticated endpoint.
+    workspaceUpdateSilentFailuresRef.current = 0;
+    workspaceUpdateWasActiveRef.current = false;
+    workspaceUpdateActiveModeRef.current = undefined;
+    workspaceUpdateReloadScheduledRef.current = false;
     return () => {
-      hostSummaryLifecycle.current.invalidate();
-      hostDependenciesLifecycle.current.invalidate();
+      systemReadsActiveRef.current = false;
+      invalidate();
     };
   }, [apiBase, uiAuthReady, isAdminIdentity]);
 
@@ -125,9 +158,9 @@ export function useSystemRuntime({
     formatWorkspaceUpdateApiError(error, workspaceUpdateUiLang());
 
   const fetchHostSystemSummary = async () => {
-    if (!uiAuthReady || hostReadScopeRef.current !== hostReadScope) return;
+    if (!uiAuthReady || !isSystemReadScopeCurrent()) return;
     const requestId = hostSummaryLifecycle.current.begin(false)!;
-    const isCurrent = () => hostReadScopeRef.current === hostReadScope
+    const isCurrent = () => isSystemReadScopeCurrent()
       && hostSummaryLifecycle.current.isCurrent(requestId);
     setHostSystemLoading(true);
     setHostSystemErrorCode(null);
@@ -148,10 +181,10 @@ export function useSystemRuntime({
   };
 
   const fetchHostDependencies = async (silent = false): Promise<HostDependenciesSnapshot | null> => {
-    if (!uiAuthReady || hostReadScopeRef.current !== hostReadScope) return null;
+    if (!uiAuthReady || !isSystemReadScopeCurrent()) return null;
     const requestId = hostDependenciesLifecycle.current.begin(silent);
     if (requestId === null) return null;
-    const isCurrent = () => hostReadScopeRef.current === hostReadScope
+    const isCurrent = () => isSystemReadScopeCurrent()
       && hostDependenciesLifecycle.current.isCurrent(requestId);
     if (!silent) setHostDependenciesLoading(true);
     setHostDependenciesErrorCode(null);
@@ -230,6 +263,11 @@ export function useSystemRuntime({
   };
 
   const fetchWorkspaceUpdateStatus = async (silent = false): Promise<WorkspaceUpdateStatus | null> => {
+    if (!uiAuthReady || !isAdminIdentity || !isSystemReadScopeCurrent()) return null;
+    const requestId = workspaceStatusLifecycle.current.begin(silent);
+    if (requestId === null) return null;
+    const isCurrent = () => isSystemReadScopeCurrent()
+      && workspaceStatusLifecycle.current.isCurrent(requestId);
     if (!silent) {
       setWorkspaceUpdateLoading(true);
       setWorkspaceUpdateMessage(null);
@@ -238,36 +276,44 @@ export function useSystemRuntime({
       const refreshQuery = silent ? "" : "?refresh_release=true";
       const res = await apiFetch(`/v1/admin/workspace-update${refreshQuery}`);
       const body = (await res.json()) as ApiResponse<WorkspaceUpdateStatus>;
+      if (!isCurrent()) return null;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error ? workspaceUpdateApiErrorMessage(body.error) : `workspace_update_status_http_${res.status}`);
       }
       setWorkspaceUpdateStatus(body.data);
       return body.data;
     } catch (err) {
-      if (!silent) {
+      if (!silent && isCurrent()) {
         const message = formatUiError(err, t, "更新状态暂时无法读取。", "Update status is temporarily unavailable.");
         setWorkspaceUpdateMessage(`${t("查询更新状态失败", "Failed to query update status")}: ${message}`);
       }
       return null;
     } finally {
-      if (!silent) {
+      if (isCurrent() && workspaceStatusLifecycle.current.finish(requestId)) {
         setWorkspaceUpdateLoading(false);
       }
     }
   };
 
   const fetchNginxStatus = async (silent = false): Promise<NginxUiStatus | null> => {
+    if (!uiAuthReady || !isAdminIdentity || !isSystemReadScopeCurrent()) return null;
+    const requestId = nginxStatusLifecycle.current.begin(silent);
+    if (requestId === null) return null;
+    const isCurrent = () => isSystemReadScopeCurrent()
+      && nginxStatusLifecycle.current.isCurrent(requestId);
     if (!silent) setNginxStatusLoading(true);
     setNginxStatusError(null);
     try {
       const res = await apiFetch("/v1/admin/nginx");
       const body = await readJsonApiResponse<ApiResponse<NginxUiStatus>>(res);
+      if (!isCurrent()) return null;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `nginx_status_http_${res.status}`);
       }
       setNginxStatus(body.data);
       return body.data;
     } catch (err) {
+      if (!isCurrent()) return null;
       const message = err instanceof ApiResponseFormatError
         ? err.kind === "html_response"
           ? t(
@@ -287,22 +333,29 @@ export function useSystemRuntime({
       setNginxStatusError(message);
       return null;
     } finally {
-      if (!silent) setNginxStatusLoading(false);
+      if (isCurrent() && nginxStatusLifecycle.current.finish(requestId)) setNginxStatusLoading(false);
     }
   };
 
   const fetchWebdExposureStatus = async (silent = false): Promise<WebdExposureStatus | null> => {
+    if (!uiAuthReady || !isAdminIdentity || !isSystemReadScopeCurrent()) return null;
+    const requestId = webdStatusLifecycle.current.begin(silent);
+    if (requestId === null) return null;
+    const isCurrent = () => isSystemReadScopeCurrent()
+      && webdStatusLifecycle.current.isCurrent(requestId);
     if (!silent) setWebdExposureLoading(true);
     setWebdExposureError(null);
     try {
       const res = await apiFetch("/v1/admin/webd-exposure");
       const body = await readJsonApiResponse<ApiResponse<WebdExposureStatus>>(res);
+      if (!isCurrent()) return null;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `webd_exposure_status_http_${res.status}`);
       }
       setWebdExposureStatus(body.data);
       return body.data;
     } catch (err) {
+      if (!isCurrent()) return null;
       const message = err instanceof ApiResponseFormatError
         ? t(
             "webd 状态接口返回了无法识别的数据，请更新并重启 {product_name} 后重试。",
@@ -317,7 +370,7 @@ export function useSystemRuntime({
       setWebdExposureError(message);
       return null;
     } finally {
-      if (!silent) setWebdExposureLoading(false);
+      if (isCurrent() && webdStatusLifecycle.current.finish(requestId)) setWebdExposureLoading(false);
     }
   };
 
@@ -676,15 +729,22 @@ export function useSystemRuntime({
   };
 
   const fetchPiAppStatus = async () => {
+    if (!uiAuthReady || !isAdminIdentity || !isSystemReadScopeCurrent()) return;
+    const requestId = hardwareStatusLifecycle.current.begin(false)!;
+    const isCurrent = () => isSystemReadScopeCurrent()
+      && hardwareStatusLifecycle.current.isCurrent(requestId);
     try {
       const res = await apiFetch(`/v1/pi-app/status`);
       const body = (await res.json()) as ApiResponse<PiAppStatusResponse>;
+      if (!isCurrent()) return;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `hardware_device_status_http_${res.status}`);
       }
       setPiAppStatus(body.data);
     } catch {
-      setPiAppStatus(null);
+      if (isCurrent()) setPiAppStatus(null);
+    } finally {
+      if (isCurrent()) hardwareStatusLifecycle.current.finish(requestId);
     }
   };
 
@@ -769,7 +829,12 @@ export function useSystemRuntime({
     }
     workspaceUpdateWasActiveRef.current = false;
     workspaceUpdateReloadScheduledRef.current = true;
-    window.setTimeout(() => window.location.reload(), 600);
+    const timer = window.setTimeout(() => {
+      if (workspaceUpdateReloadTimerRef.current !== timer) return;
+      workspaceUpdateReloadTimerRef.current = null;
+      if (uiAuthReady && isAdminIdentity && isSystemReadScopeCurrent()) window.location.reload();
+    }, 600);
+    workspaceUpdateReloadTimerRef.current = timer;
   }, [workspaceUpdateStatus?.mode, workspaceUpdateStatus?.status]);
 
   useEffect(() => {
@@ -777,8 +842,14 @@ export function useSystemRuntime({
     const status = workspaceUpdateStatus?.status;
     if (status !== "running" && status !== "restarting") return;
     const refreshWhenVisible = async () => {
-      if (document.visibilityState !== "visible") return;
-      const next = await fetchWorkspaceUpdateStatus(true);
+      if (!isSystemReadScopeCurrent() || document.visibilityState !== "visible"
+        || workspaceStatusLifecycle.current.hasForegroundRequest()) return;
+      const pending = fetchWorkspaceUpdateStatus(true);
+      const requestId = workspaceStatusLifecycle.current.currentRequestId();
+      const isCurrentPoll = () => isSystemReadScopeCurrent()
+        && workspaceStatusLifecycle.current.isCurrent(requestId);
+      const next = await pending;
+      if (!isCurrentPoll()) return;
       if (!next) {
         workspaceUpdateSilentFailuresRef.current += 1;
         if (status === "restarting" && workspaceUpdateSilentFailuresRef.current >= 3) {
@@ -794,6 +865,7 @@ export function useSystemRuntime({
       workspaceUpdateSilentFailuresRef.current = 0;
       if (next?.status === "restarting") {
         await sleep(1800);
+        if (!isCurrentPoll()) return;
         await fetchHealth({ silent: true });
       }
     };
