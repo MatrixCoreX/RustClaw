@@ -720,6 +720,12 @@ Changing the sign-in service address invalidates an unfinished attempt before
 using the new address. Credential submission and logout requests are deduplicated
 while pending, and an old logout cannot clear a later authenticated session.
 
+Text and native model requests, model-config probes, and device-key enrollment
+also use their exact configured endpoint without following HTTP redirects.
+Configure the final provider or relay API base URL. A 3xx response remains a
+structured provider failure, not a second request to another address. Platform
+and media/CDN clients keep their independent redirect policies.
+
 ### Telegram Transport Boundary
 
 Telegram is limited to message transport, identity binding, and task control. It no longer owns skill-specific configuration or natural-language routing:

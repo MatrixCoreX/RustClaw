@@ -42,6 +42,8 @@ const MAX_LLM_RATE_LIMIT_RETRY_TIMES: usize = 8;
 /// 若后续启用 HTTP/2 feature 可在此补 `http2_keep_alive_interval`。
 pub(crate) fn build_llm_http_client(timeout_seconds: u64) -> reqwest::Result<Client> {
     Client::builder()
+        // Provider credentials and prompts belong only to the configured endpoint.
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(timeout_seconds))
         .pool_max_idle_per_host(LLM_POOL_MAX_IDLE_PER_HOST)
         .pool_idle_timeout(Duration::from_secs(LLM_POOL_IDLE_TIMEOUT_SECS))
@@ -780,3 +782,7 @@ async fn await_model_turn_call_with_timeout(
 #[cfg(test)]
 #[path = "client_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "client_transport_tests.rs"]
+mod transport_tests;

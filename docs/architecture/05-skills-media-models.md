@@ -47,6 +47,15 @@ projected into receipts by the normal build. Bundled optional skills live under
 receipt verification before registration. No runtime is inferred from a file
 extension, skill name, or `target/release` convention.
 
+## Core Model HTTP Transport
+
+The core text/native provider client, model-config probes and device-key
+enrollment use the exact configured endpoint and do not follow HTTP redirects.
+Enter the final API base URL, including HTTPS where required. Redirect responses
+remain structured failures; they do not forward keys, prompts or signature
+payloads to another path or origin. Independent media/skill HTTP clients retain
+their own policies. This boundary does not encrypt plain HTTP.
+
 ## Independent Multimodal Modules
 
 The Models page keeps the main text model separate from seven multimodal
