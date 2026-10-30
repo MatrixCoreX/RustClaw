@@ -10,7 +10,7 @@ pub(super) async fn handle_message(bot: Bot, msg: Message, state: BotState) -> a
         &payload,
     );
     let claim_response = claw_core::channel_event_admission::claim_channel_event(
-        &state.client,
+        &state.core_client,
         &state.clawd_base_url,
         &state.bot_token,
         &claim,
@@ -46,7 +46,7 @@ pub(super) async fn handle_message(bot: Bot, msg: Message, state: BotState) -> a
         },
     };
     let finish_result = claw_core::channel_event_admission::finish_channel_event(
-        &state.client,
+        &state.core_client,
         &state.clawd_base_url,
         &state.bot_token,
         &finish,
@@ -67,10 +67,11 @@ pub(super) async fn handle_message(bot: Bot, msg: Message, state: BotState) -> a
 
 async fn handle_claimed_message(bot: Bot, msg: Message, state: BotState) -> anyhow::Result<()> {
     let platform_user_id = msg
-        .from()
+        .from
+        .as_ref()
         .map(|u| i64::try_from(u.id.0).unwrap_or_default())
         .unwrap_or_default();
-    let platform_username = msg.from().and_then(|u| u.username.clone());
+    let platform_username = msg.from.as_ref().and_then(|u| u.username.clone());
     let platform_chat_id = msg.chat.id.0;
     let text = msg.text().or_else(|| msg.caption()).unwrap_or_default();
     let slash_command = state.command_catalog.match_command(text, "telegram");

@@ -429,8 +429,12 @@ function extractBindKeyCandidate(text, expectReply) {
   return null;
 }
 
+function fetchCore(apiPath, options = {}) {
+  return fetch(`${cfg.clawdBaseUrl}${apiPath}`, { ...options, redirect: "manual" });
+}
+
 async function resolveIdentity(externalUserId, externalChatId) {
-  const resp = await fetch(`${cfg.clawdBaseUrl}/v1/auth/channel/resolve`, {
+  const resp = await fetchCore("/v1/auth/channel/resolve", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -447,7 +451,7 @@ async function resolveIdentity(externalUserId, externalChatId) {
 }
 
 async function bindIdentity(externalUserId, externalChatId, userKey) {
-  const resp = await fetch(`${cfg.clawdBaseUrl}/v1/auth/channel/bind`, {
+  const resp = await fetchCore("/v1/auth/channel/bind", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -540,7 +544,7 @@ async function submitTask(
     messageId
   );
   const userKey = body.user_key;
-  const resp = await fetch(`${cfg.clawdBaseUrl}/v1/tasks`, {
+  const resp = await fetchCore("/v1/tasks", {
     method: "POST",
     headers: { "content-type": "application/json", "x-agent-key": userKey },
     body: JSON.stringify(body),
@@ -597,7 +601,7 @@ async function storePendingRequest(
     kind: "ask",
     payload: { text: prompt, adapter: "whatsapp_web" },
   };
-  const resp = await fetch(`${cfg.clawdBaseUrl}/v1/auth/channel/pending-request`, {
+  const resp = await fetchCore("/v1/auth/channel/pending-request", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -615,7 +619,7 @@ async function storePendingRequest(
 async function queryTask(taskId, identity) {
   const userKey = String(identity?.user_key || "").trim();
   const headers = userKey ? { "x-agent-key": userKey } : {};
-  const resp = await fetch(`${cfg.clawdBaseUrl}/v1/tasks/${taskId}`, { headers });
+  const resp = await fetchCore(`/v1/tasks/${taskId}`, { headers });
   const text = await resp.text();
   if (!resp.ok) {
     throw new Error(`query task http ${resp.status}: ${text}`);
@@ -644,7 +648,7 @@ async function pollTaskResult(taskId, waitSeconds, identity) {
 async function requestTaskDelivery(taskId, identity, background = false) {
   const userKey = String(identity?.user_key || "").trim();
   if (!userKey) throw new Error("channel_task_delivery_bound_key_missing");
-  const resp = await fetch(`${cfg.clawdBaseUrl}/v1/tasks/${taskId}/delivery`, {
+  const resp = await fetchCore(`/v1/tasks/${taskId}/delivery`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-agent-key": userKey },
     body: JSON.stringify({
@@ -1252,6 +1256,7 @@ module.exports = {
   normalizeInternalApiBaseUrl,
   parseListenAddress,
   queryTask,
+  requestTaskDelivery,
   resolveIdentity,
   stableUserId,
   submitTask,

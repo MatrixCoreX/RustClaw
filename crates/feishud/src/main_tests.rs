@@ -387,6 +387,9 @@ async fn feishu_pending_bind_requires_explicit_token() {
             },
         },
         client: Client::new(),
+        core_client: claw_core::channel_http::core_api_client_builder()
+            .build()
+            .unwrap(),
         token_cache: Arc::new(OpenPlatformTokenCache::default()),
         workspace_root: std::env::temp_dir(),
         pending_key_bind_by_chat: Arc::new(Mutex::new(std::collections::HashSet::new())),

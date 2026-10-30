@@ -690,6 +690,17 @@ agentctl -key add rk-xxxx admin
 agentctl -key disable rk-xxxx
 ```
 
+### Channel Core API Transport
+
+WeChat, Telegram, Feishu, Lark, WhatsApp Cloud and WhatsApp Web send internal
+core requests to their exact configured API endpoint without following HTTP
+redirects. Binding, event admission, task submission, polling, cancellation and
+terminal delivery do not forward credentials or replay mutations at a redirect
+target. Platform APIs and media downloads keep separate HTTP clients, so a
+normal media/CDN redirect is not disabled by this internal-API boundary.
+Configure the final API address, including HTTPS when applicable, rather than
+an alias that depends on a redirect.
+
 ### Telegram Transport Boundary
 
 Telegram is limited to message transport, identity binding, and task control. It no longer owns skill-specific configuration or natural-language routing:

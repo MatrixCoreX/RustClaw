@@ -121,7 +121,7 @@ pub(super) async fn resolve_telegram_identity(
         external_user_id: Some(platform_user_id.to_string()),
         external_chat_id: Some(platform_chat_id.to_string()),
     };
-    let resp = state.client.post(&url).json(&req).send().await?;
+    let resp = state.core_client.post(&url).json(&req).send().await?;
     let status = resp.status();
     let body: ApiResponse<ResolveChannelBindingResponse> = resp.json().await?;
     if !status.is_success() || !body.ok {
@@ -147,7 +147,7 @@ pub(super) async fn bind_telegram_identity(
         external_chat_id: Some(platform_chat_id.to_string()),
         user_key: user_key.trim().to_string(),
     };
-    let resp = state.client.post(&url).json(&req).send().await?;
+    let resp = state.core_client.post(&url).json(&req).send().await?;
     let status = resp.status();
     let body: ApiResponse<BindChannelKeyResponse> = resp.json().await?;
     if !status.is_success() {
@@ -211,7 +211,7 @@ pub(super) async fn store_pending_telegram_request(
         },
     };
     let url = format!("{}/v1/auth/channel/pending-request", state.clawd_base_url);
-    let response = state.client.post(url).json(&pending).send().await?;
+    let response = state.core_client.post(url).json(&pending).send().await?;
     let status = response.status();
     let body: ApiResponse<PendingChannelRequestStatus> = response.json().await?;
     if !status.is_success() || !body.ok {

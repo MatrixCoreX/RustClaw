@@ -82,6 +82,7 @@ struct AppState {
     language: String,
     command_catalog: Arc<ChannelCommandCatalog>,
     client: Client,
+    core_client: Client,
     api_base: String,
     access_token: String,
     app_secret: String,
@@ -210,6 +211,12 @@ async fn main() -> anyhow::Result<()> {
             ))
             .build()
             .context("build reqwest client failed")?,
+        core_client: claw_core::channel_http::core_api_client_builder()
+            .timeout(Duration::from_secs(
+                config.server.request_timeout_seconds.max(5),
+            ))
+            .build()
+            .context("build core API client failed")?,
         api_base: config.whatsapp.api_base.trim_end_matches('/').to_string(),
         access_token: config.whatsapp.access_token.clone(),
         app_secret: config.whatsapp.app_secret.clone(),
@@ -335,7 +342,7 @@ async fn forward_delivery_statuses(
         .get("x-hub-signature-256")
         .ok_or_else(|| anyhow!("x-hub-signature-256 missing"))?;
     let response = state
-        .client
+        .core_client
         .post(format!(
             "{}/v1/internal/channel-events/whatsapp-cloud",
             state.clawd_base_url
@@ -460,7 +467,7 @@ async fn resolve_whatsapp_identity(
         external_user_id: Some(wa_id.to_string()),
         external_chat_id: Some(wa_id.to_string()),
     };
-    let resp = state.client.post(&url).json(&req).send().await?;
+    let resp = state.core_client.post(&url).json(&req).send().await?;
     let status = resp.status();
     let body: ApiResponse<ResolveChannelBindingResponse> = resp.json().await?;
     if !status.is_success() || !body.ok {
@@ -485,7 +492,7 @@ async fn bind_whatsapp_identity(
         external_chat_id: Some(wa_id.to_string()),
         user_key: user_key.trim().to_string(),
     };
-    let resp = state.client.post(&url).json(&req).send().await?;
+    let resp = state.core_client.post(&url).json(&req).send().await?;
     let status = resp.status();
     let body: ApiResponse<BindChannelKeyResponse> = resp.json().await?;
     if !status.is_success() {
@@ -555,7 +562,7 @@ async fn store_pending_whatsapp_request(
     };
     let url = format!("{}/v1/auth/channel/pending-request", state.clawd_base_url);
     let response = state
-        .client
+        .core_client
         .post(url)
         .json(&PendingChannelRequestStoreRequest {
             idempotency_key,
@@ -596,7 +603,7 @@ async fn handle_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Res
         &payload,
     );
     let claim_response = claw_core::channel_event_admission::claim_channel_event(
-        &state.client,
+        &state.core_client,
         &state.clawd_base_url,
         &state.app_secret,
         &claim,
@@ -630,7 +637,7 @@ async fn handle_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Res
         },
     };
     let finish_result = claw_core::channel_event_admission::finish_channel_event(
-        &state.client,
+        &state.core_client,
         &state.clawd_base_url,
         &state.app_secret,
         &finish,
@@ -774,7 +781,7 @@ async fn handle_claimed_inbound_message(state: &AppState, msg: WaMessage) -> any
             expected_task_id,
         };
         let message_key = match claw_core::conversation_control::cancel_current_conversation_task(
-            &state.client,
+            &state.core_client,
             &state.clawd_base_url,
             &identity.user_key,
             &request,
@@ -1161,7 +1168,7 @@ async fn submit_task_only(
             },
         )
     });
-    let builder = state.client.post(&url);
+    let builder = state.core_client.post(&url);
     let resp = if let Some(conversation_request) = conversation_request.as_ref() {
         builder.json(conversation_request)
     } else {
@@ -1233,7 +1240,7 @@ async fn query_task_status(
     user_key: Option<&str>,
 ) -> anyhow::Result<TaskQueryResponse> {
     let url = format!("{}/v1/tasks/{task_id}", state.clawd_base_url);
-    let mut req = state.client.get(&url);
+    let mut req = state.core_client.get(&url);
     if let Some(user_key) = user_key.map(str::trim).filter(|v| !v.is_empty()) {
         req = req.header("X-Agent-Key", user_key);
     }
@@ -1443,7 +1450,7 @@ async fn request_unified_terminal_delivery(
         claw_core::channel_delivery::ChannelDeliverySource::ImmediateDaemon
     };
     let result = claw_core::channel_delivery_client::request_task_delivery_until_settled(
-        &state.client,
+        &state.core_client,
         &state.clawd_base_url,
         task_id,
         &user_key,

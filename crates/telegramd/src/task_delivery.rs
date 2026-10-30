@@ -238,7 +238,7 @@ async fn request_terminal_delivery_with_content(
         claw_core::channel_delivery::ChannelDeliverySource::ImmediateDaemon
     };
     match claw_core::channel_delivery_client::request_task_delivery_until_settled_with_content(
-        &state.client,
+        &state.core_client,
         &state.clawd_base_url,
         task_id,
         &user_key,
@@ -420,7 +420,7 @@ pub(super) async fn query_task_status(
     user_key: Option<&str>,
 ) -> anyhow::Result<TaskQueryResponse> {
     let url = format!("{}/v1/tasks/{task_id}", state.clawd_base_url);
-    let resp = maybe_with_user_key_header(state.client.get(&url), user_key)
+    let resp = maybe_with_user_key_header(state.core_client.get(&url), user_key)
         .send()
         .await
         .context("query task status failed")?;
@@ -578,8 +578,10 @@ pub(super) async fn submit_task_only(
             },
         )
     });
-    let builder =
-        maybe_with_user_key_header(state.client.post(&submit_url), user_key_header.as_deref());
+    let builder = maybe_with_user_key_header(
+        state.core_client.post(&submit_url),
+        user_key_header.as_deref(),
+    );
     let submit_resp = if let Some(request) = request.as_ref() {
         builder.json(request)
     } else {
@@ -710,7 +712,7 @@ pub(super) async fn cancel_tasks_for_chat(
     let auth_key =
         bound_user_key_for_chat(state, chat_id).context("telegram cancel identity is not bound")?;
     let receipt = claw_core::conversation_control::cancel_current_conversation_task(
-        &state.client,
+        &state.core_client,
         &state.clawd_base_url,
         &auth_key,
         &claw_core::conversation_control::CancelCurrentConversationTaskRequest {

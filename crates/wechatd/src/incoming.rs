@@ -111,7 +111,7 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
         &payload,
     );
     let claim_response = match claw_core::channel_event_admission::claim_channel_event(
-        &state.client,
+        &state.core_client,
         &state.config.clawd_base_url,
         &admission_secret,
         &claim,
@@ -150,7 +150,7 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
         outcome: inbound_finish_outcome(durable_handoff),
     };
     if let Err(error) = claw_core::channel_event_admission::finish_channel_event(
-        &state.client,
+        &state.core_client,
         &state.config.clawd_base_url,
         &admission_secret,
         &finish,
@@ -476,7 +476,7 @@ async fn handle_claimed_incoming_message(
                 .and_then(|task_id| task_id.parse().ok()),
         };
         let message_key = match claw_core::conversation_control::cancel_current_conversation_task(
-            &state.client,
+            &state.core_client,
             &state.config.clawd_base_url,
             &identity.user_key,
             &request,

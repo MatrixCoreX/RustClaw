@@ -103,6 +103,7 @@ fn lark_delivery_error_text(config: &LarkConfig, error_text: &str) -> String {
 struct AppState {
     config: LarkConfig,
     client: Client,
+    core_client: Client,
     /// Region/API/app-scoped tenant_access_token cache.
     token_cache: Arc<OpenPlatformTokenCache>,
     /// 工作区根目录（用于解析相对落盘路径）
@@ -434,6 +435,7 @@ async fn handle_incoming_lark_text(
 ) -> bool {
     let base = state.config.lark.clawd_base_url.clone();
     let client = state.client.clone();
+    let core_client = state.core_client.clone();
     let config = state.config.clone();
     let token_cache = state.token_cache.clone();
     let explicit_bind_candidate = extract_bind_key_candidate(text.trim(), false);
@@ -451,7 +453,7 @@ async fn handle_incoming_lark_text(
     let identity = match if explicit_bind_candidate.is_some() {
         Ok(None)
     } else {
-        resolve_lark_identity(&client, &base, &open_id, &chat_id).await
+        resolve_lark_identity(&core_client, &base, &open_id, &chat_id).await
     } {
         Ok(ident) => ident,
         Err(e) => {
@@ -491,7 +493,7 @@ async fn handle_incoming_lark_text(
     );
     let trimmed = text.trim();
     if let Some(bind_token) = extract_pending_bind_token_candidate(trimmed) {
-        match detect_pending_lark_bind(&client, &base, &open_id, &chat_id, &bind_token).await {
+        match detect_pending_lark_bind(&core_client, &base, &open_id, &chat_id, &bind_token).await {
             Ok(Some(bind_result)) => {
                 set_expect_key_reply(&state, &chat_id, false);
                 info!("larkd: pending bind finalized external_chat_id={}", chat_id);
@@ -571,7 +573,7 @@ async fn handle_incoming_lark_text(
             chat_id,
             candidate.len()
         );
-        match bind_lark_identity(&client, &base, &open_id, &chat_id, &candidate).await {
+        match bind_lark_identity(&core_client, &base, &open_id, &chat_id, &candidate).await {
             Ok(Some(bind_result)) => {
                 set_expect_key_reply(&state, &chat_id, false);
                 info!("larkd: bind success external_chat_id={}", chat_id);
@@ -664,6 +666,7 @@ async fn handle_incoming_lark_text(
 async fn handle_incoming_lark_media(state: AppState, ctx: LarkMediaCtx) -> bool {
     let base = state.config.lark.clawd_base_url.clone();
     let client = state.client.clone();
+    let core_client = state.core_client.clone();
     let config = state.config.clone();
     let token_cache = state.token_cache.clone();
     let workspace_root = state.workspace_root.clone();
@@ -673,19 +676,20 @@ async fn handle_incoming_lark_media(state: AppState, ctx: LarkMediaCtx) -> bool 
         ctx.message_type, ctx.chat_id, ctx.message_id
     );
 
-    let identity = match resolve_lark_identity(&client, &base, &ctx.open_id, &ctx.chat_id).await {
-        Ok(ident) => ident,
-        Err(e) => {
-            warn!("larkd: media binding resolve failed err={}", e);
-            let msg = lark_t(
-                &config,
-                LARK_I18N_IDENTITY_CHECK_UNAVAILABLE_KEY,
-                LARK_IDENTITY_CHECK_UNAVAILABLE_FALLBACK,
-            );
-            let _ = send_lark_text(&config, &client, &token_cache, &ctx.chat_id, &msg).await;
-            return false;
-        }
-    };
+    let identity =
+        match resolve_lark_identity(&core_client, &base, &ctx.open_id, &ctx.chat_id).await {
+            Ok(ident) => ident,
+            Err(e) => {
+                warn!("larkd: media binding resolve failed err={}", e);
+                let msg = lark_t(
+                    &config,
+                    LARK_I18N_IDENTITY_CHECK_UNAVAILABLE_KEY,
+                    LARK_IDENTITY_CHECK_UNAVAILABLE_FALLBACK,
+                );
+                let _ = send_lark_text(&config, &client, &token_cache, &ctx.chat_id, &msg).await;
+                return false;
+            }
+        };
 
     let Some(ident) = identity else {
         if let Err(error) = store_pending_lark_request(
@@ -852,7 +856,7 @@ async fn admit_and_dispatch_event(
     claim.provider_nonce = provider_nonce.map(ToString::to_string);
     claim.provider_timestamp = provider_timestamp;
     let response = claw_core::channel_event_admission::claim_channel_event(
-        &state.client,
+        &state.core_client,
         &state.config.lark.clawd_base_url,
         &state.config.lark.app_secret,
         &claim,
@@ -883,7 +887,7 @@ async fn admit_and_dispatch_event(
         },
     };
     claw_core::channel_event_admission::finish_channel_event(
-        &state.client,
+        &state.core_client,
         &state.config.lark.clawd_base_url,
         &state.config.lark.app_secret,
         &finish,
@@ -969,7 +973,7 @@ async fn handle_text_message_to_clawd(
             expected_task_id,
         };
         let receipt = match claw_core::conversation_control::cancel_current_conversation_task(
-            &state.client,
+            &state.core_client,
             &state.config.lark.clawd_base_url,
             auth_key,
             &request,
@@ -1022,6 +1026,7 @@ async fn handle_text_message_to_clawd(
     );
 
     let client = state.client.clone();
+    let core_client = state.core_client.clone();
     let config = state.config.clone();
     let token_cache = state.token_cache.clone();
     let poll_interval = Duration::from_millis(1500);
@@ -1071,7 +1076,7 @@ async fn handle_text_message_to_clawd(
                 },
             )
         });
-        let builder = client.post(&submit_url);
+        let builder = core_client.post(&submit_url);
         let submit_resp = match if let Some(request) = conversation_request.as_ref() {
             builder.json(request)
         } else {
@@ -1173,7 +1178,7 @@ async fn handle_text_message_to_clawd(
         let mut timeout_logged = false;
         loop {
             let url = format!("{}/v1/tasks/{}", clawd_base, task_id);
-            let mut req = client.get(&url);
+            let mut req = core_client.get(&url);
             if let Some(ref key) = user_key_poll {
                 let k = key.trim();
                 if !k.is_empty() {
@@ -1322,7 +1327,7 @@ async fn handle_text_message_to_clawd(
                 | TaskStatus::Timeout => {
                     request_unified_terminal_delivery(
                         "larkd",
-                        &client,
+                        &core_client,
                         &clawd_base,
                         &task_id,
                         user_key_poll.as_deref(),
@@ -1339,7 +1344,7 @@ async fn handle_text_message_to_clawd(
 
 async fn request_unified_terminal_delivery(
     daemon: &str,
-    client: &Client,
+    core_client: &Client,
     clawd_base: &str,
     task_id: &str,
     user_key: Option<&str>,
@@ -1358,7 +1363,11 @@ async fn request_unified_terminal_delivery(
         claw_core::channel_delivery::ChannelDeliverySource::ImmediateDaemon
     };
     match claw_core::channel_delivery_client::request_task_delivery_until_settled(
-        client, clawd_base, task_id, user_key, source,
+        core_client,
+        clawd_base,
+        task_id,
+        user_key,
+        source,
     )
     .await
     {
@@ -1840,11 +1849,15 @@ async fn main() -> anyhow::Result<()> {
     let client = Client::builder()
         .timeout(Duration::from_secs(config.lark.request_timeout_seconds))
         .build()?;
+    let core_client = claw_core::channel_http::core_api_client_builder()
+        .timeout(Duration::from_secs(config.lark.request_timeout_seconds))
+        .build()?;
 
     let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let state = AppState {
         config: config.clone(),
         client: client.clone(),
+        core_client,
         token_cache: Arc::new(OpenPlatformTokenCache::default()),
         workspace_root,
         pending_key_bind_by_chat: Arc::new(Mutex::new(HashSet::new())),

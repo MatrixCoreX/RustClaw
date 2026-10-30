@@ -114,7 +114,7 @@ pub(super) async fn store_pending_feishu_request(
         payload: json!({ "text": prompt }),
     };
     let response = state
-        .client
+        .core_client
         .post(format!(
             "{}/v1/auth/channel/pending-request",
             state.config.feishu.clawd_base_url.trim_end_matches('/')

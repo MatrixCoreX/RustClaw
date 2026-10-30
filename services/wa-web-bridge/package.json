@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "test": "node test.js"
+    "test": "node --test test.js redirect-tests.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.18",

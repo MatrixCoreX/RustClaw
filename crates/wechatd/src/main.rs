@@ -193,6 +193,7 @@ struct State {
     workspace_root: PathBuf,
     config: WechatSection,
     client: Client,
+    core_client: Client,
     status: Arc<RwLock<WechatRuntimeStatus>>,
     status_path: Arc<PathBuf>,
     session_path: Arc<PathBuf>,
@@ -518,11 +519,17 @@ async fn main() -> anyhow::Result<()> {
             config.wechat.request_timeout_seconds.max(5),
         ))
         .build()?;
+    let core_client = claw_core::channel_http::core_api_client_builder()
+        .timeout(Duration::from_secs(
+            config.wechat.request_timeout_seconds.max(5),
+        ))
+        .build()?;
     let persisted_session = load_session_file(&session_path);
     let state = State {
         workspace_root: workspace_root.clone(),
         config: config.wechat.clone(),
         client,
+        core_client,
         status: Arc::new(RwLock::new(starting)),
         status_path,
         session_path: Arc::new(session_path),

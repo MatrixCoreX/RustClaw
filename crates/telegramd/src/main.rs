@@ -54,6 +54,7 @@ struct BotState {
     clawd_base_url: String,
     workspace_root: PathBuf,
     client: Client,
+    core_client: Client,
     poll_interval_ms: u64,
     task_wait_seconds: u64,
     update_mode: String,
@@ -218,7 +219,11 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let selected_bot = telegram_runtime_bots.remove(0);
-    let state = build_bot_state(&config, &selected_bot, client, &workspace_root);
+    let core_client = claw_core::channel_http::core_api_client_builder()
+        .timeout(Duration::from_secs(config.server.request_timeout_seconds))
+        .build()
+        .context("build core API client failed")?;
+    let state = build_bot_state(&config, &selected_bot, client, core_client, &workspace_root);
     run_telegram_bot_runtime(state).await
 }
 
@@ -226,6 +231,7 @@ fn build_bot_state(
     config: &AppConfig,
     bot_config: &ResolvedTelegramBotConfig,
     client: Client,
+    core_client: Client,
     workspace_root: &Path,
 ) -> BotState {
     let i18n_path = resolve_i18n_path(&bot_config.language, &bot_config.i18n_path);
@@ -267,6 +273,7 @@ fn build_bot_state(
         clawd_base_url: clawd_base_url_from_config(config),
         workspace_root: workspace_root.to_path_buf(),
         client,
+        core_client,
         poll_interval_ms: config.worker.poll_interval_ms,
         task_wait_seconds: bot_config.task_delivery_timeout_seconds.max(1),
         update_mode: config.telegram.update_mode.clone(),

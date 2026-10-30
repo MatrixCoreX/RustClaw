@@ -630,6 +630,14 @@ agentctl -key add rk-xxxx admin
 agentctl -key disable rk-xxxx
 ```
 
+### 通信端内部 API 传输
+
+微信、Telegram、飞书、Lark、WhatsApp Cloud 和 WhatsApp Web 的内部核心请求
+只访问配置的准确 API 地址，不跟随 HTTP 重定向。绑定、事件准入、任务提交、
+轮询、取消和终态投送不会向跳转目标转发凭据或重放变更请求。平台 API 与媒体
+下载使用独立的 HTTP 客户端，这项内部 API 限制不影响正常的媒体/CDN 跳转。
+请直接配置最终 API 地址（需要时包含 HTTPS），不要使用依赖跳转的别名地址。
+
 ### Telegram 通信端边界
 
 Telegram 只承担消息传输、身份绑定和任务控制，不再维护技能专属配置或自然语言路由：

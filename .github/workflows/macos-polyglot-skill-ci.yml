@@ -11,6 +11,12 @@ name: Polyglot Skill macOS CI
       - "configs/skills_registry.toml"
       - "crates/claw-core/**"
       - "crates/clawcli/**"
+      - "crates/wechatd/**"
+      - "crates/telegramd/**"
+      - "crates/feishud/**"
+      - "crates/larkd/**"
+      - "crates/whatsappd/**"
+      - "services/wa-web-bridge/**"
       - "crates/clawd/**"
       - "crates/skill-runner/**"
       - "crates/skill-sdk/**"
@@ -50,6 +56,12 @@ name: Polyglot Skill macOS CI
       - "configs/skills_registry.toml"
       - "crates/claw-core/**"
       - "crates/clawcli/**"
+      - "crates/wechatd/**"
+      - "crates/telegramd/**"
+      - "crates/feishud/**"
+      - "crates/larkd/**"
+      - "crates/whatsappd/**"
+      - "services/wa-web-bridge/**"
       - "crates/clawd/**"
       - "crates/skill-runner/**"
       - "crates/skill-sdk/**"
@@ -169,6 +181,14 @@ jobs:
       - name: Test CLI transport and task continuity
         shell: bash
         run: cargo test -p clawcli
+
+      - name: Test channel core transport and delivery
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p claw-core -p wechatd -p telegramd -p feishud -p larkd -p whatsappd
+          npm ci --ignore-scripts --prefix services/wa-web-bridge
+          npm test --prefix services/wa-web-bridge
 
       - name: Check shared runtime integration
         shell: bash

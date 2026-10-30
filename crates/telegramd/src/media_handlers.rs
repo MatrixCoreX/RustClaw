@@ -305,7 +305,7 @@ pub(super) async fn store_pending_telegram_attachment(
         }),
     };
     let response = state
-        .client
+        .core_client
         .post(format!(
             "{}/v1/auth/channel/pending-request",
             state.clawd_base_url

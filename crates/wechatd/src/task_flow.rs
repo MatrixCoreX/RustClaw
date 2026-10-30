@@ -512,7 +512,7 @@ pub(super) async fn submit_wechat_task_with_payload(
             "{}/v1/conversation-inputs/client-task",
             state.config.clawd_base_url.trim_end_matches('/')
         );
-        let mut builder = state.client.post(&submit_url).json(&request);
+        let mut builder = state.core_client.post(&submit_url).json(&request);
         if let Some(key) = user_key
             .as_deref()
             .map(str::trim)
@@ -578,7 +578,7 @@ pub(super) async fn submit_wechat_task_with_payload(
             state.config.clawd_base_url.trim_end_matches('/')
         );
         let submit_resp = match state
-            .client
+            .core_client
             .post(&submit_url)
             .json(&submit_req)
             .send()
@@ -648,7 +648,7 @@ pub(super) async fn submit_wechat_task_with_payload(
             state.config.clawd_base_url.trim_end_matches('/'),
             task_id
         );
-        let mut req = state.client.get(&url);
+        let mut req = state.core_client.get(&url);
         if let Some(ref key) = user_key {
             let k = key.trim();
             if !k.is_empty() {
@@ -834,7 +834,7 @@ async fn request_unified_terminal_delivery(
     // durable dispatch in `query_required`. Keep only a bounded local connect
     // deadline here; provider requests retain their own operation timeouts and the
     // delivery lease heartbeat remains authoritative for the overall lifetime.
-    let delivery_client = match reqwest::Client::builder()
+    let delivery_client = match claw_core::channel_http::core_api_client_builder()
         .connect_timeout(Duration::from_secs(10))
         .build()
     {

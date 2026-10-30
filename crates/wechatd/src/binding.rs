@@ -89,7 +89,7 @@ pub(super) async fn ensure_bound_before_task(
         Ok(None)
     } else {
         resolve_wechat_identity(
-            &state.client,
+            &state.core_client,
             &state.config.clawd_base_url,
             from_user_id,
             &scope.storage_key(),
@@ -108,7 +108,7 @@ pub(super) async fn ensure_bound_before_task(
         // Read-only compatibility for bindings created before account-scoped
         // conversation IDs. New writes always use the scoped key.
         resolve_wechat_identity(
-            &state.client,
+            &state.core_client,
             &state.config.clawd_base_url,
             from_user_id,
             from_user_id,
@@ -135,7 +135,7 @@ pub(super) async fn ensure_bound_before_task(
             .or_else(|| extract_bind_key_candidate(trimmed, expect_key_reply))
         {
             match bind_wechat_identity(
-                &state.client,
+                &state.core_client,
                 &state.config.clawd_base_url,
                 from_user_id,
                 &scope.storage_key(),
@@ -262,7 +262,7 @@ async fn store_pending_wechat_request(
         }),
     };
     let response = state
-        .client
+        .core_client
         .post(format!(
             "{}/v1/auth/channel/pending-request",
             state.config.clawd_base_url.trim_end_matches('/')
