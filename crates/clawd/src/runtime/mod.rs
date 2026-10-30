@@ -2,6 +2,7 @@ pub(crate) mod ask_state;
 mod llm_cost;
 mod llm_cost_ledger;
 pub(crate) mod policy;
+mod provider_outcome;
 pub(crate) mod provider_runtime;
 pub(crate) mod state;
 pub(crate) mod types;

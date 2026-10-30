@@ -1,6 +1,28 @@
 pub const PROVIDER_WAIT_RECOVERY_ACTION: &str = "wait_background";
 pub const PROVIDER_WAIT_RESUME_ENTRYPOINT: &str = "next_planner_round";
 pub const PROVIDER_WAIT_RESUME_REASON: &str = "provider_blocker_wait_background";
+pub const PROVIDER_QUOTA_TERMINATED: &str = "provider_quota_exhausted";
+
+pub fn is_terminal_quota_lifecycle(lifecycle: &serde_json::Value) -> bool {
+    use serde_json::Value;
+
+    lifecycle.get("schema_version").and_then(Value::as_u64) == Some(1)
+        && lifecycle.get("state").and_then(Value::as_str) == Some("failed")
+        && lifecycle.get("reason_code").and_then(Value::as_str) == Some(PROVIDER_QUOTA_TERMINATED)
+        && lifecycle.get("retryable").and_then(Value::as_bool) == Some(false)
+        && lifecycle
+            .pointer("/provider_status/external_provider_blocked")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && lifecycle
+            .pointer("/provider_status/status_code")
+            .and_then(Value::as_str)
+            .and_then(ProviderFailureClass::from_str)
+            == Some(ProviderFailureClass::QuotaExhausted)
+}
+
+#[path = "provider_failure_notice.rs"]
+mod notice;
 
 #[cfg(test)]
 #[path = "provider_failure_policy_tests.rs"]
@@ -59,12 +81,9 @@ impl ProviderFailureClass {
 
     pub const fn policy(self) -> ProviderFailurePolicy {
         match self {
-            Self::QuotaExhausted => ProviderFailurePolicy::background_wait(
-                self,
-                false,
-                3 * 60 * 60,
-                "provider.quota_exhausted",
-            ),
+            Self::QuotaExhausted => {
+                ProviderFailurePolicy::terminal(self, "provider.quota_exhausted")
+            }
             Self::RateLimited => {
                 ProviderFailurePolicy::background_wait(self, true, 60, "provider.rate_limited")
             }
@@ -90,6 +109,13 @@ impl ProviderFailureClass {
 
     pub const fn background_wait_seconds(self) -> Option<u64> {
         self.policy().retry_after_seconds
+    }
+
+    pub fn terminal_notice_text(self) -> Option<&'static str> {
+        match self {
+            Self::QuotaExhausted => Some(notice::quota_exhausted()),
+            _ => None,
+        }
     }
 }
 

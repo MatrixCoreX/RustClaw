@@ -930,6 +930,14 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
     ) {
         terminal_result = machine_reply_result;
     }
+    let quota_lifecycle = terminal_result
+        .get("task_lifecycle")
+        .or_else(|| terminal_result.pointer("/task_journal/summary/task_lifecycle"))
+        .filter(|lifecycle| {
+            db_status == "failed"
+                && claw_core::provider_failure_policy::is_terminal_quota_lifecycle(lifecycle)
+        })
+        .cloned();
     let Some(result_obj) = terminal_result.as_object_mut() else {
         return Ok(false);
     };
@@ -956,6 +964,25 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
             "resume_executor_result_projection": projection,
         }),
     );
+
+    if let Some(quota_lifecycle) = quota_lifecycle {
+        for field in [
+            "reason_code",
+            "message_key",
+            "retryable",
+            "provider_status",
+            "can_poll",
+            "can_cancel",
+            "terminal_reason",
+        ] {
+            if let Some(value) = quota_lifecycle.get(field) {
+                result_obj["task_lifecycle"]
+                    .as_object_mut()
+                    .unwrap()
+                    .insert(field.to_string(), value.clone());
+            }
+        }
+    }
 
     let updated_result_json = terminal_result.to_string();
     drop(db);
@@ -991,6 +1018,13 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
             claim_attempt
         ],
     )?;
+    if changed > 0
+        && claw_core::provider_failure_policy::is_terminal_quota_lifecycle(
+            &terminal_result["task_lifecycle"],
+        )
+    {
+        state.clear_task_provider_outcome(task_id);
+    }
     Ok(changed > 0)
 }
 

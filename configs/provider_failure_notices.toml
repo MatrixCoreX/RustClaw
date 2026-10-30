@@ -1,0 +1,3 @@
+schema_version = 1
+locale = "en-US"
+quota_exhausted = "API quota exhausted. Task terminated."

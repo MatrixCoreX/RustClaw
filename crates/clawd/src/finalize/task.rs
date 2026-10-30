@@ -21,8 +21,8 @@ mod task_failure_lifecycle;
 mod task_memory;
 #[path = "task_payload_helpers.rs"]
 mod task_payload_helpers;
-#[path = "task_provider_wait.rs"]
-mod task_provider_wait;
+#[path = "task_provider_outcome.rs"]
+mod task_provider_outcome;
 #[path = "task_resume.rs"]
 mod task_resume;
 #[path = "task_runtime_failure_payload.rs"]
@@ -64,7 +64,7 @@ use task_payload_helpers::{
     answer_verifier_should_force_task_failure, ask_result_payload, non_failure_final_status,
     normalize_existing_file_delivery_token_answer,
 };
-use task_provider_wait::record_provider_wait_checkpoint;
+use task_provider_outcome::record_provider_wait_checkpoint;
 pub(crate) use task_resume::{
     answer_verifier_retry_answer_has_required_machine_evidence,
     preserve_verified_delivery_tokens_after_retry, retry_answer_after_verifier,
@@ -540,6 +540,11 @@ pub(crate) async fn finalize_ask_result(
             if let Some(answer_journal) = answer.task_journal.as_ref() {
                 journal.merge_from(answer_journal);
             }
+            if task_provider_outcome::finalize_if_exhausted(state, task, payload, &mut journal)
+                .await?
+            {
+                return Ok(());
+            }
             if journal_has_checkpointed_nonterminal_lifecycle(&journal) {
                 let answer_text = crate::intercept_response_text_for_delivery(&answer.text);
                 let answer_messages = answer
@@ -576,6 +581,11 @@ pub(crate) async fn finalize_ask_result(
             let mut failure_reply = answer.should_fail_task;
             let missing_file_delivery_reply =
                 missing_file_delivery_reply_text(state, task, prompt, route_result, &answer).await;
+            if task_provider_outcome::finalize_if_exhausted(state, task, payload, &mut journal)
+                .await?
+            {
+                return Ok(());
+            }
             let (mut answer_text, mut answer_messages) = if failure_reply {
                 (
                     crate::intercept_response_text_for_delivery(&answer.text),
@@ -734,6 +744,11 @@ pub(crate) async fn finalize_ask_result(
                         }
                     }
                 }
+            }
+            if task_provider_outcome::finalize_if_exhausted(state, task, payload, &mut journal)
+                .await?
+            {
+                return Ok(());
             }
             if crate::answer_verifier::checkpoint_unavailable_verification(
                 state,
@@ -972,6 +987,11 @@ pub(crate) async fn finalize_ask_result(
                 );
                 return Ok(());
             }
+            if task_provider_outcome::finalize_if_exhausted(state, task, payload, &mut journal)
+                .await?
+            {
+                return Ok(());
+            }
             if let Some(cost_blocker) = state.task_cost_blocker(&task.task_id) {
                 let checkpoint_id =
                     record_cost_wait_checkpoint(state, task, &mut journal, &cost_blocker);
@@ -1191,6 +1211,11 @@ pub(crate) async fn finalize_ask_result(
                 return Ok(());
             }
             let user_error = compose_ask_failure_user_message(state, task, prompt, &err_text).await;
+            if task_provider_outcome::finalize_if_exhausted(state, task, payload, &mut journal)
+                .await?
+            {
+                return Ok(());
+            }
             journal.record_runtime_llm_metrics(state, &task.task_id);
             journal.record_final_answer(&user_error);
             crate::finalize::ensure_task_metrics(&mut journal, &user_error, &[]);

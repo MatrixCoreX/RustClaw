@@ -900,6 +900,14 @@ fn checkpoint_handoff_reply(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> AskReply {
+    if super::provider_quota_failure::is_quota_stop(loop_state) {
+        return super::provider_quota_failure::reply(
+            task,
+            user_text,
+            loop_state,
+            agent_run_context,
+        );
+    }
     let mut journal = crate::finalize::build_from_loop_state(
         task,
         user_text,

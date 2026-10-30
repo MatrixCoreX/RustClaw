@@ -635,10 +635,9 @@ pub(crate) struct TaskMetricsRegistry {
     pub(crate) llm_cost_budget_per_task:
         Arc<Mutex<HashMap<String, crate::runtime::LlmCostBudgetSnapshot>>>,
     pub(crate) cost_blocker_per_task: Arc<Mutex<HashMap<String, TaskCostBlocker>>>,
-    /// Final machine-classified provider blocker for the current task attempt. This is only set
-    /// after the complete fallback set is exhausted and is consumed by finalization to create a
-    /// resumable waiting checkpoint.
-    pub(crate) provider_blocker_per_task: Arc<Mutex<HashMap<String, TaskProviderBlocker>>>,
+    /// Final provider outcome after fallback exhaustion: recoverable wait or terminal quota.
+    pub(crate) provider_outcome_per_task:
+        Arc<Mutex<HashMap<String, super::provider_outcome::TaskProviderOutcome>>>,
     /// Task-scoped provider overrides reuse one validated runtime so HTTP,
     /// concurrency, latency, and circuit-breaker state remain coherent for the
     /// complete task. Entries are removed with the other per-task LLM state.
@@ -1660,31 +1659,6 @@ impl AppState {
             .unwrap_or_default()
     }
 
-    pub(crate) fn note_task_provider_blocker(&self, task_id: &str, blocker: TaskProviderBlocker) {
-        self.metrics
-            .provider_blocker_per_task
-            .lock()
-            .unwrap()
-            .insert(task_id.to_string(), blocker);
-    }
-
-    pub(crate) fn task_provider_blocker(&self, task_id: &str) -> Option<TaskProviderBlocker> {
-        self.metrics
-            .provider_blocker_per_task
-            .lock()
-            .unwrap()
-            .get(task_id)
-            .cloned()
-    }
-
-    pub(crate) fn clear_task_provider_blocker(&self, task_id: &str) {
-        self.metrics
-            .provider_blocker_per_task
-            .lock()
-            .unwrap()
-            .remove(task_id);
-    }
-
     pub(crate) fn clear_task_llm_call_count(&self, task_id: &str) {
         self.metrics
             .llm_calls_per_task
@@ -1714,7 +1688,7 @@ impl AppState {
         self.clear_task_llm_cost_records(task_id);
         self.clear_task_llm_cost_budget(task_id);
         self.clear_task_cost_blocker(task_id);
-        self.clear_task_provider_blocker(task_id);
+        self.clear_task_provider_outcome(task_id);
     }
 
     pub(crate) fn get_skills_registry(&self) -> Option<Arc<SkillsRegistry>> {

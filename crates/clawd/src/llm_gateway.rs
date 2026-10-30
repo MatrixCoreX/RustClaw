@@ -9,6 +9,7 @@ use crate::providers::build_llm_http_client;
 use crate::providers::client::ProviderErrorKind;
 use crate::runtime::TaskProviderBlocker;
 use crate::{AppState, ClaimedTask, LlmProviderRuntime};
+pub(crate) use claw_core::provider_failure_policy::PROVIDER_QUOTA_TERMINATED;
 use claw_core::skill_registry::{SkillResourceClass, SkillResourceRequest};
 
 #[path = "llm_gateway_model_turn.rs"]
@@ -719,6 +720,9 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
     hints: crate::ChatRequestHints,
     providers: Vec<Arc<LlmProviderRuntime>>,
 ) -> Result<String, String> {
+    if state.task_provider_quota_exhausted(&task.task_id).is_some() {
+        return Err(PROVIDER_QUOTA_TERMINATED.to_string());
+    }
     let _prompt_debug_enabled = state.policy.routing.debug_log_prompt;
     if providers.is_empty() {
         return Err("No available LLM provider configured".to_string());
@@ -771,6 +775,8 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
     let mut any_provider_attempted = false;
     let mut attempted_provider_count = 0_u64;
     let mut context_length_error_count = 0_u64;
+    let mut quota_error_count = 0_u64;
+    let mut quota_provider = None;
     let mut selected_provider_count = 0_u64;
     let mut skipped_providers: Vec<(String, u64)> = Vec::new();
     let mut recoverable_provider_blocker: Option<TaskProviderBlocker> = None;
@@ -1062,6 +1068,10 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                 return Ok(cleaned_text);
             }
             Err(err) => {
+                if err.kind == ProviderErrorKind::QuotaExhausted {
+                    quota_error_count = quota_error_count.saturating_add(1);
+                    quota_provider = Some(provider.config.name.clone());
+                }
                 if err.kind == ProviderErrorKind::ContextLengthExceeded {
                     context_length_error_count = context_length_error_count.saturating_add(1);
                 }
@@ -1223,6 +1233,13 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
     }
     if attempted_provider_count > 0 && context_length_error_count == attempted_provider_count {
         return Err(CONTEXT_LENGTH_EXCEEDED_ERR.to_string());
+    }
+    if attempted_provider_count > 0 && quota_error_count == attempted_provider_count {
+        if skipped_providers.is_empty() {
+            state.note_task_provider_quota_exhausted(&task.task_id, quota_provider.unwrap());
+            return Err(PROVIDER_QUOTA_TERMINATED.to_string());
+        }
+        recoverable_provider_blocker = provider_circuit_wait_blocker(&skipped_providers);
     }
     if let Some(blocker) = recoverable_provider_blocker {
         state.note_task_provider_blocker(&task.task_id, blocker);

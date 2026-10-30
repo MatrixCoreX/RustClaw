@@ -9,6 +9,10 @@ pub(super) fn checkpoint_blocked_model_error(
     task: &ClaimedTask,
     loop_state: &mut LoopState,
 ) -> Result<bool, String> {
+    if super::provider_quota_failure::mark_if_exhausted(state, task, loop_state) {
+        ensure_task_running(state, task)?;
+        return Ok(true);
+    }
     let (reason, source, status_key, status, message_key, retry_after, kind) =
         if let Some(blocker) = state.task_cost_blocker(&task.task_id) {
             (

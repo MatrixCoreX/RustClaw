@@ -14,6 +14,27 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
     clamp_child_task_budget_policy(task, &mut task_budget_policy);
     let mut loop_state = LoopState::new();
     super::seed_loop_state_for_agent_run(&mut loop_state, agent_run_context, resume_checkpoint);
+    if let Some(provider) =
+        resume_checkpoint.and_then(crate::agent_engine::provider_quota_failure::checkpoint_provider)
+    {
+        if let Some(metrics) = resume_checkpoint
+            .and_then(|checkpoint| checkpoint.boundary_context.get("task_llm_metrics"))
+        {
+            state.restore_task_llm_metrics_from_checkpoint(&task.task_id, metrics);
+        }
+        state.restore_task_llm_call_count_from_cost_ledger(&task.task_id);
+        state.note_task_provider_quota_exhausted(&task.task_id, provider);
+    }
+    if crate::agent_engine::provider_quota_failure::mark_if_exhausted(state, task, &mut loop_state)
+    {
+        ensure_task_running(state, task)?;
+        return Ok(checkpoint_handoff_reply(
+            task,
+            user_text,
+            &loop_state,
+            agent_run_context,
+        ));
+    }
     loop_state
         .task_observations
         .extend(initial_task_observations.iter().cloned());
@@ -274,7 +295,9 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                 }
             }
         }
-        if loop_state_has_checkpoint_handoff(&loop_state) {
+        if loop_state_has_checkpoint_handoff(&loop_state)
+            || crate::agent_engine::provider_quota_failure::is_quota_stop(&loop_state)
+        {
             return Ok(checkpoint_handoff_reply(
                 task,
                 &effective_user_text,

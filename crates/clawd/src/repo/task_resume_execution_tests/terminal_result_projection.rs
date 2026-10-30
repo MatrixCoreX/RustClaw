@@ -567,6 +567,93 @@ fn failed_seeded_loop_projection_keeps_latest_journal_instead_of_checkpoint() {
 }
 
 #[test]
+fn quota_seeded_failure_projection_retains_terminal_notice_authority_without_a_resume_checkpoint() {
+    let state = state_with_tasks_table();
+    let now = 9_000;
+    let task_id = "terminal-quota-failure";
+    let checkpoint_id = "ckpt-terminal-quota-failure";
+    let seed = terminal_projection_seed(
+        task_id,
+        checkpoint_id,
+        "executing_planner_resume",
+        "run_seeded_agent_loop",
+        "seeded_loop_requires_provider_window",
+        "ready_to_run_seeded_agent_loop",
+        "seeded_loop_failed",
+        now,
+    );
+    insert_task(&state, task_id, "running", Some(&seed), now);
+    activate_resume_owner(&state, task_id, checkpoint_id, now, now + 30);
+    claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
+        &state,
+        task_id,
+        checkpoint_id,
+        "executing_planner_resume",
+        "run_seeded_agent_loop",
+        "seeded_loop_requires_provider_window",
+        "ready_to_run_seeded_agent_loop",
+        "seeded_loop_failed",
+        now + 1,
+        10,
+    )
+    .unwrap()
+    .unwrap();
+    let lifecycle = json!({"schema_version":1,"state":"failed",
+        "reason_code":claw_core::provider_failure_policy::PROVIDER_QUOTA_TERMINATED,
+        "message_key":"provider.quota_exhausted", "retryable":false,"can_cancel":false,
+        "provider_status":{"status_code":"quota_exhausted","external_provider_blocked":true}});
+    let text = claw_core::provider_failure_policy::ProviderFailureClass::QuotaExhausted
+        .terminal_notice_text()
+        .unwrap();
+    let mut journal = crate::task_journal::TaskJournal::for_task(task_id, "ask", "fixture");
+    journal.record_task_lifecycle(lifecycle.clone());
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
+    journal.record_llm_calls_per_task(2);
+    let final_result = journal.attach_to_result(json!({"text":text}));
+    let payload = json!({"schema_version":1,"task_id":task_id,"checkpoint_id":checkpoint_id,
+        "executor_state":"executing_planner_resume","executor_action":"run_seeded_agent_loop",
+        "executor_status":"seeded_loop_requires_provider_window", "dispatch_state":"ready_to_run_seeded_agent_loop",
+        "executor_result_status":"seeded_loop_failed", "result_projection_state":"project_seeded_loop_failed",
+        "error_code":"seeded_loop_answer_marked_failed", "message_key":"clawd.task.seeded_loop_answer_marked_failed",
+        "failure_result_json":final_result});
+    state.note_task_provider_quota_exhausted(task_id, "fixture".into());
+    assert!(
+        record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal(
+            &state,
+            CLAIM_ATTEMPT,
+            task_id,
+            checkpoint_id,
+            "executing_planner_resume",
+            "run_seeded_agent_loop",
+            "seeded_loop_requires_provider_window",
+            "ready_to_run_seeded_agent_loop",
+            "seeded_loop_failed",
+            &payload,
+            now + 2
+        )
+        .unwrap()
+    );
+    let (status, _, result) = stored_task_status_error_result(&state, task_id);
+    assert_eq!(status, "failed");
+    assert_eq!(result["text"], text);
+    assert_eq!(
+        crate::visible_text::quota_terminal_notice(Some(&result)),
+        Some(text)
+    );
+    assert_eq!(
+        result["task_lifecycle"]["provider_status"],
+        lifecycle["provider_status"]
+    );
+    assert!(result["task_checkpoint"].is_null());
+    assert!(result["task_journal"]["summary"]["task_checkpoint"].is_null());
+    assert_eq!(
+        result["task_journal"]["summary"]["task_metrics"]["llm_calls_per_task"],
+        2
+    );
+    assert!(state.task_provider_quota_exhausted(task_id).is_none());
+}
+
+#[test]
 fn terminal_dispatch_result_projection_updates_task_status_with_machine_payload() {
     let state = state_with_tasks_table();
     let now = 9_000;

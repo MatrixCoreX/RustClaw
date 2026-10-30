@@ -82,6 +82,79 @@ fn failed_terminal_content_uses_common_locale_not_raw_error() {
 }
 
 #[test]
+fn confirmed_quota_terminal_content_is_english_without_generic_failure_wrapping() {
+    let state = AppState::test_default_with_fixture_provider();
+    let lifecycle = quota_lifecycle();
+    for locale in ["zh-CN", "en-US", "ja", "es", "und"] {
+        let record = record(
+            "failed",
+            Some(serde_json::json!({"task_lifecycle": lifecycle})),
+        );
+        let mut payload: Value = serde_json::from_str(&record.task.payload_json).unwrap();
+        payload["channel_ingress"]["locale"] = serde_json::json!(locale);
+        let (text, notice) =
+            terminal_delivery_content(&state, &record, &payload, TaskStatus::Failed);
+        assert_eq!(text, "API quota exhausted. Task terminated.");
+        assert!(notice.is_none());
+    }
+}
+
+#[test]
+fn quota_words_or_nonquota_machine_fields_do_not_select_the_fixed_notice() {
+    let state = AppState::test_default_with_fixture_provider();
+    let quota = quota_lifecycle();
+    for result in [
+        None,
+        Some(serde_json::json!({"text":"API quota exhausted. Task terminated."})),
+    ] {
+        let record = record("failed", result);
+        let payload: Value = serde_json::from_str(&record.task.payload_json).unwrap();
+        let (text, notice) =
+            terminal_delivery_content(&state, &record, &payload, TaskStatus::Failed);
+        assert_ne!(text, "API quota exhausted. Task terminated.");
+        assert!(notice.is_some());
+    }
+    for (field, value) in [
+        ("/state", serde_json::json!("waiting")),
+        ("/reason_code", serde_json::json!("provider_unavailable")),
+        ("/retryable", serde_json::json!(true)),
+        (
+            "/provider_status/status_code",
+            serde_json::json!("rate_limited"),
+        ),
+        (
+            "/provider_status/external_provider_blocked",
+            serde_json::json!(false),
+        ),
+    ] {
+        let mut lifecycle = quota.clone();
+        *lifecycle.pointer_mut(field).unwrap() = value;
+        let record = record(
+            "failed",
+            Some(serde_json::json!({"task_lifecycle":lifecycle})),
+        );
+        let payload: Value = serde_json::from_str(&record.task.payload_json).unwrap();
+        let (text, notice) =
+            terminal_delivery_content(&state, &record, &payload, TaskStatus::Failed);
+        assert_ne!(text, "API quota exhausted. Task terminated.");
+        assert!(notice.is_some());
+    }
+}
+
+fn quota_lifecycle() -> Value {
+    serde_json::json!({
+        "schema_version": 1,
+        "state": "failed",
+        "reason_code": claw_core::provider_failure_policy::PROVIDER_QUOTA_TERMINATED,
+        "retryable": false,
+        "provider_status": {
+            "status_code": "quota_exhausted",
+            "external_provider_blocked": true
+        }
+    })
+}
+
+#[test]
 fn failed_terminal_content_delivers_sanitized_protocol_failure_reason() {
     let state = AppState::test_default_with_fixture_provider();
     let record = record(

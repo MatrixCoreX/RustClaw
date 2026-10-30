@@ -136,7 +136,6 @@ fn payload(output: &Output) -> Value {
 #[test]
 fn fixture_reads_nonblocking_accepted_streams_as_bounded_blocking_connections() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.set_nonblocking(true).unwrap();
     let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
     let (mut accepted, _) = listener.accept().unwrap();
     accepted.set_nonblocking(true).unwrap();

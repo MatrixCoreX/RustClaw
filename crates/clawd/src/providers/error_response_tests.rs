@@ -17,6 +17,9 @@ use super::super::client::{
 };
 use super::*;
 
+#[path = "quota_gateway_tests.rs"]
+mod quota_gateway_tests;
+
 fn runtime(name: &str, protocol: &str, base_url: &str) -> Arc<LlmProviderRuntime> {
     Arc::new(LlmProviderRuntime {
         config: LlmProviderConfig {
@@ -128,7 +131,7 @@ fn normalized_error_retains_evidence_but_not_raw_body_in_message() {
     .unwrap();
     assert_eq!(error.kind, ProviderErrorKind::QuotaExhausted);
     assert!(!error.retryable);
-    assert_eq!(error.background_wait_seconds(), Some(10_800));
+    assert_eq!(error.background_wait_seconds(), None);
     assert!(!error.message.contains("opaque"));
     assert!(error.raw_response.unwrap().contains("2056"));
 }

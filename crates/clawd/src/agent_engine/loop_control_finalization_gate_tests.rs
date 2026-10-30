@@ -446,7 +446,8 @@ async fn model_quota_at_verifier_and_planner_boundaries_keeps_evidence() {
     )
     .await;
     assert_eq!(calls.load(Ordering::SeqCst), 1);
-    assert!(state.task_provider_blocker(&task.task_id).is_some());
+    assert!(state.task_provider_blocker(&task.task_id).is_none());
+    assert!(state.task_provider_quota_exhausted(&task.task_id).is_some());
     assert!(
         !accepted,
         "a missing quota-blocked verifier is not an acceptance"
@@ -490,13 +491,18 @@ async fn model_quota_at_verifier_and_planner_boundaries_keeps_evidence() {
         &[],
     )
     .await
-    .expect("quota returns a nonterminal handoff, not a state-losing error");
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    .expect("quota returns a terminal handoff without losing prior evidence");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert!(continued.should_fail_task);
+    assert_eq!(continued.text, "API quota exhausted. Task terminated.");
     let journal = continued.task_journal.unwrap();
-    assert_eq!(journal.task_lifecycle.as_ref().unwrap()["state"], "waiting");
-    let checkpoint = journal.task_checkpoint.unwrap();
+    assert_eq!(journal.task_lifecycle.as_ref().unwrap()["state"], "failed");
+    assert!(journal.task_checkpoint.is_none());
+    assert_eq!(journal.step_results.len(), 1);
+    let snapshot = journal.answer_verification_checkpoint.unwrap();
+    let checkpoint = &snapshot["task_checkpoint"];
     assert_eq!(checkpoint["budget"]["tool_calls"], 1);
-    assert_eq!(checkpoint["budget"]["round"], 3);
+    assert_eq!(checkpoint["budget"]["round"], 2);
     assert_eq!(
         checkpoint["completed_side_effect_refs"],
         json!(["fixture-write"])
@@ -506,6 +512,4 @@ async fn model_quota_at_verifier_and_planner_boundaries_keeps_evidence() {
             ["output"],
         json!(prior.executed_step_results[0].output)
     );
-    assert!(!continued.should_fail_task);
-    assert!(continued.text.is_empty());
 }

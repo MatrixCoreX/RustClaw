@@ -27,6 +27,8 @@ pub(crate) use loop_state_seed::session_alias_bindings_from_context_summary;
 mod media_artifact_plan;
 mod model_blocker_checkpoint;
 pub(crate) mod mutation_ledger;
+mod provider_quota_failure;
+pub(crate) use provider_quota_failure::checkpoint_reply as quota_checkpoint_reply;
 mod task_plan_reconciliation;
 mod workspace_action_revision;
 pub(crate) use mutation_ledger::{

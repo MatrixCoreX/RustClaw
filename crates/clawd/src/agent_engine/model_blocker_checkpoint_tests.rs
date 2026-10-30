@@ -63,12 +63,96 @@ fn block(state: &AppState, task: &ClaimedTask) {
         &task.task_id,
         crate::TaskProviderBlocker {
             provider: "fixture".to_string(),
-            status_code: "quota_exhausted".to_string(),
+            status_code: "rate_limited".to_string(),
             retry_after_seconds: 4500,
             external_provider_blocked: true,
-            message_key: "provider.quota_exhausted".to_string(),
+            message_key: "provider.rate_limited".to_string(),
         },
     );
+}
+
+#[test]
+fn quota_failure_preserves_completed_results_without_a_resume_checkpoint() {
+    let (state, task, mut loop_state) = fixture();
+    let results = loop_state.capability_results.clone();
+    let steps = loop_state.executed_step_results.len();
+    state.note_task_provider_quota_exhausted(&task.task_id, "fixture-provider".into());
+    assert!(checkpoint_blocked_model_error(&state, &task, &mut loop_state).unwrap());
+    assert!(loop_state.task_checkpoint.is_none());
+    let lifecycle = loop_state.task_lifecycle.as_ref().unwrap();
+    assert_eq!(lifecycle["state"], "failed");
+    assert_eq!(lifecycle["retryable"], false);
+    assert!(lifecycle.get("next_check_after").is_none());
+    assert_eq!(loop_state.capability_results, results);
+    assert_eq!(loop_state.executed_step_results.len(), steps);
+    let reply =
+        crate::agent_engine::provider_quota_failure::reply(&task, "继续执行", &loop_state, None);
+    assert!(reply.should_fail_task);
+    assert!(!reply.is_llm_reply);
+    assert_eq!(reply.text, "API quota exhausted. Task terminated.");
+    assert_eq!(
+        reply.task_journal.as_ref().unwrap().capability_results,
+        results
+    );
+    assert_eq!(state.task_llm_call_count(&task.task_id), 0);
+}
+
+#[test]
+fn only_verified_quota_wait_checkpoint_is_reclassified_as_terminal() {
+    let (state, task, mut loop_state) = fixture();
+    block(&state, &task);
+    assert!(checkpoint_blocked_model_error(&state, &task, &mut loop_state).unwrap());
+    let mut checkpoint: crate::task_lifecycle::TaskCheckpoint =
+        serde_json::from_value(loop_state.task_checkpoint.unwrap()).unwrap();
+    assert!(
+        crate::agent_engine::provider_quota_failure::checkpoint_provider(&checkpoint).is_none()
+    );
+    checkpoint.boundary_context["provider_status"]["status_code"] = json!("quota_exhausted");
+    checkpoint.boundary_context["provider_status"]["provider_error_class"] =
+        json!("quota_exhausted");
+    assert_eq!(
+        crate::agent_engine::provider_quota_failure::checkpoint_provider(&checkpoint).as_deref(),
+        Some("fixture")
+    );
+    checkpoint.boundary_context["resume_reason"] = json!("resource_admission_wait");
+    assert!(
+        crate::agent_engine::provider_quota_failure::checkpoint_provider(&checkpoint).is_none()
+    );
+}
+
+#[tokio::test]
+async fn historical_quota_checkpoint_ends_without_replaying_or_calling_a_model() {
+    let (state, task, mut loop_state) = fixture();
+    for _ in 0..2 {
+        state.note_task_llm_call_with_label_and_prompt_size(&task.task_id, "plan", 10);
+    }
+    block(&state, &task);
+    assert!(checkpoint_blocked_model_error(&state, &task, &mut loop_state).unwrap());
+    let mut checkpoint: crate::task_lifecycle::TaskCheckpoint =
+        serde_json::from_value(loop_state.task_checkpoint.unwrap()).unwrap();
+    checkpoint.boundary_context["provider_status"]["status_code"] = json!("quota_exhausted");
+    checkpoint.boundary_context["provider_status"]["provider_error_class"] =
+        json!("quota_exhausted");
+    state.clear_task_llm_call_count(&task.task_id);
+    assert_eq!(state.task_llm_call_count(&task.task_id), 0);
+    let reply = crate::agent_engine::run_agent_with_tools_seeded(
+        &state,
+        &task,
+        "continue",
+        "continue",
+        None,
+        &checkpoint,
+        &[],
+    )
+    .await
+    .unwrap();
+    assert!(reply.should_fail_task);
+    assert_eq!(reply.text, "API quota exhausted. Task terminated.");
+    let journal = reply.task_journal.unwrap();
+    assert_eq!(journal.capability_results, checkpoint.capability_results);
+    assert!(journal.task_checkpoint.is_none());
+    assert_eq!(journal.task_lifecycle.unwrap()["state"], "failed");
+    assert_eq!(state.task_llm_call_count(&task.task_id), 2);
 }
 
 #[test]
@@ -108,10 +192,7 @@ fn provider_wait_retains_execution_evidence_and_resume_fingerprints() {
     assert!(checkpoint_blocked_model_error(&state, &task, &mut loop_state).unwrap());
     let lifecycle = loop_state.task_lifecycle.as_ref().unwrap();
     assert_eq!(lifecycle["state"], "waiting");
-    assert_eq!(
-        lifecycle["provider_status"]["status_code"],
-        "quota_exhausted"
-    );
+    assert_eq!(lifecycle["provider_status"]["status_code"], "rate_limited");
     assert!(lifecycle["next_check_after"].as_i64().unwrap() >= before + 4500);
     let checkpoint: crate::task_lifecycle::TaskCheckpoint =
         serde_json::from_value(loop_state.task_checkpoint.clone().unwrap()).unwrap();

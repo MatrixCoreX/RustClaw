@@ -51,10 +51,17 @@ pub(crate) fn sanitize_channel_failure_reason(text: &str) -> String {
 pub(crate) fn sanitize_task_query_response_for_delivery(
     mut task: TaskQueryResponse,
 ) -> TaskQueryResponse {
-    let structured_reason = matches!(task.status, TaskStatus::Failed | TaskStatus::Timeout)
-        .then(|| structured_task_failure_detail(task.result_json.as_ref()))
-        .flatten()
-        .map(|detail| detail.reason);
+    let structured_reason = if matches!(task.status, TaskStatus::Failed) {
+        quota_terminal_notice(task.result_json.as_ref()).map(str::to_string)
+    } else {
+        None
+    }
+    .or_else(|| {
+        matches!(task.status, TaskStatus::Failed | TaskStatus::Timeout)
+            .then(|| structured_task_failure_detail(task.result_json.as_ref()))
+            .flatten()
+            .map(|detail| detail.reason)
+    });
     task.error_text = structured_reason.or_else(|| {
         task.error_text.take().and_then(|error_text| {
             let sanitized = sanitize_user_visible_text(&error_text);
@@ -63,6 +70,16 @@ pub(crate) fn sanitize_task_query_response_for_delivery(
         })
     });
     task
+}
+
+pub(crate) fn quota_terminal_notice(result: Option<&Value>) -> Option<&'static str> {
+    use claw_core::provider_failure_policy::{is_terminal_quota_lifecycle, ProviderFailureClass};
+
+    let lifecycle = result?.get("task_lifecycle")?;
+    if !is_terminal_quota_lifecycle(lifecycle) {
+        return None;
+    }
+    ProviderFailureClass::QuotaExhausted.terminal_notice_text()
 }
 
 pub(crate) fn structured_task_failure_detail(

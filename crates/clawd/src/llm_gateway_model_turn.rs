@@ -50,6 +50,9 @@ pub(crate) async fn run_native_model_turn_with_fallback(
     prompt_source: &str,
     request: &ModelTurnRequest,
 ) -> Result<Option<ModelTurnResponse>, String> {
+    if state.task_provider_quota_exhausted(&task.task_id).is_some() {
+        return Err(super::PROVIDER_QUOTA_TERMINATED.to_string());
+    }
     let task_providers = state.task_llm_providers(task);
     if !task_providers
         .iter()
@@ -104,6 +107,8 @@ pub(crate) async fn run_native_model_turn_with_fallback(
     let mut recoverable_blocker = None;
     let mut attempted_provider_count = 0_u64;
     let mut context_length_error_count = 0_u64;
+    let mut quota_error_count = 0_u64;
+    let mut quota_provider = None;
     let mut skipped_providers = Vec::new();
     let model_event_index = Arc::new(AtomicU64::new(0));
     let conversation_interrupt = state.worker.model_turn_interrupt_token(&task.task_id);
@@ -295,6 +300,10 @@ pub(crate) async fn run_native_model_turn_with_fallback(
                 return Ok(Some(output.turn));
             }
             Err(err) => {
+                if err.kind == ProviderErrorKind::QuotaExhausted {
+                    quota_error_count = quota_error_count.saturating_add(1);
+                    quota_provider = Some(provider.config.name.clone());
+                }
                 if err.kind == ProviderErrorKind::ContextLengthExceeded {
                     context_length_error_count = context_length_error_count.saturating_add(1);
                 }
@@ -364,6 +373,14 @@ pub(crate) async fn run_native_model_turn_with_fallback(
     if attempted_provider_count == 0 {
         recoverable_blocker = super::provider_circuit_wait_blocker(&skipped_providers);
     }
+    if attempted_provider_count > 0 && quota_error_count == attempted_provider_count {
+        if skipped_providers.is_empty() {
+            state.note_task_provider_quota_exhausted(&task.task_id, quota_provider.unwrap());
+            recoverable_blocker = None;
+        } else {
+            recoverable_blocker = super::provider_circuit_wait_blocker(&skipped_providers);
+        }
+    }
     if let Some(blocker) = recoverable_blocker {
         state.note_task_provider_blocker(&task.task_id, blocker);
     }
@@ -373,6 +390,9 @@ pub(crate) async fn run_native_model_turn_with_fallback(
         call_started_at.elapsed().as_millis() as u64,
     );
     stop_llm_task_lease_heartbeat(&mut heartbeat_stop);
+    if state.task_provider_quota_exhausted(&task.task_id).is_some() {
+        return Err(super::PROVIDER_QUOTA_TERMINATED.to_string());
+    }
     if attempted_provider_count > 0 && context_length_error_count == attempted_provider_count {
         return Err(super::CONTEXT_LENGTH_EXCEEDED_ERR.to_string());
     }

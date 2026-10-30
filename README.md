@@ -87,7 +87,7 @@ preview summaries report truncation and provide scoped recall references.
 Retained argument evidence keeps safe locators separately from summaries and
 marks complete fields explicitly; incomplete arguments are never passed off as exact.
 Stale read cursors return bounded argument-replanning facts rather than replaying
-the source task. Failure explanations remain model-authored, including requested
+the source task. Ordinary failure explanations remain model-authored, including requested
 public JSON, without exposing nested internal error wrappers.
 Multi-part channel delivery retries explicitly retryable rejected parts without
 replaying accepted parts or tool execution. Unchanged verification checkpoints
@@ -95,6 +95,14 @@ resume verification only. UI/CLI display the three facts separately; ambiguous
 sends require an owner decision and snapshot check before retry, with manual
 confirmation distinct from provider proof. See [context and recovery](docs/architecture/03-task-state-context.md)
 and [delivery recovery](docs/architecture/11-task-artifact-delivery.md).
+
+Confirmed model/API quota exhaustion is the single fixed-notice exception:
+`quota_exhausted` ends the task as failed without a waiting checkpoint, automatic
+retry, or another model call to explain the error. The English notice is
+`API quota exhausted. Task terminated.`, defined once in
+`configs/provider_failure_notices.toml`. Completed execution evidence is retained.
+Temporary rate limits, network failures and resource-capacity waits keep their
+recoverable policies; other failure and reply handling is unchanged.
 
 A malformed or internally contradictory verifier audit is a verification-protocol
 failure, not proof that completed work failed. It follows the bounded

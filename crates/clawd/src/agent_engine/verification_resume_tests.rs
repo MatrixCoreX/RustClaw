@@ -95,6 +95,7 @@ fn verification_checkpoint_clones_share_the_private_snapshot() {
 
 #[tokio::test]
 async fn provider_recovery_resumes_persisted_verification_without_replaying_tools() {
+    use axum::response::IntoResponse;
     use std::sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
@@ -110,10 +111,10 @@ async fn provider_recovery_resumes_persisted_verification_without_replaying_tool
             // A planner call would contain tools; only the verifier is permitted.
             assert!(body.get("tools").is_none());
             if !ready.load(Ordering::SeqCst) {
-                return (axum::http::StatusCode::TOO_MANY_REQUESTS,axum::Json(json!({"error":{"code":"insufficient_quota","type":"insufficient_quota"}})));
+                return (axum::http::StatusCode::TOO_MANY_REQUESTS, [("retry-after", "60")], axum::Json(json!({"error":{"code":"rate_limit_exceeded","type":"rate_limit_error"}}))).into_response();
             }
             let verdict=json!({"operation_checks":[],"output_field_checks":[],"pass":true,"missing_evidence_fields":[],"answer_incomplete_reason":"","should_retry":false,"retry_instruction":"","confidence":0.99});
-            (axum::http::StatusCode::OK,axum::Json(json!({"choices":[{"message":{"role":"assistant","content":verdict.to_string()},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":10,"total_tokens":20}})))
+            (axum::http::StatusCode::OK,axum::Json(json!({"choices":[{"message":{"role":"assistant","content":verdict.to_string()},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":10,"total_tokens":20}}))).into_response()
         }
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

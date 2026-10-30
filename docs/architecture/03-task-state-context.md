@@ -36,6 +36,12 @@ attempt. Only accepted verification publishes the candidate. Rewritten answers r
 explicit acceptance. Private checkpoint clones share an immutable snapshot rather
 than copying its full JSON tree.
 
+Confirmed model/API quota exhaustion is terminal rather than recoverable provider
+waiting. The task fails with the sole fixed English operational notice from
+`configs/provider_failure_notices.toml`; no error composer or model retry runs.
+Completed evidence remains available. This exception does not apply to temporary
+rate limiting, transport failures, local budgets or resource-capacity waits.
+
 Invalid responses include schema failures and internally contradictory operation
 audits, such as an audit claiming success while marking the same observed method
 as blocked. The host classifies these as `answer_verifier_response_invalid`;
@@ -117,7 +123,8 @@ or compacted evidence do not grant automatic retry.
 Failure state is independent from its presentation. The model may explain a
 failure in the user's language or return explicitly requested JSON. Structured
 JSON is bounded and checked for credentials, internal payloads and nested error
-wrappers; the response-contract validator still applies. If presentation is
+wrappers; the response-contract validator still applies. Except for the confirmed
+API quota exhaustion notice described above, if presentation is
 unavailable, the runtime emits a flat public machine record rather than a raw
 provider body or fixed language-specific sentence. Completed actions stay
 completed and remaining actions stay paused.
@@ -173,6 +180,8 @@ flowchart TD
     A3 --> E
     E --> F{Budget / provider / async state}
     F -->|continue| E
+    F -->|confirmed API quota exhausted| Q[Fail with fixed English quota notice]
+    Q --> M
     F -->|waiting / background / checkpoint_requeue| G[Persist TaskBudgetSlice + checkpoint]
     G --> H[Release exact worker claim]
     H --> I{Resume due?}
@@ -183,6 +192,7 @@ flowchart TD
     LV -->|yes| VV[Retry answer verification only]
     LV -->|no| E
     VV -->|passed| M
+    VV -->|confirmed API quota exhausted| Q
     VV -->|provider wait / invalid response retries remaining| G
     VV -->|invalid response retries exhausted / non-retryable| N
     VV -->|rejected or instruction changed| E

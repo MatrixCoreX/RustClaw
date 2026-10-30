@@ -204,10 +204,10 @@ fn short_retry_never_overrides_the_provider_cooldown() {
         &task.task_id,
         crate::TaskProviderBlocker {
             provider: "fixture".into(),
-            status_code: "quota_exhausted".into(),
+            status_code: "rate_limited".into(),
             retry_after_seconds: 900,
             external_provider_blocked: true,
-            message_key: "provider.quota_exhausted".into(),
+            message_key: "provider.rate_limited".into(),
         },
     );
     let mut journal = TaskJournal::for_task(&task.task_id, "ask", "fixture");

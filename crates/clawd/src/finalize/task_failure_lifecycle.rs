@@ -12,6 +12,19 @@ pub(super) fn failed_task_lifecycle_payload(err_text: &str) -> Value {
         "can_cancel": false,
         "failure_attribution": failure_attribution,
     });
+    if err_text == claw_core::provider_failure_policy::PROVIDER_QUOTA_TERMINATED {
+        payload["reason_code"] =
+            json!(claw_core::provider_failure_policy::PROVIDER_QUOTA_TERMINATED);
+        payload["message_key"] = json!("provider.quota_exhausted");
+        payload["failure_attribution"] = json!("provider_error");
+        payload["retryable"] = json!(false);
+        payload["terminal_reason"] = json!(
+            crate::task_lifecycle::TerminalFailureReason::ProviderWindowExhausted.status_code()
+        );
+        payload["provider_status"] = json!({"status_code":"quota_exhausted", "provider_error_class":"quota_exhausted",
+            "external_provider_blocked":true, "retry_policy":"none", "retryable":false});
+        return payload;
+    }
     if let Some(terminal_reason) = terminal_failure_reason_for_error(err_text, &failure_attribution)
     {
         payload["terminal_reason"] = json!(terminal_reason);

@@ -323,6 +323,12 @@ fn terminal_delivery_content(
     payload: &Value,
     status: TaskStatus,
 ) -> (String, Option<ChannelNotice>) {
+    if matches!(status, TaskStatus::Failed) {
+        if let Some(text) = crate::visible_text::quota_terminal_notice(record.result_json.as_ref())
+        {
+            return (text.to_string(), None);
+        }
+    }
     let locale = payload
         .pointer("/channel_ingress/locale")
         .and_then(Value::as_str)

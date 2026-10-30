@@ -77,12 +77,18 @@ Agent Runtime 主自然语言路径使用接近 Codex / Claude 的 agent loop。
 同会话历史引用可通过 `task_control.recall_context` 重新鉴权回查，能力索引支持绑定快照的
 有界分页；预览摘要明确标记截断状态并提供同作用域回查引用。参数证据与摘要分开保留
 安全定位符，并明确标记完整字段，不把不完整参数冒充精确历史。失效游标通过有界参数重规划
-恢复，不重跑源任务；失败说明交给模型生成，支持用户要求的公开 JSON，不暴露多层内部
+恢复，不重跑源任务；普通失败说明交给模型生成，支持用户要求的公开 JSON，不暴露多层内部
 错误包装。多部分通信端投送只重试
 明确可重试的拒绝项，不重复已接受部分或工具执行。内容未变的验证 checkpoint 只重试验证；
 UI/CLI 分开显示三种状态。结果不明的投送须由当前用户确认，并核对快照后才能补发，
 用户确认不会冒充平台送达证明。详见[上下文与恢复](docs/architecture/03-task-state-context.zh-CN.md)
 和[投送恢复](docs/architecture/11-task-artifact-delivery.zh-CN.md)。
+
+确认模型/API 额度耗尽是唯一的固定通知例外：结构化 `quota_exhausted` 会把任务结束为
+失败，不进入等待 checkpoint、不自动重试，也不再请求模型解释错误。统一使用英文
+`API quota exhausted. Task terminated.`，只在 `configs/provider_failure_notices.toml`
+定义一次，保留已经完成的执行证据。临时限速、网络故障和资源容量等待保留可恢复策略；
+其他错误和正常回复处理保持不变。
 
 验证器返回格式错误或内部自相矛盾的审计时，属于验证协议失败，不代表已经完成的工作失败。
 此时走有界的验证专用 checkpoint；重试耗尽后等待用户处理。有规范能力结果时，终态合成

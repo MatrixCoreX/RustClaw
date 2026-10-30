@@ -21,6 +21,12 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
         state.restore_task_llm_metrics_from_checkpoint(&claimed.task_id, metrics);
     }
 
+    // Quota termination must precede attachment providers and context compaction.
+    if let Some(result) =
+        crate::agent_engine::quota_checkpoint_reply(state, &claimed.task, &claimed.task_checkpoint)
+    {
+        return Ok(finish_seeded_dispatch_result(state, claimed, result));
+    }
     let mut payload: Value = serde_json::from_str(&claimed.task.payload_json)?;
     let resume_input = load_resume_steering_input(state, &claimed.task_id, &claimed.checkpoint_id)?;
     if let Some(resume_input) = resume_input.as_ref() {
@@ -77,7 +83,7 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
         stored_checkpoint_action.is_some(),
         pending_conversation_input
     );
-    let mut result = if let Some(stored_action) = stored_checkpoint_action {
+    let result = if let Some(stored_action) = stored_checkpoint_action {
         let replay_checkpoint =
             checkpoint_with_action_replay_binding(state, &claimed.task_checkpoint, &stored_action)?;
         let output_contract = stored_action
@@ -130,6 +136,14 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
         )
         .await
     };
+    Ok(finish_seeded_dispatch_result(state, claimed, result))
+}
+
+fn finish_seeded_dispatch_result(
+    state: &AppState,
+    claimed: &repo::ClaimedDispatchedPausedCheckpointResumeExecution,
+    mut result: Result<crate::AskReply, String>,
+) -> Option<Value> {
     if let Ok(answer) = &mut result {
         if let Some(journal) = answer.task_journal.as_mut() {
             journal.record_runtime_llm_metrics(state, &claimed.task_id);
@@ -153,11 +167,11 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
                     crate::now_ts_u64().min(i64::MAX as u64) as i64,
                 );
             state.clear_task_provider_blocker(&claimed.task_id);
-            return Ok(payload);
+            return payload;
         }
     }
 
-    Ok(super::runtime_support::seeded_agent_loop_terminal_dispatch_result_payload(claimed, result))
+    super::runtime_support::seeded_agent_loop_terminal_dispatch_result_payload(claimed, result)
 }
 
 fn validate_checkpoint_action_for_replay(

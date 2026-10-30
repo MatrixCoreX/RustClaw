@@ -7,6 +7,75 @@ use super::{
 use claw_core::skill_registry::SkillsRegistry;
 use std::sync::{Arc, RwLock};
 
+#[tokio::test]
+async fn historical_quota_dispatch_terminates_before_input_materialization_and_model_preparation() {
+    let mut state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    state.core.llm_providers.clear();
+    state.seed_ask_task_row("quota-resume-dispatch", 7, 11, r#"{"text":"继续执行"}"#);
+    let task = crate::repo::claim_next_task(&state).unwrap().unwrap();
+    let checkpoint_id = "quota-checkpoint";
+    let checkpoint = crate::task_lifecycle::TaskCheckpoint {
+        schema_version: 1,
+        checkpoint_id: checkpoint_id.into(),
+        boundary_context: json!({"resume_reason":"provider_blocker_wait_background",
+            "provider_status":{"provider":"fixture","status_code":"quota_exhausted","external_provider_blocked":true},
+            "task_llm_metrics":{"schema_version":1,"llm_calls":2,"llm_elapsed_ms":1,"by_prompt":{},"call_sequence":[]}}),
+        last_successful_round: None,
+        last_successful_step: None,
+        pending_action: None,
+        observations: vec![],
+        capability_results: vec![],
+        evidence_refs: vec![],
+        artifact_refs: vec![],
+        completed_side_effect_refs: vec![],
+        budget: crate::task_lifecycle::CheckpointBudgetCounters {
+            round: 1,
+            step: 0,
+            llm_calls: 2,
+            tool_calls: 0,
+            elapsed_ms: 1,
+            llm_elapsed_ms: 1,
+            tool_elapsed_ms: 0,
+        },
+        attempt_ledger: None,
+        pending_async_job: None,
+        repair_signal: None,
+        resume_entrypoint: crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound,
+    };
+    let claimed = crate::repo::ClaimedDispatchedPausedCheckpointResumeExecution {
+        task: task.clone(),
+        task_id: task.task_id.clone(),
+        checkpoint_id: checkpoint_id.into(),
+        executor_state: "executing_planner_resume".into(),
+        executor_action: "run_seeded_agent_loop".into(),
+        executor_status: "seeded_loop_requires_provider_window".into(),
+        dispatch_state: "ready_to_run_seeded_agent_loop".into(),
+        dispatch_execution_state: "claimed_to_run_seeded_agent_loop".into(),
+        resume_trigger: "worker_recovery".into(),
+        resume_directive: "run_next_planner_round".into(),
+        lease_expires_at: 100,
+        handoff_claim_expires_at: 90,
+        dispatch_claim_expires_at: 80,
+        execution_plan: json!({}),
+        dispatch_payload: json!({}),
+        dispatch_claim: json!({}),
+        task_checkpoint: checkpoint,
+    };
+    let result = super::execute_seeded_agent_loop_dispatch_result(&state, &claimed)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(result["executor_result_status"], "seeded_loop_failed");
+    let failure = &result["failure_result_json"];
+    assert_eq!(failure["text"], "API quota exhausted. Task terminated.");
+    assert_eq!(
+        failure["task_journal"]["summary"]["task_metrics"]["llm_calls_per_task"],
+        2
+    );
+    assert!(failure["task_journal"]["summary"]["task_checkpoint"].is_null());
+    assert_eq!(state.task_llm_call_count(&task.task_id), 2);
+}
+
 fn resource_replay_test_state() -> crate::AppState {
     let root = std::env::temp_dir().join(format!(
         "agent-runtime-resource-replay-{}-{}",

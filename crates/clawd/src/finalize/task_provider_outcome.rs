@@ -1,11 +1,57 @@
 use serde_json::{json, Value};
 
-use claw_core::provider_failure_policy::PROVIDER_WAIT_RESUME_REASON;
+use claw_core::provider_failure_policy::{
+    ProviderFailureClass, PROVIDER_QUOTA_TERMINATED, PROVIDER_WAIT_RESUME_REASON,
+};
 
 use crate::task_lifecycle::{
     CheckpointBudgetCounters, ResumeEntrypoint, TaskCheckpoint, TaskLifecycleState,
 };
 use crate::{AppState, ClaimedTask, TaskProviderBlocker};
+
+pub(super) async fn finalize_if_exhausted(
+    state: &AppState,
+    task: &ClaimedTask,
+    payload: &Value,
+    journal: &mut crate::task_journal::TaskJournal,
+) -> anyhow::Result<bool> {
+    if state.task_provider_quota_exhausted(&task.task_id).is_none() {
+        return Ok(false);
+    }
+    let text = ProviderFailureClass::QuotaExhausted
+        .terminal_notice_text()
+        .expect("quota_terminal_notice_missing");
+    journal.task_checkpoint = None;
+    journal.record_task_lifecycle(super::failed_task_lifecycle_payload(
+        PROVIDER_QUOTA_TERMINATED,
+    ));
+    journal.record_final_stop_signal(PROVIDER_QUOTA_TERMINATED);
+    journal.final_failure_attribution = Some("provider_error".to_string());
+    journal.record_runtime_llm_metrics(state, &task.task_id);
+    journal.record_final_answer(text);
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
+    crate::finalize::ensure_task_metrics(journal, text, &[]);
+    super::finalize_ask_failure(
+        state,
+        task,
+        payload,
+        text,
+        &[],
+        PROVIDER_QUOTA_TERMINATED,
+        journal,
+    )
+    .await?;
+    crate::log_ask_transition(
+        state,
+        &task.task_id,
+        Some(crate::AskState::Finalizing),
+        crate::AskState::Failed,
+        PROVIDER_QUOTA_TERMINATED,
+        None,
+    );
+    state.clear_task_llm_call_count(&task.task_id);
+    Ok(true)
+}
 
 pub(super) fn record_provider_wait_checkpoint(
     state: &AppState,
