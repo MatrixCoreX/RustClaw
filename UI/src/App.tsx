@@ -1342,6 +1342,8 @@ export default function App() {
     apiFetch,
     t,
     uiAuthReady,
+    requestScope: activeUiRequestScope,
+    isAdminIdentity,
     onConfigRefresh: async () => {
       await fetchFeishuConfig();
     },
@@ -1361,6 +1363,8 @@ export default function App() {
     apiFetch,
     t,
     uiAuthReady,
+    requestScope: activeUiRequestScope,
+    isAdminIdentity,
     platform: "lark",
     onConfigRefresh: async () => {
       await fetchLarkConfig();

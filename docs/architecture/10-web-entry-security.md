@@ -142,6 +142,18 @@ status, and the settle-delay continuation checks ownership before proceeding.
 An accepted sign-out remains accepted if the secondary status read fails. These
 UI boundaries do not change the bridge's account model or backend permissions.
 
+Feishu/Lark binding and reset require an authenticated administrator scope and
+the matching platform/session. Scope changes discard obsolete local sessions
+and QR images; delayed response bodies, encoders and confirmation callbacks
+cannot update the new owner's view or launch follow-up reads. Each platform
+serializes conflicting start/reset commands, including an open reset confirmation,
+without blocking the other platform. A failed explicit start/reset retains the
+last known session and resumes its existing polling cadence. Confirmed binding
+or reset is independent of secondary configuration/health reads: both refreshes
+are attempted while still owned, and neither can replay the primary operation.
+These frontend checks do not replace server authorization or registration
+idempotency, and do not imply automatic retry of a failed registration poll.
+
 ```mermaid
 flowchart TD
     A[Channel admin control] --> B{Current authenticated scope}
