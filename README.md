@@ -726,6 +726,11 @@ Configure the final provider or relay API base URL. A 3xx response remains a
 structured provider failure, not a second request to another address. Platform
 and media/CDN clients keep their independent redirect policies.
 
+Saving global model settings or provider keys and running a connection test
+require a server-verified administrator identity, including when no new key is
+supplied. Authenticated read-only model/catalog queries remain available; normal
+agent requests do not gain model-configuration permissions.
+
 ### Telegram Transport Boundary
 
 Telegram is limited to message transport, identity binding, and task control. It no longer owns skill-specific configuration or natural-language routing:

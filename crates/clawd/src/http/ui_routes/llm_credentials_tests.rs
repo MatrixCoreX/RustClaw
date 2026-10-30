@@ -137,11 +137,8 @@ async fn llm_credentials_non_admin_cannot_save_or_test_keys() {
             .await,
         ];
         for (status, Json(body)) in responses {
-            assert_eq!(status, StatusCode::BAD_REQUEST);
-            assert_eq!(
-                body.error.as_deref(),
-                Some("vendor_api_key_private_store_not_allowed")
-            );
+            assert_eq!(status, StatusCode::FORBIDDEN);
+            assert_eq!(body.error.as_deref(), Some("admin_required"));
         }
         assert_eq!(
             std::fs::read(root.join("configs/config.toml")).unwrap(),

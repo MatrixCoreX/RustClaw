@@ -836,12 +836,9 @@ models = ["MiniMax-M3", "MiniMax-M2.7"]
     )
     .await;
 
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(status, StatusCode::FORBIDDEN);
     assert!(!body.ok);
-    assert_eq!(
-        body.error.as_deref(),
-        Some("vendor_api_key_private_store_not_allowed")
-    );
+    assert_eq!(body.error.as_deref(), Some("admin_required"));
 }
 
 #[tokio::test]

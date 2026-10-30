@@ -60,6 +60,15 @@ implicitly on macOS. Missing sandbox support fails closed with a structured
 unsupported result rather than silently falling back to unrestricted
 execution.
 
+## Model Control Plane
+
+Global text/multimodal configuration writes, provider-key updates and draft
+connection tests require the shared server-owned administrator check before
+reading credentials, writing files or contacting a provider. Omitting an inline
+key does not bypass that boundary. Authenticated users retain secret-free
+model/catalog reads and their normal task permissions; the browser's visible
+navigation is not the authorization authority.
+
 ## Domain allowlist spike
 
 Bubblewrap and Seatbelt can deny or inherit the complete network path, but they

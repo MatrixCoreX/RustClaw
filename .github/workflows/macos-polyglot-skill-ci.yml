@@ -247,6 +247,10 @@ jobs:
         shell: bash
         run: cargo test -p clawd --bin clawd providers::client::transport_tests -- --test-threads=2
 
+      - name: Test model control-plane authorization
+        shell: bash
+        run: cargo test -p clawd --bin clawd model_control_plane_tests -- --test-threads=2
+
       - name: Test quota termination and recoverable provider waits
         shell: bash
         run: |

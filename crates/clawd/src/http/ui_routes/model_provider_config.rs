@@ -1147,7 +1147,7 @@ async fn update_model_config(
     headers: HeaderMap,
     Json(req): Json<ModelConfigUpdateRequest>,
 ) -> (StatusCode, Json<ApiResponse<ModelConfigResponse>>) {
-    if let Err(resp) = require_ui_identity(&state, &headers) {
+    if let Err(resp) = require_ui_admin(&state, &headers) {
         return (
             resp.0,
             Json(ApiResponse {
@@ -1226,7 +1226,7 @@ async fn update_provider_keys(
     headers: HeaderMap,
     Json(req): Json<ProviderKeysResponse>,
 ) -> (StatusCode, Json<ApiResponse<ProviderKeysResponse>>) {
-    if let Err(resp) = require_ui_identity(&state, &headers) {
+    if let Err(resp) = require_ui_admin(&state, &headers) {
         return (
             resp.0,
             Json(ApiResponse {

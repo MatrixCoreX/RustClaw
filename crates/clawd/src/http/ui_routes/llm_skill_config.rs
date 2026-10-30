@@ -827,22 +827,11 @@ async fn update_llm_config(
     headers: HeaderMap,
     Json(req): Json<UpdateLlmConfigRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    let identity = match require_ui_identity(&state, &headers) {
-        Ok(identity) => identity,
-        Err(resp) => return resp,
-    };
+    if let Err(resp) = require_ui_admin(&state, &headers) {
+        return resp;
+    }
     let inline_api_key = req.vendor_api_key.as_deref().map(str::trim).unwrap_or("");
     let selected_vendor = req.selected_vendor.trim().to_ascii_lowercase();
-    if !inline_api_key.is_empty() && !identity.role.eq_ignore_ascii_case("admin") {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("vendor_api_key_private_store_not_allowed".to_string()),
-            }),
-        );
-    }
     let selected_model = req.selected_model.trim().to_string();
     if selected_vendor.is_empty() {
         return (
@@ -1050,22 +1039,11 @@ async fn test_llm_config(
     headers: HeaderMap,
     Json(req): Json<UpdateLlmConfigRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    let identity = match require_ui_identity(&state, &headers) {
-        Ok(identity) => identity,
-        Err(resp) => return resp,
-    };
+    if let Err(resp) = require_ui_admin(&state, &headers) {
+        return resp;
+    }
     let inline_api_key = req.vendor_api_key.as_deref().map(str::trim).unwrap_or("");
     let selected_vendor = req.selected_vendor.trim().to_ascii_lowercase();
-    if !inline_api_key.is_empty() && !identity.role.eq_ignore_ascii_case("admin") {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("vendor_api_key_private_store_not_allowed".to_string()),
-            }),
-        );
-    }
     let selected_model = req.selected_model.trim().to_string();
     if selected_vendor.is_empty() {
         return (
