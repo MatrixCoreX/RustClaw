@@ -101,9 +101,26 @@ async fn host_system_summary(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    let identity = match require_ui_identity(&state, &headers) {
-        Ok(identity) => identity,
-        Err(response) => return response,
+    // An auth-read failure must not reach the collector's partial-success fallback.
+    let read_state = state.clone();
+    let context = tokio::task::spawn_blocking(move || {
+        let identity = require_ui_identity(&read_state, &headers)?;
+        let waiting_summary = host_task_waiting_summary(&read_state).ok();
+        Ok::<_, (StatusCode, Json<ApiResponse<Value>>)>((
+            !identity.role.eq_ignore_ascii_case("admin"),
+            waiting_summary,
+        ))
+    })
+    .await;
+    let (redact_details, waiting_summary) = match context {
+        Ok(Ok(context)) => context,
+        Ok(Err(response)) => return response,
+        Err(_) => {
+            return crate::api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "host_snapshot_unavailable",
+            )
+        }
     };
 
     let workspace_root = state.skill_rt.workspace_root.clone();
@@ -112,17 +129,12 @@ async fn host_system_summary(
         .skill_concurrency_gates
         .resource_broker()
         .clone();
-    let waiting_summary = host_task_waiting_summary(&state).ok();
     let mut summary = tokio::task::spawn_blocking(move || {
-        collect_host_system_summary(
-            &workspace_root,
-            resource_broker.status(),
-            waiting_summary,
-        )
+        collect_host_system_summary(&workspace_root, resource_broker.status(), waiting_summary)
     })
     .await
     .unwrap_or_else(|_| HostSystemSummary::collection_failed());
-    if !identity.role.eq_ignore_ascii_case("admin") {
+    if redact_details {
         summary.redact_admin_details();
     }
     (
@@ -288,10 +300,7 @@ fn collect_host_system_summary(
         },
         architecture: std::env::consts::ARCH.to_string(),
         deployment: platform.deployment,
-        memory: HostCapacity::new(
-            platform.memory_total_bytes,
-            platform.memory_available_bytes,
-        ),
+        memory: HostCapacity::new(platform.memory_total_bytes, platform.memory_available_bytes),
         storage: HostCapacity::new(storage_total_bytes, storage_available_bytes),
         uptime_seconds: platform.uptime_seconds,
         runtime_resources: HostRuntimeResources {
@@ -307,15 +316,16 @@ fn collect_host_system_summary(
             reserved_provider_slots: Some(resource_status.reserved_provider_slots),
             reserved_browser_slots: Some(resource_status.reserved_browser_slots),
             active_heavy_leases: Some(resource_status.active_heavy_leases),
-            waiting_tasks: waiting_summary.as_ref().map(|summary| summary.waiting_tasks),
+            waiting_tasks: waiting_summary
+                .as_ref()
+                .map(|summary| summary.waiting_tasks),
             resource_waiting_tasks: waiting_summary
                 .as_ref()
                 .map(|summary| summary.resource_waiting_tasks),
             recent_waiting_reason_code: waiting_summary
                 .and_then(|summary| summary.recent_waiting_reason_code),
             recent_admission_refusal_reason: resource_status.recent_admission_refusal_reason,
-            recent_admission_refusal_at_epoch: resource_status
-                .recent_admission_refusal_at_epoch,
+            recent_admission_refusal_at_epoch: resource_status.recent_admission_refusal_at_epoch,
             swap_used_bytes: resource_status.snapshot.swap_used_bytes,
             cgroup_version: resource_status.snapshot.cgroup_version,
             process_memory_measurement: resource_status
@@ -416,8 +426,8 @@ fn collect_host_platform_snapshot() -> HostPlatformSnapshot {
     let uptime_seconds = read_bounded_text(Path::new("/proc/uptime"))
         .as_deref()
         .and_then(parse_linux_uptime);
-    let kernel = read_bounded_text(Path::new("/proc/sys/kernel/osrelease"))
-        .and_then(normalize_host_value);
+    let kernel =
+        read_bounded_text(Path::new("/proc/sys/kernel/osrelease")).and_then(normalize_host_value);
     let deployment = Some(detect_linux_deployment());
 
     HostPlatformSnapshot {
@@ -433,18 +443,18 @@ fn collect_host_platform_snapshot() -> HostPlatformSnapshot {
 
 #[cfg(target_os = "macos")]
 fn collect_host_platform_snapshot() -> HostPlatformSnapshot {
-    let system_version =
-        read_bounded_text(Path::new("/System/Library/CoreServices/SystemVersion.plist"));
+    let system_version = read_bounded_text(Path::new(
+        "/System/Library/CoreServices/SystemVersion.plist",
+    ));
     let (os_name, os_version) = system_version
         .as_deref()
         .map(parse_macos_system_version)
         .unwrap_or_else(|| (Some("macOS".to_string()), None));
     let resources = claw_core::host_resources::HostResourceSnapshot::collect();
-    let uptime_seconds =
-        bounded_command_output("/usr/sbin/sysctl", &["-n", "kern.boottime"])
-            .as_deref()
-            .and_then(parse_macos_boot_time)
-            .and_then(|boot| u64::try_from(now_unix_seconds()).ok()?.checked_sub(boot));
+    let uptime_seconds = bounded_command_output("/usr/sbin/sysctl", &["-n", "kern.boottime"])
+        .as_deref()
+        .and_then(parse_macos_boot_time)
+        .and_then(|boot| u64::try_from(now_unix_seconds()).ok()?.checked_sub(boot));
 
     HostPlatformSnapshot {
         os_name,

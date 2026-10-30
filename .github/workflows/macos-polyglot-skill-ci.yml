@@ -269,6 +269,10 @@ jobs:
         shell: bash
         run: cargo test -p clawd --bin clawd health_runtime_tests -- --test-threads=2
 
+      - name: Test host summary responsiveness and authorization
+        shell: bash
+        run: cargo test -p clawd --bin clawd host_system_ -- --nocapture --test-threads=1
+
       - name: Test model transport diagnostic credential isolation
         shell: bash
         run: cargo test -p clawd --bin clawd gemini_transport_error_tests -- --test-threads=2

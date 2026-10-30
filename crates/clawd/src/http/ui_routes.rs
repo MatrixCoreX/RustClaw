@@ -602,6 +602,10 @@ mod crypto_credentials_tests;
 mod host_system_tests;
 
 #[cfg(test)]
+#[path = "ui_routes/host_system_runtime_tests.rs"]
+mod host_system_runtime_tests;
+
+#[cfg(test)]
 #[path = "ui_routes/host_dependencies_tests.rs"]
 mod host_dependencies_tests;
 
