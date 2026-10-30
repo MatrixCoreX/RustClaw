@@ -137,8 +137,6 @@ struct OfficialRegistrationPollResponse {
     user_info: Option<OfficialRegistrationUserInfo>,
     #[serde(default)]
     error: Option<String>,
-    #[serde(default)]
-    error_description: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -278,6 +276,7 @@ fn channel_bind_session_response(
     session: PendingChannelBindSession,
 ) -> FeishuBindSessionStatusResponse {
     let entry_url = channel_bind_entry_url(state, platform, Some(&session));
+    let error_text = channel_bind_session_public_error(&session);
     FeishuBindSessionStatusResponse {
         session_id: session.id,
         channel: session.channel,
@@ -285,7 +284,7 @@ fn channel_bind_session_response(
         status: session.status,
         external_user_id: session.external_user_id,
         external_chat_id: session.external_chat_id,
-        error_text: session.error_text,
+        error_text,
         created_at: session.created_at,
         updated_at: session.updated_at,
         expires_at: session.expires_at,

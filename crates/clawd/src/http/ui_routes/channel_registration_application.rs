@@ -174,6 +174,28 @@ where
         return Ok(session);
     };
     let poll = poll_result?;
+    if let Some(error_code) = poll
+        .error
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let mut db = state.core.db.get()?;
+        return match error_code {
+            "authorization_pending" | "slow_down" => Ok(session),
+            "expired_token" => mark_pending_channel_bind_session_expired(&mut db, session.id),
+            "access_denied" => mark_pending_channel_bind_session_failed(
+                &mut db,
+                session.id,
+                &ChannelRegistrationFailure::AccessDenied.to_string(),
+            ),
+            _ => mark_pending_channel_bind_session_failed(
+                &mut db,
+                session.id,
+                &ChannelRegistrationFailure::ProviderRejected.to_string(),
+            ),
+        };
+    }
     if let (Some(client_id), Some(client_secret), Some(_open_id)) = (
         poll.client_id
             .as_deref()
@@ -241,14 +263,18 @@ where
             return Ok(current);
         }
         receipt_result?;
-        if let Err(err) = start_result {
+        if start_result.is_err() {
             let failed = {
                 let mut db = state
                     .core
                     .db
                     .get()
                     .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-                mark_pending_channel_bind_session_failed(&mut db, session.id, &err.to_string())
+                mark_pending_channel_bind_session_failed(
+                    &mut db,
+                    session.id,
+                    &ChannelRegistrationFailure::ServiceStartFailed.to_string(),
+                )
             };
             return failed.or_else(|error| {
                 // Conditional failure may lose to a binding finalized concurrently.
@@ -265,32 +291,5 @@ where
         return Ok(current);
     }
 
-    let Some(error_code) = poll
-        .error
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(session);
-    };
-    let error_text = poll
-        .error_description
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|detail| format!("{error_code}: {detail}"))
-        .unwrap_or_else(|| error_code.to_string());
-    let mut db = state
-        .core
-        .db
-        .get()
-        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    match error_code {
-        "authorization_pending" | "slow_down" => Ok(session),
-        "expired_token" => mark_pending_channel_bind_session_expired(&mut db, session.id),
-        "access_denied" => {
-            mark_pending_channel_bind_session_failed(&mut db, session.id, &error_text)
-        }
-        _ => mark_pending_channel_bind_session_failed(&mut db, session.id, &error_text),
-    }
+    Ok(session)
 }

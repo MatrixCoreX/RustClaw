@@ -63,3 +63,51 @@ test("channel recovery guidance never parses arbitrary human diagnostics", () =>
   assert.equal(channelBindRecoveryGuidance(new Error("Please retry after recovery"), (_zh, en) => en), null);
   assert.equal(channelBindRecoveryGuidance(new Error("channel_bind_future_error"), (_zh, en) => en), null);
 });
+
+const sessionCodes = [
+  "channel_bind_registration_access_denied",
+  "channel_bind_registration_rejected",
+  "channel_bind_registration_start_failed",
+];
+
+for (const platform of ["feishu", "lark"] as const) {
+  for (const code of sessionCodes) {
+    for (const language of ["zh", "en"] as const) for (const phase of ["begin", "poll"] as const) {
+      test(`${platform} ${language} ${phase} failed session has owned recovery guidance for ${code}`, async context => {
+        const h = await channelBindHarness(context, platform);
+        context.after(() => h.dispose());
+        const translate = (zh: string, en: string) => language === "zh" ? zh : en;
+        await h.update({ t: translate });
+        const failed = { ...bindSession(platform), status: "failed", error_text: code };
+        if (phase === "begin") {
+          const begin = await h.begin();
+          await h.reply(begin.index, failed);
+          await begin.completion;
+        } else {
+          await h.load();
+          await h.advance();
+          await h.reply(1, failed);
+        }
+        const guidance = channelBindRecoveryGuidance(code, translate);
+        assert.ok(guidance);
+        assert.equal(h.current.bindError, guidance);
+        assert.equal(h.current.bindSession?.status, "failed");
+        const requests = h.pending.length;
+        await h.advance(60_000);
+        assert.equal(h.pending.length, requests);
+        assert.deepEqual(h.reads, []);
+      });
+    }
+    test(`${platform} a stale failed session with ${code} cannot enter the new owner's view`, async context => {
+      const h = await channelBindHarness(context, platform);
+      context.after(() => h.dispose());
+      await h.load();
+      await h.advance();
+      await h.update({ requestScope: "device-b:admin:epoch-1" });
+      await h.reply(1, { ...bindSession(platform), status: "failed", error_text: code });
+      assert.equal(h.current.bindError, null);
+      assert.equal(h.current.bindSession, null);
+      assert.deepEqual(h.reads, []);
+    });
+  }
+}

@@ -1,4 +1,45 @@
 #[derive(Debug, thiserror::Error)]
+enum ChannelRegistrationFailure {
+    #[error("channel_bind_registration_access_denied")]
+    AccessDenied,
+    #[error("channel_bind_registration_rejected")]
+    ProviderRejected,
+    #[error("channel_bind_registration_start_failed")]
+    ServiceStartFailed,
+}
+
+fn channel_bind_session_public_error(session: &PendingChannelBindSession) -> Option<String> {
+    match session.status.as_str() {
+        "failed" => Some(
+            [
+                ChannelRegistrationFailure::AccessDenied,
+                ChannelRegistrationFailure::ProviderRejected,
+                ChannelRegistrationFailure::ServiceStartFailed,
+            ]
+            .into_iter()
+            .map(|reason| reason.to_string())
+            .chain(
+                [
+                    ChannelRegistrationTransportError::RequestTimeout,
+                    ChannelRegistrationTransportError::TransportUnavailable,
+                    ChannelRegistrationTransportError::ResponseUnavailable,
+                    ChannelRegistrationTransportError::ResponseTooLarge,
+                    ChannelRegistrationTransportError::ResponseInvalid,
+                    ChannelRegistrationTransportError::RedirectRejected,
+                    ChannelRegistrationTransportError::HttpStatusRejected,
+                ]
+                .into_iter()
+                .map(|reason| reason.to_string()),
+            )
+            .find(|code| session.error_text.as_deref() == Some(code.as_str()))
+            .unwrap_or_else(|| ChannelRegistrationFailure::ProviderRejected.to_string()),
+        ),
+        "expired" => Some("expired".into()),
+        _ => None,
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
 enum ChannelRegistrationRejection {
     #[error("channel_bind_owner_unavailable")]
     OwnerUnavailable,

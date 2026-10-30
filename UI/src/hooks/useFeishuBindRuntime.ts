@@ -97,6 +97,7 @@ export function useChannelBindRuntime({
         if (!validSession(session)) throw new Error("channel_bind_session_invalid");
         requests.session = session;
         setBindSession(session);
+        if (session.status === "failed") setBindError(channelBindRecoveryGuidance(session.error_text, t));
       } catch (err) {
         if (ownsBegin()) setBindError(channelBindRecoveryGuidance(err, t)
           ?? formatUiError(err, t, `${channelLabel}绑定未能开始。`, `${channelLabel} binding could not start.`));
@@ -124,6 +125,7 @@ export function useChannelBindRuntime({
       if (!validSession(session, sessionId)) throw new Error("channel_bind_session_invalid");
       requests.session = session;
       setBindSession(session);
+      if (session.status === "failed") setBindError(channelBindRecoveryGuidance(session.error_text, t));
       if (session.status === "bound") await refreshAcceptedView(ownsRead);
       return session;
     } catch (err) {

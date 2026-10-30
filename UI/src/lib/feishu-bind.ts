@@ -69,6 +69,21 @@ export function channelBindRecoveryGuidance(
 ): string | null {
   const code = cause instanceof Error ? cause.message : cause;
   switch (code) {
+    case "channel_bind_registration_access_denied":
+      return t(
+        "本次授权已被拒绝。请确认账号权限后重新扫码。",
+        "Authorization was denied. Check your account permissions and start a new scan.",
+      );
+    case "channel_bind_registration_rejected":
+      return t(
+        "接入未完成。请稍后重新扫码，并检查通信平台的账号权限。",
+        "Setup did not complete. Start a new scan later and check the channel account permissions.",
+      );
+    case "channel_bind_registration_start_failed":
+      return t(
+        "配置已保存，但通信端未能启动。请检查并保存通信端配置后手动启动，或重置接入后重新扫码。",
+        "The configuration was saved, but the channel did not start. Review and save the channel configuration, then start the service, or reset setup and scan again.",
+      );
     case "channel_bind_application_recovery_required":
       return t(
         "上次接入可能只完成了一部分，已停止自动处理。请检查并保存通信端配置，或重置接入后重新扫码。",

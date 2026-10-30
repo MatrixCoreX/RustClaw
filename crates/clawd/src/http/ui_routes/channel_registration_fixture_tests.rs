@@ -28,19 +28,23 @@ struct RegistrationServer {
     requests: Arc<AtomicUsize>,
     result: Value,
     action: &'static str,
+    status: StatusCode,
 }
 
 async fn registration(
     State(state): State<RegistrationServer>,
     headers: HeaderMap,
     Form(form): Form<std::collections::HashMap<String, String>>,
-) -> Json<Value> {
+) -> (StatusCode, Json<Value>) {
     assert!(!headers.contains_key("x-agent-key"));
     assert!(!headers.contains_key("authorization"));
     state.requests.fetch_add(1, Ordering::SeqCst);
     if state.action == "begin" && form.get("action").map(String::as_str) == Some("init") {
         assert_eq!(form.len(), 1);
-        return Json(json!({"supported_auth_methods":["client_secret"]}));
+        return (
+            StatusCode::OK,
+            Json(json!({"supported_auth_methods":["client_secret"]})),
+        );
     }
     assert_eq!(form.get("action").map(String::as_str), Some(state.action));
     if state.action == "poll" {
@@ -65,7 +69,7 @@ async fn registration(
     }
     state.entered.notify_one();
     state.release.acquire().await.unwrap().forget();
-    Json(state.result)
+    (state.status, Json(state.result))
 }
 
 pub(super) struct Fixture {
@@ -95,11 +99,28 @@ impl Fixture {
         Self::with_action(platform, result, "poll").await
     }
 
+    pub(super) async fn with_status_result(
+        platform: AgentAppChannel,
+        status: StatusCode,
+        result: Value,
+    ) -> Self {
+        Self::with_status_action(platform, result, "poll", status).await
+    }
+
     pub(super) async fn for_begin(platform: AgentAppChannel, result: Value) -> Self {
         Self::with_action(platform, result, "begin").await
     }
 
     async fn with_action(platform: AgentAppChannel, result: Value, action: &'static str) -> Self {
+        Self::with_status_action(platform, result, action, StatusCode::OK).await
+    }
+
+    async fn with_status_action(
+        platform: AgentAppChannel,
+        result: Value,
+        action: &'static str,
+        status: StatusCode,
+    ) -> Self {
         assert!(
             !service_is_running(platform.service()),
             "native fixture requires no real channel service"
@@ -179,6 +200,7 @@ impl Fixture {
             requests: requests.clone(),
             result,
             action,
+            status,
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
@@ -219,12 +241,11 @@ impl Fixture {
                 connection.busy_timeout(Duration::from_secs(10))?;
                 Ok(())
             });
-        r2d2::Pool::builder().max_size(2).build(manager).unwrap()
+        crate::db_init::test_pool_builder(2).build(manager).unwrap()
     }
 
     pub(super) fn reopen_database(&mut self) {
-        let placeholder = r2d2::Pool::builder()
-            .max_size(1)
+        let placeholder = crate::db_init::test_pool_builder(1)
             .build(r2d2_sqlite::SqliteConnectionManager::memory())
             .unwrap();
         drop(std::mem::replace(&mut self.state.core.db, placeholder));

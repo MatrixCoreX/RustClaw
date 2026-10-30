@@ -168,6 +168,14 @@ not raw response bodies, URLs or parser diagnostics. The UI displays localized
 guidance for those codes without automatically replaying the failed operation.
 Other HTTP clients, model transport and agent task budgets are independent.
 
+A nonempty OAuth error takes precedence over any credentials returned alongside
+it, so that response cannot install credentials or start a channel. Terminal
+registration failures persist host-owned machine codes instead of provider
+descriptions or startup exception text. Session responses expose only exact
+allowed codes; unknown stored diagnostics are hidden without modifying records.
+The UI translates these codes into recovery guidance under the current request
+owner and stops polling terminal sessions.
+
 Authenticated users can read communication status/configuration metadata without
 receiving application secrets: Feishu/Lark clear the secret field for non-admin
 identities, Telegram masks bot credentials, and WeChat exposes configured flags.

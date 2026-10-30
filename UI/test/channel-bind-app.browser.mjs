@@ -11,9 +11,9 @@ const results = [];
 let browser;
 try {
   browser = await chromium.launch({ executablePath: process.env.BROWSER_EXECUTABLE || undefined, headless: true });
-  for (const theme of ["light", "dark"]) for (const platform of ["feishu", "lark"]) for (const phase of ["begin", "poll", "reset", "ordinary", "parallel", "transport-error"]) {
+  for (const theme of ["light", "dark"]) for (const platform of ["feishu", "lark"]) for (const phase of ["begin", "poll", "reset", "ordinary", "parallel", "transport-error", "session-error", "session-error-mobile"]) {
     if (phase === "parallel" && platform === "lark") continue;
-    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const page = await browser.newPage({ viewport: { width: phase === "session-error-mobile" ? 390 : 1440, height: 1000 } });
     const requests = [], errors = [], held = [];
     let loggedIn = false, watch = true;
     const title = platform === "lark" ? "Lark" : "Feishu";
@@ -57,6 +57,9 @@ try {
         if (phase === "transport-error" && action !== "start") {
           return reply(route, null, 502, "channel_bind_registration_response_invalid");
         }
+        if ((phase === "session-error" || phase === "session-error-mobile") && action !== "start") {
+          return reply(route, { ...session(channel, url.origin), status: "failed", error_text: "channel_bind_registration_start_failed" });
+        }
         if (watch && url.origin === origins[0] && ((phase === "begin" && action === "start") || (phase === "poll" && action !== "start") || phase === "parallel")) {
           held.push(route); return;
         }
@@ -70,7 +73,7 @@ try {
       await page.getByLabel("Username", { exact: true }).fill("fixture-user");
       await page.getByLabel("Password", { exact: true }).fill("fixture-password");
       await page.getByRole("button", { name: "Enter Console", exact: true }).click();
-      await page.getByRole("button", { name: "Log out", exact: true }).waitFor();
+      if (phase !== "session-error-mobile") await page.getByRole("button", { name: "Log out", exact: true }).waitFor();
       await card.getByRole("button", { name: `Start ${title} setup`, exact: true }).waitFor();
     };
     const release = async (index, data) => {
@@ -86,7 +89,14 @@ try {
         assert.deepEqual(requests.filter(row => row.path.startsWith("/v1/admin/channel-binds/")), []);
       } else {
         await card.getByRole("button", { name: `Start ${title} setup`, exact: true }).click();
-        if (phase === "transport-error") {
+        if (phase === "session-error" || phase === "session-error-mobile") {
+          await card.getByText("The configuration was saved, but the channel did not start. Review and save the channel configuration, then start the service, or reset setup and scan again.", { exact: true }).waitFor();
+          const polls = () => requests.filter(row => row.path.startsWith(`/v1/admin/channel-binds/${platform}/`) && row.method === "GET");
+          assert.equal(polls().length, 1);
+          await page.waitForTimeout(1500);
+          assert.equal(polls().length, 1);
+          assert.equal(await card.getByText("channel_bind_registration_start_failed", { exact: true }).count(), 0);
+        } else if (phase === "transport-error") {
           await card.getByText("The channel could not complete this setup request. Check your connection and start a new scan later.", { exact: true }).waitFor();
           const polls = () => requests.filter(row => row.path.startsWith(`/v1/admin/channel-binds/${platform}/`) && row.method === "GET");
           assert.equal(polls().length, 1);
