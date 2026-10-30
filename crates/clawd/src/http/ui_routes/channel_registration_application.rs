@@ -182,7 +182,10 @@ where
     {
         let mut db = state.core.db.get()?;
         return match error_code {
-            "authorization_pending" | "slow_down" => Ok(session),
+            "authorization_pending" => Ok(session),
+            "slow_down" => crate::repo::channel_registration::slow_registration_polling(
+                &mut db, &session,
+            ),
             "expired_token" => mark_pending_channel_bind_session_expired(&mut db, session.id),
             "access_denied" => mark_pending_channel_bind_session_failed(
                 &mut db,

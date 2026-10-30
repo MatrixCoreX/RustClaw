@@ -86,6 +86,23 @@ for (const platform of ["feishu", "lark"] as const) {
     assert.deepEqual(h.reads, []);
   });
 
+  test(`${platform} slower server intervals govern every subsequent poll without a new scan`, async (context) => {
+    const h = await channelBindHarness(context, platform);
+    context.after(() => h.dispose());
+    await h.load();
+    await h.advance(1000);
+    for (const [index, seconds] of [6, 11, 16].entries()) {
+      await h.reply(index + 1, { ...bindSession(platform), poll_interval_seconds: seconds });
+      await h.advance(seconds * 1000 - 1);
+      assert.equal(h.pending.length, index + 2);
+      await h.advance(1);
+      assert.equal(h.pending.length, index + 3);
+    }
+    assert.equal(h.pending.filter(row => row.init?.method === "POST").length, 1);
+    assert.equal(h.current.bindSession?.session_id, 1);
+    assert.deepEqual(h.reads, []);
+  });
+
   test(`${platform} failed guarded poll still stops instead of silently retrying`, async (context) => {
     const h = await channelBindHarness(context, platform);
     context.after(() => h.dispose());

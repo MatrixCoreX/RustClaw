@@ -4,6 +4,9 @@ use sha2::{Digest, Sha256};
 
 use super::auth::PendingChannelBindSession;
 
+// Public intervals must also fit a browser's signed 32-bit millisecond timer.
+pub(crate) const MAX_REGISTRATION_POLL_INTERVAL_SECONDS: i64 = i32::MAX as i64 / 1000;
+
 const INIT_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS channel_configuration_revisions (
     channel TEXT PRIMARY KEY,
@@ -39,6 +42,8 @@ pub(crate) enum RegistrationJournalError {
     RevisionExhausted,
     #[error("channel_registration_journal_phase_invalid")]
     InvalidPhase,
+    #[error("channel_registration_poll_interval_invalid")]
+    InvalidPollInterval,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -224,6 +229,51 @@ pub(crate) struct RegistrationInstallFlow<'a> {
     pub verification_url: &'a str,
     pub poll_interval_seconds: i64,
     pub expires_at: &'a str,
+}
+
+pub(crate) fn slow_registration_polling(
+    db: &mut Connection,
+    expected: &PendingChannelBindSession,
+) -> anyhow::Result<PendingChannelBindSession> {
+    ensure_schema(db)?;
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let current = super::auth::get_pending_channel_bind_session_by_id(&tx, expected.id)?
+        .filter(|current| {
+            current.user_key == expected.user_key
+                && current.channel == expected.channel
+                && current.bind_token == expected.bind_token
+                && current.install_device_code == expected.install_device_code
+                && matches!(current.status.as_str(), "pending" | "detected")
+        })
+        .ok_or(RegistrationJournalError::Superseded)?;
+    if !matches!(
+        registration_gate(&tx, &current)?,
+        RegistrationGate::Ready { .. }
+    ) {
+        return Err(RegistrationJournalError::Superseded.into());
+    }
+    let interval = current.install_poll_interval_seconds.unwrap_or(5);
+    let next = interval
+        .checked_add(5)
+        .filter(|seconds| interval > 0 && *seconds <= MAX_REGISTRATION_POLL_INTERVAL_SECONDS)
+        .ok_or(RegistrationJournalError::InvalidPollInterval)?;
+    let changed = tx.execute(
+        "UPDATE pending_channel_bind_sessions SET install_poll_interval_seconds=?2, updated_at=?3
+         WHERE id=?1 AND status IN ('pending','detected') AND install_poll_interval_seconds IS ?4",
+        params![
+            current.id,
+            next,
+            crate::now_ts_u64().to_string(),
+            current.install_poll_interval_seconds
+        ],
+    )?;
+    if changed != 1 {
+        return Err(RegistrationJournalError::Superseded.into());
+    }
+    let updated = super::auth::get_pending_channel_bind_session_by_id(&tx, current.id)?
+        .ok_or(RegistrationJournalError::Superseded)?;
+    tx.commit()?;
+    Ok(updated)
 }
 
 pub(crate) fn attach_registration_install_flow(

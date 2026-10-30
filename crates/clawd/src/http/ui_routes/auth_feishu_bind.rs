@@ -121,6 +121,13 @@ struct OfficialRegistrationBeginResponse {
     expire_in: Option<u64>,
 }
 
+struct OfficialRegistrationBegin {
+    device_code: String,
+    verification_uri_complete: String,
+    poll_interval_seconds: i64,
+    expire_in: Option<u64>,
+}
+
 #[derive(Debug, Deserialize, Default)]
 struct OfficialRegistrationUserInfo {
     #[serde(default)]
@@ -193,7 +200,7 @@ fn official_accounts_base_url(platform: AgentAppChannel) -> String {
 async fn begin_official_registration(
     state: &AppState,
     platform: AgentAppChannel,
-) -> anyhow::Result<OfficialRegistrationBeginResponse> {
+) -> anyhow::Result<OfficialRegistrationBegin> {
     let init = call_official_registration::<OfficialRegistrationInitResponse>(
         state, platform, &[("action", "init")],
     ).await?;
@@ -218,7 +225,18 @@ async fn begin_official_registration(
     if begin.device_code.trim().is_empty() || begin.verification_uri_complete.trim().is_empty() {
         return Err(ChannelRegistrationTransportError::ResponseInvalid.into());
     }
-    Ok(begin)
+    let poll_interval_seconds = i64::try_from(begin.interval.unwrap_or(5).max(1))
+        .ok()
+        .filter(|seconds| {
+            *seconds <= crate::repo::channel_registration::MAX_REGISTRATION_POLL_INTERVAL_SECONDS
+        })
+        .ok_or(ChannelRegistrationTransportError::ResponseInvalid)?;
+    Ok(OfficialRegistrationBegin {
+        device_code: begin.device_code,
+        verification_uri_complete: begin.verification_uri_complete,
+        poll_interval_seconds,
+        expire_in: begin.expire_in,
+    })
 }
 
 async fn poll_official_registration(
@@ -506,8 +524,16 @@ async fn start_channel_bind_session(
         }
     };
     let begin_expire_seconds = begin.expire_in.unwrap_or(ttl_seconds);
+    let host_deadline = match session.expires_at.parse::<i64>() {
+        Ok(deadline) if deadline > 0 => deadline,
+        _ => return channel_registration_failure_response(
+            &ChannelRegistrationTransportError::ResponseInvalid.into(),
+            "channel_bind_state_unavailable".into(),
+        ),
+    };
     let session_expires_at = current_unix_ts()
         .saturating_add(begin_expire_seconds.min(ttl_seconds) as i64)
+        .min(host_deadline)
         .to_string();
     let mut db = match state.core.db.get() {
         Ok(db) => db,
@@ -528,7 +554,7 @@ async fn start_channel_bind_session(
         crate::repo::channel_registration::RegistrationInstallFlow {
             device_code: &begin.device_code,
             verification_url: &begin.verification_uri_complete,
-            poll_interval_seconds: begin.interval.unwrap_or(5) as i64,
+            poll_interval_seconds: begin.poll_interval_seconds,
             expires_at: &session_expires_at,
         },
         &config_digest,

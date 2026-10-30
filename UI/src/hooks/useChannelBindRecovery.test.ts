@@ -16,6 +16,7 @@ const codes = [
   "channel_bind_application_recovery_required",
   "channel_bind_registration_superseded",
   "channel_bind_registration_prepare_required",
+  "channel_registration_poll_interval_invalid",
   ...transportCodes,
 ];
 

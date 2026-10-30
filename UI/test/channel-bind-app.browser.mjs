@@ -11,7 +11,7 @@ const results = [];
 let browser;
 try {
   browser = await chromium.launch({ executablePath: process.env.BROWSER_EXECUTABLE || undefined, headless: true });
-  for (const theme of ["light", "dark"]) for (const platform of ["feishu", "lark"]) for (const phase of ["begin", "poll", "reset", "ordinary", "parallel", "transport-error", "session-error", "session-error-mobile"]) {
+  for (const theme of ["light", "dark"]) for (const platform of ["feishu", "lark"]) for (const phase of ["begin", "poll", "reset", "ordinary", "parallel", "transport-error", "timing-error", "session-error", "session-error-mobile"]) {
     if (phase === "parallel" && platform === "lark") continue;
     const page = await browser.newPage({ viewport: { width: phase === "session-error-mobile" ? 390 : 1440, height: 1000 } });
     const requests = [], errors = [], held = [];
@@ -54,8 +54,10 @@ try {
       const bind = url.pathname.match(/^\/v1\/admin\/channel-binds\/(feishu|lark)\/(start|[0-9]+)$/);
       if (bind) {
         const [, channel, action] = bind;
-        if (phase === "transport-error" && action !== "start") {
-          return reply(route, null, 502, "channel_bind_registration_response_invalid");
+        if ((phase === "transport-error" || phase === "timing-error") && action !== "start") {
+          return phase === "timing-error"
+            ? reply(route, null, 409, "channel_registration_poll_interval_invalid")
+            : reply(route, null, 502, "channel_bind_registration_response_invalid");
         }
         if ((phase === "session-error" || phase === "session-error-mobile") && action !== "start") {
           return reply(route, { ...session(channel, url.origin), status: "failed", error_text: "channel_bind_registration_start_failed" });
@@ -96,7 +98,7 @@ try {
           await page.waitForTimeout(1500);
           assert.equal(polls().length, 1);
           assert.equal(await card.getByText("channel_bind_registration_start_failed", { exact: true }).count(), 0);
-        } else if (phase === "transport-error") {
+        } else if (phase === "transport-error" || phase === "timing-error") {
           await card.getByText("The channel could not complete this setup request. Check your connection and start a new scan later.", { exact: true }).waitFor();
           const polls = () => requests.filter(row => row.path.startsWith(`/v1/admin/channel-binds/${platform}/`) && row.method === "GET");
           assert.equal(polls().length, 1);

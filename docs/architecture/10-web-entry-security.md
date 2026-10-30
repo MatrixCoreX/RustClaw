@@ -176,6 +176,14 @@ allowed codes; unknown stored diagnostics are hidden without modifying records.
 The UI translates these codes into recovery guidance under the current request
 owner and stops polling terminal sessions.
 
+Registration intervals are checked before integer conversion and must fit the
+browser timer contract; a rejected interval never attaches a device code.
+The host's original session deadline caps the provider expiry. A `slow_down`
+response adds five seconds to the persisted interval for the exact active
+session and attempt, following [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628.html#section-3.5).
+The UI uses the returned interval without starting a new scan or shortening it
+to the remaining lifetime; expiry remains a server decision.
+
 Authenticated users can read communication status/configuration metadata without
 receiving application secrets: Feishu/Lark clear the secret field for non-admin
 identities, Telegram masks bot credentials, and WeChat exposes configured flags.

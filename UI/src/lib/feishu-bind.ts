@@ -100,6 +100,7 @@ export function channelBindRecoveryGuidance(
     case "channel_bind_registration_response_unavailable":
     case "channel_bind_registration_response_too_large":
     case "channel_bind_registration_response_invalid":
+    case "channel_registration_poll_interval_invalid":
     case "channel_bind_registration_redirect_rejected":
     case "channel_bind_registration_http_status_rejected":
       return t(

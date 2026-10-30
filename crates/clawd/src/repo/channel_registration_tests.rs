@@ -5,6 +5,9 @@ use std::{
 
 use super::*;
 
+#[path = "channel_registration_polling_tests.rs"]
+mod polling_tests;
+
 struct Fixture {
     root: PathBuf,
     path: PathBuf,
