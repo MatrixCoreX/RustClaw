@@ -1162,7 +1162,11 @@ def copy_entry(src, dst):
         shutil.copy2(src, temporary)
     os.replace(temporary, dst)
 
-if operation == 'restore':
+if operation == 'validate-document-targets':
+    for name in Path(managed_file).read_text().splitlines():
+        if PurePosixPath(name).parts[:1] == ('docs',):
+            safe_path(source, name)
+elif operation == 'restore':
     record = json.loads((storage / 'inventory.json').read_text())
     for name in record['files']:
         copy_entry(safe_path(storage / 'files', name), safe_path(target, name))
@@ -1455,6 +1459,10 @@ for relative in \
   install-agent-cmd.sh \
   stop-agent.sh \
   build-ui-nginx.sh \
+  deploy-ui-nginx.sh \
+  docs/release_installation.md \
+  docs/release_installation.zh-CN.md \
+  docs/developer_build.md \
   start-all.sh \
   start-all-bin.sh \
   deploy-github-release.sh \
@@ -1515,6 +1523,8 @@ printf '%s\n' ".release-tag" >> "$MANAGED_PATHS_FILE"
 printf '%s\n' ".release-rollback" >> "$MANAGED_PATHS_FILE"
 printf '%s\n' ".release-manifest-digest" >> "$MANAGED_PATHS_FILE"
 
+preserve_deployment_files validate-document-targets "$ROOT_DIR" "$PACKAGE_DIR" \
+  "$BACKUP_DIR/preserved-files" "$MANAGED_PATHS_FILE"
 preserve_deployment_files capture-source "$ROOT_DIR" "$PACKAGE_DIR" \
   "$BACKUP_DIR/preserved-files" "$MANAGED_PATHS_FILE"
 

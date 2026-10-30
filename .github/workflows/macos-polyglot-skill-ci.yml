@@ -32,6 +32,8 @@ name: Polyglot Skill macOS CI
       - "scripts/stage_release_pi_app.py"
       - "scripts/verify_release_binary.py"
       - "scripts/tests/test_release_native_libraries.py"
+      - "deploy-github-release.sh"
+      - "scripts/tests/test_release_managed_files.py"
       - "scripts/auth-key.sh"
       - "scripts/nl_tests/auth_key_http_tests.py"
       - "scripts/nl_tests/release_candidate_workflow_tests.py"
@@ -82,6 +84,8 @@ name: Polyglot Skill macOS CI
       - "scripts/stage_release_pi_app.py"
       - "scripts/verify_release_binary.py"
       - "scripts/tests/test_release_native_libraries.py"
+      - "deploy-github-release.sh"
+      - "scripts/tests/test_release_managed_files.py"
       - "scripts/auth-key.sh"
       - "scripts/nl_tests/auth_key_http_tests.py"
       - "scripts/nl_tests/release_candidate_workflow_tests.py"
@@ -162,6 +166,7 @@ jobs:
           python3 scripts/check_on_demand_skill_builds.py
           python3 scripts/check_cross_platform_contracts.py
           python3 -m unittest discover -s scripts/tests -p 'test_release_native_libraries.py'
+          python3 -m unittest discover -s scripts/tests -p 'test_release_managed_files.py'
 
       - name: Test retained-task acceptance without resubmission
         shell: bash

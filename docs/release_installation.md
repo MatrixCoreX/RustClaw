@@ -72,6 +72,13 @@ still require host admission and a policy grant. Raspberry Pi and macOS use thei
 own platform packages and cannot reuse another architecture or operating system's
 Python/FunASR runtime.
 
+Updates also replace the packaged nginx deployment helper and the three bundled
+installation/developer guides, recording their previous versions in the rollback
+backup. Other user-authored documentation stays untouched. Before changing any
+managed file, the updater checks that these document destinations do not resolve
+through parents outside the installation directory; aliases resolving within it
+remain supported. This check does not change existing runtime-data layouts.
+
 1. Download the matching archive and its `.sha256`, `.spdx.json`,
    `.manifest.json`, and `.manifest.json.sig` assets from the same release.
 2. Obtain `configs/release_allowed_signers` and
