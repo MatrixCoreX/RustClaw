@@ -42,6 +42,7 @@ pub(super) async fn call_gemini_model_turn(
         .send()
         .await
         .map_err(|error| {
+            let error = error.without_url();
             if error.is_timeout() {
                 ProviderError::timeout(format!("timeout: {error}"), req_body.clone())
             } else {

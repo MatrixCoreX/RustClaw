@@ -301,10 +301,9 @@ fn build_llm_test_runtime(
     let provider_type = llm_provider_type_for_vendor(selected_vendor, vendor_api_format);
     let mut params = claw_core::config::LlmProviderParams::default();
     params.device_key_enrollment = device_key_enrollment;
+    params.credential_source = claw_core::config::LlmCredentialSource::Resolved;
     let config = claw_core::config::LlmProviderConfig {
-        // A connection test must use its resolved draft key, not override it
-        // with an older vendor credential from the global runtime broker.
-        name: format!("connection-test-{}", selected_vendor.trim().to_ascii_lowercase()),
+        name: format!("vendor-{}", selected_vendor.trim().to_ascii_lowercase()),
         provider_type,
         base_url: vendor_base_url.trim().to_string(),
         api_key: vendor_api_key.trim().to_string(),

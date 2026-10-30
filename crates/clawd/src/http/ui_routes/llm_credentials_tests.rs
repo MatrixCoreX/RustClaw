@@ -164,11 +164,93 @@ fn llm_credentials_connection_test_does_not_replace_draft_with_saved_key() {
         false,
     )
     .unwrap();
+    assert_eq!(runtime.config.name, "vendor-minimax");
+    assert_eq!(
+        runtime.config.params.credential_source,
+        claw_core::config::LlmCredentialSource::Resolved
+    );
     assert_eq!(
         runtime.api_key_using(&EnvFileSecretsBroker::new(path)),
         "draft-key"
     );
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn llm_credentials_probe_preserves_vendor_protocol_headers_for_text_and_native() {
+    use claw_core::model_turn::{ModelMessage, ModelRole, ModelToolChoice, ModelTurnRequest};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    for (vendor, protocol, bearer) in [
+        ("minimax", "anthropic_claude", true),
+        ("anthropic", "anthropic_claude", false),
+        ("custom", "openai_compat", true),
+        ("minimax", "openai_compat", true),
+    ] {
+        let (root, state, headers) = fixture(vendor);
+        let path = root.join("configs/config.toml");
+        let before = std::fs::read(&path).unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let app = Router::new().fallback(move |headers: HeaderMap| {
+            counter.fetch_add(1, Ordering::SeqCst);
+            let valid = if bearer {
+                headers.get("authorization").is_some_and(|v| v == "Bearer fixture-draft-key")
+                    && !headers.contains_key("x-api-key")
+            } else {
+                headers.get("x-api-key").is_some_and(|v| v == "fixture-draft-key")
+                    && !headers.contains_key("authorization")
+            };
+            async move {
+                if valid {
+                    (StatusCode::OK, Json(json!({"content":[{"type":"text","text":"fixture-answer"}],
+                        "stop_reason":"end_turn", "choices":[{"message":{"role":"assistant","content":"fixture-answer"},"finish_reason":"stop"}]})))
+                } else {
+                    (StatusCode::UNAUTHORIZED, Json(json!({"error":{"type":"authentication_error","message":"fixture_auth_mismatch"}})))
+                }
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let mut req = request(vendor, Some("fixture-draft-key"));
+        req.vendor_base_url = Some(url.clone());
+        req.vendor_api_format = Some(protocol.into());
+        let (status, Json(body)) = test_llm_config(State(state), headers, Json(req)).await;
+        assert_eq!(status, StatusCode::OK, "{vendor}/{protocol}: {body:?}");
+        assert_eq!(body.data.unwrap()["response_text"], "fixture-answer");
+        let runtime = build_llm_test_runtime(
+            vendor,
+            "fixture-model",
+            &url,
+            "fixture-draft-key",
+            Some(protocol),
+            false,
+        )
+        .unwrap();
+        let req = ModelTurnRequest {
+            messages: vec![ModelMessage::text(ModelRole::User, "fixture")],
+            tools: vec![],
+            tool_choice: ModelToolChoice::Auto,
+            response_schema: None,
+            stream: false,
+            metadata: Default::default(),
+        };
+        crate::providers::call_model_turn_with_retry(runtime, &req, &Default::default(), None)
+            .await
+            .unwrap();
+        server.abort();
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert!(!claw_core::git_remote_config::git_credential_store_path(&root).exists());
+        assert!(!claw_core::secrets::model_environment::path(&root).exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[tokio::test]

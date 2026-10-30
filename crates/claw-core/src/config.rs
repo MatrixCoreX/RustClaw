@@ -1072,6 +1072,13 @@ pub struct LlmProviderConfig {
     pub params: LlmProviderParams,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LlmCredentialSource {
+    #[default]
+    Managed,
+    Resolved,
+}
+
 /// Phase 2.5: per-provider 默认参数（来自 `[llm_providers.params]` 子表）。
 /// 全部字段都是 `Option`，没在 toml 里写就保持 `None`，对外行为与不带本字段时
 /// 完全一致——目的是把以前散落在 provider 实现里的"硬编码默认值"（OpenAI compat
@@ -1079,6 +1086,10 @@ pub struct LlmProviderConfig {
 /// 配置入口，但不强制每个 provider 都填。
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct LlmProviderParams {
+    /// Runtime-owned credential binding; file/request data cannot select it.
+    /// Connection probes use their already-resolved key without changing vendor identity.
+    #[serde(skip)]
+    pub credential_source: LlmCredentialSource,
     /// The managed relay may bootstrap its private bearer key after a one-time
     /// Slot 0 challenge. This is derived from `[llm.hosted_relay]`; ordinary
     /// provider configuration must not set it as an authorization bypass.
@@ -1930,3 +1941,7 @@ fn default_prompts_config_path() -> String {
 #[cfg(test)]
 #[path = "config_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "config_provider_credentials_tests.rs"]
+mod provider_credentials_tests;

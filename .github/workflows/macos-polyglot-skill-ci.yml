@@ -251,6 +251,17 @@ jobs:
         shell: bash
         run: cargo test -p clawd --bin clawd model_control_plane_tests -- --test-threads=2
 
+      - name: Test model transport diagnostic credential isolation
+        shell: bash
+        run: cargo test -p clawd --bin clawd gemini_transport_error_tests -- --test-threads=2
+
+      - name: Test resolved connection-probe credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p clawd --bin clawd llm_credentials -- --test-threads=2
+          cargo test -p clawd --bin clawd llm_provider_runtime_tests -- --test-threads=2
+
       - name: Test quota termination and recoverable provider waits
         shell: bash
         run: |

@@ -22,6 +22,10 @@ pub(crate) mod usage;
 #[path = "pricing_tests.rs"]
 mod pricing_tests;
 
+#[cfg(test)]
+#[path = "gemini_transport_error_tests.rs"]
+mod gemini_transport_error_tests;
+
 pub(crate) use circuit::{AttemptDecision, CircuitBreaker, CircuitBreakerSnapshot};
 pub(crate) use client::{
     build_llm_http_client, call_model_turn_with_retry, call_provider_with_retry,

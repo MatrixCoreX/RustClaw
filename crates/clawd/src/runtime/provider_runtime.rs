@@ -140,6 +140,12 @@ impl LlmProviderRuntime {
             return std::borrow::Cow::Borrowed(&self.config.api_key);
         }
 
+        if self.config.params.credential_source
+            == claw_core::config::LlmCredentialSource::Resolved
+        {
+            return std::borrow::Cow::Borrowed(&self.config.api_key);
+        }
+
         let Some(vendor) = self.vendor_name_for_secret_lookup() else {
             return std::borrow::Cow::Borrowed(&self.config.api_key);
         };

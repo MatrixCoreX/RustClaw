@@ -725,11 +725,16 @@ also use their exact configured endpoint without following HTTP redirects.
 Configure the final provider or relay API base URL. A 3xx response remains a
 structured provider failure, not a second request to another address. Platform
 and media/CDN clients keep their independent redirect policies.
+Gemini transport diagnostics omit the request URL so query-string credentials
+do not enter connection/timeout errors. Authentication and retry classes remain unchanged.
 
 Saving global model settings or provider keys and running a connection test
 require a server-verified administrator identity, including when no new key is
 supplied. Authenticated read-only model/catalog queries remain available; normal
 agent requests do not gain model-configuration permissions.
+Connection tests bind their resolved draft key explicitly while retaining the
+vendor identity used for protocol authentication and structured error handling.
+They do not replace a draft key with an unrelated managed credential or save it.
 
 ### Telegram Transport Boundary
 

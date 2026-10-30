@@ -77,6 +77,7 @@ pub(super) async fn call_google_gemini(
         .send()
         .await
         .map_err(|err| {
+            let err = err.without_url();
             if err.is_timeout() {
                 ProviderError::timeout(format!("timeout: {err}"), req_body.clone())
             } else {

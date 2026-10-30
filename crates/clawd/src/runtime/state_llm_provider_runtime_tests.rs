@@ -170,6 +170,40 @@ fn hosted_relay_rejects_generic_custom_provider_key() {
 }
 
 #[test]
+fn resolved_probe_credential_does_not_query_the_managed_vendor_broker() {
+    struct NoLookup;
+    impl SecretsBroker for NoLookup {
+        fn lookup(&self, _: &str) -> Result<Option<SecretValue>, SecretsError> {
+            panic!("resolved_credential_queried_broker");
+        }
+        fn label(&self) -> &str {
+            "fixture-no-lookup"
+        }
+    }
+    for vendor in ["minimax", "anthropic", "google", "custom"] {
+        let mut provider = make_provider(&format!("vendor-{vendor}"), "fixture-resolved-key");
+        provider.config.params.credential_source = claw_core::config::LlmCredentialSource::Resolved;
+        let key = provider.api_key_using(&NoLookup);
+        assert_eq!(key, "fixture-resolved-key");
+        assert!(matches!(key, std::borrow::Cow::Borrowed(_)));
+    }
+}
+
+#[test]
+fn resolved_probe_marker_does_not_override_hosted_relay_credential_ownership() {
+    let mut provider = make_hosted_relay_provider();
+    provider.config.params.credential_source = claw_core::config::LlmCredentialSource::Resolved;
+    let broker = FixedBroker {
+        expected_name: "text_hosted_relay_api_key".into(),
+        value: "fixture-enrolled-relay-key".into(),
+    };
+    assert_eq!(
+        provider.api_key_using(&broker),
+        "fixture-enrolled-relay-key"
+    );
+}
+
+#[test]
 fn ordinary_provider_cannot_consume_hosted_relay_device_key() {
     let provider = make_provider("vendor-custom", "config-fallback-key");
     let broker = FixedBroker {
