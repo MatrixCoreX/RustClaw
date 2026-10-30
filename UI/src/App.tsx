@@ -1244,6 +1244,7 @@ export default function App() {
     apiBase,
     uiAuthReady,
     isAdminIdentity,
+    requestEpoch: authFlowEpochRef.current,
     currentPage,
     fetchHealth,
     setHealth,

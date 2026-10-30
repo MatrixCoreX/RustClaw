@@ -82,6 +82,23 @@ background workspace-operation state:
 Operations return machine status and error keys. Human-facing Chinese or
 English guidance is rendered by the UI rather than parsed by runtime logic.
 
+System-operation confirmations, response bodies and recovery checks belong to
+the originating API endpoint and login epoch, including a new login with the
+same role. After changing that scope, an old confirmation cannot submit a new
+request, and an old acknowledgment cannot update the current page or initiate
+follow-up reads or a diagnostic download. Repeated clicks share one pending
+local action; distinct dependency installs remain independent. Diagnostic export
+remains available to authenticated ordinary users; administrative writes still
+require backend-confirmed administrator permission.
+
+Workspace status reads wait for a pending start/cancel acknowledgment, and older
+reads cannot replace the accepted state. Exposure changes likewise invalidate
+older status reads. Changing browser scope only discards obsolete UI work: it
+does not cancel an already accepted server operation. Returning to that device
+reads its actual operation state again.
+Portaled confirmation, choice and input dialogs read semantic theme colors
+directly, so their warnings and controls remain legible in either theme.
+
 ## Deployment Rules
 
 - Native Linux/macOS: `clawd` is loopback-only; `webd` is the browser entry.

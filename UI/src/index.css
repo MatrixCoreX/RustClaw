@@ -18,6 +18,7 @@
   --theme-border: rgba(255, 255, 255, 0.1);
   --theme-border-strong: rgba(255, 255, 255, 0.15);
   --theme-text-strong: #f6f2ea;
+  --theme-danger-text: #ffe2e2;
   --theme-text-soft: rgba(246, 242, 234, 0.9);
   --theme-text-body: rgba(246, 242, 234, 0.8);
   --theme-text-muted: rgba(246, 242, 234, 0.6);
@@ -78,6 +79,7 @@
   --theme-border: rgba(60, 60, 67, 0.32);
   --theme-border-strong: rgba(60, 60, 67, 0.46);
   --theme-text-strong: #1d1d1f;
+  --theme-danger-text: #b04a45;
   --theme-text-soft: rgba(29, 29, 31, 0.92);
   --theme-text-body: rgba(29, 29, 31, 0.8);
   --theme-text-muted: rgba(60, 60, 67, 0.68);

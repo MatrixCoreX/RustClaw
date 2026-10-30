@@ -33,6 +33,7 @@ export interface UseSystemRuntimeParams {
   apiBase: string;
   uiAuthReady: boolean;
   isAdminIdentity: boolean;
+  requestEpoch?: number;
   currentPage: ConsolePage;
   fetchHealth: (options?: { silent?: boolean }) => Promise<void>;
   setHealth: (health: HealthResponse) => void;
@@ -51,6 +52,7 @@ export function useSystemRuntime({
   apiBase,
   uiAuthReady,
   isAdminIdentity,
+  requestEpoch = 0,
   currentPage,
   fetchHealth,
   setHealth,
@@ -100,18 +102,33 @@ export function useSystemRuntime({
   const nginxStatusLifecycle = useRef(new PageRequestLifecycle());
   const webdStatusLifecycle = useRef(new PageRequestLifecycle());
   const hardwareStatusLifecycle = useRef(new PageRequestLifecycle());
+  const systemActionsRef = useRef(new Map<string, symbol>());
+  const workspaceWritePendingRef = useRef(false);
   const systemReadsActiveRef = useRef(true);
-  const systemReadScopeRef = useRef({ apiBase, uiAuthReady, isAdminIdentity });
+  const systemReadScopeRef = useRef({ apiBase, uiAuthReady, isAdminIdentity, requestEpoch });
   if (
     systemReadScopeRef.current.apiBase !== apiBase
     || systemReadScopeRef.current.uiAuthReady !== uiAuthReady
     || systemReadScopeRef.current.isAdminIdentity !== isAdminIdentity
+    || systemReadScopeRef.current.requestEpoch !== requestEpoch
   ) {
-    systemReadScopeRef.current = { apiBase, uiAuthReady, isAdminIdentity };
+    systemReadScopeRef.current = { apiBase, uiAuthReady, isAdminIdentity, requestEpoch };
   }
   const systemReadScope = systemReadScopeRef.current;
   const isSystemReadScopeCurrent = () => systemReadsActiveRef.current
     && systemReadScopeRef.current === systemReadScope;
+  const beginSystemAction = (key: string, adminOnly = true) => {
+    if (!uiAuthReady || (adminOnly && !isAdminIdentity) || !isSystemReadScopeCurrent()
+      || systemActionsRef.current.has(key)) return null;
+    const token = Symbol(key);
+    systemActionsRef.current.set(key, token);
+    const isCurrent = () => isSystemReadScopeCurrent() && systemActionsRef.current.get(key) === token;
+    return { isCurrent, finish: () => {
+      if (!isCurrent()) return false;
+      systemActionsRef.current.delete(key);
+      return true;
+    } };
+  };
 
   useEffect(() => {
     const lifecycles = [hostSummaryLifecycle.current, hostDependenciesLifecycle.current,
@@ -119,6 +136,8 @@ export function useSystemRuntime({
       webdStatusLifecycle.current, hardwareStatusLifecycle.current];
     const invalidate = () => {
       for (const lifecycle of lifecycles) lifecycle.invalidate();
+      systemActionsRef.current.clear();
+      workspaceWritePendingRef.current = false;
       if (workspaceUpdateReloadTimerRef.current !== null) {
         window.clearTimeout(workspaceUpdateReloadTimerRef.current);
         workspaceUpdateReloadTimerRef.current = null;
@@ -132,8 +151,16 @@ export function useSystemRuntime({
     setHostDependencies(null);
     setHostDependenciesLoading(false);
     setHostDependenciesErrorCode(null);
+    setDependencyInstallingId(null);
+    setSystemDiagnosticsExporting(false);
+    setSystemDiagnosticsExportError(null);
+    setSystemRestarting(false);
+    setSystemRestartMessage(null);
+    setPiAppRestarting(false);
+    setPiAppRestartMessage(null);
     setWorkspaceUpdateStatus(null);
     setWorkspaceUpdateLoading(false);
+    setWorkspaceUpdateCanceling(false);
     setWorkspaceUpdateMessage(null);
     setNginxStatus(null);
     setNginxStatusLoading(false);
@@ -141,6 +168,8 @@ export function useSystemRuntime({
     setWebdExposureStatus(null);
     setWebdExposureLoading(false);
     setWebdExposureError(null);
+    setWebdExposureUpdating(false);
+    setWebdExposureMessage(null);
     setPiAppStatus(null);
     // Build history and scheduled navigation belong to one authenticated endpoint.
     workspaceUpdateSilentFailuresRef.current = 0;
@@ -151,7 +180,7 @@ export function useSystemRuntime({
       systemReadsActiveRef.current = false;
       invalidate();
     };
-  }, [apiBase, uiAuthReady, isAdminIdentity]);
+  }, [apiBase, uiAuthReady, isAdminIdentity, requestEpoch]);
 
   const workspaceUpdateUiLang = (): "zh" | "en" => (t("__zh__", "__en__") === "__zh__" ? "zh" : "en");
   const workspaceUpdateApiErrorMessage = (error: string | null | undefined): string =>
@@ -207,6 +236,8 @@ export function useSystemRuntime({
   };
 
   const installHostDependency = async (dependencyId: string) => {
+    const action = beginSystemAction(`dependency:${dependencyId}`);
+    if (!action) return;
     setDependencyInstallingId(dependencyId);
     setHostDependenciesErrorCode(null);
     try {
@@ -216,24 +247,30 @@ export function useSystemRuntime({
         body: JSON.stringify({ dependency_id: dependencyId }),
       });
       const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
+      if (!action.isCurrent()) return;
       if (!res.ok || !body.ok) {
         setHostDependenciesErrorCode(body.error || "install_failed");
         return;
       }
+      hostDependenciesLifecycle.current.invalidate();
+      setHostDependenciesLoading(false);
       await fetchHostDependencies(true);
     } catch {
-      setHostDependenciesErrorCode("disconnected");
+      if (action.isCurrent()) setHostDependenciesErrorCode("disconnected");
     } finally {
-      setDependencyInstallingId(null);
+      if (action.finish()) setDependencyInstallingId(current => current === dependencyId ? null : current);
     }
   };
 
   const exportSystemDiagnostics = async () => {
+    const action = beginSystemAction("diagnostics", false);
+    if (!action) return;
     setSystemDiagnosticsExporting(true);
     setSystemDiagnosticsExportError(null);
     try {
       const response = await apiFetch("/v1/system/diagnostics/export");
       const body = (await response.json()) as ApiResponse<SystemDiagnosticExport>;
+      if (!action.isCurrent()) return;
       if (!response.ok || !body.ok || !body.data) {
         throw new Error(body.error || `system_diagnostic_export_http_${response.status}`);
       }
@@ -249,6 +286,7 @@ export function useSystemRuntime({
       anchor.click();
       URL.revokeObjectURL(url);
     } catch (error) {
+      if (!action.isCurrent()) return;
       setSystemDiagnosticsExportError(
         formatUiError(
           error,
@@ -258,12 +296,12 @@ export function useSystemRuntime({
         ),
       );
     } finally {
-      setSystemDiagnosticsExporting(false);
+      if (action.finish()) setSystemDiagnosticsExporting(false);
     }
   };
 
   const fetchWorkspaceUpdateStatus = async (silent = false): Promise<WorkspaceUpdateStatus | null> => {
-    if (!uiAuthReady || !isAdminIdentity || !isSystemReadScopeCurrent()) return null;
+    if (!uiAuthReady || !isAdminIdentity || !isSystemReadScopeCurrent() || workspaceWritePendingRef.current) return null;
     const requestId = workspaceStatusLifecycle.current.begin(silent);
     if (requestId === null) return null;
     const isCurrent = () => isSystemReadScopeCurrent()
@@ -375,37 +413,44 @@ export function useSystemRuntime({
   };
 
   const setWebdExternalAccess = async (externallyAccessible: boolean) => {
-    const confirmed = await showConfirm({
-      title: externallyAccessible
-        ? t("开放 webd 对外端口", "Expose the webd port")
-        : t("关闭 webd 对外端口", "Close the public webd port"),
-      message: externallyAccessible
-        ? t(
-            `开放后，局域网或公网可直接连接当前设备的 ${webdExposureStatus?.port ?? 8788} 端口。该入口会绕过 nginx，请确认防火墙和访问网络可信。Web 入口将短暂重启。`,
-            `After this is enabled, LAN or internet clients can connect directly to port ${webdExposureStatus?.port ?? 8788} on this device. This path bypasses nginx, so verify the firewall and network trust first. The web entry will restart briefly.`,
-          )
-        : t(
-            `关闭后，webd 只监听 127.0.0.1:${webdExposureStatus?.port ?? 8788}。nginx 页面和 API 仍可使用；当前若通过 IP:${webdExposureStatus?.port ?? 8788} 直连，页面会断开。Web 入口将短暂重启。`,
-            `After this is disabled, webd listens only on 127.0.0.1:${webdExposureStatus?.port ?? 8788}. The nginx UI and API remain available; a page connected directly through IP:${webdExposureStatus?.port ?? 8788} will disconnect. The web entry will restart briefly.`,
-          ),
-      confirmLabel: externallyAccessible ? t("确认开放", "Expose port") : t("确认关闭", "Close port"),
-      tone: externallyAccessible ? "danger" : "default",
-    });
-    if (!confirmed) return;
-
-    setWebdExposureUpdating(true);
-    setWebdExposureError(null);
-    setWebdExposureMessage(null);
+    const action = beginSystemAction("webd");
+    if (!action) return;
     try {
+      const confirmed = await showConfirm({
+        title: externallyAccessible
+          ? t("开放 webd 对外端口", "Expose the webd port")
+          : t("关闭 webd 对外端口", "Close the public webd port"),
+        message: externallyAccessible
+          ? t(
+              `开放后，局域网或公网可直接连接当前设备的 ${webdExposureStatus?.port ?? 8788} 端口。该入口会绕过 nginx，请确认防火墙和访问网络可信。Web 入口将短暂重启。`,
+              `After this is enabled, LAN or internet clients can connect directly to port ${webdExposureStatus?.port ?? 8788} on this device. This path bypasses nginx, so verify the firewall and network trust first. The web entry will restart briefly.`,
+            )
+          : t(
+              `关闭后，webd 只监听 127.0.0.1:${webdExposureStatus?.port ?? 8788}。nginx 页面和 API 仍可使用；当前若通过 IP:${webdExposureStatus?.port ?? 8788} 直连，页面会断开。Web 入口将短暂重启。`,
+              `After this is disabled, webd listens only on 127.0.0.1:${webdExposureStatus?.port ?? 8788}. The nginx UI and API remain available; a page connected directly through IP:${webdExposureStatus?.port ?? 8788} will disconnect. The web entry will restart briefly.`,
+            ),
+        confirmLabel: externallyAccessible ? t("确认开放", "Expose port") : t("确认关闭", "Close port"),
+        tone: externallyAccessible ? "danger" : "default",
+      });
+      if (!confirmed || !action.isCurrent()) return;
+
+      webdStatusLifecycle.current.invalidate();
+      setWebdExposureLoading(false);
+      setWebdExposureUpdating(true);
+      setWebdExposureError(null);
+      setWebdExposureMessage(null);
       const res = await apiFetch("/v1/admin/webd-exposure", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ externally_accessible: externallyAccessible }),
       });
       const body = await readJsonApiResponse<ApiResponse<WebdExposureStatus>>(res);
+      if (!action.isCurrent()) return;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `webd_exposure_update_http_${res.status}`);
       }
+      webdStatusLifecycle.current.invalidate();
+      setWebdExposureLoading(false);
       setWebdExposureStatus(body.data);
       setWebdExposureMessage(body.data.restart_scheduled
         ? t(
@@ -414,9 +459,12 @@ export function useSystemRuntime({
           )
         : t("webd 已经是所选访问范围。", "webd already uses the selected access scope."));
       if (body.data.restart_scheduled) {
-        window.setTimeout(() => void fetchWebdExposureStatus(true), 5000);
+        window.setTimeout(() => {
+          if (isSystemReadScopeCurrent()) void fetchWebdExposureStatus(true);
+        }, 5000);
       }
     } catch (err) {
+      if (!action.isCurrent()) return;
       const message = formatUiError(
         err,
         t,
@@ -425,7 +473,7 @@ export function useSystemRuntime({
       );
       setWebdExposureError(`${t("修改 webd 访问范围失败", "Failed to update webd access scope")}: ${message}`);
     } finally {
-      setWebdExposureUpdating(false);
+      if (action.finish()) setWebdExposureUpdating(false);
     }
   };
 
@@ -540,55 +588,59 @@ export function useSystemRuntime({
         started: t("正在安全切换到源码模式，下面会自动刷新进度。", "Safely switching to source mode. Progress will refresh automatically."),
       },
     };
-    let selectedModeKey = mode;
-    let confirmed = false;
-    if (mode === "full") {
-      const choice = await showChoice({
-        title: t("选择完整编译方式", "Choose full build behavior"),
-        message: t(
-          "两种方式都会拉取最新代码并完整编译后端、UI、核心工具和本平台技能，完成后重启 {product_name}。请选择是否同时更新 nginx 中的 UI。",
-          "Both choices pull the latest code and fully build the backend, UI, core tools, and platform skills, then restart {product_name}. Choose whether to update the UI hosted by nginx as well.",
-        ),
-        choices: [
-          {
-            value: "deploy_nginx",
-            label: t("包含 nginx：完整部署最新 UI", "Include nginx: deploy the latest UI"),
-            description: t(
-              "如果本机已配置 {product_name} nginx 站点，将最新 UI 同步到该站点；未配置时不会新建 nginx。",
-              "Sync the latest UI to the existing {product_name} nginx site. This does not create nginx when no site is configured.",
-            ),
-          },
-          {
-            value: "preserve_nginx",
-            label: t("不动 nginx", "Leave nginx unchanged"),
-            description: t(
-              "仍然完整编译 UI，但不安装、升级、重载、复制或修改任何 nginx 内容。",
-              "Still build the complete UI without installing, upgrading, reloading, copying, or modifying anything in nginx.",
-            ),
-          },
-        ],
-      });
-      if (!choice) return;
-      selectedModeKey = choice === "preserve_nginx" ? "full_preserve_nginx" : "full";
-      confirmed = true;
-    } else if (mode === "local_https_enable") {
-      confirmed = true;
-    } else {
-      const selectedMode = modeConfig[selectedModeKey];
-      confirmed = await showConfirm({
-        title: selectedModeKey === "nginx_disable"
-          ? t("关闭 nginx Web 入口", "Disable nginx web entry")
-          : t("确认系统操作", "Confirm system operation"),
-        message: selectedMode.confirm,
-        confirmLabel: selectedModeKey === "nginx_disable" ? t("确认关闭", "Disable") : t("继续", "Continue"),
-        tone: selectedModeKey === "nginx_disable" ? "danger" : "default",
-      });
-    }
-    if (!confirmed) return;
-    const selectedMode = modeConfig[selectedModeKey];
-    setWorkspaceUpdateLoading(true);
-    setWorkspaceUpdateMessage(null);
+    const action = beginSystemAction("workspace");
+    if (!action) return;
     try {
+      let selectedModeKey = mode;
+      let confirmed = false;
+      if (mode === "full") {
+        const choice = await showChoice({
+          title: t("选择完整编译方式", "Choose full build behavior"),
+          message: t(
+            "两种方式都会拉取最新代码并完整编译后端、UI、核心工具和本平台技能，完成后重启 {product_name}。请选择是否同时更新 nginx 中的 UI。",
+            "Both choices pull the latest code and fully build the backend, UI, core tools, and platform skills, then restart {product_name}. Choose whether to update the UI hosted by nginx as well.",
+          ),
+          choices: [
+            {
+              value: "deploy_nginx",
+              label: t("包含 nginx：完整部署最新 UI", "Include nginx: deploy the latest UI"),
+              description: t(
+                "如果本机已配置 {product_name} nginx 站点，将最新 UI 同步到该站点；未配置时不会新建 nginx。",
+                "Sync the latest UI to the existing {product_name} nginx site. This does not create nginx when no site is configured.",
+              ),
+            },
+            {
+              value: "preserve_nginx",
+              label: t("不动 nginx", "Leave nginx unchanged"),
+              description: t(
+                "仍然完整编译 UI，但不安装、升级、重载、复制或修改任何 nginx 内容。",
+                "Still build the complete UI without installing, upgrading, reloading, copying, or modifying anything in nginx.",
+              ),
+            },
+          ],
+        });
+        if (!choice) return;
+        selectedModeKey = choice === "preserve_nginx" ? "full_preserve_nginx" : "full";
+        confirmed = true;
+      } else if (mode === "local_https_enable") {
+        confirmed = true;
+      } else {
+        const selectedMode = modeConfig[selectedModeKey];
+        confirmed = await showConfirm({
+          title: selectedModeKey === "nginx_disable"
+            ? t("关闭 nginx Web 入口", "Disable nginx web entry")
+            : t("确认系统操作", "Confirm system operation"),
+          message: selectedMode.confirm,
+          confirmLabel: selectedModeKey === "nginx_disable" ? t("确认关闭", "Disable") : t("继续", "Continue"),
+          tone: selectedModeKey === "nginx_disable" ? "danger" : "default",
+        });
+      }
+      if (!confirmed || !action.isCurrent()) return;
+      const selectedMode = modeConfig[selectedModeKey];
+      workspaceWritePendingRef.current = true;
+      workspaceStatusLifecycle.current.invalidate();
+      setWorkspaceUpdateLoading(true);
+      setWorkspaceUpdateMessage(null);
       const requestInit: RequestInit = { method: "POST" };
       if (selectedModeKey === "local_https_enable") {
         requestInit.headers = { "Content-Type": "application/json" };
@@ -598,6 +650,7 @@ export function useSystemRuntime({
       }
       const res = await apiFetch(selectedMode.endpoint, requestInit);
       const body = (await res.json()) as ApiResponse<WorkspaceUpdateStatus>;
+      if (!action.isCurrent()) return;
       if (!res.ok || !body.ok || !body.data) {
         if (res.status === 409 && body.data) {
           setWorkspaceUpdateStatus(body.data);
@@ -611,41 +664,51 @@ export function useSystemRuntime({
       setWorkspaceUpdateStatus(body.data);
       setWorkspaceUpdateMessage(selectedMode.started);
     } catch (err) {
+      if (!action.isCurrent()) return;
       const message = formatUiError(err, t, "系统重启未完成，请查看日志。", "The system restart did not complete. Check the logs.");
       setWorkspaceUpdateMessage(`${t("启动更新失败", "Failed to start update")}: ${message}`);
     } finally {
-      setWorkspaceUpdateLoading(false);
+      if (action.finish()) {
+        workspaceWritePendingRef.current = false;
+        setWorkspaceUpdateLoading(false);
+      }
     }
   };
 
   const cancelWorkspaceUpdate = async () => {
-    const confirmed = await showConfirm({
-      title: t("停止当前操作", "Stop current operation"),
-      message: t(
-        workspaceUpdateStatus?.mode === "release_deploy" || workspaceUpdateStatus?.mode === "release_restore"
-          ? "停止当前部署？已经完成的下载或文件复制不会自动回滚，后续可重新点击下载 Release 部署。"
-          : workspaceUpdateStatus?.mode === "nginx_disable"
-            ? "停止关闭 nginx？已经停止的服务或已经删除的 UI 不会自动恢复。"
-          : workspaceUpdateStatus?.mode === "source_checkout"
-            ? "停止切换源码模式？如果尚未完成原子切换，当前 Release 安装会保持不变。"
-            : "停止当前编译？已经完成的拉取或文件复制不会自动回滚，后续可重新点击完整编译。",
-        workspaceUpdateStatus?.mode === "release_deploy" || workspaceUpdateStatus?.mode === "release_restore"
-          ? "Stop the current deployment? Completed download or copy steps will not be rolled back. You can deploy the Release again later."
-          : workspaceUpdateStatus?.mode === "nginx_disable"
-            ? "Stop disabling nginx? A service already stopped or UI files already removed will not be restored automatically."
-          : workspaceUpdateStatus?.mode === "source_checkout"
-            ? "Stop switching to source mode? The current Release installation remains unchanged if the atomic switch has not completed."
-          : "Stop the current build? Completed pull or copy steps will not be rolled back. You can run Build All again later.",
-      ),
-      confirmLabel: t("停止", "Stop"),
-      tone: "danger",
-    });
-    if (!confirmed) return;
-    setWorkspaceUpdateCanceling(true);
-    setWorkspaceUpdateMessage(null);
+    const action = beginSystemAction("workspace");
+    if (!action) return;
     try {
+      const confirmed = await showConfirm({
+        title: t("停止当前操作", "Stop current operation"),
+        message: t(
+          workspaceUpdateStatus?.mode === "release_deploy" || workspaceUpdateStatus?.mode === "release_restore"
+            ? "停止当前部署？已经完成的下载或文件复制不会自动回滚，后续可重新点击下载 Release 部署。"
+            : workspaceUpdateStatus?.mode === "nginx_disable"
+              ? "停止关闭 nginx？已经停止的服务或已经删除的 UI 不会自动恢复。"
+            : workspaceUpdateStatus?.mode === "source_checkout"
+              ? "停止切换源码模式？如果尚未完成原子切换，当前 Release 安装会保持不变。"
+              : "停止当前编译？已经完成的拉取或文件复制不会自动回滚，后续可重新点击完整编译。",
+          workspaceUpdateStatus?.mode === "release_deploy" || workspaceUpdateStatus?.mode === "release_restore"
+            ? "Stop the current deployment? Completed download or copy steps will not be rolled back. You can deploy the Release again later."
+            : workspaceUpdateStatus?.mode === "nginx_disable"
+              ? "Stop disabling nginx? A service already stopped or UI files already removed will not be restored automatically."
+            : workspaceUpdateStatus?.mode === "source_checkout"
+              ? "Stop switching to source mode? The current Release installation remains unchanged if the atomic switch has not completed."
+            : "Stop the current build? Completed pull or copy steps will not be rolled back. You can run Build All again later.",
+        ),
+        confirmLabel: t("停止", "Stop"),
+        tone: "danger",
+      });
+      if (!confirmed || !action.isCurrent()) return;
+      workspaceWritePendingRef.current = true;
+      workspaceStatusLifecycle.current.invalidate();
+      setWorkspaceUpdateLoading(false);
+      setWorkspaceUpdateCanceling(true);
+      setWorkspaceUpdateMessage(null);
       const res = await apiFetch("/v1/admin/workspace-update/cancel", { method: "POST" });
       const body = (await res.json()) as ApiResponse<WorkspaceUpdateStatus>;
+      if (!action.isCurrent()) return;
       if (!res.ok || !body.ok || !body.data) {
         if (body.data) setWorkspaceUpdateStatus(body.data);
         throw new Error(body.error ? workspaceUpdateApiErrorMessage(body.error) : `workspace_update_cancel_http_${res.status}`);
@@ -653,28 +716,33 @@ export function useSystemRuntime({
       setWorkspaceUpdateStatus(body.data);
       setWorkspaceUpdateMessage(t("已请求停止编译，正在结束当前进程。", "Stop requested. Ending the current build process."));
     } catch (err) {
+      if (!action.isCurrent()) return;
       const message = formatUiError(err, t, "硬件设备服务重启未完成，请查看日志。", "The hardware-device service restart did not complete. Check the logs.");
       setWorkspaceUpdateMessage(`${t("停止编译失败", "Failed to stop build")}: ${message}`);
     } finally {
-      setWorkspaceUpdateCanceling(false);
+      if (action.finish()) {
+        workspaceWritePendingRef.current = false;
+        setWorkspaceUpdateCanceling(false);
+      }
     }
   };
 
   const restartSystem = async () => {
+    const action = beginSystemAction("restart");
+    if (!action) return false;
     setSystemRestarting(true);
     setSystemRestartMessage(null);
     clearLlmConfigError();
     clearSkillsConfigError();
-    let restartAccepted = false;
     try {
       const res = await apiFetch(`/v1/system/restart`, {
         method: "POST",
       });
       const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
+      if (!action.isCurrent()) return false;
       if (!res.ok || !body.ok) {
         throw new Error(formatSystemActionError(body, res.status, t));
       }
-      restartAccepted = true;
       setSystemRestartMessage(
         t(
           "已发起重启，页面会短暂断开，稍后会自动恢复。",
@@ -682,11 +750,13 @@ export function useSystemRuntime({
         ),
       );
       await sleep(1800);
+      if (!action.isCurrent()) return false;
       let recovered = false;
       for (let attempt = 0; attempt < 12; attempt += 1) {
         try {
           const probe = await apiFetch(`/v1/health`);
           const body = (await probe.json()) as ApiResponse<HealthResponse>;
+          if (!action.isCurrent()) return false;
           if (probe.ok && body.ok && body.data) {
             recovered = true;
             setHealth(body.data);
@@ -694,13 +764,16 @@ export function useSystemRuntime({
             break;
           }
         } catch {
+          if (!action.isCurrent()) return false;
           // The restart window is expected to cause transient failures while clawd comes back up.
         }
         await sleep(1500);
+        if (!action.isCurrent()) return false;
       }
 
       if (recovered) {
         await Promise.allSettled([fetchLlmConfig(), fetchMultimodalConfig(), fetchSkillsConfig(), fetchSkills()]);
+        if (!action.isCurrent()) return false;
         setSystemRestartMessage(
           t(
             "{product_name} 已重启完成，当前页面已经恢复。",
@@ -715,16 +788,14 @@ export function useSystemRuntime({
           ),
         );
       }
-      setSystemRestarting(false);
       return recovered;
     } catch (err) {
+      if (!action.isCurrent()) return false;
       const message = formatUiError(err, t, "系统重启未完成，请查看日志。", "The system restart did not complete. Check the logs.");
       setSystemRestartMessage(`${t("重启失败", "Restart failed")}: ${message}`);
       return false;
     } finally {
-      if (!restartAccepted) {
-        setSystemRestarting(false);
-      }
+      if (action.finish()) setSystemRestarting(false);
     }
   };
 
@@ -749,21 +820,28 @@ export function useSystemRuntime({
   };
 
   const restartPiApp = async () => {
+    const action = beginSystemAction("hardware");
+    if (!action) return;
+    hardwareStatusLifecycle.current.invalidate();
     setPiAppRestarting(true);
     setPiAppRestartMessage(null);
     try {
       const res = await apiFetch(`/v1/pi-app/restart`, { method: "POST" });
       const body = (await res.json()) as ApiResponse<Record<string, unknown>>;
+      if (!action.isCurrent()) return;
       if (!res.ok || !body.ok) {
         throw new Error(formatSystemActionError(body, res.status, t));
       }
       setPiAppRestartMessage(t("已发起 Pi App 小程序重启。", "Pi App restart requested."));
     } catch (err) {
+      if (!action.isCurrent()) return;
       const message = formatUiError(err, t, "硬件设备服务重启未完成，请查看日志。", "The hardware-device service restart did not complete. Check the logs.");
       setPiAppRestartMessage(`${t("Pi App 重启失败", "Pi App restart failed")}: ${message}`);
     } finally {
-      setPiAppRestarting(false);
-      void fetchPiAppStatus();
+      if (action.finish()) {
+        setPiAppRestarting(false);
+        void fetchPiAppStatus();
+      }
     }
   };
 
@@ -778,7 +856,7 @@ export function useSystemRuntime({
       void fetchPiAppStatus();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiBase, uiAuthReady, isAdminIdentity, currentPage]);
+  }, [apiBase, uiAuthReady, isAdminIdentity, requestEpoch, currentPage]);
 
   useEffect(() => {
     if (!uiAuthReady || currentPage !== "dashboard") return;
@@ -796,7 +874,7 @@ export function useSystemRuntime({
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiBase, uiAuthReady, currentPage, hostDependencies?.operations]);
+  }, [apiBase, uiAuthReady, isAdminIdentity, requestEpoch, currentPage, hostDependencies?.operations]);
 
   useEffect(() => {
     const status = workspaceUpdateStatus?.status;
@@ -843,7 +921,7 @@ export function useSystemRuntime({
     if (status !== "running" && status !== "restarting") return;
     const refreshWhenVisible = async () => {
       if (!isSystemReadScopeCurrent() || document.visibilityState !== "visible"
-        || workspaceStatusLifecycle.current.hasForegroundRequest()) return;
+        || workspaceStatusLifecycle.current.hasForegroundRequest() || workspaceWritePendingRef.current) return;
       const pending = fetchWorkspaceUpdateStatus(true);
       const requestId = workspaceStatusLifecycle.current.currentRequestId();
       const isCurrentPoll = () => isSystemReadScopeCurrent()
@@ -876,7 +954,7 @@ export function useSystemRuntime({
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiBase, uiAuthReady, isAdminIdentity, workspaceUpdateStatus?.status]);
+  }, [apiBase, uiAuthReady, isAdminIdentity, requestEpoch, workspaceUpdateStatus?.status]);
 
   return {
     systemRestarting,

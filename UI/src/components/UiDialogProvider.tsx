@@ -141,14 +141,14 @@ export function UiDialogProvider({ children }: { children: ReactNode }) {
         className="theme-dialog-panel w-full max-w-md p-0"
       >
         <div className="flex items-start gap-3 border-b border-white/10 px-5 py-4">
-          <span className={active.tone === "danger" ? "mt-0.5 text-red-300" : "mt-0.5 text-sky-300"}>
+          <span className={active.tone === "danger" ? "mt-0.5 text-[color:var(--theme-danger-text)]" : "mt-0.5 text-[color:var(--theme-icon-accent-color)]"}>
             {active.tone === "danger" ? <AlertTriangle className="h-5 w-5" /> : <Info className="h-5 w-5" />}
           </span>
           <div className="min-w-0 flex-1">
-            <h2 id="ui-dialog-title" className="text-base font-semibold text-white">
+            <h2 id="ui-dialog-title" className="text-base font-semibold text-[color:var(--theme-text-strong)]">
               {active.title ?? browserCopy("请确认", "Confirm action")}
             </h2>
-            <p id="ui-dialog-message" className="mt-2 whitespace-pre-wrap text-sm leading-6 text-white/65">
+            <p id="ui-dialog-message" className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[color:var(--theme-text-body)]">
               {active.message}
             </p>
           </div>
@@ -173,9 +173,9 @@ export function UiDialogProvider({ children }: { children: ReactNode }) {
                   onClick={() => finish(choice.value)}
                   className="theme-secondary-btn theme-choice-btn min-h-16 w-full items-start px-4 py-3 text-left"
                 >
-                  <span className="block text-sm font-semibold text-white">{choice.label}</span>
+                  <span className="block text-sm font-semibold text-[color:var(--theme-text-strong)]">{choice.label}</span>
                   {choice.description ? (
-                    <span className="mt-1 block text-xs font-normal leading-5 text-white/60">
+                    <span className="mt-1 block text-xs font-normal leading-5 text-[color:var(--theme-text-body)]">
                       {choice.description}
                     </span>
                   ) : null}
@@ -192,7 +192,7 @@ export function UiDialogProvider({ children }: { children: ReactNode }) {
           <form onSubmit={submitDialog}>
             {active.kind === "prompt" ? (
               <div className="px-5 pt-4">
-                <label className="block text-sm font-medium text-white/80" htmlFor="ui-dialog-input">
+                <label className="block text-sm font-medium text-[color:var(--theme-text-body)]" htmlFor="ui-dialog-input">
                   {active.inputLabel ?? browserCopy("输入内容", "Enter a value")}
                 </label>
                 <input
@@ -214,7 +214,7 @@ export function UiDialogProvider({ children }: { children: ReactNode }) {
                 ref={primaryButtonRef}
                 type="submit"
                 className={active.tone === "danger"
-                  ? "inline-flex min-h-10 items-center justify-center rounded-md border border-red-400/35 bg-red-500/15 px-4 py-2 text-sm font-medium text-red-100 transition hover:bg-red-500/25"
+                  ? "inline-flex min-h-10 items-center justify-center rounded-md border border-red-400/35 bg-red-500/15 px-4 py-2 text-sm font-medium text-[color:var(--theme-danger-text)] transition hover:bg-red-500/25"
                   : "theme-accent-btn px-4 py-2 text-sm"}
               >
                 {active.confirmLabel ?? browserCopy("确认", "Confirm")}

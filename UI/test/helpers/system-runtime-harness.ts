@@ -5,6 +5,7 @@ import { useSystemRuntime, type UseSystemRuntimeParams } from "../../src/hooks/u
 
 type PendingRequest = {
   path: string;
+  init?: RequestInit;
   resolve: (response: Response) => void;
   reject: (error: Error) => void;
 };
@@ -30,7 +31,7 @@ export async function systemRuntimeHarness() {
   const pending: PendingRequest[] = [];
   const noop = () => undefined;
   let props: UseSystemRuntimeParams = {
-    apiFetch: (path) => new Promise<Response>((resolve, reject) => pending.push({ path, resolve, reject })),
+    apiFetch: (path, init) => new Promise<Response>((resolve, reject) => pending.push({ path, init, resolve, reject })),
     t: (zh) => zh, apiBase: "http://localhost:8788", uiAuthReady: true,
     isAdminIdentity: false, currentPage: "chat",
     fetchHealth: async () => { healthReads++; }, setHealth: noop, setError: noop,
