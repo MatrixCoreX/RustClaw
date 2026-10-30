@@ -1,3 +1,9 @@
+fn channel_config_read_error(channel: &str) -> String {
+    // Parser diagnostics can contain credential-bearing source lines.
+    tracing::warn!(channel, error_code = "channel_config_read_failed");
+    format!("{channel}_config_read_failed")
+}
+
 async fn get_telegram_config(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -15,13 +21,13 @@ async fn get_telegram_config(
     let config_path = state.skill_rt.workspace_root.join("configs/config.toml");
     let config = match claw_core::config::AppConfig::load(&config_path.to_string_lossy()) {
         Ok(config) => config,
-        Err(err) => {
+        Err(_) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiResponse {
                     ok: false,
                     data: None,
-                    error: Some(format!("read telegram config failed: {err}")),
+                    error: Some(channel_config_read_error("telegram")),
                 }),
             );
         }
@@ -545,12 +551,12 @@ async fn get_wechat_config(
                 error: None,
             }),
         ),
-        Err(err) => (
+        Err(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some(format!("read wechat config failed: {err}")),
+                error: Some(channel_config_read_error("wechat")),
             }),
         ),
     }
@@ -574,20 +580,25 @@ async fn get_feishu_config(
         }
     };
     match load_feishu_config_response(&state, Some(&identity.user_key)) {
-        Ok(data) => (
-            StatusCode::OK,
-            Json(ApiResponse {
-                ok: true,
-                data: Some(data),
-                error: None,
-            }),
-        ),
-        Err(err) => (
+        Ok(mut data) => {
+            if !identity.role.eq_ignore_ascii_case("admin") {
+                data.app_secret.clear();
+            }
+            (
+                StatusCode::OK,
+                Json(ApiResponse {
+                    ok: true,
+                    data: Some(data),
+                    error: None,
+                }),
+            )
+        }
+        Err(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some(format!("read feishu config failed: {err}")),
+                error: Some(channel_config_read_error("feishu")),
             }),
         ),
     }
@@ -611,20 +622,25 @@ async fn get_lark_config(
         }
     };
     match load_lark_config_response(&state, Some(&identity.user_key)) {
-        Ok(data) => (
-            StatusCode::OK,
-            Json(ApiResponse {
-                ok: true,
-                data: Some(data),
-                error: None,
-            }),
-        ),
-        Err(err) => (
+        Ok(mut data) => {
+            if !identity.role.eq_ignore_ascii_case("admin") {
+                data.app_secret.clear();
+            }
+            (
+                StatusCode::OK,
+                Json(ApiResponse {
+                    ok: true,
+                    data: Some(data),
+                    error: None,
+                }),
+            )
+        }
+        Err(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some(format!("read lark config failed: {err}")),
+                error: Some(channel_config_read_error("lark")),
             }),
         ),
     }
@@ -785,7 +801,7 @@ async fn update_feishu_config(
     headers: HeaderMap,
     Json(req): Json<UpdateFeishuConfigRequest>,
 ) -> (StatusCode, Json<ApiResponse<FeishuConfigResponse>>) {
-    let identity = match require_ui_identity(&state, &headers) {
+    let identity = match require_ui_admin(&state, &headers) {
         Ok(identity) => identity,
         Err((status, Json(resp))) => {
             return (
@@ -951,7 +967,7 @@ async fn update_lark_config(
     headers: HeaderMap,
     Json(req): Json<UpdateLarkConfigRequest>,
 ) -> (StatusCode, Json<ApiResponse<LarkConfigResponse>>) {
-    let identity = match require_ui_identity(&state, &headers) {
+    let identity = match require_ui_admin(&state, &headers) {
         Ok(identity) => identity,
         Err((status, Json(resp))) => {
             return (
@@ -1556,3 +1572,7 @@ struct UsageTaskMeta {
     telegram_bot_name: Option<String>,
     request_text: Option<String>,
 }
+
+#[cfg(test)]
+#[path = "channel_configuration_access_tests.rs"]
+mod channel_configuration_access_tests;

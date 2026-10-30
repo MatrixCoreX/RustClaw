@@ -154,6 +154,16 @@ are attempted while still owned, and neither can replay the primary operation.
 These frontend checks do not replace server authorization or registration
 idempotency, and do not imply automatic retry of a failed registration poll.
 
+Authenticated users can read communication status/configuration metadata without
+receiving application secrets: Feishu/Lark clear the secret field for non-admin
+identities, Telegram masks bot credentials, and WeChat exposes configured flags.
+Feishu/Lark configuration writes require the server-resolved administrator role
+before reading or changing credentials; role fields supplied in request JSON do
+not grant authority. Administrator editing and ordinary-user status reads remain
+separate from account-owned QR login and binding. Configuration read failures
+return machine error codes, never credential-bearing parser source excerpts;
+diagnostic events contain only the channel and safe error code.
+
 After official registration init/begin or poll I/O returns, the backend rereads
 the active key, administrator role and owned platform/session before attaching
 registration metadata or applying credentials. It

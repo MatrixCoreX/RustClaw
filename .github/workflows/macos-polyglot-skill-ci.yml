@@ -260,6 +260,10 @@ jobs:
         shell: bash
         run: cargo test -p clawd --bin clawd channel_registration_race_tests -- --test-threads=1 --nocapture
 
+      - name: Test channel configuration authorization and privacy
+        shell: bash
+        run: cargo test -p clawd --bin clawd channel_configuration_access_tests -- --test-threads=1 --nocapture
+
       - name: Test capability loading and verification-only recovery
         shell: bash
         run: |
