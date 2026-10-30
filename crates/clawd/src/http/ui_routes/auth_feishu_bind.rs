@@ -416,7 +416,16 @@ async fn maybe_complete_official_scan(
         return Ok(session);
     };
 
-    let poll = poll_official_registration(state, platform, device_code).await?;
+    let poll_result = poll_official_registration(state, platform, device_code).await;
+    // Registration I/O may outlive the actor, session, or registration attempt.
+    let current = refresh_registration_session(state, platform, &session)?;
+    if !matches!(current.status.as_str(), "pending" | "detected")
+        || current.install_device_code != session.install_device_code
+    {
+        return Ok(current);
+    }
+    let session = current;
+    let poll = poll_result?;
     if let (Some(client_id), Some(client_secret), Some(_open_id)) = (
         poll.client_id
             .as_deref()
@@ -793,17 +802,20 @@ async fn get_channel_bind_session(
                 error: None,
             }),
         ),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(format!(
-                    "refresh {} bind session failed: {err}",
-                    platform.channel()
-                )),
-            }),
-        ),
+        Err(err) => {
+            let rejection = err.downcast_ref::<ChannelRegistrationRejection>();
+            (
+                rejection.map_or(StatusCode::INTERNAL_SERVER_ERROR, |cause| cause.status()),
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(rejection.map_or_else(
+                        || format!("refresh {} bind session failed: {err}", platform.channel()),
+                        ToString::to_string,
+                    )),
+                }),
+            )
+        }
     }
 }
 
@@ -1738,3 +1750,7 @@ async fn bind_channel_key(
 #[cfg(test)]
 #[path = "auth_feishu_bind_tests.rs"]
 mod pending_request_tests;
+
+#[cfg(test)]
+#[path = "channel_registration_race_tests.rs"]
+mod channel_registration_race_tests;

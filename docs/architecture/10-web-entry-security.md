@@ -154,6 +154,16 @@ are attempted while still owned, and neither can replay the primary operation.
 These frontend checks do not replace server authorization or registration
 idempotency, and do not imply automatic retry of a failed registration poll.
 
+After an official registration poll returns, the backend rereads the active key,
+administrator role and owned platform/session before applying credentials. It
+uses the current expiry, terminal status and registration code rather than the
+pre-request snapshot. Missing/revoked keys, removed or reassigned sessions and
+role changes return machine-coded authorization/not-found errors; expired,
+already-bound or replaced registrations retain their current stored state
+without applying the delayed result. A delayed upstream expiry cannot replace
+an already-bound session. This eligibility check is not an atomic application
+receipt or a guarantee of ordering against every concurrent configuration write.
+
 ```mermaid
 flowchart TD
     A[Channel admin control] --> B{Current authenticated scope}

@@ -256,6 +256,10 @@ jobs:
         shell: bash
         run: cargo test -p clawd --bin clawd verify_projection_tests
 
+      - name: Test channel registration response ownership
+        shell: bash
+        run: cargo test -p clawd --bin clawd channel_registration_race_tests -- --test-threads=1 --nocapture
+
       - name: Test capability loading and verification-only recovery
         shell: bash
         run: |
