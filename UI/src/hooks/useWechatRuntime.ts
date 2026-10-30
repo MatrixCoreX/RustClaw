@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type {
   ApiResponse,
@@ -7,9 +7,12 @@ import type {
   WechatQrWaitResponse,
 } from "../types/api";
 import { formatUiError } from "../lib/ui-error";
+import { useRequestOwner } from "./useRequestOwner";
 
 type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
+type LoginRequest = { token: symbol; promise: Promise<void> };
+type StatusRequest = LoginRequest & { foreground: boolean };
 
 export function wechatLoginRequestError(
   t: Translate,
@@ -55,6 +58,7 @@ export interface UseWechatRuntimeParams {
   apiFetch: ApiFetch;
   t: Translate;
   apiBase: string;
+  requestScope: string;
   uiAuthReady: boolean;
   enabled: boolean;
   serviceHealthy: boolean;
@@ -65,61 +69,91 @@ export function useWechatRuntime({
   apiFetch,
   t,
   apiBase,
+  requestScope,
   uiAuthReady,
   enabled,
   serviceHealthy,
   statusPollingEnabled = true,
 }: UseWechatRuntimeParams) {
+  const isCurrent = useRequestOwner(uiAuthReady ? requestScope : "", apiBase);
+  const requests = useMemo(() => ({
+    status: null as StatusRequest | null,
+    start: null as LoginRequest | null,
+    poll: null as LoginRequest | null,
+    sessionKey: null as string | null,
+  }), [isCurrent]);
   const [wechatLoginLoading, setWechatLoginLoading] = useState(false);
   const [wechatLoginError, setWechatLoginError] = useState<string | null>(null);
   const [wechatLoginStatus, setWechatLoginStatus] = useState<WechatLoginStatus | null>(null);
   const [wechatSessionKey, setWechatSessionKey] = useState<string | null>(null);
   const [wechatQrStarting, setWechatQrStarting] = useState(false);
   const [wechatQrPreviewRequested, setWechatQrPreviewRequested] = useState(false);
-  const statusRequestRef = useRef<Promise<void> | null>(null);
-  const qrPollRequestRef = useRef<Promise<void> | null>(null);
+  useEffect(() => {
+    setWechatLoginLoading(false);
+    setWechatLoginError(null);
+    setWechatLoginStatus(null);
+    setWechatSessionKey(null);
+    setWechatQrStarting(false);
+    setWechatQrPreviewRequested(false);
+  }, [isCurrent]);
 
   const fetchWechatLoginStatus = (silent = false): Promise<void> => {
-    if (statusRequestRef.current) return statusRequestRef.current;
-    const request = (async () => {
+    if (!isCurrent() || requests.start) return Promise.resolve();
+    if (requests.status) {
+      if (!silent) {
+        requests.status.foreground = true;
+        setWechatLoginLoading(true);
+        setWechatLoginError(null);
+      }
+      return requests.status.promise;
+    }
+    const token = Symbol("wechat-status");
+    const ownsRead = () => isCurrent() && requests.status?.token === token;
     if (!silent) {
       setWechatLoginLoading(true);
       setWechatLoginError(null);
     }
-    try {
-      const res = await apiFetch(`/v1/wechat/login-status`);
-      const body = (await res.json()) as ApiResponse<WechatLoginStatus>;
-      if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `wechat_login_status_http_${res.status}`);
+    const promise = Promise.resolve().then(async () => {
+      if (!ownsRead()) return;
+      try {
+        const res = await apiFetch(`/v1/wechat/login-status`);
+        const body = (await res.json()) as ApiResponse<WechatLoginStatus>;
+        if (!ownsRead()) return;
+        if (!res.ok || !body.ok || !body.data) {
+          throw new Error(body.error || `wechat_login_status_http_${res.status}`);
+        }
+        setWechatLoginStatus(body.data);
+        let sessionKey = requests.sessionKey;
+        if (body.data.connected || !body.data.qr_ready) sessionKey = null;
+        else if (body.data.session_key) sessionKey = body.data.session_key;
+        if (sessionKey !== requests.sessionKey) requests.poll = null;
+        requests.sessionKey = sessionKey;
+        setWechatSessionKey(sessionKey);
+        if (requests.status?.foreground) setWechatLoginError(null);
+      } catch (err) {
+        if (ownsRead() && requests.status?.foreground) {
+          setWechatLoginError(formatUiError(err, t, "微信登录状态暂时无法读取。", "WeChat sign-in status is temporarily unavailable."));
+        }
+      } finally {
+        if (ownsRead()) {
+          if (requests.status?.foreground) setWechatLoginLoading(false);
+          requests.status = null;
+        }
       }
-      setWechatLoginStatus(body.data);
-      if (body.data.qr_ready && body.data.session_key) {
-        setWechatSessionKey(body.data.session_key);
-      } else if (!body.data.qr_ready || body.data.connected) {
-        setWechatSessionKey(null);
-      }
-      if (!silent) {
-        setWechatLoginError(null);
-      }
-    } catch (err) {
-      const message = formatUiError(err, t, "微信登录状态暂时无法读取。", "WeChat sign-in status is temporarily unavailable.");
-      if (!silent) {
-        setWechatLoginError(message);
-      }
-    } finally {
-      if (!silent) {
-        setWechatLoginLoading(false);
-      }
-    }
-    })();
-    statusRequestRef.current = request;
-    void request.finally(() => {
-      if (statusRequestRef.current === request) statusRequestRef.current = null;
     });
-    return request;
+    requests.status = { token, promise, foreground: !silent };
+    return promise;
   };
 
-  const startWechatQrLogin = async (force = true) => {
+  const startWechatQrLogin = (force = true): Promise<void> => {
+    if (!isCurrent()) return Promise.resolve();
+    if (requests.start) return requests.start.promise;
+    const token = Symbol("wechat-start");
+    const ownsStart = () => isCurrent() && requests.start?.token === token;
+    requests.status = null;
+    requests.poll = null;
+    requests.sessionKey = null;
+    setWechatLoginLoading(false);
     setWechatQrStarting(true);
     setWechatQrPreviewRequested(true);
     setWechatLoginError(null);
@@ -135,108 +169,145 @@ export function useWechatRuntime({
       status: "qr_generating",
       last_update_ts: Date.now(),
     }));
-    try {
-      const res = await apiFetch(`/v1/wechat/login-qr/start`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ force }),
-      });
-      const body = (await res.json()) as ApiResponse<WechatQrStartResponse>;
-      if (!res.ok || !body.ok || !body.data) {
-        throw new Error(wechatLoginRequestError(
-          t,
-          body.error,
-          "微信登录二维码生成失败，请稍后重试。",
-          "The WeChat sign-in QR code could not be generated. Try again shortly.",
-        ));
-      }
-      setWechatSessionKey(body.data.session_key);
-      setWechatLoginStatus((prev) => ({
-        ...(prev ?? {}),
-        connected: false,
-        qr_ready: true,
-        qr_status: "wait",
-        qrcode_url: body.data.qrcode_url,
-        message: body.data.message,
-        last_error: null,
-        status: "qr_ready",
-        last_update_ts: Date.now(),
-      }));
-    } catch (err) {
-      const message = formatUiError(err, t, "微信登录二维码生成失败，请稍后重试。", "The WeChat sign-in QR code could not be generated. Try again shortly.");
-      setWechatLoginError(message);
-    } finally {
-      setWechatQrStarting(false);
-    }
-  };
-
-  const pollWechatQrLogin = (sessionKey: string): Promise<void> => {
-    if (qrPollRequestRef.current) return qrPollRequestRef.current;
-    const request = (async () => {
-    try {
-      const res = await apiFetch(`/v1/wechat/login-qr/wait`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_key: sessionKey, timeout_ms: 1500 }),
-      });
-      const body = (await res.json()) as ApiResponse<WechatQrWaitResponse>;
-      if (!res.ok || !body.ok || !body.data) {
-        if (wechatLoginSessionRequiresRestart(body.error)) {
-          setWechatSessionKey(null);
+    const promise = Promise.resolve().then(async () => {
+      if (!ownsStart()) return;
+      try {
+        const res = await apiFetch(`/v1/wechat/login-qr/start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ force }),
+        });
+        const body = (await res.json()) as ApiResponse<WechatQrStartResponse>;
+        if (!ownsStart()) return;
+        if (!res.ok || !body.ok || !body.data) {
+          throw new Error(wechatLoginRequestError(
+            t,
+            body.error,
+            "微信登录二维码生成失败，请稍后重试。",
+            "The WeChat sign-in QR code could not be generated. Try again shortly.",
+          ));
         }
-        throw new Error(wechatLoginRequestError(
-          t,
-          body.error,
-          "微信登录确认失败，请刷新二维码后重试。",
-          "WeChat sign-in confirmation failed. Refresh the QR code and try again.",
-        ));
-      }
-      if (body.data.connected) {
-        setWechatSessionKey(null);
-        await fetchWechatLoginStatus(true);
-        return;
-      }
-      if (body.data.qr_status === "expired") {
-        setWechatSessionKey(null);
-        setWechatLoginStatus((prev) => ({
-          ...(prev ?? {}),
-          connected: false,
-          qr_ready: false,
-          qrcode_url: null,
-          qr_status: "expired",
-          message: body.data?.message ?? prev?.message,
-          status: "qr_expired",
-        }));
-        return;
-      }
-      if (body.data.qr_status || body.data.message) {
+        requests.sessionKey = body.data.session_key;
+        setWechatSessionKey(body.data.session_key);
         setWechatLoginStatus((prev) => ({
           ...(prev ?? {}),
           connected: false,
           qr_ready: true,
-          qr_status: body.data.qr_status ?? prev?.qr_status ?? "wait",
-          message: body.data.message ?? prev?.message,
+          qr_status: "wait",
+          qrcode_url: body.data.qrcode_url,
+          message: body.data.message,
+          last_error: null,
           status: "qr_ready",
+          last_update_ts: Date.now(),
         }));
+      } catch (err) {
+        if (ownsStart()) {
+          setWechatLoginError(formatUiError(err, t, "微信登录二维码生成失败，请稍后重试。", "The WeChat sign-in QR code could not be generated. Try again shortly."));
+        }
+      } finally {
+        if (ownsStart()) {
+          requests.start = null;
+          setWechatQrStarting(false);
+        }
       }
-    } catch (err) {
-      const message = formatUiError(err, t, "微信登录确认失败，请刷新二维码后重试。", "WeChat sign-in confirmation failed. Refresh the QR code and try again.");
-      setWechatLoginError(message);
-    }
-    })();
-    qrPollRequestRef.current = request;
-    void request.finally(() => {
-      if (qrPollRequestRef.current === request) qrPollRequestRef.current = null;
     });
-    return request;
+    requests.start = { token, promise };
+    return promise;
+  };
+
+  const pollWechatQrLogin = (sessionKey: string): Promise<void> => {
+    if (!isCurrent() || requests.start || requests.sessionKey !== sessionKey) return Promise.resolve();
+    if (requests.poll) return requests.poll.promise;
+    const token = Symbol("wechat-poll");
+    const ownsPoll = () => isCurrent() && requests.poll?.token === token && requests.sessionKey === sessionKey;
+    const promise = Promise.resolve().then(async () => {
+      if (!ownsPoll()) return;
+      try {
+        const res = await apiFetch(`/v1/wechat/login-qr/wait`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_key: sessionKey, timeout_ms: 1500 }),
+        });
+        const body = (await res.json()) as ApiResponse<WechatQrWaitResponse>;
+        if (!ownsPoll()) return;
+        if (!res.ok || !body.ok || !body.data) {
+          if (wechatLoginSessionRequiresRestart(body.error)) {
+            requests.sessionKey = null;
+            requests.status = null;
+            setWechatLoginLoading(false);
+            setWechatSessionKey(null);
+          }
+          throw new Error(wechatLoginRequestError(
+            t,
+            body.error,
+            "微信登录确认失败，请刷新二维码后重试。",
+            "WeChat sign-in confirmation failed. Refresh the QR code and try again.",
+          ));
+        }
+        if (body.data.connected) {
+          const confirmation = body.data;
+          const foreground = requests.status?.foreground === true;
+          // A pre-confirmation status read cannot establish the new binding.
+          requests.status = null;
+          requests.sessionKey = null;
+          setWechatLoginLoading(false);
+          setWechatSessionKey(null);
+          setWechatLoginStatus((prev) => ({
+            ...(prev ?? {}),
+            connected: confirmation.connected,
+            provider_connected: confirmation.provider_connected,
+            current_user_bound: confirmation.current_user_bound,
+            binding_status: confirmation.binding_status,
+            qr_ready: false,
+            qr_status: null,
+            qrcode_url: null,
+            message: confirmation.message ?? null,
+            status: "connected",
+          }));
+          await fetchWechatLoginStatus(!foreground);
+          return;
+        }
+        if (body.data.qr_status === "expired") {
+          requests.sessionKey = null;
+          requests.status = null;
+          setWechatLoginLoading(false);
+          setWechatSessionKey(null);
+          setWechatLoginStatus((prev) => ({
+            ...(prev ?? {}), connected: false, qr_ready: false, qrcode_url: null, qr_status: "expired",
+            message: body.data?.message ?? prev?.message, status: "qr_expired",
+          }));
+          return;
+        }
+        if (body.data.qr_status || body.data.message) {
+          setWechatLoginStatus((prev) => ({
+            ...(prev ?? {}), connected: false, qr_ready: true,
+            qr_status: body.data.qr_status ?? prev?.qr_status ?? "wait",
+            message: body.data.message ?? prev?.message, status: "qr_ready",
+          }));
+        }
+      } catch (err) {
+        if (isCurrent() && requests.poll?.token === token) {
+          setWechatLoginError(formatUiError(err, t, "微信登录确认失败，请刷新二维码后重试。", "WeChat sign-in confirmation failed. Refresh the QR code and try again."));
+        }
+      } finally {
+        if (isCurrent() && requests.poll?.token === token) requests.poll = null;
+      }
+    });
+    requests.poll = { token, promise };
+    return promise;
   };
 
   useEffect(() => {
     if (!uiAuthReady || !enabled || !serviceHealthy || !statusPollingEnabled) {
+      requests.status = null;
+      requests.poll = null;
+      requests.sessionKey = null;
+      setWechatLoginLoading(false);
       setWechatLoginStatus(null);
       setWechatSessionKey(null);
       return;
     }
+    if (wechatSessionKey !== requests.sessionKey) return;
     if (wechatSessionKey && !wechatLoginStatus?.connected) return;
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") void fetchWechatLoginStatus(true);
@@ -249,11 +320,12 @@ export function useWechatRuntime({
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiBase, uiAuthReady, enabled, serviceHealthy, statusPollingEnabled, wechatSessionKey, wechatLoginStatus?.connected]);
+  }, [apiBase, uiAuthReady, enabled, serviceHealthy, statusPollingEnabled, wechatSessionKey, wechatLoginStatus?.connected, isCurrent]);
 
   useEffect(() => {
     if (!uiAuthReady || !enabled || !serviceHealthy || !statusPollingEnabled) return;
     if (!wechatSessionKey) return;
+    if (wechatSessionKey !== requests.sessionKey) return;
     if (wechatLoginStatus?.connected) return;
     const refreshWhenVisible = () => {
       if (document.visibilityState !== "visible") return;
@@ -268,7 +340,7 @@ export function useWechatRuntime({
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wechatSessionKey, wechatLoginStatus?.connected, apiBase, uiAuthReady, enabled, serviceHealthy, statusPollingEnabled]);
+  }, [wechatSessionKey, wechatLoginStatus?.connected, apiBase, uiAuthReady, enabled, serviceHealthy, statusPollingEnabled, isCurrent]);
 
   return {
     wechatLoginLoading,

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { wechatLoginHarness, qrStart } from "../../test/helpers/wechat-login-harness";
 
 function source(relativePath: string): string {
   return readFileSync(new URL(relativePath, import.meta.url), "utf8");
@@ -22,11 +23,29 @@ test("high-frequency page polling pauses while the browser document is hidden", 
   }
 });
 
-test("channel login polling uses a single visible polling lane", () => {
-  const wechat = source("../hooks/useWechatRuntime.ts");
-  assert.match(wechat, /statusRequestRef/);
-  assert.match(wechat, /qrPollRequestRef/);
-  assert.match(wechat, /if \(wechatSessionKey && !wechatLoginStatus\?\.connected\) return/);
+test("channel login polling uses a single visible polling lane", async (t) => {
+  const h = await wechatLoginHarness(t); t.after(() => h.dispose());
+  const qr = qrStart("fixture-session");
+  const status = { connected: false, qr_ready: true, ...qr };
+  const replyFrom = async (start: number) => {
+    const end = h.pending.length;
+    for (let index = start; index < end; index++) {
+      await h.reply(index, h.pending[index].path.endsWith("/wait") ? { qr_status: "wait" } : status);
+    }
+  };
+  await h.advance(5000); assert.equal(h.pending.length, 0);
+  await h.visibility("visible"); assert.equal(h.pending.length, 1);
+  await h.reply(0, status);
+  assert.equal(h.pending.filter(row => row.path.endsWith("/wait")).length, 1);
+  await h.advance(2000); assert.equal(h.pending.length, 3);
+  await replyFrom(1);
+  await h.advance(2000); assert.equal(h.pending.length, 5);
+  await replyFrom(3);
+  await h.advance(1000); assert.equal(h.pending.length, 5, "the ordinary 5s lane must not run alongside the QR lane");
+  await h.advance(1000); assert.equal(h.pending.length, 7);
+  await replyFrom(5);
+  await h.visibility("hidden"); await h.advance(10000);
+  assert.equal(h.pending.length, 7);
 
   const whatsapp = source("../hooks/useWhatsappWebRuntime.ts");
   assert.match(whatsapp, /statusRequestRef/);

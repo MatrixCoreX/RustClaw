@@ -1311,6 +1311,7 @@ export default function App() {
     apiFetch,
     t,
     apiBase,
+    requestScope: activeUiRequestScope,
     uiAuthReady,
     enabled: wechatConfigData?.enabled === true,
     serviceHealthy: health?.wechatd_healthy === true,

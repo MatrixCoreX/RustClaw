@@ -213,6 +213,7 @@ jobs:
           node UI/test/service-action-ownership.browser.mjs
           node UI/test/channel-service-app.browser.mjs
           UI_BROWSER_ARTIFACTS="$UI_BROWSER_ARTIFACTS/channel-config" node UI/test/channel-config-ownership.browser.mjs
+          UI_BROWSER_ARTIFACTS="$UI_BROWSER_ARTIFACTS/wechat-login" node UI/test/wechat-login-ownership.browser.mjs
 
       - name: Upload browser authentication evidence
         if: ${{ always() }}

@@ -123,6 +123,16 @@ remain unsaved. Changing identity or device clears obsolete local configuration
 and secret drafts, but does not modify backend configuration or cancel a save
 already accepted by the server. QR/login status has its own lifecycle.
 
+WeChat sign-in status, QR generation and confirmation polls are bound to the
+authenticated endpoint and login epoch. A scope change clears obsolete local
+QR data and prevents old callbacks from submitting follow-up requests. Ordinary
+authenticated users can still sign in under the backend's per-user session
+checks. Hidden pages pause polling; a foreground refresh shares a pending status
+read instead of adding another request. Repeated QR clicks share one pending
+generation. A confirmed binding remains confirmed if its follow-up status read
+is unavailable; pre-confirmation reads cannot overwrite that result, and the
+generation request is not replayed.
+
 ```mermaid
 flowchart TD
     A[Channel admin control] --> B{Current authenticated scope}
