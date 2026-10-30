@@ -701,6 +701,14 @@ normal media/CDN redirect is not disabled by this internal-API boundary.
 Configure the final API address, including HTTPS when applicable, rather than
 an alias that depends on a redirect.
 
+The browser console's login, session/profile checks and internal API requests,
+and `skillctl admit`, also reject redirects. Enter the final webd/nginx or core
+API address for the appropriate client. Browser requests retain their existing
+cookie, CSRF and direct-key rules; refusing a redirect does not encrypt HTTP.
+Use HTTPS for untrusted networks. Delayed identity responses are checked again
+after reading the body, so signing out or changing accounts invalidates their
+authority to update the current console identity.
+
 ### Telegram Transport Boundary
 
 Telegram is limited to message transport, identity binding, and task control. It no longer owns skill-specific configuration or natural-language routing:

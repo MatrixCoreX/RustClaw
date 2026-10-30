@@ -17,6 +17,7 @@ import {
 } from "./lib/dashboard-home";
 import { formatDuration, toLocalTime } from "./lib/display-format";
 import { runCoalescedResponseRead } from "./lib/resilient-read";
+import { runtimeApiFetch } from "./lib/runtime-api-transport";
 import { formatUiError } from "./lib/ui-error";
 import {
   buildRuntimeRequestHeaders,
@@ -269,7 +270,7 @@ export default function App() {
     const targetUrl = `${apiBase.replace(/\/$/, "")}${path}`;
     const credentials = runtimeRequestCredentials(withAuth, authMode, init?.credentials);
     try {
-      const response = await fetch(targetUrl, {
+      const response = await runtimeApiFetch(targetUrl, {
         ...init,
         credentials,
         headers: buildRuntimeRequestHeaders({
@@ -923,6 +924,8 @@ export default function App() {
   };
 
   const fetchAuthMe = async (silent = false) => {
+    const authEpoch = authFlowEpochRef.current;
+    const isCurrent = () => authEpoch === authFlowEpochRef.current && isCurrentApiRequest();
     if (!silent) {
       setAuthMeLoading(true);
       setAuthMeError(null);
@@ -930,6 +933,7 @@ export default function App() {
     try {
       const res = await apiFetch(`/v1/auth/me`);
       const body = (await res.json()) as ApiResponse<AuthIdentityResponse>;
+      if (!isCurrent()) return null;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(formatAuthenticationError(body.error, res.status, t));
       }
@@ -939,13 +943,14 @@ export default function App() {
       }
       return body.data;
     } catch (err) {
+      if (!isCurrent()) return null;
       const message = formatUiError(err, t, "无法读取当前登录信息。", "Could not load the current sign-in information.");
       if (!silent) {
         setAuthMeError(message);
       }
       return null;
     } finally {
-      if (!silent) {
+      if (!silent && isCurrent()) {
         setAuthMeLoading(false);
       }
     }
@@ -1006,7 +1011,7 @@ export default function App() {
     if (authMode === "webd") {
       try {
         const webdBase = apiBase.replace(/\/$/, "");
-        await fetch(`${webdBase}/webd/logout`, {
+        await runtimeApiFetch(`${webdBase}/webd/logout`, {
           method: "POST",
           credentials: "include",
           headers: webdCsrfToken ? { [WEBD_CSRF_HEADER]: webdCsrfToken } : undefined,
@@ -1044,7 +1049,7 @@ export default function App() {
     const loginUrl = `${webdBase}/webd/login`;
     let failingUrl = loginUrl;
     try {
-      const res = await fetch(loginUrl, {
+      const res = await runtimeApiFetch(loginUrl, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -1061,6 +1066,7 @@ export default function App() {
           nni_navigation_visible?: boolean;
         };
       };
+      if (authEpoch !== authFlowEpochRef.current) return;
       if (!res.ok || !body.ok) {
         if (body.error_code === "invalid_credentials") {
           throw new Error(t("用户名或密码不正确", "Invalid username or password"));
@@ -1098,9 +1104,10 @@ export default function App() {
       setAuthMeError(null);
       const meUrl = `${webdBase}/v1/auth/me`;
       failingUrl = meUrl;
-      const meRes = await fetch(meUrl, { credentials: "include" });
+      const meRes = await runtimeApiFetch(meUrl, { credentials: "include" });
       if (authEpoch !== authFlowEpochRef.current) return;
       const meBody = (await meRes.json()) as ApiResponse<AuthIdentityResponse>;
+      if (authEpoch !== authFlowEpochRef.current) return;
       if (!meRes.ok || !meBody.ok || !meBody.data) {
         setUiAuthReady(false);
         setAuthMode(null);
@@ -1472,7 +1479,7 @@ export default function App() {
         setUiAuthError(null);
         try {
           const sessionUrl = `${apiBase.replace(/\/$/, "")}/webd/session`;
-          const sessionRes = await fetch(sessionUrl, { credentials: "include" });
+          const sessionRes = await runtimeApiFetch(sessionUrl, { credentials: "include" });
           const sessionBody = (await sessionRes.json()) as {
             ok?: boolean;
             data?: {
@@ -1481,6 +1488,7 @@ export default function App() {
               nni_navigation_visible?: boolean | null;
             };
           };
+          if (authEpoch !== authFlowEpochRef.current) return;
           const csrfToken = normalizeWebdCsrfToken(sessionBody.data?.csrf_token);
           if (!sessionRes.ok || !sessionBody.ok || !sessionBody.data?.logged_in || !csrfToken) {
             throw new Error("webd_session_invalid");
@@ -1490,9 +1498,10 @@ export default function App() {
             setNniNavigationVisible(sessionBody.data.nni_navigation_visible);
           }
           const targetUrl = `${apiBase.replace(/\/$/, "")}/v1/auth/me`;
-          const res = await fetch(targetUrl, { credentials: "include" });
+          const res = await runtimeApiFetch(targetUrl, { credentials: "include" });
           if (authEpoch !== authFlowEpochRef.current) return;
           const body = (await res.json()) as ApiResponse<AuthIdentityResponse>;
+          if (authEpoch !== authFlowEpochRef.current) return;
           if (!res.ok || !body.ok || !body.data) {
             setUiAuthReady(false);
             setAuthIdentity(null);
@@ -1577,7 +1586,7 @@ export default function App() {
     let stopped = false;
     const verifyWebdSession = async () => {
       try {
-        const response = await fetch(`${apiBase.replace(/\/$/, "")}/webd/session`, {
+        const response = await runtimeApiFetch(`${apiBase.replace(/\/$/, "")}/webd/session`, {
           credentials: "include",
         });
         const body = (await response.json()) as {

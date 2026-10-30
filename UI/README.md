@@ -2,7 +2,7 @@
 
 本目录是 Agent Runtime 的浏览器控制台前端项目。
 
-它不是独立产品，而是给 `clawd` 提供本地或静态托管的 Web 管理界面，用于查看运行状态、提交任务、配置部分运行参数、查看日志和做日常管理。
+它不是独立产品，而是通过 `webd` 访问核心服务的 Web 管理界面，用于查看运行状态、提交任务、配置部分运行参数、查看日志和做日常管理。
 
 ## 技术栈
 
@@ -67,8 +67,8 @@ npm run lint
 
 Agent Runtime 当前常见的 UI 使用方式有两种：
 
-1. 随仓库一起本地构建，供 `clawd` 或本地静态目录使用
-2. 构建后复制到 nginx 静态目录
+1. 使用完整 Release 包中的 UI，由 `webd` 提供页面与 API 入口
+2. 构建后复制到 nginx 静态目录，API 反向代理给 `webd`
 
 仓库内相关入口：
 
@@ -91,8 +91,28 @@ bash install-agent-cmd.sh --user --no-deploy-ui
 
 ## 与后端的关系
 
-- 后端核心服务是 `clawd`
-- 常见 API 地址是 `http://127.0.0.1:8787`
-- UI 主要依赖 `clawd` 暴露的健康检查、任务、鉴权、配置和日志接口
+- 浏览器入口是 `webd`（默认 `http://127.0.0.1:8788`），也可以使用 nginx 对外地址
+- `clawd` 只提供本机内部 API，不直接提供网页或公网入口
+- UI 通过 `webd` 使用健康检查、任务、鉴权、配置和日志接口
+- 登录、会话与内部 API 请求只访问填写的最终地址，不跟随重定向；外链和媒体请求不受这项限制
+- Cookie 会话继续使用 CSRF 校验；直接 Key 仅保留在当前内存中。退出或换账号后，旧身份响应不能更新当前身份
+- 本机 HTTP 仍可使用；这不提供网络加密，不可信网络应使用 HTTPS
 
 如果后端没有启动，UI 中依赖 API 的页面将无法正常工作。
+
+## 认证回归测试
+
+```bash
+cd UI
+npm ci --ignore-scripts
+npm test
+npm run lint
+node node_modules/playwright/cli.js install chromium
+node test/runtime-api-transport.browser.mjs
+node test/authentication-ownership.browser.mjs
+```
+
+浏览器测试使用独立的临时页面服务、回环 HTTP 服务和测试凭据，不访问真实
+后端、不调用模型。它们覆盖正常密码/Key 登录、同源与跨源五种重定向，以及
+响应头已经返回、正文仍在等待时退出并更换账号。也可通过
+`BROWSER_EXECUTABLE` 指定测试浏览器；该配置不改变业务技能使用的浏览器。

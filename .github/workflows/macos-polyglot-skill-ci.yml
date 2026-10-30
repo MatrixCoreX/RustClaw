@@ -8,6 +8,7 @@ name: Polyglot Skill macOS CI
       - ".github/workflows/pi-aarch64-release.yml"
       - "Cargo.lock"
       - "Cargo.toml"
+      - "UI/**"
       - "configs/skills_registry.toml"
       - "crates/claw-core/**"
       - "crates/clawcli/**"
@@ -53,6 +54,7 @@ name: Polyglot Skill macOS CI
       - ".github/workflows/pi-aarch64-release.yml"
       - "Cargo.lock"
       - "Cargo.toml"
+      - "UI/**"
       - "configs/skills_registry.toml"
       - "crates/claw-core/**"
       - "crates/clawcli/**"
@@ -177,6 +179,27 @@ jobs:
           set -euo pipefail
           cargo test -p agent-skill-sdk
           cargo test -p skill-runner
+
+      - name: Test browser API authentication boundaries
+        shell: bash
+        env:
+          UI_BROWSER_ARTIFACTS: ${{ runner.temp }}/ui-authentication-browser-tests
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --prefix UI
+          npm test --prefix UI
+          npm run lint --prefix UI
+          node UI/node_modules/playwright/cli.js install chromium
+          node UI/test/runtime-api-transport.browser.mjs
+          node UI/test/authentication-ownership.browser.mjs
+
+      - name: Upload browser authentication evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ui-authentication-browser-evidence
+          path: ${{ runner.temp }}/ui-authentication-browser-tests
+          if-no-files-found: ignore
 
       - name: Test CLI transport and task continuity
         shell: bash

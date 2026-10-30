@@ -115,6 +115,7 @@ fn admit_command(args: &[String]) -> Result<Value, SkillSdkError> {
     }
     let endpoint = format!("{clawd_url}/v1/skills/import");
     let client = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(timeout_seconds))
         .build()
         .map_err(|error| SkillSdkError::new("admission_client_failed", error.to_string()))?;
@@ -129,6 +130,12 @@ fn admit_command(args: &[String]) -> Result<Value, SkillSdkError> {
         .send()
         .map_err(|error| SkillSdkError::new("admission_request_failed", error.to_string()))?;
     let status = response.status();
+    if status.is_redirection() {
+        return Err(SkillSdkError::new(
+            "admission_redirect_rejected",
+            format!("status={status}"),
+        ));
+    }
     let payload: Value = response
         .json()
         .map_err(|error| SkillSdkError::new("admission_response_invalid", error.to_string()))?;
