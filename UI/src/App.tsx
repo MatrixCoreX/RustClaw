@@ -182,6 +182,7 @@ export default function App() {
   const [authMeLoading, setAuthMeLoading] = useState(false);
   const [authMeError, setAuthMeError] = useState<string | null>(null);
   const authFlowEpochRef = useRef(0);
+  const logoutPendingRef = useRef(false);
   const sharedApiReadsRef = useRef(new Map<string, Promise<Response>>());
   const [pollingSeconds, setPollingSeconds] = useState(() => {
     return readNumber(STORAGE_KEYS.polling, 5);
@@ -957,13 +958,14 @@ export default function App() {
   };
 
   const verifyUiKey = async (candidate: string) => {
-    const authEpoch = authFlowEpochRef.current;
+    if (uiAuthLoading || logoutPendingRef.current) return false;
     const normalized = candidate.trim();
     if (!normalized) {
       setUiAuthReady(false);
       setUiAuthError(t("请输入 key", "Please enter a key"));
       return false;
     }
+    const authEpoch = ++authFlowEpochRef.current;
     setUiAuthLoading(true);
     setUiAuthError(null);
     try {
@@ -1007,19 +1009,24 @@ export default function App() {
   };
 
   const logout = async () => {
-    authFlowEpochRef.current += 1;
-    if (authMode === "webd") {
-      try {
+    if (logoutPendingRef.current) return;
+    logoutPendingRef.current = true;
+    const authEpoch = ++authFlowEpochRef.current;
+    try {
+      if (authMode === "webd") {
         const webdBase = apiBase.replace(/\/$/, "");
         await runtimeApiFetch(`${webdBase}/webd/logout`, {
           method: "POST",
           credentials: "include",
           headers: webdCsrfToken ? { [WEBD_CSRF_HEADER]: webdCsrfToken } : undefined,
         });
-      } catch {
-        // ignore network errors on logout
       }
+    } catch {
+      // Clear local sign-in state even if the gateway is unavailable.
+    } finally {
+      logoutPendingRef.current = false;
     }
+    if (authEpoch !== authFlowEpochRef.current) return;
     window.localStorage.removeItem(STORAGE_KEYS.userKey);
     window.localStorage.removeItem(STORAGE_KEYS.authMode);
     setAuthMode(null);
@@ -1037,12 +1044,13 @@ export default function App() {
   };
 
   const loginWebd = async () => {
-    const authEpoch = authFlowEpochRef.current;
+    if (uiAuthLoading || logoutPendingRef.current) return;
     const u = webdUsername.trim();
     if (!u || !webdPassword) {
       setUiAuthError(t("请输入用户名和密码", "Please enter username and password"));
       return;
     }
+    const authEpoch = ++authFlowEpochRef.current;
     setUiAuthLoading(true);
     setUiAuthError(null);
     const webdBase = (webdBaseUrlDraft.trim() || window.location.origin).replace(/\/$/, "");
@@ -1132,6 +1140,18 @@ export default function App() {
       if (authEpoch !== authFlowEpochRef.current) return;
       setUiAuthLoading(false);
     }
+  };
+
+  const invalidatePendingSignIn = () => {
+    authFlowEpochRef.current += 1;
+    window.localStorage.removeItem(STORAGE_KEYS.authMode);
+    window.localStorage.removeItem(STORAGE_KEYS.userKey);
+    setUiAuthLoading(false);
+    setUiAuthReady(false);
+    setUiAuthError(null);
+    setAuthMode(null);
+    setWebdCsrfToken("");
+    setUiKey("");
   };
 
   const updateNniNavigationVisible = async (visible: boolean) => {
@@ -1923,9 +1943,9 @@ export default function App() {
         uiAuthLoading={uiAuthLoading}
         uiAuthError={uiAuthError}
         factoryResetModal={factoryResetModal}
-        onBaseUrlChange={setBaseUrl}
+        onBaseUrlChange={(value) => { invalidatePendingSignIn(); setBaseUrl(value); }}
         onUiKeyDraftChange={setUiKeyDraft}
-        onWebdBaseUrlDraftChange={setWebdBaseUrlDraft}
+        onWebdBaseUrlDraftChange={(value) => { invalidatePendingSignIn(); setWebdBaseUrlDraft(value); }}
         onWebdUsernameChange={setWebdUsername}
         onWebdPasswordChange={setWebdPassword}
         onVerifyUiKey={verifyUiKey}

@@ -96,6 +96,7 @@ bash install-agent-cmd.sh --user --no-deploy-ui
 - UI 通过 `webd` 使用健康检查、任务、鉴权、配置和日志接口
 - 登录、会话与内部 API 请求只访问填写的最终地址，不跟随重定向；外链和媒体请求不受这项限制
 - Cookie 会话继续使用 CSRF 校验；直接 Key 仅保留在当前内存中。退出或换账号后，旧身份响应不能更新当前身份
+- 登录期间不能重复提交凭据；修改服务地址会使未完成登录失效，可以直接登录新地址。重复退出不会重复发送退出请求或清除后续新会话
 - 本机 HTTP 仍可使用；这不提供网络加密，不可信网络应使用 HTTPS
 
 如果后端没有启动，UI 中依赖 API 的页面将无法正常工作。
@@ -110,9 +111,11 @@ npm run lint
 node node_modules/playwright/cli.js install chromium
 node test/runtime-api-transport.browser.mjs
 node test/authentication-ownership.browser.mjs
+node test/authentication-concurrency.browser.mjs
 ```
 
 浏览器测试使用独立的临时页面服务、回环 HTTP 服务和测试凭据，不访问真实
 后端、不调用模型。它们覆盖正常密码/Key 登录、同源与跨源五种重定向，以及
-响应头已经返回、正文仍在等待时退出并更换账号。也可通过
+响应头已经返回、正文仍在等待时退出并更换账号、切换服务地址、重复回车和
+重复退出后的新登录。也可通过
 `BROWSER_EXECUTABLE` 指定测试浏览器；该配置不改变业务技能使用的浏览器。

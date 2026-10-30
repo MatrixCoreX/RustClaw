@@ -24,6 +24,7 @@ impl Drop for Server {
 }
 
 fn read_request(socket: &mut TcpStream) -> Vec<u8> {
+    socket.set_nonblocking(false).unwrap();
     socket
         .set_read_timeout(Some(Duration::from_secs(3)))
         .unwrap();
@@ -130,6 +131,29 @@ fn payload(output: &Output) -> Value {
     assert!(!String::from_utf8_lossy(&output.stdout).contains(FIXTURE_KEY));
     assert!(!String::from_utf8_lossy(&output.stderr).contains(FIXTURE_KEY));
     serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[test]
+fn fixture_reads_nonblocking_accepted_streams_as_bounded_blocking_connections() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (mut accepted, _) = listener.accept().unwrap();
+    accepted.set_nonblocking(true).unwrap();
+    let error = accepted.peek(&mut [0_u8; 1]).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+    let writer = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(20));
+        client
+            .write_all(b"POST /fixture HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}")
+            .unwrap();
+    });
+    let request = read_request(&mut accepted);
+    assert_eq!(
+        request,
+        b"POST /fixture HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}"
+    );
+    writer.join().unwrap();
 }
 
 #[test]

@@ -708,6 +708,9 @@ cookie, CSRF and direct-key rules; refusing a redirect does not encrypt HTTP.
 Use HTTPS for untrusted networks. Delayed identity responses are checked again
 after reading the body, so signing out or changing accounts invalidates their
 authority to update the current console identity.
+Changing the sign-in service address invalidates an unfinished attempt before
+using the new address. Credential submission and logout requests are deduplicated
+while pending, and an old logout cannot clear a later authenticated session.
 
 ### Telegram Transport Boundary
 

@@ -129,6 +129,7 @@ export function SignInPage({
                     <input
                       className="theme-input"
                       value={uiKeyDraft}
+                      disabled={uiAuthLoading}
                       onChange={(event) => onUiKeyDraftChange(event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter") {
@@ -176,6 +177,7 @@ export function SignInPage({
                     <input
                       className="theme-input"
                       autoComplete="username"
+                      disabled={uiAuthLoading}
                       value={webdUsername}
                       onChange={(event) => onWebdUsernameChange(event.target.value)}
                       onKeyDown={(event) => {
@@ -192,6 +194,7 @@ export function SignInPage({
                       className="theme-input"
                       type="password"
                       autoComplete="current-password"
+                      disabled={uiAuthLoading}
                       value={webdPassword}
                       onChange={(event) => onWebdPasswordChange(event.target.value)}
                       onKeyDown={(event) => {

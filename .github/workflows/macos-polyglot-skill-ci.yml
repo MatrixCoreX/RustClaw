@@ -192,6 +192,7 @@ jobs:
           node UI/node_modules/playwright/cli.js install chromium
           node UI/test/runtime-api-transport.browser.mjs
           node UI/test/authentication-ownership.browser.mjs
+          node UI/test/authentication-concurrency.browser.mjs
 
       - name: Upload browser authentication evidence
         if: ${{ always() }}
