@@ -35,7 +35,7 @@ jobs:
   build-macos:
     needs: python-wheels
     name: Build verified macOS ${{ inputs.architecture }} package
-    runs-on: ${{ inputs.architecture == 'x86_64' && 'macos-15-intel' || 'macos-14' }}
+    runs-on: ${{ inputs.architecture == 'x86_64' && 'macos-15-intel' || 'macos-15' }}
     env:
       PACKAGE_ARCH: ${{ inputs.architecture }}
       RUST_TARGET: ${{ inputs.architecture }}-apple-darwin

@@ -52,7 +52,7 @@ jobs:
 
   macos-wheels:
     if: contains(inputs.target, 'apple')
-    runs-on: ${{ startsWith(inputs.target, 'aarch64') && 'macos-14' || 'macos-15-intel' }}
+    runs-on: ${{ startsWith(inputs.target, 'aarch64') && 'macos-15' || 'macos-15-intel' }}
     env:
       MACOSX_DEPLOYMENT_TARGET: '13.0'
     strategy:
