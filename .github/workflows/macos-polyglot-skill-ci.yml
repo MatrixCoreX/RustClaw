@@ -272,6 +272,13 @@ jobs:
         shell: bash
         run: cargo test -p clawd --bin clawd repo::channel_registration::tests -- --test-threads=1 --nocapture
 
+      - name: Test durable process target and async poll boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p clawd --bin clawd local_process_job::tests -- --test-threads=1 --nocapture
+          cargo test -p clawd --bin clawd worker::async_poll_executor::tests -- --test-threads=1 --nocapture
+
       - name: Test capability loading and verification-only recovery
         shell: bash
         run: |

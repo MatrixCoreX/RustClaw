@@ -29,6 +29,38 @@ impl Drop for TempDirGuard {
 }
 
 #[test]
+fn pid_metadata_rejects_init_and_nonrepresentable_os_targets() {
+    let root = TempDirGuard::new("pid_target_range");
+    for raw in ["0", "1", "-1", "2147483648", "4294967294", "4294967295"] {
+        std::fs::write(root.path().join("pid"), raw).expect("write pid");
+        assert_eq!(super::read_pid(root.path()), None, "pid={raw}");
+    }
+}
+
+#[test]
+fn pid_metadata_retains_positive_signed_process_boundaries() {
+    let root = TempDirGuard::new("pid_valid_range");
+    for pid in [2, std::process::id(), i32::MAX as u32] {
+        std::fs::write(root.path().join("pid"), format!(" {pid}\n")).expect("write pid");
+        assert_eq!(super::read_pid(root.path()), Some(pid));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn pid_identity_never_probes_special_or_wrapped_process_targets() {
+    let root = TempDirGuard::new("pid_identity_range");
+    for pid in [0, 1, i32::MAX as u32 + 1, u32::MAX - 1, u32::MAX] {
+        assert_eq!(
+            process_identity_state(root.path(), pid),
+            ProcessIdentityState::Missing,
+            "pid={pid}",
+        );
+        assert_eq!(super::process_group_exists(pid), Some(false), "pgid={pid}");
+    }
+}
+
+#[test]
 fn output_snapshot_uses_durable_monotonic_byte_cursors() {
     let root = TempDirGuard::new("output_cursor");
     let path = root.path().join("stdout");

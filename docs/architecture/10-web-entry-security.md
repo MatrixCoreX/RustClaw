@@ -159,6 +159,15 @@ values use the existing five-second default; valid intervals retain the
 one-second minimum. The same check applies to every refreshed session and does
 not infer expiration or success from the browser clock.
 
+Official registration HTTP uses a dedicated pooled client with redirects
+disabled and a 30-second total request deadline, including the response body.
+Responses are limited to 64 KiB, checking both declared length and streamed
+chunks. OAuth polling errors may use HTTP 400; failed-status credential objects
+cannot authorize setup. Transport/decoding failures expose machine error codes,
+not raw response bodies, URLs or parser diagnostics. The UI displays localized
+guidance for those codes without automatically replaying the failed operation.
+Other HTTP clients, model transport and agent task budgets are independent.
+
 Authenticated users can read communication status/configuration metadata without
 receiving application secrets: Feishu/Lark clear the secret field for non-admin
 identities, Telegram masks bot credentials, and WeChat exposes configured flags.

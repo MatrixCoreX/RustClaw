@@ -53,7 +53,12 @@ pub(crate) fn read_pid(job_dir: &Path) -> Option<u32> {
         .trim()
         .parse::<u32>()
         .ok()
-        .filter(|pid| *pid > 0)
+        .filter(|pid| valid_job_process_target(*pid))
+}
+
+fn valid_job_process_target(pid: u32) -> bool {
+    // Zero and negative pid_t values select groups or multiple processes.
+    pid > 1 && i32::try_from(pid).is_ok()
 }
 
 pub(crate) fn read_i64(job_dir: &Path, name: &str) -> Option<i64> {
@@ -88,6 +93,9 @@ pub(crate) fn read_retention_seconds(job_dir: &Path) -> Option<u64> {
 pub(crate) fn process_identity_state(job_dir: &Path, pid: u32) -> ProcessIdentityState {
     #[cfg(unix)]
     {
+        if !valid_job_process_target(pid) {
+            return ProcessIdentityState::Missing;
+        }
         let alive = Command::new("kill")
             .arg("-0")
             .arg(pid.to_string())
@@ -136,6 +144,9 @@ pub(crate) fn process_identity_state(job_dir: &Path, pid: u32) -> ProcessIdentit
 fn process_group_exists(process_group_id: u32) -> Option<bool> {
     #[cfg(unix)]
     {
+        if !valid_job_process_target(process_group_id) {
+            return Some(false);
+        }
         Command::new("kill")
             .args(["-0", "--", &format!("-{process_group_id}")])
             .stdout(std::process::Stdio::null())
@@ -342,6 +353,9 @@ fn signal_process_group_or_pid(pid: u32, signal: &str) -> bool {
 fn signal_process_group(pid: u32, signal: &str) -> bool {
     #[cfg(unix)]
     {
+        if !valid_job_process_target(pid) {
+            return false;
+        }
         let signal = match signal {
             "KILL" => "-KILL",
             "INT" => "-INT",
@@ -367,6 +381,9 @@ fn signal_process_group(pid: u32, signal: &str) -> bool {
 fn signal_process(pid: u32, signal: &str) -> bool {
     #[cfg(unix)]
     {
+        if !valid_job_process_target(pid) {
+            return false;
+        }
         let signal = match signal {
             "KILL" => "-KILL",
             "INT" => "-INT",

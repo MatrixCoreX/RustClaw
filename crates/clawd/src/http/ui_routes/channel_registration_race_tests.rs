@@ -18,6 +18,9 @@ mod application_tests;
 #[path = "channel_registration_recovery_tests.rs"]
 mod recovery_tests;
 
+#[path = "channel_registration_protocol_tests.rs"]
+mod protocol_tests;
+
 #[tokio::test]
 async fn channel_registration_pending_control_keeps_the_session_and_configuration() {
     let _env_lock = crate::fixture_replay_e2e::fixture_env_lock();

@@ -1186,6 +1186,7 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
             agents_by_id: Arc::new(RwLock::new(Arc::new(agents_by_id))),
             agent_runtime_leases: Arc::new(RwLock::new(agent_runtime_leases)),
             http_client: Client::new(),
+            registration_http_client: http::ui_routes::official_registration_http_client_builder().build()?,
             public_http_client: crate::public_http_client::build_public_http_client()?,
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(initial_skill_views))),
             active_provider_type,

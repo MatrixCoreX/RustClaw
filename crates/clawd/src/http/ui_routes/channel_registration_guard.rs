@@ -35,10 +35,12 @@ fn channel_registration_failure_response<T>(
     let journal =
         error.downcast_ref::<crate::repo::channel_registration::RegistrationJournalError>();
     let configuration = error.downcast_ref::<ChannelConfigurationOperationError>();
+    let transport = error.downcast_ref::<ChannelRegistrationTransportError>();
     let status = rejection
         .map(|cause| cause.status())
         .or_else(|| journal.map(|_| StatusCode::CONFLICT))
         .or_else(|| configuration.map(|_| StatusCode::INTERNAL_SERVER_ERROR))
+        .or_else(|| transport.map(|_| StatusCode::BAD_GATEWAY))
         .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     let code = rejection
         .map(ToString::to_string)
@@ -59,7 +61,8 @@ fn channel_registration_failure_response<T>(
                 }
             })
         })
-        .or_else(|| configuration.map(ToString::to_string));
+        .or_else(|| configuration.map(ToString::to_string))
+        .or_else(|| transport.map(ToString::to_string));
     (
         status,
         Json(ApiResponse {

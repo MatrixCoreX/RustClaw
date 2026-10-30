@@ -11,7 +11,7 @@ const results = [];
 let browser;
 try {
   browser = await chromium.launch({ executablePath: process.env.BROWSER_EXECUTABLE || undefined, headless: true });
-  for (const theme of ["light", "dark"]) for (const platform of ["feishu", "lark"]) for (const phase of ["begin", "poll", "reset", "ordinary", "parallel"]) {
+  for (const theme of ["light", "dark"]) for (const platform of ["feishu", "lark"]) for (const phase of ["begin", "poll", "reset", "ordinary", "parallel", "transport-error"]) {
     if (phase === "parallel" && platform === "lark") continue;
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     const requests = [], errors = [], held = [];
@@ -26,10 +26,10 @@ try {
       const deadline = Date.now() + 10000;
       while (!(await predicate())) { if (Date.now() >= deadline) throw new Error("fixture_state_timeout"); await page.waitForTimeout(10); }
     };
-    const reply = (route, data, status = 200) => route.fulfill({ status, contentType: "application/json", headers: {
+    const reply = (route, data, status = 200, error = "fixture_unavailable") => route.fulfill({ status, contentType: "application/json", headers: {
       "Access-Control-Allow-Origin": ui.base, "Access-Control-Allow-Credentials": "true",
       "Access-Control-Allow-Headers": "content-type,x-agent-key,x-webd-csrf", "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    }, body: JSON.stringify({ ok: status === 200, data, error: status === 200 ? null : "fixture_unavailable" }) });
+    }, body: JSON.stringify({ ok: status === 200, data, error: status === 200 ? null : error }) });
     await page.addInitScript(value => {
       localStorage.setItem("agent-runtime.monitor.currentPage", "services");
       localStorage.setItem("agent-runtime.monitor.pollingSeconds", "0");
@@ -54,6 +54,9 @@ try {
       const bind = url.pathname.match(/^\/v1\/admin\/channel-binds\/(feishu|lark)\/(start|[0-9]+)$/);
       if (bind) {
         const [, channel, action] = bind;
+        if (phase === "transport-error" && action !== "start") {
+          return reply(route, null, 502, "channel_bind_registration_response_invalid");
+        }
         if (watch && url.origin === origins[0] && ((phase === "begin" && action === "start") || (phase === "poll" && action !== "start") || phase === "parallel")) {
           held.push(route); return;
         }
@@ -83,7 +86,14 @@ try {
         assert.deepEqual(requests.filter(row => row.path.startsWith("/v1/admin/channel-binds/")), []);
       } else {
         await card.getByRole("button", { name: `Start ${title} setup`, exact: true }).click();
-        if (phase === "parallel") {
+        if (phase === "transport-error") {
+          await card.getByText("The channel could not complete this setup request. Check your connection and start a new scan later.", { exact: true }).waitFor();
+          const polls = () => requests.filter(row => row.path.startsWith(`/v1/admin/channel-binds/${platform}/`) && row.method === "GET");
+          assert.equal(polls().length, 1);
+          await page.waitForTimeout(1500);
+          assert.equal(polls().length, 1);
+          assert.equal(await card.getByText("channel_bind_registration_response_invalid", { exact: true }).count(), 0);
+        } else if (phase === "parallel") {
           await wait(() => held.length === 1);
           await cardFor("Lark").getByRole("button", { name: "Start Lark setup", exact: true }).click();
           await wait(() => held.length === 2); watch = false;

@@ -432,7 +432,7 @@ fn async_poll_requires_a_second_missing_process_observation_before_failure() {
     let job_dir = workspace.root_job_dir("missing-job");
     std::fs::write(job_dir.join("run.sh"), "#!/usr/bin/env bash\nexit 0\n")
         .expect("write identity script");
-    std::fs::write(job_dir.join("pid"), "4294967294").expect("write missing pid");
+    std::fs::write(job_dir.join("pid"), i32::MAX.to_string()).expect("write missing pid");
     std::fs::write(job_dir.join("started_at"), "1000").expect("write started at");
     std::fs::write(job_dir.join("retention_seconds"), "600").expect("write retention");
 
@@ -515,6 +515,22 @@ fn async_poll_missing_pid_metadata_is_a_stable_machine_failure() {
     assert_eq!(payload["executor_result_status"], "async_poll_failed");
     assert_eq!(payload["error_code"], "local_process_pid_missing");
     assert_eq!(payload["failure_result_json"]["process_loss_stable"], true);
+    for raw in ["0", "1", "2147483648", "4294967294", "4294967295"] {
+        std::fs::write(job_dir.join("pid"), raw).expect("write invalid pid metadata");
+        let payload = super::execute_async_poll_dispatch_result(&claimed, 1_011, 30)
+            .expect("invalid pid is a stable metadata failure");
+        assert_eq!(
+            payload["executor_result_status"],
+            "async_poll_failed",
+            "pid={raw}",
+        );
+        assert_eq!(payload["error_code"], "local_process_pid_missing", "pid={raw}");
+        assert_eq!(
+            payload["failure_result_json"]["pid"],
+            serde_json::Value::Null,
+            "pid={raw}",
+        );
+    }
 }
 
 #[test]

@@ -192,29 +192,6 @@ fn official_accounts_base_url(platform: AgentAppChannel) -> String {
         .unwrap_or_else(|| platform.default_accounts_base_url().to_string())
 }
 
-async fn call_official_registration<T: DeserializeOwned>(
-    state: &AppState,
-    platform: AgentAppChannel,
-    params: &[(&str, &str)],
-) -> anyhow::Result<T> {
-    let url = format!(
-        "{}/oauth/v1/app/registration",
-        official_accounts_base_url(platform)
-    );
-    let resp = state.core.http_client.post(url).form(params).send().await?;
-    let status = resp.status();
-    let body = resp.text().await?;
-    serde_json::from_str::<T>(&body).map_err(|err| {
-        anyhow::anyhow!(
-            "decode {} registration response failed: status={} body={} err={}",
-            platform.channel(),
-            status,
-            body,
-            err
-        )
-    })
-}
-
 async fn begin_official_registration(
     state: &AppState,
     platform: AgentAppChannel,
@@ -227,10 +204,7 @@ async fn begin_official_registration(
         .iter()
         .any(|method| method == "client_secret")
     {
-        anyhow::bail!(
-            "{} registration does not support client_secret auth",
-            platform.channel()
-        );
+        return Err(ChannelRegistrationTransportError::ResponseInvalid.into());
     }
     let begin = call_official_registration::<OfficialRegistrationBeginResponse>(
         state,
@@ -244,10 +218,7 @@ async fn begin_official_registration(
     )
     .await?;
     if begin.device_code.trim().is_empty() || begin.verification_uri_complete.trim().is_empty() {
-        anyhow::bail!(
-            "{} registration did not return a device_code or verification url",
-            platform.channel()
-        );
+        return Err(ChannelRegistrationTransportError::ResponseInvalid.into());
     }
     Ok(begin)
 }
@@ -530,16 +501,8 @@ async fn start_channel_bind_session(
                 }
             };
             let _ = mark_pending_channel_bind_session_failed(&mut db, session.id, &err.to_string());
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!(
-                        "start {} official registration failed: {err}",
-                        platform.channel()
-                    )),
-                }),
+            return channel_registration_failure_response(
+                &err, "channel_bind_registration_unavailable".into(),
             );
         }
     };

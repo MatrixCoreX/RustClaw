@@ -80,6 +80,17 @@ export function channelBindRecoveryGuidance(
         "接入配置已经变化，请重新开始扫码；当前保存的配置不会被旧请求覆盖。",
         "Setup configuration has changed. Start a new scan; the old request will not overwrite your saved configuration.",
       );
+    case "channel_bind_registration_request_timeout":
+    case "channel_bind_registration_transport_unavailable":
+    case "channel_bind_registration_response_unavailable":
+    case "channel_bind_registration_response_too_large":
+    case "channel_bind_registration_response_invalid":
+    case "channel_bind_registration_redirect_rejected":
+    case "channel_bind_registration_http_status_rejected":
+      return t(
+        "通信平台未能完成本次接入请求。请检查网络，稍后重新开始扫码。",
+        "The channel could not complete this setup request. Check your connection and start a new scan later.",
+      );
     default:
       return null;
   }

@@ -126,7 +126,7 @@ impl Fixture {
         state.core.db = Self::database_pool(&root);
         let mut state = state.with_seeded_db_schema();
         state.skill_rt.workspace_root = root.clone();
-        state.core.http_client = reqwest::Client::builder()
+        state.core.registration_http_client = official_registration_http_client_builder()
             .no_proxy()
             .timeout(Duration::from_secs(15))
             .build()

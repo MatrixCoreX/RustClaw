@@ -3,10 +3,20 @@ import test from "node:test";
 import { bindSession, channelBindHarness } from "../../test/helpers/channel-bind-harness";
 import { channelBindRecoveryGuidance } from "../lib/feishu-bind";
 
+const transportCodes = [
+  "channel_bind_registration_request_timeout",
+  "channel_bind_registration_transport_unavailable",
+  "channel_bind_registration_response_unavailable",
+  "channel_bind_registration_response_too_large",
+  "channel_bind_registration_response_invalid",
+  "channel_bind_registration_redirect_rejected",
+  "channel_bind_registration_http_status_rejected",
+];
 const codes = [
   "channel_bind_application_recovery_required",
   "channel_bind_registration_superseded",
   "channel_bind_registration_prepare_required",
+  ...transportCodes,
 ];
 
 for (const platform of ["feishu", "lark"] as const) {
@@ -19,7 +29,7 @@ for (const platform of ["feishu", "lark"] as const) {
         await h.update({ t: translate });
         await h.load();
         await h.advance();
-        await h.reply(1, null, 409, code);
+        await h.reply(1, null, transportCodes.includes(code) ? 502 : 409, code);
         assert.equal(h.current.bindError, channelBindRecoveryGuidance(new Error(code), translate));
         assert.ok(h.current.bindError);
         assert.equal(h.current.bindSession?.session_id, 1);
@@ -41,7 +51,7 @@ for (const platform of ["feishu", "lark"] as const) {
       await h.load();
       await h.advance();
       await h.update({ requestScope: "device-b:admin:epoch-1" });
-      await h.reply(1, null, 409, code);
+      await h.reply(1, null, transportCodes.includes(code) ? 502 : 409, code);
       assert.equal(h.current.bindError, null);
       assert.equal(h.current.bindSession, null);
       assert.deepEqual(h.reads, []);
