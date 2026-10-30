@@ -114,6 +114,15 @@ the mutation. Scope changes clear local feedback, not accepted server work.
 The WeChat enable/start/config/QR continuation checks ownership between steps,
 so a new sign-in or device selection cannot continue the former setup request.
 
+WeChat, Feishu, Lark and Telegram configuration snapshots use that same scope;
+only the latest read for each channel may update its state. A pending save fences
+older reads and duplicate saves for that channel without blocking other channels.
+Telegram refreshes update the server snapshot without overwriting unsaved edits.
+A save acknowledgment clears only the submitted draft: edits made while saving
+remain unsaved. Changing identity or device clears obsolete local configuration
+and secret drafts, but does not modify backend configuration or cancel a save
+already accepted by the server. QR/login status has its own lifecycle.
+
 ```mermaid
 flowchart TD
     A[Channel admin control] --> B{Current authenticated scope}

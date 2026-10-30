@@ -744,7 +744,7 @@ export default function App() {
     fetchTelegramConfig,
     setTelegramPrimaryBotDraftField,
     saveTelegramConfig,
-  } = useChannelConfigRuntime({ apiFetch, t });
+  } = useChannelConfigRuntime({ apiFetch, t, requestScope: activeUiRequestScope, isAdminIdentity });
   const activeUserKey = authMode === "key" && uiKey.trim() ? uiKey.trim() : "";
   const activeIdentityIds =
     activeUserKey || interactionUserId == null || interactionChatId == null

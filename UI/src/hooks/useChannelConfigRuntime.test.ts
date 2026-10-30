@@ -41,7 +41,7 @@ test("WeChat enable preserves the loaded channel configuration", async () => {
   };
   let runtime: ReturnType<typeof useChannelConfigRuntime> | null = null;
   function Probe() {
-    runtime = useChannelConfigRuntime({ apiFetch, t: (zh) => zh });
+    runtime = useChannelConfigRuntime({ apiFetch, t: (zh) => zh, requestScope: "device-a:admin", isAdminIdentity: true });
     return null;
   }
 
