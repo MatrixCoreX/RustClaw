@@ -18,6 +18,24 @@ impl ChannelRegistrationRejection {
     }
 }
 
+fn channel_registration_failure_response(
+    error: &anyhow::Error,
+    fallback: String,
+) -> (
+    StatusCode,
+    Json<ApiResponse<FeishuBindSessionStatusResponse>>,
+) {
+    let rejection = error.downcast_ref::<ChannelRegistrationRejection>();
+    (
+        rejection.map_or(StatusCode::INTERNAL_SERVER_ERROR, |cause| cause.status()),
+        Json(ApiResponse {
+            ok: false,
+            data: None,
+            error: Some(rejection.map_or_else(|| fallback, ToString::to_string)),
+        }),
+    )
+}
+
 fn refresh_registration_session(
     state: &AppState,
     platform: AgentAppChannel,

@@ -605,7 +605,30 @@ async fn start_channel_bind_session(
         );
     }
 
-    let begin = match begin_official_registration(&state, platform).await {
+    let begin_result = begin_official_registration(&state, platform).await;
+    let current = match refresh_registration_session(&state, platform, &session) {
+        Ok(current) => current,
+        Err(err) => {
+            return channel_registration_failure_response(
+                &err,
+                "channel_bind_state_unavailable".to_string(),
+            );
+        }
+    };
+    if !matches!(current.status.as_str(), "pending" | "detected")
+        || current.install_device_code != session.install_device_code
+    {
+        return (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(channel_bind_session_response(&state, platform, current)),
+                error: None,
+            }),
+        );
+    }
+    let session = current;
+    let begin = match begin_result {
         Ok(begin) => begin,
         Err(err) => {
             let mut db = match state.core.db.get() {
@@ -802,20 +825,10 @@ async fn get_channel_bind_session(
                 error: None,
             }),
         ),
-        Err(err) => {
-            let rejection = err.downcast_ref::<ChannelRegistrationRejection>();
-            (
-                rejection.map_or(StatusCode::INTERNAL_SERVER_ERROR, |cause| cause.status()),
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(rejection.map_or_else(
-                        || format!("refresh {} bind session failed: {err}", platform.channel()),
-                        ToString::to_string,
-                    )),
-                }),
-            )
-        }
+        Err(err) => channel_registration_failure_response(
+            &err,
+            format!("refresh {} bind session failed: {err}", platform.channel()),
+        ),
     }
 }
 

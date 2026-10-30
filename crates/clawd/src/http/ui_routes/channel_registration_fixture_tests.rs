@@ -27,6 +27,7 @@ struct RegistrationServer {
     release: Arc<Notify>,
     requests: Arc<AtomicUsize>,
     result: Value,
+    action: &'static str,
 }
 
 async fn registration(
@@ -36,12 +37,32 @@ async fn registration(
 ) -> Json<Value> {
     assert!(!headers.contains_key("x-agent-key"));
     assert!(!headers.contains_key("authorization"));
-    assert_eq!(form.get("action").map(String::as_str), Some("poll"));
-    assert_eq!(
-        form.get("device_code").map(String::as_str),
-        Some("fixture-device-code")
-    );
     state.requests.fetch_add(1, Ordering::SeqCst);
+    if state.action == "begin" && form.get("action").map(String::as_str) == Some("init") {
+        assert_eq!(form.len(), 1);
+        return Json(json!({"supported_auth_methods":["client_secret"]}));
+    }
+    assert_eq!(form.get("action").map(String::as_str), Some(state.action));
+    if state.action == "poll" {
+        assert_eq!(
+            form.get("device_code").map(String::as_str),
+            Some("fixture-device-code")
+        );
+    } else {
+        assert_eq!(
+            form.get("archetype").map(String::as_str),
+            Some("PersonalAgent")
+        );
+        assert_eq!(
+            form.get("auth_method").map(String::as_str),
+            Some("client_secret")
+        );
+        assert_eq!(
+            form.get("request_user_info").map(String::as_str),
+            Some("open_id")
+        );
+        assert!(!form.contains_key("device_code"));
+    }
     state.entered.notify_one();
     state.release.notified().await;
     Json(state.result)
@@ -71,6 +92,14 @@ impl Fixture {
     }
 
     pub(super) async fn with_result(platform: AgentAppChannel, result: Value) -> Self {
+        Self::with_action(platform, result, "poll").await
+    }
+
+    pub(super) async fn for_begin(platform: AgentAppChannel, result: Value) -> Self {
+        Self::with_action(platform, result, "begin").await
+    }
+
+    async fn with_action(platform: AgentAppChannel, result: Value, action: &'static str) -> Self {
         assert!(
             !service_is_running(platform.service()),
             "native fixture requires no real channel service"
@@ -131,6 +160,7 @@ impl Fixture {
             release: release.clone(),
             requests: requests.clone(),
             result,
+            action,
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
@@ -179,16 +209,59 @@ impl Fixture {
     }
 
     pub(super) async fn wait_for_poll(&self) {
+        self.wait_for_response_gate().await;
+    }
+
+    pub(super) async fn wait_for_response_gate(&self) {
         tokio::time::timeout(Duration::from_secs(15), self.entered.notified())
             .await
             .unwrap();
     }
 
     pub(super) fn finish_poll(&self) {
+        self.release_response();
+    }
+
+    pub(super) fn release_response(&self) {
         self.release.notify_one();
     }
     pub(super) fn requests(&self) -> usize {
         self.requests.load(Ordering::SeqCst)
+    }
+
+    pub(super) fn begin(
+        &self,
+    ) -> tokio::task::JoinHandle<(
+        StatusCode,
+        Json<ApiResponse<FeishuBindSessionStatusResponse>>,
+    )> {
+        let state = self.state.clone();
+        let platform = self.platform;
+        tokio::spawn(async move {
+            start_channel_bind_session(
+                state,
+                Self::headers(ADMIN_KEY),
+                StartFeishuBindSessionRequest {
+                    expires_in_seconds: Some(600),
+                },
+                platform,
+            )
+            .await
+        })
+    }
+
+    pub(super) fn latest_session(&self) -> PendingChannelBindSession {
+        let db = self.state.core.db.get().unwrap();
+        let id: i64 = db
+            .query_row(
+                "SELECT MAX(id) FROM pending_channel_bind_sessions",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        get_pending_channel_bind_session_by_id(&db, id)
+            .unwrap()
+            .unwrap()
     }
 
     pub(super) fn snapshot(&self) -> Vec<Vec<u8>> {

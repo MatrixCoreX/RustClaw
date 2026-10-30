@@ -6,6 +6,9 @@ use super::*;
 mod support;
 use support::{Fixture, ADMIN_KEY};
 
+#[path = "channel_registration_begin_tests.rs"]
+mod begin_tests;
+
 #[tokio::test]
 async fn channel_registration_pending_control_keeps_the_session_and_configuration() {
     let _env_lock = crate::fixture_replay_e2e::fixture_env_lock();
