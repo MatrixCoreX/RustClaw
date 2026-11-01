@@ -197,10 +197,11 @@ attribute fidelity, arbitrary concurrent-writer isolation or atomic recovery aft
 
 Snapshot directory metadata is enumerated lazily through the admitted directory descriptor.
 Capture reads at most the remaining entry budget plus one overflow witness, then sorts the bounded
-selection. Pending siblings in ancestor traversals count against the same aggregate budget, so
-nested directories cannot each allocate a separate full-budget listing. Empty and exact-boundary
-trees remain valid. This bounds entry-metadata accumulation, not recursive stack depth, arbitrary
-filesystem latency, concurrent content changes or power-loss durability.
+selection. An explicit depth-first work stack counts pending siblings against the same aggregate
+budget and avoids recursive capture frames. Nested directories cannot each allocate a separate
+full-budget listing. Empty/exact-boundary trees and depth-first backup ordinals remain valid.
+This bounds entry-metadata accumulation and capture stack growth, not arbitrary filesystem latency,
+concurrent content changes or power-loss durability.
 
 Structured mutation path records preserve native UTF-8 spelling on Linux/macOS, including literal
 backslashes in filenames. Target, descendant and missing-parent serialization do not rewrite them

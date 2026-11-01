@@ -5,6 +5,7 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::time::Duration;
 
+#[cfg(target_os = "linux")]
 use super::super::owner_host_handshake::HostReadyStart;
 use super::super::owner_store::tests::{binding, credential, store};
 use super::*;

@@ -55,6 +55,7 @@ pub(crate) use super::owner_host_handshake::CommitObservation;
 pub(crate) use super::owner_protocol::OwnerCredential;
 #[cfg(target_os = "linux")]
 pub(crate) use super::owner_protocol::{OwnerAction, OwnerPhase};
+#[cfg(target_os = "linux")]
 pub(crate) use super::owner_reference::AuthorityFingerprint;
 #[cfg(target_os = "linux")]
 pub(crate) use super::process_launch::{PayloadIo, ProcessLaunch};

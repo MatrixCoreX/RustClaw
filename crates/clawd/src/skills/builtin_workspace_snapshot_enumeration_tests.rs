@@ -98,13 +98,12 @@ fn snapshot_enumeration_reserves_pending_siblings_before_descending() {
 }
 
 #[test]
-fn snapshot_enumeration_releases_reservations_after_complete_visit() {
+fn snapshot_enumeration_counts_nested_entries_once_after_complete_visit() {
     let fixture = Fixture::new(&["a/one", "b"]);
     let root = fixture.root.path().canonicalize().unwrap();
     let mut entries = Vec::new();
     let mut budget = SnapshotBudget {
         entries: 0,
-        pending_entries: 0,
         bytes: 0,
         max_entries: 4,
     };
@@ -120,7 +119,59 @@ fn snapshot_enumeration_releases_reservations_after_complete_visit() {
     .unwrap();
     assert_eq!(entries.len(), 4);
     assert_eq!(budget.entries, 4);
-    assert_eq!(budget.pending_entries, 0);
+}
+
+#[test]
+fn snapshot_enumeration_preserves_depth_first_backup_ordinals_and_content() {
+    let fixture = Fixture::new(&["a/z", "a.txt", "z"]);
+    let root = fixture.root.path().canonicalize().unwrap();
+    let backup = root.join("backup");
+    fs::create_dir(&backup).unwrap();
+    let entries =
+        capture_snapshot_with_entry_limit(&root, "tree", Some(&backup), &fixture.filesystem, 5)
+            .unwrap();
+    for (path, ordinal, bytes) in [
+        ("tree/a/z", "before/0002.bin", b"a/z".as_slice()),
+        ("tree/a.txt", "before/0003.bin", b"a.txt".as_slice()),
+        ("tree/z", "before/0004.bin", b"z".as_slice()),
+    ] {
+        let entry = entries.iter().find(|entry| entry.path == path).unwrap();
+        assert_eq!(entry.backup_file.as_deref(), Some(ordinal));
+        assert_eq!(fs::read(backup.join(ordinal)).unwrap(), bytes);
+        assert_eq!(entry.sha256.as_deref(), Some(sha256_label(bytes).as_str()));
+    }
+}
+
+#[test]
+fn snapshot_enumeration_budget_matches_every_small_owned_tree_shape() {
+    let candidates = ["a/one", "a/two", "b/one", "b/two", "plain"];
+    for mask in 0..(1 << candidates.len()) {
+        let files = candidates
+            .iter()
+            .enumerate()
+            .filter_map(|(index, path)| (mask & (1 << index) != 0).then_some(*path))
+            .collect::<Vec<_>>();
+        let count = 1
+            + files.len()
+            + usize::from(files.iter().any(|path| path.starts_with("a/")))
+            + usize::from(files.iter().any(|path| path.starts_with("b/")));
+        let fixture = Fixture::new(&files);
+        let expected = fixture.capture(count).unwrap();
+        assert_eq!(expected.len(), count);
+        for limit in 0..=count + 1 {
+            if limit < count {
+                fixture.assert_limit(limit);
+            } else {
+                assert_eq!(fixture.capture(limit).unwrap(), expected);
+            }
+        }
+        for path in files {
+            assert_eq!(
+                fs::read(fixture.root.path().join("tree").join(path)).unwrap(),
+                path.as_bytes()
+            );
+        }
+    }
 }
 
 #[test]
@@ -188,7 +239,16 @@ fn run_stack_fixture(root: &Path, case: &str) -> std::process::Output {
     }
     let mut child = command.spawn().unwrap();
     let deadline = Instant::now() + Duration::from_secs(60);
-    while child.try_wait().unwrap().is_none() {
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {}
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("owned stack fixture observation failed: {error}");
+            }
+        }
         if Instant::now() >= deadline {
             let _ = child.kill();
             let output = child.wait_with_output().unwrap();

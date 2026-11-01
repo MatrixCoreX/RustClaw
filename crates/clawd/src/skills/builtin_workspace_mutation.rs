@@ -89,7 +89,6 @@ struct MutationCheckpointManifest {
 
 struct SnapshotBudget {
     entries: usize,
-    pending_entries: usize,
     bytes: u64,
     max_entries: usize,
 }
@@ -496,7 +495,6 @@ fn capture_snapshot_with_entry_limit(
     let mut entries = Vec::new();
     let mut budget = SnapshotBudget {
         entries: 0,
-        pending_entries: 0,
         bytes: 0,
         max_entries,
     };
@@ -522,125 +520,118 @@ fn capture_path(
     budget: &mut SnapshotBudget,
     filesystem: &HostFilesystemPolicy,
 ) -> Result<(), String> {
-    // Descendants must satisfy the same path contract as their eventual rewind.
-    safe_target_from_relative(root, relative)?;
-    budget.entries += 1;
-    if budget.entries > budget.max_entries {
-        return Err(snapshot_limit_error(budget));
-    }
-    let metadata = match filesystem.metadata(Some(root), path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            entries.push(SnapshotEntry {
-                path: relative.to_string(),
-                kind: "missing".to_string(),
-                sha256: None,
-                size_bytes: None,
-                backup_file: None,
-            });
-            return Ok(());
-        }
-        Err(error) => return Err(io_error("snapshot_inspection_failed", error)),
-    };
-    if metadata.file_type == FileType::Symlink {
-        return Err(mutation_error(
-            "snapshot_symlink_denied",
-            "workspace.mutation.symlink_denied",
-            json!({"path": relative}),
-        ));
-    }
-    if metadata.file_type == FileType::RegularFile {
-        if budget.bytes.saturating_add(metadata.size_bytes) > MAX_SNAPSHOT_BYTES {
+    let mut pending = vec![(path.to_path_buf(), relative.to_string())];
+    while let Some((path, relative)) = pending.pop() {
+        // Descendants obey the same path contract as their eventual rewind.
+        safe_target_from_relative(root, &relative)?;
+        budget.entries += 1;
+        if budget.entries > budget.max_entries {
             return Err(snapshot_limit_error(budget));
         }
-        let (file, _) = filesystem
-            .open_file(Some(root), path)
-            .map_err(|error| io_error("snapshot_read_failed", error))?;
-        let mut bytes = Vec::new();
-        file.take(MAX_SNAPSHOT_BYTES.saturating_sub(budget.bytes) + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|error| io_error("snapshot_read_failed", error))?;
-        budget.bytes = budget.bytes.saturating_add(bytes.len() as u64);
-        if budget.bytes > MAX_SNAPSHOT_BYTES {
-            return Err(snapshot_limit_error(budget));
-        }
-        let backup_file = if let Some(backup_root) = backup_root {
-            let name = format!("before/{:04}.bin", entries.len());
-            let backup = backup_root.join(&name);
-            filesystem
-                .atomic_write_file_with_options(Some(backup_root), &backup, &bytes, true)
-                .map_err(|error| io_error("snapshot_write_failed", error))?;
-            Some(name)
-        } else {
-            None
+        let metadata = match filesystem.metadata(Some(root), &path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                entries.push(SnapshotEntry {
+                    path: relative,
+                    kind: "missing".to_string(),
+                    sha256: None,
+                    size_bytes: None,
+                    backup_file: None,
+                });
+                continue;
+            }
+            Err(error) => return Err(io_error("snapshot_inspection_failed", error)),
         };
-        entries.push(SnapshotEntry {
-            path: relative.to_string(),
-            kind: "file".to_string(),
-            sha256: Some(sha256_label(&bytes)),
-            size_bytes: Some(bytes.len() as u64),
-            backup_file,
-        });
-        return Ok(());
-    }
-    if metadata.file_type != FileType::Directory {
-        return Err(mutation_error(
-            "unsupported_target_type",
-            "workspace.mutation.unsupported_target_type",
-            json!({"path": relative}),
-        ));
-    }
-    entries.push(SnapshotEntry {
-        path: relative.to_string(),
-        kind: "directory".to_string(),
-        sha256: None,
-        size_bytes: None,
-        backup_file: None,
-    });
-    let directory = filesystem
-        .open_directory(Some(root), path)
-        .map_err(|error| io_error("snapshot_read_dir_failed", error))?;
-    let remaining = budget
-        .max_entries
-        .saturating_sub(budget.entries)
-        .saturating_sub(budget.pending_entries);
-    // One extra entry proves overflow without allocating the entire directory.
-    let mut children = directory
-        .entries_iter()
-        .map_err(|error| io_error("snapshot_read_dir_failed", error))?
-        .take(remaining.saturating_add(1))
-        .collect::<std::io::Result<Vec<_>>>()
-        .map_err(|error| io_error("snapshot_read_dir_failed", error))?;
-    if children.len() > remaining {
-        budget.entries = budget
-            .entries
-            .saturating_add(budget.pending_entries)
-            .saturating_add(children.len());
-        return Err(snapshot_limit_error(budget));
-    }
-    // Ancestor iterators retain their pending siblings while descending.
-    budget.pending_entries += children.len();
-    children.sort_by(|left, right| left.name.cmp(&right.name));
-    for child in children {
-        budget.pending_entries -= 1;
-        let child_path = directory.canonical_path().join(child.name);
-        if !child_path.starts_with(root) {
+        if metadata.file_type == FileType::Symlink {
             return Err(mutation_error(
-                "snapshot_outside_workspace",
-                "workspace.mutation.outside_workspace",
-                json!({"path": child_path.display().to_string()}),
+                "snapshot_symlink_denied",
+                "workspace.mutation.symlink_denied",
+                json!({"path": relative}),
             ));
         }
-        let child_relative = relative_path(root, &child_path)?;
-        capture_path(
-            root,
-            &child_path,
-            &child_relative,
-            backup_root,
-            entries,
-            budget,
-            filesystem,
-        )?;
+        if metadata.file_type == FileType::RegularFile {
+            if budget.bytes.saturating_add(metadata.size_bytes) > MAX_SNAPSHOT_BYTES {
+                return Err(snapshot_limit_error(budget));
+            }
+            let (file, _) = filesystem
+                .open_file(Some(root), &path)
+                .map_err(|error| io_error("snapshot_read_failed", error))?;
+            let mut bytes = Vec::new();
+            file.take(MAX_SNAPSHOT_BYTES.saturating_sub(budget.bytes) + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|error| io_error("snapshot_read_failed", error))?;
+            budget.bytes = budget.bytes.saturating_add(bytes.len() as u64);
+            if budget.bytes > MAX_SNAPSHOT_BYTES {
+                return Err(snapshot_limit_error(budget));
+            }
+            let backup_file = if let Some(backup_root) = backup_root {
+                let name = format!("before/{:04}.bin", entries.len());
+                let backup = backup_root.join(&name);
+                filesystem
+                    .atomic_write_file_with_options(Some(backup_root), &backup, &bytes, true)
+                    .map_err(|error| io_error("snapshot_write_failed", error))?;
+                Some(name)
+            } else {
+                None
+            };
+            entries.push(SnapshotEntry {
+                path: relative,
+                kind: "file".to_string(),
+                sha256: Some(sha256_label(&bytes)),
+                size_bytes: Some(bytes.len() as u64),
+                backup_file,
+            });
+            continue;
+        }
+        if metadata.file_type != FileType::Directory {
+            return Err(mutation_error(
+                "unsupported_target_type",
+                "workspace.mutation.unsupported_target_type",
+                json!({"path": relative}),
+            ));
+        }
+        entries.push(SnapshotEntry {
+            path: relative,
+            kind: "directory".to_string(),
+            sha256: None,
+            size_bytes: None,
+            backup_file: None,
+        });
+        let directory = filesystem
+            .open_directory(Some(root), &path)
+            .map_err(|error| io_error("snapshot_read_dir_failed", error))?;
+        let remaining = budget
+            .max_entries
+            .saturating_sub(budget.entries)
+            .saturating_sub(pending.len());
+        // One extra entry proves overflow without allocating the whole directory.
+        let mut children = directory
+            .entries_iter()
+            .map_err(|error| io_error("snapshot_read_dir_failed", error))?
+            .take(remaining.saturating_add(1))
+            .collect::<std::io::Result<Vec<_>>>()
+            .map_err(|error| io_error("snapshot_read_dir_failed", error))?;
+        if children.len() > remaining {
+            budget.entries = budget
+                .entries
+                .saturating_add(pending.len())
+                .saturating_add(children.len());
+            return Err(snapshot_limit_error(budget));
+        }
+        // Reverse pushes preserve depth-first lexical order and backup ordinals.
+        children.sort_by(|left, right| right.name.cmp(&left.name));
+        for child in children {
+            let child_path = directory.canonical_path().join(child.name);
+            if !child_path.starts_with(root) {
+                return Err(mutation_error(
+                    "snapshot_outside_workspace",
+                    "workspace.mutation.outside_workspace",
+                    json!({"path": child_path.display().to_string()}),
+                ));
+            }
+            let child_relative = relative_path(root, &child_path)?;
+            pending.push((child_path, child_relative));
+        }
     }
     Ok(())
 }
