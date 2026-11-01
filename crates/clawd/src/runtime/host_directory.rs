@@ -40,34 +40,44 @@ impl HostDirectory {
     }
 
     pub(crate) fn entries(&self) -> io::Result<Vec<HostDirectoryEntry>> {
-        let mut entries = Vec::new();
-        for entry in Dir::read_from(&self.file)? {
-            let entry = entry?;
-            let name = entry.file_name();
-            if name.to_bytes() == b"." || name.to_bytes() == b".." {
-                continue;
-            }
-            // Both enumeration and lstat use the same held directory, including
-            // when the original pathname has been renamed or replaced.
-            let metadata = statat(&self.file, name, AtFlags::SYMLINK_NOFOLLOW)?;
-            let file_type = FileType::from_raw_mode(metadata.st_mode as _);
-            entries.push(HostDirectoryEntry {
-                name: std::ffi::OsStr::from_bytes(name.to_bytes()).to_owned(),
-                file_type,
-                size_bytes: (file_type == FileType::RegularFile)
-                    .then(|| u64::try_from(metadata.st_size).ok())
-                    .flatten(),
-                modified_ts: u64::try_from(metadata.st_mtime).ok(),
-                modified_ns: u64::try_from(metadata.st_mtime)
-                    .ok()
-                    .map(|seconds| {
-                        seconds.saturating_mul(1_000_000_000).saturating_add(
-                            u64::try_from(metadata.st_mtime_nsec).unwrap_or_default(),
-                        )
-                    })
-                    .unwrap_or_default(),
-            });
-        }
-        Ok(entries)
+        self.entries_iter()?.collect()
+    }
+
+    pub(crate) fn entries_iter(
+        &self,
+    ) -> io::Result<impl Iterator<Item = io::Result<HostDirectoryEntry>> + '_> {
+        Ok(
+            Dir::read_from(&self.file)?.filter_map(move |entry| match entry {
+                Err(error) => Some(Err(error.into())),
+                Ok(entry) if matches!(entry.file_name().to_bytes(), b"." | b"..") => None,
+                Ok(entry) => Some(self.describe_entry(entry.file_name())),
+            }),
+        )
+    }
+
+    fn describe_entry(&self, name: &std::ffi::CStr) -> io::Result<HostDirectoryEntry> {
+        // Enumeration and lstat stay on the held directory even after rename.
+        let metadata = statat(&self.file, name, AtFlags::SYMLINK_NOFOLLOW)?;
+        let file_type = FileType::from_raw_mode(metadata.st_mode as _);
+        Ok(HostDirectoryEntry {
+            name: std::ffi::OsStr::from_bytes(name.to_bytes()).to_owned(),
+            file_type,
+            size_bytes: (file_type == FileType::RegularFile)
+                .then(|| u64::try_from(metadata.st_size).ok())
+                .flatten(),
+            modified_ts: u64::try_from(metadata.st_mtime).ok(),
+            modified_ns: u64::try_from(metadata.st_mtime)
+                .ok()
+                .map(|seconds| {
+                    seconds
+                        .saturating_mul(1_000_000_000)
+                        .saturating_add(u64::try_from(metadata.st_mtime_nsec).unwrap_or_default())
+                })
+                .unwrap_or_default(),
+        })
     }
 }
+
+#[cfg(test)]
+#[path = "host_directory_tests.rs"]
+mod tests;

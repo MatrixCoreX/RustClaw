@@ -29,6 +29,16 @@ def valid_job(job, runner, target):
 
 
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_bounded_snapshot_enumeration_is_selected_before_the_owner_gate(self):
+        steps = load("macos-polyglot-skill-ci.yml")["jobs"]["polyglot-skill-macos"]["steps"]
+        gate = next(index for index, step in enumerate(steps) if "local_process_job::tests" in step.get("run", ""))
+        for selection in ("runtime::host_filesystem::directory::tests",
+                          "skills::builtin::builtin_workspace_mutation::enumeration_tests"):
+            command = f"cargo test -p clawd --bin clawd {selection}"
+            selected = [index for index, step in enumerate(steps) if command in step.get("run", "")]
+            self.assertEqual(len(selected), 1)
+            self.assertLess(selected[0], gate)
+
     def test_staged_secret_guard_is_selected_on_native_macos(self):
         workflow = load("macos-polyglot-skill-ci.yml")
         for event in ("push", "pull_request"):

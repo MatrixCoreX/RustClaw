@@ -195,6 +195,13 @@ refusing nested `.git` or runtime-state components before dispatch rather than p
 unrestorable checkpoint. Ordinary hidden names remain supported. These checks do not establish
 attribute fidelity, arbitrary concurrent-writer isolation or atomic recovery after write/power loss.
 
+Snapshot directory metadata is enumerated lazily through the admitted directory descriptor.
+Capture reads at most the remaining entry budget plus one overflow witness, then sorts the bounded
+selection. Pending siblings in ancestor traversals count against the same aggregate budget, so
+nested directories cannot each allocate a separate full-budget listing. Empty and exact-boundary
+trees remain valid. This bounds entry-metadata accumulation, not recursive stack depth, arbitrary
+filesystem latency, concurrent content changes or power-loss durability.
+
 Structured mutation path records preserve native UTF-8 spelling on Linux/macOS, including literal
 backslashes in filenames. Target, descendant and missing-parent serialization do not rewrite them
 into directory separators. A name that cannot be represented in the JSON path contract is refused

@@ -102,6 +102,7 @@ jobs:
           APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test --locked -p clawd --bin clawd skills::runner::owner_submission_tests::entry_executable_async_submit_acceptance -- --exact --ignored --test-threads=1 --nocapture
           APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test --locked -p clawd --bin clawd skills::runner::owner_recovery_tests::entry_executable_inventory_recovery_acceptance -- --exact --ignored --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd workspace_ -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd runtime::host_filesystem::directory::tests -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd local_process_owner:: -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd skills::runner:: -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd cancellation_observation -- --test-threads=1 --nocapture

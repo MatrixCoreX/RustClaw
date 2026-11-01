@@ -424,6 +424,7 @@ fn mutation_capacity_missing_entries_still_consume_the_snapshot_budget() {
     let fixture = Fixture::new();
     let mut entries = Vec::new();
     let mut budget = SnapshotBudget {
+        pending_entries: 0,
         entries: 1,
         bytes: 0,
         max_entries: 1,

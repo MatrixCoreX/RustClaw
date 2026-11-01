@@ -89,6 +89,7 @@ struct MutationCheckpointManifest {
 
 struct SnapshotBudget {
     entries: usize,
+    pending_entries: usize,
     bytes: u64,
     max_entries: usize,
 }
@@ -495,6 +496,7 @@ fn capture_snapshot_with_entry_limit(
     let mut entries = Vec::new();
     let mut budget = SnapshotBudget {
         entries: 0,
+        pending_entries: 0,
         bytes: 0,
         max_entries,
     };
@@ -598,11 +600,29 @@ fn capture_path(
     let directory = filesystem
         .open_directory(Some(root), path)
         .map_err(|error| io_error("snapshot_read_dir_failed", error))?;
+    let remaining = budget
+        .max_entries
+        .saturating_sub(budget.entries)
+        .saturating_sub(budget.pending_entries);
+    // One extra entry proves overflow without allocating the entire directory.
     let mut children = directory
-        .entries()
+        .entries_iter()
+        .map_err(|error| io_error("snapshot_read_dir_failed", error))?
+        .take(remaining.saturating_add(1))
+        .collect::<std::io::Result<Vec<_>>>()
         .map_err(|error| io_error("snapshot_read_dir_failed", error))?;
+    if children.len() > remaining {
+        budget.entries = budget
+            .entries
+            .saturating_add(budget.pending_entries)
+            .saturating_add(children.len());
+        return Err(snapshot_limit_error(budget));
+    }
+    // Ancestor iterators retain their pending siblings while descending.
+    budget.pending_entries += children.len();
     children.sort_by(|left, right| left.name.cmp(&right.name));
     for child in children {
+        budget.pending_entries -= 1;
         let child_path = directory.canonical_path().join(child.name);
         if !child_path.starts_with(root) {
             return Err(mutation_error(
@@ -1212,3 +1232,7 @@ mod capacity_tests;
 #[cfg(test)]
 #[path = "builtin_workspace_mutation_restore_tests.rs"]
 mod restore_tests;
+
+#[cfg(test)]
+#[path = "builtin_workspace_snapshot_enumeration_tests.rs"]
+mod enumeration_tests;
