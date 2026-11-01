@@ -545,11 +545,11 @@ fn explicit_host_direct_mode_preserves_the_installed_entrypoint() {
     let mut launch = ChildLaunch::legacy(program.clone());
     launch.installed = true;
     launch.working_directory = Some(root.path().to_path_buf());
-    let command = child_process_command_for_parent(&launch, Some("direct"))
+    let command = child_process_command_for_parent(&launch, Some("direct"), None)
         .expect("explicit host execution policy");
     assert_eq!(command.as_std().get_program(), program.as_os_str());
     for backend in [None, Some("unknown"), Some("child_sandbox"), Some("")] {
-        if let Ok(command) = child_process_command_for_parent(&launch, backend) {
+        if let Ok(command) = child_process_command_for_parent(&launch, backend, None) {
             assert_ne!(command.as_std().get_program(), program.as_os_str());
         }
     }
@@ -770,8 +770,8 @@ async fn admitted_temporary_environment_reaches_the_installed_python_child() {
             execution_profile:Default::default(), sandbox_profile:manifest.security.sandbox.clone(),
             runtime_network:false, install_root:target.clone(), manifest_digest:"a".repeat(64), receipt_digest:"b".repeat(64),
         };
-        let launch = ChildLaunch::installed(spec);
-        let output = child_process_command_for_parent(&launch, Some(backend))
+        let launch = ChildLaunch::installed(spec, Vec::new());
+        let output = child_process_command_for_parent(&launch, Some(backend), None)
             .unwrap()
             .output()
             .await

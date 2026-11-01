@@ -13,6 +13,7 @@ pub mod path_policy;
 pub mod platform;
 mod prebuilt;
 mod process;
+mod process_invocation;
 pub mod progress;
 pub mod protocol;
 pub mod receipt;
@@ -20,6 +21,8 @@ pub mod runtime;
 mod runtime_assets;
 pub mod safe_archive;
 pub mod sandbox;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub mod sandbox_private;
 mod secret_scan;
 pub mod templates;
 
@@ -53,6 +56,7 @@ pub use operation::{
 };
 pub use path_policy::{ExpectedPathKind, PathAuthority, SkillPathPolicy};
 pub use platform::HostPlatform;
+pub use process_invocation::ProcessInvocation;
 pub use progress::SkillProgressEmitter;
 pub use protocol::{
     validate_progress_frame_line, validate_protocol_output, validate_response_line,
@@ -61,6 +65,8 @@ pub use protocol::{
     MAX_PROGRESS_FRAME_LINE_BYTES, MAX_PROGRESS_FRAME_PARAMS, MAX_PROTOCOL_LINE_BYTES,
     SKILL_PROGRESS_FRAME_RECORD_TYPE, SKILL_PROGRESS_FRAME_SCHEMA_VERSION,
 };
+pub mod package_custody;
+
 pub use receipt::{
     digest_file, is_sensitive_runtime_environment_name, ArtifactReceipt, CurrentInstallPointer,
     InstallReceipt, InstallReceiptStore, ProtocolSmokeReceipt, VerifiedInstall,
@@ -75,7 +81,8 @@ pub use safe_archive::{
     SafeArchiveInspection, SafeArchiveLimits,
 };
 pub use sandbox::{
-    prepare_sandboxed_command, PreparedSandboxCommand, SandboxNetwork, PARENT_SANDBOX_BACKEND_ENV,
+    prepare_sandboxed_invocation, private_directories_digest, PreparedSandboxInvocation,
+    SandboxNetwork, PARENT_PRIVATE_DIRECTORIES_DIGEST_ENV, PARENT_SANDBOX_BACKEND_ENV,
     SKILL_STORAGE_WRITABLE_DIRECTORY_ENV,
 };
 pub use secret_scan::redact_diagnostics;

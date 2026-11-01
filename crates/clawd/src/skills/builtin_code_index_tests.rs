@@ -51,7 +51,13 @@ impl Drop for TempRepo {
 }
 
 fn execute_json(repo: &TempRepo, args: Value) -> Value {
-    let text = execute(&repo.path, &args).expect("execute code index");
+    let text = execute(
+        &repo.path,
+        &args,
+        &HostFilesystemPolicy::without_private_authority(),
+        ToolSandboxBackend::Auto,
+    )
+    .expect("execute code index");
     serde_json::from_str(&text).expect("machine json")
 }
 
@@ -233,6 +239,8 @@ fn workspace_traversal_is_rejected_as_machine_error() {
     let error = execute(
         &repo.path,
         &json!({"action": "retrieve_context", "paths": ["../outside.rs"]}),
+        &HostFilesystemPolicy::without_private_authority(),
+        ToolSandboxBackend::Auto,
     )
     .expect_err("traversal must fail");
     assert_eq!(error.code, "path_outside_workspace");
@@ -380,6 +388,8 @@ fn oversized_source_context_returns_a_narrow_read_handle_instead_of_loading_all_
     let error = execute(
         &repo.path,
         &json!({"action":"retrieve_context", "symbols":["large"]}),
+        &HostFilesystemPolicy::without_private_authority(),
+        ToolSandboxBackend::Auto,
     )
     .unwrap_err();
     assert_eq!(error.code, "source_budget_exceeded");
@@ -394,15 +404,28 @@ fn oversized_source_context_returns_a_narrow_read_handle_instead_of_loading_all_
 fn source_range_does_not_follow_a_link_substituted_after_indexing() {
     let repo = TempRepo::new();
     let outside = TempRepo::new();
-    let (index, _) = refresh_index(&repo.path, 10, None, false).unwrap();
+    let (index, _) = refresh_index(
+        &repo.path,
+        10,
+        None,
+        false,
+        &HostFilesystemPolicy::without_private_authority(),
+    )
+    .unwrap();
     let definition = index.files["src/lib.rs"].symbols[0].clone();
     let source = repo.path.join("src/lib.rs");
     fs::remove_file(&source).unwrap();
     std::os::unix::fs::symlink(outside.path.join("src/lib.rs"), &source).unwrap();
     assert_eq!(
-        context_snippet(&repo.path, "src/lib.rs", &definition, 0)
-            .unwrap_err()
-            .code,
+        context_snippet(
+            &repo.path,
+            "src/lib.rs",
+            &definition,
+            0,
+            &HostFilesystemPolicy::without_private_authority()
+        )
+        .unwrap_err()
+        .code,
         "source_read_failed"
     );
 }
@@ -417,9 +440,80 @@ fn index_cache_symlink_cannot_overwrite_external_files() {
     let index = repo.path.join(INDEX_RELATIVE_PATH);
     fs::create_dir_all(index.parent().unwrap()).unwrap();
     std::os::unix::fs::symlink(&victim, &index).unwrap();
-    let error = execute(&repo.path, &json!({"action":"refresh"})).unwrap_err();
+    let error = execute(
+        &repo.path,
+        &json!({"action":"refresh"}),
+        &HostFilesystemPolicy::without_private_authority(),
+        ToolSandboxBackend::Auto,
+    )
+    .unwrap_err();
     assert_eq!(error.code, "index_write_failed");
     assert_eq!(fs::read_to_string(victim).unwrap(), "unchanged");
+}
+
+#[cfg(unix)]
+#[test]
+fn git_query_clears_undeclared_values_and_preserves_raw_whitelisted_values() {
+    use std::os::unix::ffi::OsStringExt;
+    const CHILD: &str = "AGENT_INDEX_ENV_CHILD";
+    const SECRET: &str = "AGENT_INDEX_UNDECLARED";
+    if std::env::var_os(CHILD).is_none() {
+        let test = concat!(
+            module_path!(),
+            "::git_query_clears_undeclared_values_and_preserves_raw_whitelisted_values"
+        );
+        let test = test.split_once("::").unwrap().1;
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([test, "--exact", "--nocapture"])
+            .env(CHILD, "1")
+            .env(SECRET, "owned-not-a-credential")
+            .env("TZ", std::ffi::OsString::from_vec(b"raw-\xff".to_vec()))
+            .status()
+            .unwrap();
+        assert!(status.success());
+        return;
+    }
+    let repo = TempRepo::new();
+    let output = git_observation::prepare_query(
+        &repo.path,
+        &HostFilesystemPolicy::without_private_authority(),
+        ToolSandboxBackend::Auto,
+        &[],
+        &[],
+    )
+    .unwrap()
+    .0
+    .args([
+        "-c",
+        "alias.probe=!printf '%s\\n' \"${AGENT_INDEX_UNDECLARED-unset}\"; printf '%s' \"$TZ\"",
+        "probe",
+    ])
+    .output()
+    .unwrap();
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"unset\nraw-\xff");
+}
+
+#[test]
+fn git_query_failures_are_incomplete_evidence_not_proof_of_no_changes() {
+    let repo = TempRepo::new();
+    let result = execute_json(&repo, json!({"action":"changed_impact"}));
+    assert_eq!(result["data"]["changed_paths"], json!([]));
+    assert_eq!(result["data"]["changed_paths_complete"], false);
+    assert_eq!(result["data"]["git_query_failures"], 2);
+}
+
+#[test]
+fn git_query_never_falls_back_to_direct_execution_when_the_backend_is_unavailable() {
+    let repo = TempRepo::new();
+    let error = execute(
+        &repo.path,
+        &json!({"action":"changed_impact"}),
+        &HostFilesystemPolicy::without_private_authority(),
+        ToolSandboxBackend::RemoteContainer,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "sandbox_unavailable");
 }
 
 #[test]

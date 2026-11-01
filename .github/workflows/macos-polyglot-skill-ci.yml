@@ -38,6 +38,8 @@ name: Polyglot Skill macOS CI
       - "scripts/nl_tests/auth_key_http_tests.py"
       - "scripts/nl_tests/release_candidate_workflow_tests.py"
       - "scripts/nl_tests/macos_runner_workflow_tests.py"
+      - "scripts/clean_dev_artifacts.py"
+      - "scripts/tests/test_clean_dev_artifacts.py"
       - "scripts/skill_store_packages.py"
       - "scripts/nl_tests/run_manual_test.sh"
       - "scripts/nl_tests/manual_case_observation*.py"
@@ -91,6 +93,8 @@ name: Polyglot Skill macOS CI
       - "scripts/nl_tests/auth_key_http_tests.py"
       - "scripts/nl_tests/release_candidate_workflow_tests.py"
       - "scripts/nl_tests/macos_runner_workflow_tests.py"
+      - "scripts/clean_dev_artifacts.py"
+      - "scripts/tests/test_clean_dev_artifacts.py"
       - "scripts/skill_store_packages.py"
       - "scripts/nl_tests/run_manual_test.sh"
       - "scripts/nl_tests/manual_case_observation*.py"
@@ -169,6 +173,7 @@ jobs:
           python3 scripts/check_cross_platform_contracts.py
           python3 -m unittest discover -s scripts/tests -p 'test_release_native_libraries.py'
           python3 -m unittest discover -s scripts/tests -p 'test_release_managed_files.py'
+          python3 -m unittest discover -s scripts/tests -p test_clean_dev_artifacts.py -v
 
       - name: Test retained-task acceptance without resubmission
         shell: bash
@@ -260,6 +265,10 @@ jobs:
         shell: bash
         run: cargo test -p clawd --bin clawd verify_projection_tests
 
+      - name: Test native process sandbox filesystem visibility
+        shell: bash
+        run: cargo test -p clawd --bin clawd process_sandbox -- --test-threads=1 --nocapture
+
       - name: Test channel registration response ownership
         shell: bash
         run: cargo test -p clawd --bin clawd channel_registration_race_tests -- --test-threads=1 --nocapture
@@ -276,8 +285,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cargo test -p clawd --bin clawd skills::runner::startup:: -- --test-threads=1 --nocapture
+          cargo test -p clawd --bin clawd skills::runner::launch_spec:: -- --test-threads=1 --nocapture
+          cargo test -p clawd --bin clawd skills::builtin::builtin_run_cmd::launch_tests:: -- --test-threads=1 --nocapture
+          cargo test -p clawd --bin clawd skills::tests::env_isolation:: -- --test-threads=1 --nocapture
+          cargo test -p clawd --bin clawd process_launch:: -- --test-threads=1 --nocapture
+          cargo build -p clawd --bin clawd
+          APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test -p clawd --bin clawd local_process_owner::entry::tests::entry_executable_protocol_acceptance -- --exact --ignored --test-threads=1 --nocapture
+          cargo test -p clawd --bin clawd local_process_owner:: -- --test-threads=1 --nocapture
+          cargo test -p clawd --bin clawd cancellation_observation -- --test-threads=1 --nocapture
+          cargo test -p clawd --bin clawd resource_observation -- --test-threads=1 --nocapture
           cargo test -p clawd --bin clawd local_process_job::tests -- --test-threads=1 --nocapture
           cargo test -p clawd --bin clawd worker::async_poll_executor::tests -- --test-threads=1 --nocapture
+          cargo test -p clawd --bin clawd resource_scheduler:: -- --test-threads=1 --nocapture
+          cargo test -p clawd --bin clawd process_invocation:: -- --test-threads=1 --nocapture
 
       - name: Test capability loading and verification-only recovery
         shell: bash

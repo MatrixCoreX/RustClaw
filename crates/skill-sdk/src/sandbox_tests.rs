@@ -1,17 +1,18 @@
-use super::{prepare_macos_seatbelt, SandboxNetwork};
+use super::{prepare_sandboxed_invocation, SandboxNetwork};
 use std::path::Path;
 
 #[test]
 fn seatbelt_profile_allows_only_the_current_system_temp_subtree_for_temp_writes() {
-    let prepared = prepare_macos_seatbelt(
+    let prepared = prepare_sandboxed_invocation(
         Path::new("/usr/bin/true"),
         Path::new("/"),
         &[],
         SandboxNetwork::Deny,
+        &[],
     )
     .expect("prepare Seatbelt command");
-    let arguments = prepared
-        .command
+    let command = prepared.into_command();
+    let arguments = command
         .get_args()
         .map(|value| value.to_string_lossy().into_owned())
         .collect::<Vec<_>>();

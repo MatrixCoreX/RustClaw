@@ -42,6 +42,33 @@ installing a prebuilt Release.
 跨平台脚本位于 `scripts/archive/cross-build/`，仅由维护者和发布 CI 显式调用。
 保留最近构建缓存，不要在每次构建后执行 `cargo clean`。
 
+## Explicit Cache Cleanup / 显式清理缓存
+
+Cache retention remains the normal workflow. Clear local compilation caches
+only when explicitly requested; deployment programs and installed skills are
+not cache targets. Preview the known Cargo compilation files before deleting:
+
+```bash
+python3 scripts/clean_dev_artifacts.py
+python3 scripts/clean_dev_artifacts.py --apply
+# Select a relocated Cargo target root explicitly; never follow a target symlink:
+python3 scripts/clean_dev_artifacts.py --target-dir /path/to/cargo-target
+```
+
+The root must have a valid `CACHEDIR.TAG`, and a profile must have an owned
+regular `.cargo-lock`. The cleaner refuses active builders/busy profiles and
+changed file identities. It only removes recognized compilation metadata,
+objects and incremental records; executables, shared libraries, unknown files,
+configuration, databases, logs, test evidence and symlinks are preserved.
+All selected roots are admitted before deletion begins. Linux and macOS use
+descriptor-relative, no-follow access; unsupported platforms fail explicitly.
+This is not a runtime-data retention or factory-reset command.
+
+默认保留缓存；只有明确要求清理时才使用 `--apply`。脚本先预览已识别的 Cargo 编译文件，
+不会清除运行程序、动态库、配置、数据库、日志、测试证据或未知文件。符号链接不会作为
+删除授权；迁移过的构建根目录需要显式指定。正在编译、锁被占用、文件身份变化或平台
+不支持时明确拒绝，不会退回删除运行数据的方式。这也不是恢复出厂设置功能。
+
 ## Publishing / 发布
 
 Release CI builds binaries and UI on dedicated runners, prepares locked browser

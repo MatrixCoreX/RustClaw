@@ -1,0 +1,104 @@
+name: Linux Process Owner Contracts
+
+"on":
+  workflow_dispatch:
+  push:
+    branches: [main, 'ci/runtime-hardening-*']
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - crates/claw-core/**
+      - crates/clawd/**
+      - crates/skill-sdk/**
+      - crates/skill-runner/**
+      - .github/workflows/linux-process-owner-ci.yml
+      - scripts/nl_tests/linux_process_owner_workflow_tests.py
+      - scripts/clean_dev_artifacts.py
+      - scripts/tests/test_clean_dev_artifacts.py
+  pull_request:
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - crates/claw-core/**
+      - crates/clawd/**
+      - crates/skill-sdk/**
+      - crates/skill-runner/**
+      - .github/workflows/linux-process-owner-ci.yml
+      - scripts/nl_tests/linux_process_owner_workflow_tests.py
+      - scripts/clean_dev_artifacts.py
+      - scripts/tests/test_clean_dev_artifacts.py
+
+permissions:
+  contents: read
+
+jobs:
+  process-owner-linux:
+    runs-on: ubuntu-22.04
+    env:
+      CARGO_BUILD_JOBS: "1"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_DEV_CODEGEN_UNITS: "8"
+      CARGO_PROFILE_TEST_CODEGEN_UNITS: "8"
+      CARGO_TARGET_DIR: target
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Install native test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq pkg-config make perl clang libclang-dev bubblewrap protobuf-compiler
+          python3 -m pip install --requirement scripts/nl_tests/requirements.txt
+
+      - name: Verify workflow contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/check_github_action_pins.py
+          python3 scripts/nl_tests/linux_process_owner_workflow_tests.py
+          python3 -m unittest discover -s scripts/tests -p test_clean_dev_artifacts.py -v
+
+      - name: Test SDK and runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p agent-skill-sdk
+          cargo test --locked -p skill-runner
+
+      - name: Test actual owner and package custody
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked -p clawd --bin clawd
+          APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test --locked -p clawd --bin clawd local_process_owner::entry::tests::entry_executable_protocol_acceptance -- --exact --ignored --test-threads=1 --nocapture
+          APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test --locked -p clawd --bin clawd local_process_owner::authority_entry::tests::entry_executable_authority_acceptance -- --exact --ignored --test-threads=1 --nocapture
+          APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test --locked -p clawd --bin clawd skills::runner::owner_custody_tests::entry_executable_sdk_custody_acceptance -- --exact --ignored --test-threads=1 --nocapture
+          APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test --locked -p clawd --bin clawd skills::runner::owner_pre_ready_tests::entry_executable_pre_ready_acceptance -- --exact --ignored --test-threads=1 --nocapture
+          APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test --locked -p clawd --bin clawd skills::runner::owner_preparation_tests::entry_executable_ready_abort_acceptance -- --exact --ignored --test-threads=1 --nocapture
+          APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test --locked -p clawd --bin clawd skills::runner::owner_submission_tests::entry_executable_async_submit_acceptance -- --exact --ignored --test-threads=1 --nocapture
+          APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test --locked -p clawd --bin clawd skills::runner::owner_recovery_tests::entry_executable_inventory_recovery_acceptance -- --exact --ignored --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd workspace_ -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd local_process_owner:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd skills::runner:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd cancellation_observation -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd resource_observation -- --test-threads=1 --nocapture
+
+      - name: Test full runtime, process identity and terminal consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd local_process_job::tests -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd worker::async_poll_executor::tests -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd resource_scheduler:: -- --test-threads=1 --nocapture

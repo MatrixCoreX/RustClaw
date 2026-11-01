@@ -180,7 +180,7 @@ pub(super) fn inherited_sandbox_backend(backend: &'static str) -> Option<&'stati
 }
 
 pub(super) fn apply_parent_execution_backend(
-    command: &mut tokio::process::Command,
+    command: &mut super::launch_spec::RunnerLaunch,
     backend: Option<&'static str>,
 ) {
     // Neither the parent environment nor a package allowlist owns this grant.

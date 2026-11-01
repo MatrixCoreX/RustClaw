@@ -1,4 +1,4 @@
-use super::execute_workspace_replace_for_root;
+use super::super::workspace_test_support::execute_workspace_replace_for_root;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -69,7 +69,7 @@ fn replace_all_honors_exact_occurrence_constraint_and_rewinds() {
     assert_eq!(workspace.content(), "new new new\n");
 
     let checkpoint_id = applied["checkpoint_id"].as_str().expect("checkpoint");
-    let diff = super::super::builtin_workspace_patch::execute_workspace_patch_for_root(
+    let diff = super::super::workspace_test_support::execute_workspace_patch_for_root(
         workspace.path(),
         "task-batch-edit",
         &args(json!({"action": "diff", "checkpoint_id": checkpoint_id})),
@@ -79,7 +79,7 @@ fn replace_all_honors_exact_occurrence_constraint_and_rewinds() {
     assert_eq!(diff["action"], "diff");
     assert_eq!(diff["state"], "applied");
 
-    super::super::builtin_workspace_patch::execute_workspace_patch_for_root(
+    super::super::workspace_test_support::execute_workspace_patch_for_root(
         workspace.path(),
         "task-batch-edit",
         &args(json!({"action": "rewind", "checkpoint_id": checkpoint_id})),

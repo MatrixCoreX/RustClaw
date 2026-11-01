@@ -23,12 +23,20 @@ mod builtin_run_cmd;
 mod builtin_schedule;
 #[path = "builtin_task_plan.rs"]
 mod builtin_task_plan;
+#[path = "builtin_workspace_checkpoint_json.rs"]
+mod builtin_workspace_checkpoint_json;
 #[path = "builtin_workspace_mutation.rs"]
 mod builtin_workspace_mutation;
 #[path = "builtin_workspace_patch.rs"]
 mod builtin_workspace_patch;
 #[path = "builtin_workspace_replace.rs"]
 mod builtin_workspace_replace;
+#[cfg(all(test, target_os = "linux"))]
+#[path = "builtin_workspace_checkpoint_read_tests.rs"]
+mod checkpoint_read_tests;
+#[cfg(test)]
+#[path = "builtin_workspace_test_support.rs"]
+mod workspace_test_support;
 use builtin_child_task_patch::execute_child_task_patch;
 #[cfg(test)]
 pub(crate) use builtin_run_cmd::run_safe_command;
@@ -42,7 +50,7 @@ use builtin_run_cmd::{
 };
 use builtin_schedule::execute_schedule_workflow_for_task;
 use builtin_workspace_mutation::{
-    atomic_write_file, pre_dispatch_replan_error, run_authorized_mutation,
+    pre_dispatch_replan_error, run_authorized_mutation_with_policy, MutationAfterShape,
 };
 use builtin_workspace_patch::execute_workspace_patch;
 
@@ -85,7 +93,51 @@ fn builtin_error(
     )
 }
 
+fn checkpoint_commit_unconfirmed_error(
+    source: &str,
+    message_key: &str,
+    task_id: &str,
+    checkpoint_id: &str,
+    failure_phase: &str,
+    cause: String,
+) -> String {
+    builtin_error(
+        source,
+        "checkpoint_commit_unconfirmed",
+        "checkpoint_commit_unconfirmed",
+        None,
+        None,
+        Some(serde_json::json!({
+            "error_code": "checkpoint_commit_unconfirmed",
+            "message_key": message_key,
+            "task_id": task_id,
+            "checkpoint_id": checkpoint_id,
+            "retryable": false,
+            "complete": false,
+            "failure_phase": failure_phase,
+            "commit_state": "unknown",
+            "side_effect_applied": null,
+            "compensation_attempted": false,
+            "checkpoint_cleanup_attempted": false,
+            "cause": cause,
+            "artifact_refs": [{
+                "kind": "workspace_checkpoint",
+                "ref": format!("workspace_checkpoint:{checkpoint_id}"),
+            }],
+            "recovery": {
+                "tool": "workspace_patch",
+                "action": "diff",
+                "checkpoint_id": checkpoint_id,
+                "auto_retry": false,
+            },
+        })),
+    )
+}
+
 fn io_error_kind(err: &std::io::Error) -> &'static str {
+    if crate::runtime::host_filesystem::HostFilesystemPolicy::is_private_access_denied(err) {
+        return "host_private_directory_access_denied";
+    }
     match err.kind() {
         std::io::ErrorKind::NotFound => "not_found",
         std::io::ErrorKind::PermissionDenied => "permission_denied",
@@ -225,29 +277,33 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
         "memory_store" => builtin_memory_store::execute(state, task, map).await,
         "code_index" => {
             let workspace_root = state.skill_rt.workspace_root.clone();
+            let filesystem = state.skill_rt.host_filesystem.clone();
+            let backend = state.skill_rt.tools_policy.sandbox_backend;
             let args = args.clone();
-            tokio::task::spawn_blocking(move || builtin_code_index::execute(&workspace_root, &args))
-                .await
-                .map_err(|error| {
-                    builtin_error(
-                        "code_index",
-                        "worker_join_failed",
-                        format!("code_index.worker_join_failed error={error}"),
-                        None,
-                        None,
-                        None,
-                    )
-                })?
-                .map_err(|error| {
-                    builtin_error(
-                        "code_index",
-                        error.code,
-                        error.detail,
-                        None,
-                        None,
-                        error.extra,
-                    )
-                })
+            tokio::task::spawn_blocking(move || {
+                builtin_code_index::execute(&workspace_root, &args, &filesystem, backend)
+            })
+            .await
+            .map_err(|error| {
+                builtin_error(
+                    "code_index",
+                    "worker_join_failed",
+                    format!("code_index.worker_join_failed error={error}"),
+                    None,
+                    None,
+                    None,
+                )
+            })?
+            .map_err(|error| {
+                builtin_error(
+                    "code_index",
+                    error.code,
+                    error.detail,
+                    None,
+                    None,
+                    error.extra,
+                )
+            })
         }
         "read_file" => {
             ensure_only_keys(map, &["path", "start_byte", "max_bytes"])?;
@@ -278,6 +334,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 path,
                 &real_path,
                 workspace_scoped.then_some(state.skill_rt.workspace_root.as_path()),
+                &state.skill_rt.host_filesystem,
                 start_byte,
                 max_bytes,
             )
@@ -319,39 +376,24 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 builtin_allows_path_outside_workspace(state, task),
             )?;
             let action = if append { "append_text" } else { "write_text" };
-            run_authorized_mutation(
+            run_authorized_mutation_with_policy(
                 &state.skill_rt.workspace_root,
                 builtin_task_id(task),
                 action,
                 &real_path,
+                MutationAfterShape::RegularFile,
                 builtin_allows_path_outside_workspace(state, task),
+                &state.skill_rt.host_filesystem,
                 || {
                     let workspace_scoped = builtin_path_is_workspace_scoped(
                         &state.skill_rt.workspace_root,
                         &real_path,
                     );
-                    if create_parents && !workspace_scoped {
-                        if let Some(parent) = real_path.parent() {
-                            std::fs::create_dir_all(parent).map_err(|err| {
-                                io_builtin_error(
-                                    "write_file",
-                                    "create_parent",
-                                    &err,
-                                    Some(path),
-                                    Some(parent),
-                                )
-                            })?;
-                        }
-                    }
                     if append {
-                        let mut bytes = match if workspace_scoped {
-                            crate::secure_workspace_fs::read_workspace_file(
-                                &state.skill_rt.workspace_root,
-                                &real_path,
-                            )
-                        } else {
-                            std::fs::read(&real_path)
-                        } {
+                        let mut bytes = match state.skill_rt.host_filesystem.read_file(
+                            workspace_scoped.then_some(state.skill_rt.workspace_root.as_path()),
+                            &real_path,
+                        ) {
                             Ok(bytes) => bytes,
                             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Vec::new(),
                             Err(err) => {
@@ -374,6 +416,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                             &bytes,
                             create_parents,
                             workspace_scoped,
+                            &state.skill_rt.host_filesystem,
                         )
                         .map_err(|err| {
                             io_builtin_error(
@@ -391,6 +434,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                             content.as_bytes(),
                             create_parents,
                             workspace_scoped,
+                            &state.skill_rt.host_filesystem,
                         )
                         .map_err(|err| {
                             io_builtin_error(
@@ -497,7 +541,16 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                     None,
                 )
             })?;
-            match builtin_list_dir::list_directory_page(path, &real_path, cursor, max_entries) {
+            let workspace_scope = (!builtin_allows_path_outside_workspace(state, task))
+                .then_some(state.skill_rt.workspace_root.as_path());
+            match builtin_list_dir::list_directory_page(
+                path,
+                &real_path,
+                workspace_scope,
+                &state.skill_rt.host_filesystem,
+                cursor,
+                max_entries,
+            ) {
                 Ok(value) => Ok(value.to_string()),
                 Err(builtin_list_dir::ListDirError::Io(err)) => Err(io_builtin_error(
                     "list_dir",
@@ -635,6 +688,12 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                     )
                 });
             }
+            let host_private_directories = state.skill_rt.host_filesystem.process_directories().map_err(|_| {
+                builtin_error(
+                    "run_cmd", "permission_denied", "host_private_directory_changed", None, None,
+                    Some(serde_json::json!({"side_effect_applied":false,"failure_phase":"pre_dispatch","retryable":false})),
+                )
+            })?;
             let cwd = optional_string(map, "cwd").unwrap_or(".");
             let cwd_path = resolve_workspace_path(
                 &state.skill_rt.workspace_root,
@@ -786,6 +845,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                     execution_policy.sandbox_mode,
                     state.skill_rt.tools_policy.sandbox_backend,
                     &state.skill_rt.workspace_root,
+                    &host_private_directories,
                 )
                 .map_err(|err| match err {
                     RunSafeCommandError::Policy(text) => text,
@@ -909,6 +969,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                     execution_policy.sandbox_mode,
                     state.skill_rt.tools_policy.sandbox_backend,
                     &state.skill_rt.workspace_root,
+                    &host_private_directories,
                 )
                 .await
                 .map_err(|err| match err {
@@ -936,6 +997,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 execution_policy.sandbox_mode,
                 state.skill_rt.tools_policy.sandbox_backend,
                 &state.skill_rt.workspace_root,
+                &host_private_directories,
                 builtin_task_id(task),
             )
             .await
@@ -967,7 +1029,27 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 .unwrap_or(true);
             // An idempotent mkdir does not change an existing directory or its
             // children, so it needs no recursive mutation checkpoint.
-            if create_parents && real_path.is_dir() {
+            let scope =
+                builtin_path_is_workspace_scoped(&state.skill_rt.workspace_root, &real_path)
+                    .then_some(state.skill_rt.workspace_root.as_path());
+            let metadata = match state.skill_rt.host_filesystem.metadata(scope, &real_path) {
+                Ok(value) => Some(value),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => {
+                    return Err(io_builtin_error(
+                        "make_dir",
+                        "inspect_directory",
+                        &error,
+                        Some(path),
+                        Some(&real_path),
+                    ))
+                }
+            };
+            if create_parents
+                && metadata
+                    .as_ref()
+                    .is_some_and(|metadata| metadata.file_type == rustix::fs::FileType::Directory)
+            {
                 let snapshot = serde_json::json!([{"path": path, "kind": "directory",
                     "sha256": null, "size_bytes": null}]);
                 return Ok(serde_json::json!({
@@ -987,18 +1069,20 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 })
                 .to_string());
             }
-            run_authorized_mutation(
+            run_authorized_mutation_with_policy(
                 &state.skill_rt.workspace_root,
                 builtin_task_id(task),
                 "make_dir",
                 &real_path,
+                MutationAfterShape::Directory,
                 builtin_allows_path_outside_workspace(state, task),
+                &state.skill_rt.host_filesystem,
                 || {
-                    let create_result = if create_parents {
-                        std::fs::create_dir_all(&real_path)
-                    } else {
-                        std::fs::create_dir(&real_path)
-                    };
+                    let create_result = state.skill_rt.host_filesystem.create_directory(
+                        scope,
+                        &real_path,
+                        create_parents,
+                    );
                     create_result.map_err(|err| {
                         io_builtin_error(
                             "make_dir",
@@ -1023,7 +1107,25 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 path,
                 builtin_allows_path_outside_workspace(state, task),
             )?;
-            if real_path.is_dir() && !(target_kind.eq_ignore_ascii_case("directory") && recursive) {
+            let scope =
+                builtin_path_is_workspace_scoped(&state.skill_rt.workspace_root, &real_path)
+                    .then_some(state.skill_rt.workspace_root.as_path());
+            let metadata = state
+                .skill_rt
+                .host_filesystem
+                .metadata(scope, &real_path)
+                .map_err(|error| {
+                    io_builtin_error(
+                        "remove_file",
+                        "inspect_path",
+                        &error,
+                        Some(path),
+                        Some(&real_path),
+                    )
+                })?;
+            if metadata.file_type == rustix::fs::FileType::Directory
+                && !(target_kind.eq_ignore_ascii_case("directory") && recursive)
+            {
                 return Err(pre_dispatch_replan_error(builtin_error(
                     "remove_file",
                     "is_directory",
@@ -1036,33 +1138,43 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                     None,
                 )));
             }
-            run_authorized_mutation(
+            run_authorized_mutation_with_policy(
                 &state.skill_rt.workspace_root,
                 builtin_task_id(task),
                 "remove_path",
                 &real_path,
+                MutationAfterShape::Missing,
                 builtin_allows_path_outside_workspace(state, task),
+                &state.skill_rt.host_filesystem,
                 || {
-                    if real_path.is_dir() {
-                        std::fs::remove_dir_all(&real_path).map_err(|err| {
-                            io_builtin_error(
-                                "remove_file",
-                                "remove_dir_all",
-                                &err,
-                                Some(path),
-                                Some(&real_path),
-                            )
-                        })
+                    if metadata.file_type == rustix::fs::FileType::Directory {
+                        state
+                            .skill_rt
+                            .host_filesystem
+                            .remove_path(scope, &real_path, true)
+                            .map_err(|err| {
+                                io_builtin_error(
+                                    "remove_file",
+                                    "remove_dir_all",
+                                    &err,
+                                    Some(path),
+                                    Some(&real_path),
+                                )
+                            })
                     } else {
-                        std::fs::remove_file(&real_path).map_err(|err| {
-                            io_builtin_error(
-                                "remove_file",
-                                "remove_file",
-                                &err,
-                                Some(path),
-                                Some(&real_path),
-                            )
-                        })
+                        state
+                            .skill_rt
+                            .host_filesystem
+                            .remove_path(scope, &real_path, false)
+                            .map_err(|err| {
+                                io_builtin_error(
+                                    "remove_file",
+                                    "remove_file",
+                                    &err,
+                                    Some(path),
+                                    Some(&real_path),
+                                )
+                            })
                     }
                 },
             )
@@ -1224,17 +1336,14 @@ fn atomic_write_builtin_file(
     bytes: &[u8],
     create_missing_parents: bool,
     workspace_scoped: bool,
+    filesystem: &crate::runtime::host_filesystem::HostFilesystemPolicy,
 ) -> std::io::Result<()> {
-    if workspace_scoped {
-        crate::secure_workspace_fs::atomic_write_workspace_file_with_options(
-            workspace_root,
-            target,
-            bytes,
-            create_missing_parents,
-        )
-    } else {
-        atomic_write_file(target, bytes)
-    }
+    filesystem.atomic_write_file_with_options(
+        workspace_scoped.then_some(workspace_root),
+        target,
+        bytes,
+        create_missing_parents,
+    )
 }
 
 fn builtin_path_is_workspace_scoped(workspace_root: &Path, target: &Path) -> bool {

@@ -1,7 +1,12 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use super::{atomic_create_workspace_file, atomic_write_workspace_file, open_workspace_file};
+use super::{atomic_create_workspace_file, open_workspace_file};
+
+fn atomic_write_workspace_file(root: &Path, target: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    crate::runtime::host_filesystem::HostFilesystemPolicy::without_private_authority()
+        .atomic_write_file(root, target, bytes)
+}
 
 pub(crate) struct TestWorkspace(PathBuf);
 

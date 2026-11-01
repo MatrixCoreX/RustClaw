@@ -1,10 +1,11 @@
+use crate::runtime::host_filesystem::HostFilesystemPolicy;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use super::builtin_workspace_mutation::{
-    pre_dispatch_replan_error, run_checkpointed_workspace_mutation,
+    pre_dispatch_replan_error, run_checkpointed_workspace_mutation_with_policy, MutationAfterShape,
 };
 use super::builtin_workspace_patch::{canonical_workspace_root, validate_relative_patch_path};
 
@@ -24,10 +25,11 @@ struct Replacement {
     replacement_count: usize,
 }
 
-pub(super) fn execute_workspace_replace_for_root(
+pub(super) fn execute_workspace_replace_with_policy(
     workspace_root: &Path,
     task_id: &str,
     args: &Map<String, Value>,
+    filesystem: &HostFilesystemPolicy,
 ) -> Result<String, String> {
     ensure_only_keys(
         args,
@@ -70,8 +72,8 @@ pub(super) fn execute_workspace_replace_for_root(
         })?
         .to_string_lossy()
         .into_owned();
-    let replacement =
-        prepare_replacement(args, &root, &path, &target).map_err(pre_dispatch_replan_error)?;
+    let replacement = prepare_replacement(args, &root, &path, &target, filesystem)
+        .map_err(pre_dispatch_replan_error)?;
     let preview = replacement_preview(action, &replacement);
 
     if action == "preview_replace_text" {
@@ -94,9 +96,15 @@ pub(super) fn execute_workspace_replace_for_root(
 
     let expected_before_hash = replacement.before_sha256.clone();
     let after = replacement.after.as_bytes().to_vec();
-    let mutation =
-        run_checkpointed_workspace_mutation(&root, task_id, "replace_text", &target, || {
-            let current = read_text_file(&root, &target, &path)?;
+    let mutation = run_checkpointed_workspace_mutation_with_policy(
+        &root,
+        task_id,
+        "replace_text",
+        &target,
+        MutationAfterShape::RegularFile,
+        filesystem,
+        || {
+            let current = read_text_file(&root, &target, &path, filesystem)?;
             let current_hash = sha256_label(current.as_bytes());
             if current_hash != expected_before_hash {
                 return Err(replace_error(
@@ -109,8 +117,9 @@ pub(super) fn execute_workspace_replace_for_root(
                     }),
                 ));
             }
-            crate::secure_workspace_fs::atomic_write_workspace_file(&root, &target, &after).map_err(
-                |error| {
+            filesystem
+                .atomic_write_file(&root, &target, &after)
+                .map_err(|error| {
                     replace_error(
                         "replacement_write_failed",
                         "workspace.replace.write_failed",
@@ -119,9 +128,9 @@ pub(super) fn execute_workspace_replace_for_root(
                             "io_kind": format!("{:?}", error.kind()),
                         }),
                     )
-                },
-            )
-        })?;
+                })
+        },
+    )?;
 
     let mut result: Value = serde_json::from_str(&mutation).map_err(|error| {
         replace_error(
@@ -195,8 +204,9 @@ fn prepare_replacement(
     workspace_root: &Path,
     requested_path: &str,
     target: &Path,
+    filesystem: &HostFilesystemPolicy,
 ) -> Result<Replacement, String> {
-    let before = read_text_file(workspace_root, target, requested_path)?;
+    let before = read_text_file(workspace_root, target, requested_path, filesystem)?;
     if let Some(expected) = optional_nonempty_string(args, "expected_sha256") {
         let actual = sha256_label(before.as_bytes());
         if normalize_hash(expected) != actual {
@@ -271,9 +281,19 @@ fn read_text_file(
     workspace_root: &Path,
     path: &Path,
     requested_path: &str,
+    filesystem: &HostFilesystemPolicy,
 ) -> Result<String, String> {
-    let mut file =
-        crate::secure_workspace_fs::open_workspace_file(workspace_root, path).map_err(|error| {
+    let mut file = filesystem
+        .open_file(Some(workspace_root), path)
+        .map(|(file, _)| file)
+        .map_err(|error| {
+            if HostFilesystemPolicy::is_private_access_denied(&error) {
+                return replace_error(
+                    "host_private_directory_access_denied",
+                    "workspace.replace.private_path_denied",
+                    json!({"path": requested_path}),
+                );
+            }
             replace_error(
                 if error.kind() == std::io::ErrorKind::NotFound {
                     "replacement_target_not_found"

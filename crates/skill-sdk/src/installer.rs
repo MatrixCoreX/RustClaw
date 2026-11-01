@@ -24,7 +24,7 @@ use crate::receipt::{
     InstallReceiptStore, LaunchProgramScope, ProtocolSmokeReceipt, ReceiptLaunch,
     INSTALL_RECEIPT_SCHEMA_VERSION,
 };
-use crate::sandbox::{prepare_sandboxed_command, SandboxNetwork};
+use crate::sandbox::{prepare_sandboxed_invocation, SandboxNetwork};
 use crate::{HostPlatform, SkillSdkError, SkillSdkResult};
 
 #[derive(Clone)]
@@ -62,6 +62,7 @@ pub struct InstallControl {
     cancelled: Arc<AtomicBool>,
     progress: Option<Arc<dyn Fn(&str) + Send + Sync>>,
     source_build_allowed: bool,
+    host_private_directories: Vec<PathBuf>,
 }
 
 impl std::fmt::Debug for InstallControl {
@@ -80,6 +81,7 @@ impl InstallControl {
             cancelled,
             progress: None,
             source_build_allowed: true,
+            host_private_directories: Vec::new(),
         }
     }
 
@@ -91,11 +93,23 @@ impl InstallControl {
             cancelled,
             progress: Some(progress),
             source_build_allowed: true,
+            host_private_directories: Vec::new(),
         }
     }
 
     pub fn request_cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
+    }
+
+    /// Host-owned restrictions shared by build adapters and protocol smoke.
+    /// Package manifests and child environment must never supply this policy.
+    pub fn with_host_private_directories(mut self, directories: Vec<PathBuf>) -> Self {
+        self.host_private_directories = directories;
+        self
+    }
+
+    pub fn host_private_directories(&self) -> &[PathBuf] {
+        &self.host_private_directories
     }
 
     /// User-facing installation must never fall back to a local compiler.
@@ -1174,15 +1188,18 @@ fn protocol_smoke(
     } else {
         cross_protocol_emulator(platform, &program)?
     };
-    let prepared_command = prepare_sandboxed_command(
+    let mut sandboxed = prepare_sandboxed_invocation(
         &command_program,
         &working_directory,
         &[],
         SandboxNetwork::Deny,
+        control
+            .map(InstallControl::host_private_directories)
+            .unwrap_or(&[]),
     )?;
-    let mut command: Command = prepared_command.command;
-    command.args(command_prefix);
-    command.args(&prepared.launch.args);
+    sandboxed.invocation.args(command_prefix);
+    sandboxed.invocation.args(&prepared.launch.args);
+    let mut command: Command = sandboxed.into_command();
     command.env_clear();
     if let Some(path) = std::env::var_os("PATH") {
         command.env("PATH", path);
@@ -1505,3 +1522,7 @@ impl Drop for StagingGuard {
 #[cfg(test)]
 #[path = "installer_tests.rs"]
 mod tests;
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+#[path = "installer_private_tests.rs"]
+mod private_tests;

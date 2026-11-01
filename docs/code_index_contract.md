@@ -55,16 +55,50 @@ bounded source ranges.
   line numbers remain accurate and `range_index_budget_exceeded` discloses the
   partial result. It never treats a retained line prefix as a complete symbol.
 - Unchanged files are reused by size and nanosecond modification fingerprint;
-  changed files receive a new SHA-256 and parser pass.
+  changed files receive a new SHA-256 and parser pass. Every retained cached
+  path is re-admitted through the current host filesystem policy before reuse,
+  including entries outside the current incremental scan page. Historical
+  parser data never grants current access to its source.
 - Symlinks and generated/cache directories are excluded. Index paths are
   always workspace-relative. Source/cache access and cache publication use
   descriptor-relative no-follow filesystem operations on Linux and macOS.
+- Protected directories are excluded without disabling public queries.
+  `summary.policy_excluded_entries`, `cache_rejected_files` and `skipped_files`
+  disclose exclusion/rejection checks, not counts of distinct source files.
+  Excluded or unreadable scan entries make `scan_complete=false`; an empty
+  result from that partial scope is not proof of repository-wide absence.
+  Explicit context paths and protected cache access are refused rather than
+  read through a cached definition. Observe-only queries leave the cache file
+  unchanged; refresh publishes through one admitted parent directory.
 - Cache parser revisions invalidate older parser results without changing the
   public schema. Cache reads are bounded to 128 MiB; observe-only queries do not
   persist a rebuilt index. Only explicit `refresh` writes the cache.
 - Every source location includes a
   `filesystem.read_text_range` machine handle. Callers should request a
   narrower follow-up range instead of loading broad files.
+- Implicit Git change discovery uses a read-only, network-denied process with
+  the same host private-directory exclusions and shared explicit environment.
+  Query execution uses an ephemeral repository with a detached HEAD and bounded
+  copies of the index/shared index and local ignore/attribute data. Only validated
+  declarative core settings are projected; repository/global executable configuration,
+  clean/process filters, hooks, fsmonitor, external diff and text conversion are
+  not loaded. Object data remains read-only, including linked-worktree stores.
+  `changed_paths_semantics=without_executable_repository_config` is conservative:
+  raw files can differ from their filter-normalized blobs without a user edit.
+  NUL-delimited paths preserve newlines, whitespace and literal backslashes;
+  non-UTF-8/unrepresentable paths produce incomplete evidence, not lossy aliases.
+  Protected cached Git filenames are filtered; `data.policy_excluded_paths`,
+  `git_query_failures` and `changed_paths_complete` distinguish partial discovery
+  from a verified empty change set. An unavailable sandbox never falls back to
+  direct execution. Git does not spawn nested status commands. Populated
+  submodules use the same isolated observer, with at most 32 repositories,
+  8 nested levels and 128 MiB of copied metadata per query. Index/shared-index
+  copies stream with a 64 MiB per-file cap; local ignore/attribute files are
+  capped at 1 MiB. Gitlink HEAD changes and inspected nested file changes remain
+  observable. Uninitialized/cyclic/budget-limited submodules remain explicit:
+  `git_submodule_worktrees_uninspected>0` makes
+  `changed_paths_complete=false`. This preparation boundary does not establish complete
+  process-owner/cancellation/lifetime admission or activate authority storage.
 
 ## Result Boundary
 

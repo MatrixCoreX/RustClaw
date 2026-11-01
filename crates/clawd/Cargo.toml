@@ -51,7 +51,11 @@ tree-sitter = "=0.25.10"
 tree-sitter-python = "=0.25.0"
 tree-sitter-javascript = "=0.25.0"
 tree-sitter-typescript = "=0.23.2"
+tempfile = "=3.27.0"
 zhhz = "0.8.2"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "=1.1.4", features = ["fs", "net", "pipe"] }
 
 [dev-dependencies]
 scheduled-thread-pool = "0.2"

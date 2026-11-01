@@ -119,7 +119,13 @@ pub fn preflight_local_media_file(
             max_bytes,
         });
     }
-    let actual_bytes = metadata.len();
+    preflight_regular_media_length(metadata.len(), max_bytes)
+}
+
+fn preflight_regular_media_length(
+    actual_bytes: u64,
+    max_bytes: Option<u64>,
+) -> Result<u64, LocalMediaPreflightError> {
     if actual_bytes == 0 {
         return Err(LocalMediaPreflightError {
             failure: LocalMediaPreflightFailure::Empty,

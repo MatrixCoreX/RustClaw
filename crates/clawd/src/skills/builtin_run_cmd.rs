@@ -5,6 +5,8 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 
+use crate::local_process_owner::process_launch::{PayloadIo, ProcessLaunch};
+
 #[path = "builtin_run_cmd_artifact.rs"]
 mod output_artifact;
 
@@ -443,6 +445,7 @@ pub(crate) async fn run_safe_command(
         claw_core::config::ToolSandboxMode::DangerFull,
         claw_core::config::ToolSandboxBackend::Auto,
         cwd,
+        &[],
         "test-task",
     )
     .await
@@ -474,6 +477,7 @@ pub(crate) async fn run_safe_command_with_sandbox(
         sandbox_mode,
         sandbox_backend,
         workspace_root,
+        &[],
         "direct",
     )
     .await
@@ -492,6 +496,7 @@ pub(super) async fn run_safe_command_detailed(
     sandbox_mode: claw_core::config::ToolSandboxMode,
     sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
+    host_private_directories: &[std::path::PathBuf],
     output_artifact_task_id: &str,
 ) -> Result<CommandRunSuccess, RunSafeCommandError> {
     if command.len() > max_cmd_length {
@@ -523,7 +528,13 @@ pub(super) async fn run_safe_command_detailed(
         ));
     }
 
-    let mut cmd = prepare_run_cmd_process(cwd, sandbox_mode, sandbox_backend, workspace_root)?;
+    let mut cmd = prepare_run_cmd_process(
+        cwd,
+        sandbox_mode,
+        sandbox_backend,
+        workspace_root,
+        host_private_directories,
+    )?;
     crate::skills::apply_skill_runner_env_isolation(&mut cmd);
     configure_bash_command(&mut cmd, command);
     cmd.current_dir(cwd)
@@ -746,6 +757,7 @@ pub(super) async fn start_async_command(
     sandbox_mode: claw_core::config::ToolSandboxMode,
     sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
+    host_private_directories: &[std::path::PathBuf],
 ) -> Result<String, RunSafeCommandError> {
     if command.len() > max_cmd_length {
         return Err(RunSafeCommandError::Command(CommandRunFailure::new(
@@ -977,14 +989,15 @@ mv -f {} {}
             format!("async_job_metadata_write_failed:{err}"),
         ))
     })?;
-    let mut cmd =
-        prepare_durable_run_cmd_process(cwd, sandbox_mode, sandbox_backend, workspace_root)?;
-    crate::skills::apply_skill_runner_env_isolation(&mut cmd);
-    cmd.arg(&run_script_path)
-        .current_dir(cwd)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
+    let launch = prepare_async_command_launch(
+        cwd,
+        &run_script_path,
+        sandbox_mode,
+        sandbox_backend,
+        workspace_root,
+        host_private_directories,
+    )?;
+    let mut cmd = Command::from(launch.into_command());
     place_child_in_own_process_group(&mut cmd);
     cmd.kill_on_drop(false);
     let child = cmd.spawn().map_err(|err| {
@@ -1026,8 +1039,16 @@ fn prepare_run_cmd_process(
     sandbox_mode: claw_core::config::ToolSandboxMode,
     sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
+    host_private_directories: &[std::path::PathBuf],
 ) -> Result<Command, RunSafeCommandError> {
-    prepare_run_cmd_process_for_lifetime(cwd, sandbox_mode, sandbox_backend, workspace_root, false)
+    prepare_run_cmd_process_for_lifetime(
+        cwd,
+        sandbox_mode,
+        sandbox_backend,
+        workspace_root,
+        host_private_directories,
+        false,
+    )
 }
 
 fn prepare_durable_run_cmd_process(
@@ -1035,8 +1056,16 @@ fn prepare_durable_run_cmd_process(
     sandbox_mode: claw_core::config::ToolSandboxMode,
     sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
+    host_private_directories: &[std::path::PathBuf],
 ) -> Result<Command, RunSafeCommandError> {
-    prepare_run_cmd_process_for_lifetime(cwd, sandbox_mode, sandbox_backend, workspace_root, true)
+    prepare_run_cmd_process_for_lifetime(
+        cwd,
+        sandbox_mode,
+        sandbox_backend,
+        workspace_root,
+        host_private_directories,
+        true,
+    )
 }
 
 pub(super) fn prepare_durable_pty_command(
@@ -1045,9 +1074,15 @@ pub(super) fn prepare_durable_pty_command(
     sandbox_mode: claw_core::config::ToolSandboxMode,
     sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
+    host_private_directories: &[std::path::PathBuf],
 ) -> Result<Command, RunSafeCommandError> {
-    let mut cmd =
-        prepare_durable_run_cmd_process(cwd, sandbox_mode, sandbox_backend, workspace_root)?;
+    let mut cmd = prepare_durable_run_cmd_process(
+        cwd,
+        sandbox_mode,
+        sandbox_backend,
+        workspace_root,
+        host_private_directories,
+    )?;
     crate::skills::apply_skill_runner_env_isolation(&mut cmd);
     configure_bash_command(&mut cmd, command);
     cmd.current_dir(cwd);
@@ -1066,8 +1101,63 @@ fn prepare_run_cmd_process_for_lifetime(
     sandbox_mode: claw_core::config::ToolSandboxMode,
     sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
+    host_private_directories: &[std::path::PathBuf],
     durable_async: bool,
 ) -> Result<Command, RunSafeCommandError> {
+    let prepared = prepare_run_cmd_invocation_for_lifetime(
+        cwd,
+        sandbox_mode,
+        sandbox_backend,
+        workspace_root,
+        host_private_directories,
+        durable_async,
+    )?;
+    Ok(Command::from(prepared.invocation.into_command()))
+}
+
+fn prepare_async_command_launch(
+    cwd: &Path,
+    script: &Path,
+    sandbox_mode: claw_core::config::ToolSandboxMode,
+    sandbox_backend: claw_core::config::ToolSandboxBackend,
+    workspace_root: &Path,
+    host_private_directories: &[std::path::PathBuf],
+) -> Result<ProcessLaunch, RunSafeCommandError> {
+    let mut prepared = prepare_run_cmd_invocation_for_lifetime(
+        cwd,
+        sandbox_mode,
+        sandbox_backend,
+        workspace_root,
+        host_private_directories,
+        true,
+    )?;
+    prepared.invocation.arg(script);
+    ProcessLaunch::new(
+        prepared.invocation,
+        cwd.to_path_buf(),
+        crate::skills::SkillRunnerEnvironment::capture().into_pairs(),
+        PayloadIo {
+            stdin: None,
+            stdout: None,
+            stderr: None,
+        },
+    )
+    .map_err(|reason| {
+        RunSafeCommandError::Command(CommandRunFailure::new(
+            "async_job_launch_invalid",
+            reason.error_code(),
+        ))
+    })
+}
+
+fn prepare_run_cmd_invocation_for_lifetime(
+    cwd: &Path,
+    sandbox_mode: claw_core::config::ToolSandboxMode,
+    sandbox_backend: claw_core::config::ToolSandboxBackend,
+    workspace_root: &Path,
+    host_private_directories: &[std::path::PathBuf],
+    durable_async: bool,
+) -> Result<crate::process_sandbox::PreparedSandboxInvocation, RunSafeCommandError> {
     let request = crate::process_sandbox::ProcessSandboxRequest {
         mode: sandbox_mode,
         backend: sandbox_backend,
@@ -1075,12 +1165,13 @@ fn prepare_run_cmd_process_for_lifetime(
         execution_root: cwd,
         network: crate::process_sandbox::ProcessNetworkPolicy::Deny,
         additional_writable_paths: &[],
+        host_private_directories,
         browser_subprocess: false,
     };
     let prepared = if durable_async {
-        crate::process_sandbox::prepare_durable_process_command("bash", request)
+        crate::process_sandbox::prepare_durable_process_invocation("bash", request)
     } else {
-        crate::process_sandbox::prepare_process_command("bash", request)
+        crate::process_sandbox::prepare_process_invocation("bash", request)
     }
     .map_err(|reason_code| {
         RunSafeCommandError::Policy(crate::skills::policy_block_error(
@@ -1101,5 +1192,9 @@ fn prepare_run_cmd_process_for_lifetime(
         sandbox_mode = sandbox_mode.as_token(),
         "run_cmd_process_sandbox_prepared"
     );
-    Ok(prepared.command)
+    Ok(prepared)
 }
+
+#[cfg(test)]
+#[path = "builtin_run_cmd_launch_tests.rs"]
+mod launch_tests;

@@ -3,6 +3,10 @@ use super::{
     recover_pending_cancel_escalations, terminate_verified_process_group, ProcessIdentityState,
 };
 
+#[cfg(unix)]
+#[path = "local_process_identity_tests.rs"]
+mod identity_tests;
+
 struct TempDirGuard {
     path: std::path::PathBuf,
 }

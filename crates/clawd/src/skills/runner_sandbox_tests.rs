@@ -6,7 +6,7 @@ mod linux {
 
     use claw_core::config::{ToolSandboxBackend, ToolSandboxMode};
 
-    use super::super::prepare_runner_command;
+    use super::super::prepare_runner_invocation;
     use crate::process_sandbox::{ProcessNetworkPolicy, ProcessSandboxRequest};
 
     struct Scratch(PathBuf);
@@ -34,6 +34,7 @@ mod linux {
             execution_root: root,
             network: ProcessNetworkPolicy::Deny,
             additional_writable_paths: &[],
+            host_private_directories: &[],
             browser_subprocess: false,
         }
     }
@@ -52,9 +53,10 @@ mod linux {
         for durable in [false, true] {
             for host_process in [false, true] {
                 let prepared =
-                    prepare_runner_command("/bin/sh", request(&root.0), durable, host_process)
+                    prepare_runner_invocation("/bin/sh", request(&root.0), durable, host_process)
                         .unwrap();
-                let args: Vec<_> = prepared.command.as_std().get_args().collect();
+                let command = prepared.invocation.into_command();
+                let args: Vec<_> = command.get_args().collect();
                 let has = |value: &str| args.iter().any(|arg| *arg == value);
                 assert_eq!(has("--die-with-parent"), !durable);
                 assert_eq!(has("--unshare-pid"), !host_process);
@@ -74,23 +76,16 @@ mod linux {
         };
         let root = PathBuf::from(root);
         let durable = std::env::var("DURABLE_RUNNER_TEST_MODE").unwrap() == "durable";
-        let mut prepared =
-            prepare_runner_command("/bin/sh", request(&root), durable, false).unwrap();
-        prepared
-            .command
+        let prepared =
+            prepare_runner_invocation("/bin/sh", request(&root), durable, false).unwrap();
+        let mut command = tokio::process::Command::from(prepared.invocation.into_command());
+        command
             .args(["-c", "printf ready > ready; sleep 3; printf done > done"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
             .kill_on_drop(false);
-        assert!(prepared
-            .command
-            .spawn()
-            .unwrap()
-            .wait()
-            .await
-            .unwrap()
-            .success());
+        assert!(command.spawn().unwrap().wait().await.unwrap().success());
     }
 
     fn check_parent_exit(durable: bool) {

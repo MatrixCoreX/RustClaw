@@ -117,6 +117,7 @@ def request_for(repo: Path, skill: str, sequence: int) -> dict[str, Any]:
         "expected_overlay_generation_digest": None,
         "expected_policy_digest": None,
         "expected_admission_receipt_digest": None,
+        "host_private_directories": [],
         "args": REQUEST_ARGS[skill],
         "context": {"workspace_root": str(repo)},
     }

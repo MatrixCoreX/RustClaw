@@ -64,6 +64,7 @@ mod intent;
 mod language_policy;
 mod llm_gateway;
 mod local_process_job;
+mod local_process_owner;
 mod log_utils;
 mod long_task_progress;
 mod machine_selector;
@@ -79,6 +80,7 @@ mod package_commands;
 mod persona_style;
 mod pipeline_types;
 mod policy_decision;
+mod process_invocation;
 mod process_sandbox;
 mod prompt_budget;
 mod prompt_utils;
@@ -218,6 +220,8 @@ pub(crate) use runtime::{
     SkillViewsSnapshot, TaskCostBlocker, TaskMetricsRegistry, TaskProviderBlocker, ToolsPolicy,
     WhatsappDeliveryRoute, WorkerConfig,
 };
+use skill_sdk::package_custody;
+use skill_sdk::sandbox_private as private_filesystem_policy;
 pub(crate) use skills::canonical_skill_name;
 use skills::{run_skill_with_runner, run_skill_with_runner_outcome};
 pub(crate) use system_health::{
@@ -595,6 +599,9 @@ fn tokio_worker_stack_bytes(raw: Option<&str>) -> usize {
 }
 
 fn main() -> anyhow::Result<()> {
+    if let Some(result) = local_process_owner::run_if_requested() {
+        return result.map_err(|failure| anyhow::anyhow!("{failure}"));
+    }
     // No threads have been created yet; glibc allocator settings are process-global.
     let allocator_tuning = unsafe { runtime_memory::configure_allocator_at_startup() };
     let worker_stack_bytes = tokio_worker_stack_bytes(
@@ -1161,6 +1168,9 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         default_locator_search_dir.display(),
     );
 
+    // No authority keys are loaded until complete managed-host admission.
+    let host_filesystem =
+        Arc::new(runtime::host_filesystem::HostFilesystemPolicy::without_private_authority());
     let mcp_runtime = Arc::new(crate::mcp_runtime::McpRuntime::new(config.mcp.clone()));
     mcp_runtime.start().await;
     mcp_runtime.spawn_health_monitor().await;
@@ -1198,6 +1208,7 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
                 ),
         },
         skill_rt: crate::SkillRuntime {
+            host_filesystem,
             skill_timeout_seconds: config.skills.skill_timeout_seconds,
             skill_runner_path: effective_skill_runner_path,
             skill_global_max_concurrency: runtime_concurrency.skill_concurrency,

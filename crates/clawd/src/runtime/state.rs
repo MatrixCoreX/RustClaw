@@ -12,12 +12,15 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use tokio::sync::Semaphore;
 
 use super::policy::{RateLimiter, ToolsPolicy};
 pub(crate) use super::provider_runtime::{AgentRuntimeConfig, LlmProviderRuntime};
 use super::types::{CommandIntentRuntime, ScheduleRuntime};
 use crate::skill_admission::{AdmissionExecutionBinding, OverlaySnapshot, SkillAdmissionService};
+
+#[path = "skill_execution.rs"]
+mod skill_execution;
+pub(crate) use skill_execution::{SkillConcurrencyGates, SkillRuntime};
 
 pub(crate) struct SkillViews {
     pub(crate) registry: Option<Arc<SkillsRegistry>>,
@@ -241,8 +244,10 @@ impl CoreServices {
             agents_by_id: Arc::new(RwLock::new(Arc::new(agents_by_id))),
             agent_runtime_leases: Arc::new(RwLock::new(agent_runtime_leases)),
             http_client: Client::new(),
-            registration_http_client: crate::http::ui_routes::official_registration_http_client_builder()
-                .build().expect("test registration HTTP client should build"),
+            registration_http_client:
+                crate::http::ui_routes::official_registration_http_client_builder()
+                    .build()
+                    .expect("test registration HTTP client should build"),
             public_http_client: crate::public_http_client::build_public_http_client()
                 .expect("test public HTTP client should build"),
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
@@ -278,113 +283,6 @@ impl CoreServices {
         base.active_provider_type =
             Some(crate::providers::fixture_replay::FIXTURE_REPLAY_PROVIDER_TYPE.to_string());
         base
-    }
-}
-
-/// P2.1 Stage 2 — `SkillRuntime` 簇：技能链路 / 命令执行 / locator 相关参数。
-///
-/// 拆分动机：原 AppState 上这一簇有 10 个字段，其中 `workspace_root` 单独
-/// 84 处引用，`default_locator_search_dir` / `locator_scan_*` 在 locator
-/// 路径强相关——把它们集中在一个子 struct 之后，未来 sandbox/cap-std 改造
-/// (Phase 5) 改的也是同一份。
-#[derive(Clone)]
-pub(crate) struct SkillRuntime {
-    pub(crate) skill_timeout_seconds: u64,
-    pub(crate) skill_runner_path: PathBuf,
-    pub(crate) skill_global_max_concurrency: usize,
-    pub(crate) skill_semaphore: Arc<Semaphore>,
-    pub(crate) skill_concurrency_gates: Arc<SkillConcurrencyGates>,
-    pub(crate) runner_pool: Arc<crate::skills::runner_pool::WarmRunnerPool>,
-    pub(crate) tools_policy: Arc<ToolsPolicy>,
-    pub(crate) cmd_timeout_seconds: u64,
-    pub(crate) cmd_idle_timeout_seconds: u64,
-    pub(crate) cmd_async_retention_seconds: u64,
-    pub(crate) cmd_terminate_grace_seconds: u64,
-    pub(crate) cmd_max_output_bytes: usize,
-    pub(crate) max_cmd_length: usize,
-    pub(crate) workspace_root: PathBuf,
-    pub(crate) default_locator_search_dir: PathBuf,
-}
-
-pub(crate) struct SkillConcurrencyGates {
-    gates: Mutex<HashMap<String, SkillConcurrencyGate>>,
-    resource_broker: crate::resource_scheduler::ResourceBroker,
-}
-
-impl Default for SkillConcurrencyGates {
-    fn default() -> Self {
-        Self {
-            gates: Mutex::new(HashMap::new()),
-            resource_broker: crate::resource_scheduler::ResourceBroker::default(),
-        }
-    }
-}
-
-struct SkillConcurrencyGate {
-    limit: usize,
-    semaphore: Arc<Semaphore>,
-}
-
-impl SkillConcurrencyGates {
-    pub(crate) fn new(resource_broker: crate::resource_scheduler::ResourceBroker) -> Self {
-        Self {
-            gates: Mutex::new(HashMap::new()),
-            resource_broker,
-        }
-    }
-
-    pub(crate) fn resource_broker(&self) -> &crate::resource_scheduler::ResourceBroker {
-        &self.resource_broker
-    }
-
-    pub(crate) fn semaphore(&self, skill_name: &str, limit: usize) -> Arc<Semaphore> {
-        let limit = limit.max(1);
-        let mut gates = self.gates.lock().unwrap();
-        if let Some(gate) = gates.get(skill_name) {
-            if gate.limit != limit {
-                tracing::warn!(
-                    skill = skill_name,
-                    active_limit = gate.limit,
-                    requested_limit = limit,
-                    "skill_concurrency_limit_change_requires_restart"
-                );
-            }
-            return gate.semaphore.clone();
-        }
-        let semaphore = Arc::new(Semaphore::new(limit));
-        gates.insert(
-            skill_name.to_string(),
-            SkillConcurrencyGate {
-                limit,
-                semaphore: semaphore.clone(),
-            },
-        );
-        semaphore
-    }
-}
-
-impl SkillRuntime {
-    #[cfg(test)]
-    pub(crate) fn test_default() -> Self {
-        let tools_policy = ToolsPolicy::from_config(&claw_core::config::ToolsConfig::default())
-            .expect("tools policy");
-        Self {
-            skill_timeout_seconds: 30,
-            skill_runner_path: PathBuf::new(),
-            skill_global_max_concurrency: 1,
-            skill_semaphore: Arc::new(Semaphore::new(1)),
-            skill_concurrency_gates: Arc::new(SkillConcurrencyGates::default()),
-            runner_pool: Arc::new(crate::skills::runner_pool::WarmRunnerPool::default()),
-            tools_policy: Arc::new(tools_policy),
-            cmd_timeout_seconds: 60,
-            cmd_idle_timeout_seconds: 60,
-            cmd_async_retention_seconds: 86_400,
-            cmd_terminate_grace_seconds: 5,
-            cmd_max_output_bytes: 8000,
-            max_cmd_length: 4096,
-            workspace_root: std::env::temp_dir(),
-            default_locator_search_dir: std::env::temp_dir(),
-        }
     }
 }
 

@@ -1,134 +1,194 @@
 #!/usr/bin/env python3
-"""Clean agent-runtime development artifacts that are safe to regenerate.
+"""Remove known Cargo cache files, preserving runtime files and business data.
 
-Default mode is a dry run. Pass --apply to delete.
+Dry run by default. --apply deletes only selected cache files. Select relocated
+targets explicitly with --target-dir; directory symlinks are not followed.
 """
-
 from __future__ import annotations
 
 import argparse
-import shutil
-import sys
+from contextlib import ExitStack
+from dataclasses import dataclass
+import os
 from pathlib import Path
+import stat
+import subprocess
+import sys
 
+if os.name == "posix":
+    import fcntl
+else:
+    fcntl = None
 
 ROOT = Path(__file__).resolve().parents[1]
+CARGO_TAG = b"Signature: 8a477f597d28d172789f06886806bc55"
+CACHE_DIRECTORIES = ("deps", "build", ".fingerprint", "incremental")
+CACHE_SUFFIXES = {".d", ".o", ".a", ".rlib", ".rmeta"}
+CACHE_RECORDS = {"dep-graph.bin", "query-cache.bin", "work-products.bin", "thin-lto-past-keys.bin"}
 
 
-def byte_size(path: Path) -> int:
-    if not path.exists():
-        return 0
-    if path.is_file() or path.is_symlink():
-        try:
-            return path.lstat().st_size
-        except OSError:
-            return 0
-    total = 0
-    for item in path.rglob("*"):
-        try:
-            total += item.lstat().st_size
-        except OSError:
+@dataclass(frozen=True)
+class CacheFile:
+    directory_fd: int
+    relative: Path
+    identity: tuple[int, ...]
+    size: int
+    label: str
+
+
+def identity(metadata):
+    return (metadata.st_dev, metadata.st_ino, metadata.st_size,
+            metadata.st_mtime_ns, metadata.st_mode, metadata.st_uid)
+
+
+def directory_at(stack, name, parent=None):
+    fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+    stack.callback(os.close, fd)
+    if os.fstat(fd).st_uid != os.geteuid():
+        raise RuntimeError("cleanup_directory_not_owned")
+    return fd
+
+
+def regular_at(stack, name, parent):
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+    stack.callback(os.close, fd)
+    metadata = os.fstat(fd)
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.geteuid():
+        raise RuntimeError("cleanup_marker_not_owned_regular_file")
+    return fd
+
+
+def idle_builds():
+    commands = subprocess.check_output(["ps", "-A", "-o", "comm="], text=True,
+                                       stderr=subprocess.PIPE)
+    busy = {Path(line.strip()).name for line in commands.splitlines()} & {
+        "cargo", "rustc", "rust-lld", "cc", "clang", "gcc", "ld", "lld", "ld.lld",
+    }
+    if busy:
+        raise RuntimeError("cleanup_build_active")
+
+
+def profile_fds(stack, target):
+    target = target.absolute()
+    before = target.lstat()
+    if not stat.S_ISDIR(before.st_mode):
+        raise RuntimeError("cleanup_target_not_directory")
+    canonical = target.resolve(strict=True)
+    parent = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    stack.callback(os.close, parent)
+    for part in canonical.parts[1:]:
+        parent = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        stack.callback(os.close, parent)
+    actual = os.fstat(parent)
+    if (actual.st_dev, actual.st_ino) != (before.st_dev, before.st_ino) or actual.st_uid != os.geteuid():
+        raise RuntimeError("cleanup_target_changed_or_not_owned")
+    tag = regular_at(stack, "CACHEDIR.TAG", parent)
+    if os.read(tag, len(CARGO_TAG) + 1).splitlines()[:1] != [CARGO_TAG]:
+        raise RuntimeError("cleanup_cargo_tag_invalid")
+    bases = [(parent, "")]
+    for entry in os.listdir(parent):
+        if entry in {"debug", "release"}:
             continue
-    return total
+        metadata = os.stat(entry, dir_fd=parent, follow_symlinks=False)
+        if stat.S_ISDIR(metadata.st_mode):
+            bases.append((directory_at(stack, entry, parent), entry + "/"))
+    for base, prefix in bases:
+        for profile in ("debug", "release"):
+            try:
+                metadata = os.stat(profile, dir_fd=base, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            if not stat.S_ISDIR(metadata.st_mode):
+                continue
+            fd = directory_at(stack, profile, base)
+            try:
+                lock = regular_at(stack, ".cargo-lock", fd)
+            except FileNotFoundError:
+                continue
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            yield fd, prefix + profile
 
 
-def human_size(size: int) -> str:
-    value = float(size)
-    for unit in ("B", "K", "M", "G", "T"):
-        if value < 1024 or unit == "T":
-            if unit == "B":
-                return f"{int(value)}{unit}"
-            return f"{value:.1f}{unit}"
-        value /= 1024
-    return f"{size}B"
+def plan_cache_files(stack, targets):
+    selected = []
+    seen = set()
+    seen_targets = set()
+    for target in targets:
+        if not target.exists() and not target.is_symlink():
+            continue
+        entry = target.lstat()
+        target_key = (entry.st_dev, entry.st_ino)
+        if target_key in seen_targets:
+            continue
+        seen_targets.add(target_key)
+        for profile, label in profile_fds(stack, target):
+            for name in CACHE_DIRECTORIES:
+                try:
+                    metadata = os.stat(name, dir_fd=profile, follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                if not stat.S_ISDIR(metadata.st_mode):
+                    continue
+                cache = directory_at(stack, name, profile)
+                key = (metadata.st_dev, metadata.st_ino)
+                if key in seen:
+                    continue
+                seen.add(key)
+                for relative, _, files, directory in os.fwalk(".", dir_fd=cache,
+                                                           follow_symlinks=False):
+                    for filename in files:
+                        metadata = os.stat(filename, dir_fd=directory, follow_symlinks=False)
+                        if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o111:
+                            continue
+                        if metadata.st_uid != os.geteuid():
+                            continue
+                        if Path(filename).suffix not in CACHE_SUFFIXES and filename not in CACHE_RECORDS:
+                            continue
+                        path = Path(relative) / filename
+                        selected.append(CacheFile(cache, path, identity(metadata), metadata.st_size,
+                                                  f"{label}/{name}/{path.as_posix()}"))
+    return selected
 
 
-def contents(path: Path) -> list[Path]:
-    if not path.is_dir():
-        return []
-    return sorted(path.iterdir())
+def unlink_cache_file(candidate):
+    with ExitStack() as stack:
+        parent = candidate.directory_fd
+        for part in candidate.relative.parts[:-1]:
+            parent = directory_at(stack, part, parent)
+        name = candidate.relative.name
+        metadata = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if identity(metadata) != candidate.identity:
+            raise RuntimeError("cleanup_entry_changed")
+        os.unlink(name, dir_fd=parent)
 
 
-def historical_model_io_logs() -> list[Path]:
-    logs = ROOT / "logs"
-    if not logs.is_dir():
-        return []
-    return sorted(logs.glob("model_io.log.*"))
-
-
-def node_modules_dirs() -> list[Path]:
-    candidates = [
-        ROOT / "node_modules",
-        ROOT / "UI" / "node_modules",
-        ROOT / "services" / "wa-web-bridge" / "node_modules",
-        ROOT / "pi_app" / "node_modules",
-    ]
-    return [path for path in candidates if path.exists()]
-
-
-def default_targets() -> list[Path]:
-    targets = [ROOT / ".agent-runtime"]
-    targets.extend(contents(ROOT / "scripts" / "nl_suite_logs"))
-    targets.extend(contents(ROOT / "tmp"))
-    targets.extend(contents(ROOT / "logs" / "nl_tests"))
-    targets.extend(historical_model_io_logs())
-    return targets
-
-
-def delete_path(path: Path) -> None:
-    if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
-    else:
-        path.unlink(missing_ok=True)
-
-
-def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--apply", action="store_true", help="delete selected artifacts")
-    parser.add_argument(
-        "--include-node-modules",
-        action="store_true",
-        help="also delete node_modules directories; reinstall with npm install when needed",
-    )
-    parser.add_argument(
-        "--include-current-logs",
-        action="store_true",
-        help="also delete current logs/*.log files, not only rotated model_io logs",
-    )
+def parse_args(argv):
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument("--apply", action="store_true", help="delete reviewed Cargo cache files")
+    parser.add_argument("--target-dir", type=Path, action="append",
+                        help="explicit Cargo target root containing CACHEDIR.TAG")
     return parser.parse_args(argv)
 
 
-def main(argv: list[str]) -> int:
+def main(argv):
     args = parse_args(argv)
-    targets = default_targets()
-    if args.include_node_modules:
-        targets.extend(node_modules_dirs())
-    if args.include_current_logs:
-        targets.extend(sorted((ROOT / "logs").glob("*.log")))
-
-    existing: list[Path] = []
-    seen: set[Path] = set()
-    for target in targets:
-        resolved = target.resolve()
-        if resolved in seen or not target.exists():
-            continue
-        seen.add(resolved)
-        existing.append(target)
-
-    total = 0
-    for target in existing:
-        size = byte_size(target)
-        total += size
-        rel = target.relative_to(ROOT)
-        print(f"{human_size(size):>8}  {rel}")
-    mode = "APPLY" if args.apply else "DRY_RUN"
-    print(f"DEV_ARTIFACT_CLEAN {mode} targets={len(existing)} total={human_size(total)}")
-
-    if not args.apply:
+    try:
+        if fcntl is None or not hasattr(os, "fwalk") or not hasattr(os, "O_NOFOLLOW"):
+            raise RuntimeError("cleanup_platform_unsupported")
+        idle_builds()
+        with ExitStack() as stack:
+            files = plan_cache_files(stack, args.target_dir or [ROOT / "target"])
+            for candidate in files:
+                print(f"{candidate.size:>12}  {candidate.label}")
+            if args.apply:
+                for candidate in files:
+                    unlink_cache_file(candidate)
+            print(f"CARGO_CACHE_CLEAN mode={'APPLY' if args.apply else 'DRY_RUN'} "
+                  f"files={len(files)} bytes={sum(item.size for item in files)}")
         return 0
-    for target in existing:
-        delete_path(target)
-    return 0
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        print(f"CARGO_CACHE_CLEAN refused: {error}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

@@ -42,11 +42,34 @@
   保留后续准确行号，以 `range_index_budget_exceeded` 明示部分结果，不把截断行
   前缀当成完整符号。
 - 未变化文件通过大小和纳秒级修改时间指纹复用；变化文件重新计算 SHA-256 并解析。
+  每次查询在复用前，都通过当前宿主文件策略重新准入全部保留的缓存路径，包括本次
+  增量扫描页以外的条目。历史解析数据不代表当前仍有权限读取源码。
 - 排除符号链接以及生成/缓存目录。索引路径始终为 workspace 相对路径；Linux/macOS
   通过目录描述符和 no-follow 操作读取源码/缓存及原子发布缓存。
+- 受保护目录会被排除，公共代码查询仍可使用。`summary.policy_excluded_entries`、
+  `cache_rejected_files` 和 `skipped_files` 明示排除或拒绝检查次数，不代表去重后的
+  源文件数量。扫描中存在排除或不可读条目时，`scan_complete=false`；这类部分结果
+  不能证明全仓没有某个符号。显式请求的受保护源码和缓存会被拒绝，不会通过旧缓存
+  绕过。只读查询不改写缓存文件；刷新通过同一个已准入父目录发布缓存。
 - 解析器版本变化会使旧缓存失效，不改变公开 schema。缓存读取限制为 128 MiB；
   只读查询不会写入重建结果，仅显式 `refresh` 可以持久化缓存。
 - 每个源码位置都包含 `filesystem.read_text_range` 机器 handle。调用方应请求更窄的后续区间，不应加载大范围文件。
+- 自动查询 Git 变更时，进程只读、禁网，使用同一宿主私有目录排除策略和共享显式环境。
+  查询使用临时仓库、固定 HEAD 和有大小限制的索引/共享索引、忽略/属性数据副本，
+  只投影经过校验的声明式 core 设置，不加载仓库/全局的可执行配置、clean/process
+  过滤器、hook、fsmonitor、外部 diff 或文本转换。对象库保持只读，包括 linked worktree。
+  `changed_paths_semantics=without_executable_repository_config` 表示保守比较：
+  原始文件即使没有用户修改，也可能与过滤器归一化后的 blob 不同。
+  NUL 分隔路径保留换行、空白和字面反斜杠；无法表示的非 UTF-8 路径明示部分结果，
+  不用有损替换生成另一条路径。Git 缓存中的受保护路径也会过滤；`data.policy_excluded_paths`、
+  `git_query_failures`、`changed_paths_complete` 区分部分发现与已验证的空变更集。
+  Git 本身不启动嵌套状态命令；已初始化子模块使用同一隔离查询，每次最多 32 个仓库、
+  8 层嵌套及 128 MiB 元数据副本。索引/共享索引流式复制，每个文件最多 64 MiB；
+  忽略/属性文件每个最多 1 MiB。保留 gitlink HEAD 变化及已检查子模块内的文件变化。
+  未初始化、循环引用或超出预算的子模块明确计入
+  `git_submodule_worktrees_uninspected`；该值大于 0 时 `changed_paths_complete=false`。
+  沙箱不可用时不会退回直接执行。这一准备边界不等同于完整进程归属、取消和生命周期
+  准入，也不会启用权威存储。
 
 ## 结果边界
 

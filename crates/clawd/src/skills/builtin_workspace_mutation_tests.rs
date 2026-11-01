@@ -2,9 +2,78 @@ use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::{
+#[cfg(target_os = "linux")]
+#[test]
+fn checkpoint_metadata_reader_rejects_large_files_without_exhausting_memory() {
+    super::super::checkpoint_read_tests::assert_oversized_metadata_is_bounded(
+        "skills::builtin::builtin_workspace_mutation::tests::checkpoint_metadata_reader_rejects_large_files_without_exhausting_memory",
+        |root| super::read_manifest_value(root, &super::HostFilesystemPolicy::without_private_authority())
+            .map(|_| ()),
+    );
+}
+
+#[test]
+fn checkpoint_metadata_reader_preserves_exact_boundary_validation_and_file_contents() {
+    let workspace = TestWorkspace::new("metadata-boundary");
+    let target = workspace.path().join("a.txt");
+    fs::write(&target, b"before\n").unwrap();
+    let output = run_checkpointed_workspace_mutation(
+        workspace.path(),
+        "metadata-task",
+        "write_text",
+        &target,
+        MutationAfterShape::RegularFile,
+        || fs::write(&target, b"after\n").map_err(|error| error.to_string()),
+    )
+    .unwrap();
+    let root = workspace.path().canonicalize().unwrap();
+    let filesystem = super::HostFilesystemPolicy::without_private_authority();
+    let directory =
+        super::resolve_checkpoint_dir(&root, &checkpoint_id(&output), &filesystem).unwrap();
+    let path = directory.join("manifest.json");
+    let original = super::read_manifest_value(&directory, &filesystem).unwrap();
+    let mut bytes = fs::read(&path).unwrap();
+    bytes.resize(super::MAX_CHECKPOINT_METADATA_BYTES, b' ');
+    fs::write(&path, &bytes).unwrap();
+    assert_eq!(
+        super::read_manifest_value(&directory, &filesystem).unwrap(),
+        original
+    );
+    bytes.push(b' ');
+    fs::write(&path, &bytes).unwrap();
+    let error = super::read_manifest_value(&directory, &filesystem).unwrap_err();
+    let parsed = crate::skills::parse_structured_skill_error(&error).unwrap();
+    assert_eq!(parsed.error_code, "checkpoint_too_large");
+    let details = &parsed.extra.unwrap()["details"];
+    assert_eq!(details["max_bytes"], super::MAX_CHECKPOINT_METADATA_BYTES);
+    assert_eq!(
+        details["manifest_bytes_at_least"],
+        super::MAX_CHECKPOINT_METADATA_BYTES + 1
+    );
+    for invalid in [b"".as_slice(), b"{".as_slice(), &[0xff]] {
+        fs::write(&path, invalid).unwrap();
+        let error = super::read_manifest_value(&directory, &filesystem).unwrap_err();
+        assert_eq!(
+            crate::skills::parse_structured_skill_error(&error)
+                .unwrap()
+                .error_code,
+            "checkpoint_invalid"
+        );
+    }
+    fs::remove_file(&path).unwrap();
+    let error = super::read_manifest_value(&directory, &filesystem).unwrap_err();
+    assert_eq!(
+        crate::skills::parse_structured_skill_error(&error)
+            .unwrap()
+            .error_code,
+        "checkpoint_read_failed"
+    );
+    assert_eq!(fs::read(&target).unwrap(), b"after\n");
+}
+
+use super::super::workspace_test_support::{
     atomic_write_file, rewind_structured_mutation, run_authorized_mutation,
-    run_checkpointed_workspace_mutation, structured_mutation_diff,
+    run_checkpointed_workspace_mutation, structured_mutation_diff, MutationAfterShape,
 };
 
 struct TestWorkspace {
@@ -57,7 +126,7 @@ fn atomic_write_replaces_content_without_leaving_temporary_files() {
             entry
                 .file_name()
                 .to_string_lossy()
-                .starts_with(".agent-runtime-write-")
+                .starts_with(".agent-write-")
         })
         .count();
     assert_eq!(temporary_files, 0);
@@ -78,7 +147,7 @@ fn atomic_write_failure_removes_temporary_file() {
             entry
                 .file_name()
                 .to_string_lossy()
-                .starts_with(".agent-runtime-write-")
+                .starts_with(".agent-write-")
         })
         .count();
     assert_eq!(temporary_files, 0);
@@ -89,6 +158,32 @@ fn atomic_write_failure_removes_temporary_file() {
 #[test]
 fn atomic_write_preserves_existing_unix_permissions() {
     use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::CommandExt;
+
+    const CHILD: &str = "APP_TEST_WRITE_MODE_CHILD";
+    if std::env::var_os(CHILD).as_deref() != Some(std::ffi::OsStr::new("1")) {
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command.args(["--exact", "skills::builtin::builtin_workspace_mutation::tests::atomic_write_preserves_existing_unix_permissions", "--nocapture"])
+            .env(CHILD, "1");
+        // SAFETY: umask is process-local and async-signal-safe; only this
+        // independently executed owned test child changes its creation mask.
+        unsafe {
+            command.pre_exec(|| {
+                libc::umask(0o077);
+                Ok(())
+            });
+        }
+        let output = command.output().expect("owned permissions test child");
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    // SAFETY: this branch belongs to the owned child, not the parallel parent.
+    assert_eq!(unsafe { libc::umask(0o077) }, 0o077);
 
     let workspace = TestWorkspace::new("atomic-write-mode");
     let path = workspace.path().join("script.sh");
@@ -113,6 +208,7 @@ fn existing_file_write_can_be_rewound_with_compensation_evidence() {
         "task-1",
         "write_text",
         &path,
+        MutationAfterShape::RegularFile,
         || fs::write(&path, "after\n").map_err(|error| error.to_string()),
     )
     .expect("write with checkpoint");
@@ -154,6 +250,7 @@ fn configured_workspace_root_alias_rebases_targets_to_the_canonical_root() {
         "task-configured-root-alias",
         "write_text",
         &target,
+        MutationAfterShape::RegularFile,
         || fs::write(&target, "after").map_err(|error| error.to_string()),
     )
     .expect("write through configured workspace alias");
@@ -179,6 +276,7 @@ fn created_file_rewind_removes_empty_created_parents() {
         "task-2",
         "write_text",
         &path,
+        MutationAfterShape::RegularFile,
         || {
             fs::create_dir_all(path.parent().expect("parent"))
                 .map_err(|error| error.to_string())?;
@@ -204,6 +302,7 @@ fn recursive_directory_removal_can_be_restored() {
         "task-3",
         "remove_path",
         &target,
+        MutationAfterShape::Missing,
         || fs::remove_dir_all(&target).map_err(|error| error.to_string()),
     )
     .expect("remove with checkpoint");
@@ -233,6 +332,7 @@ fn later_user_edit_blocks_rewind() {
         "task-4",
         "write_text",
         &path,
+        MutationAfterShape::RegularFile,
         || fs::write(&path, "agent edit").map_err(|error| error.to_string()),
     )
     .expect("write with checkpoint");
@@ -258,6 +358,7 @@ fn failed_operation_restores_partial_mutation() {
         "task-5",
         "write_text",
         &path,
+        MutationAfterShape::RegularFile,
         || {
             fs::write(&path, "partial").map_err(|error| error.to_string())?;
             Err("operation_failed".to_string())
@@ -278,6 +379,7 @@ fn identical_file_write_is_recorded_as_no_op() {
         "task-no-op",
         "write_text",
         &path,
+        MutationAfterShape::RegularFile,
         || fs::write(&path, "same").map_err(|error| error.to_string()),
     )
     .expect("no-op write");
@@ -300,6 +402,7 @@ fn authorized_host_scope_mutation_is_applied_without_workspace_checkpoint() {
         "task-host-scope",
         "write_text",
         &path,
+        MutationAfterShape::RegularFile,
         true,
         || {
             fs::create_dir_all(path.parent().expect("parent"))
@@ -337,6 +440,7 @@ fn host_scope_mutation_requires_server_authorization() {
         "task-denied-host-scope",
         "write_text",
         &path,
+        MutationAfterShape::RegularFile,
         false,
         || fs::write(&path, "must not run").map_err(|error| error.to_string()),
     )
@@ -372,6 +476,7 @@ fn runtime_state_target_is_rejected_as_retryable_before_operation() {
         "task-runtime-state-target",
         "write_text",
         &target,
+        MutationAfterShape::RegularFile,
         || {
             operation_ran.set(true);
             fs::write(&target, "must not run").map_err(|error| error.to_string())
@@ -411,6 +516,7 @@ fn verified_unchanged_operation_error_is_marked_no_effect() {
         "task-operation-no-effect",
         "write_text",
         &target,
+        MutationAfterShape::RegularFile,
         || Err(operation_error),
     )
     .expect_err("operation must fail");
@@ -441,6 +547,7 @@ fn symlink_target_is_denied_before_mutation() {
         "task-6",
         "write_text",
         &target,
+        MutationAfterShape::RegularFile,
         || fs::write(&target, "denied").map_err(|error| error.to_string()),
     )
     .expect_err("symlink must be denied");

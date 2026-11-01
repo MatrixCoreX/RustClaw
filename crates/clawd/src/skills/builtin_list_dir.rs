@@ -1,9 +1,8 @@
+use rustix::fs::FileType;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::fs;
 use std::io;
 use std::path::Path;
-use std::time::UNIX_EPOCH;
 
 #[derive(Debug)]
 pub(super) enum ListDirError {
@@ -20,36 +19,28 @@ impl From<io::Error> for ListDirError {
 pub(super) fn list_directory_page(
     requested_path: &str,
     path: &Path,
+    workspace_root: Option<&Path>,
+    host_filesystem: &crate::runtime::host_filesystem::HostFilesystemPolicy,
     cursor: usize,
     max_entries: usize,
 ) -> Result<Value, ListDirError> {
+    let directory = host_filesystem.open_directory(workspace_root, path)?;
     let mut entries = Vec::new();
-    for result in fs::read_dir(path)? {
-        let entry = result?;
-        let metadata = fs::symlink_metadata(entry.path())?;
-        let file_type = metadata.file_type();
-        let kind = if file_type.is_symlink() {
-            "symlink"
-        } else if file_type.is_dir() {
-            "directory"
-        } else if file_type.is_file() {
-            "file"
-        } else {
-            "other"
+    for entry in directory.entries()? {
+        let kind = match entry.file_type {
+            FileType::Symlink => "symlink",
+            FileType::Directory => "directory",
+            FileType::RegularFile => "file",
+            _ => "other",
         };
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let modified_ts = metadata
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-            .map(|duration| duration.as_secs());
+        let name = entry.name.to_string_lossy().into_owned();
         entries.push(json!({
             "name": name,
-            "path": entry.path().display().to_string(),
+            "path": path.join(&entry.name).display().to_string(),
             "kind": kind,
-            "is_symlink": file_type.is_symlink(),
-            "size_bytes": file_type.is_file().then_some(metadata.len()),
-            "modified_ts": modified_ts,
+            "is_symlink": entry.file_type == FileType::Symlink,
+            "size_bytes": entry.size_bytes,
+            "modified_ts": entry.modified_ts,
         }));
     }
     entries.sort_by(|left, right| {
@@ -71,7 +62,7 @@ pub(super) fn list_directory_page(
         .map(str::to_string)
         .collect::<Vec<_>>();
     let snapshot_hash = directory_snapshot_hash(&entries);
-    let canonical_path = path.canonicalize()?.display().to_string();
+    let canonical_path = directory.canonical_path().display().to_string();
     let continuation = (!complete).then(|| {
         json!({
             "kind": "cursor",

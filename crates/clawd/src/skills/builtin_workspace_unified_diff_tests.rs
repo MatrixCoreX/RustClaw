@@ -1,4 +1,4 @@
-use super::execute_workspace_patch_for_root;
+use super::super::workspace_test_support::execute_workspace_patch_for_root;
 use serde_json::{json, Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};

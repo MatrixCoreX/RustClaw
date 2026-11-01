@@ -1,7 +1,10 @@
+use crate::runtime::host_filesystem::{BoundedFileReadError, HostFilesystemPolicy};
+use claw_core::config::{ToolSandboxBackend, ToolSandboxMode};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -15,7 +18,9 @@ mod unified_diff;
 
 const MAX_PATCH_BYTES: usize = 2 * 1024 * 1024;
 const MAX_DIFF_BYTES: usize = 2 * 1024 * 1024;
+const MAX_CHECKPOINT_METADATA_BYTES: usize = 2 * 1024 * 1024;
 const CHECKPOINT_SCHEMA_VERSION: u32 = 1;
+const CHECKPOINT_RESTORE_FAILED_STATE: &str = "restore_failed";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PatchCheckpoint {
@@ -54,29 +59,44 @@ pub(super) fn execute_workspace_patch(
     let task_id = task
         .map(|task| task.task_id.as_str())
         .unwrap_or("test-task");
-    execute_workspace_patch_for_root(&state.skill_rt.workspace_root, task_id, args)
+    execute_workspace_patch_with_policy(
+        &state.skill_rt.workspace_root,
+        task_id,
+        args,
+        &state.skill_rt.host_filesystem,
+        state.skill_rt.tools_policy.sandbox_backend,
+    )
 }
 
-pub(super) fn execute_workspace_patch_for_root(
+pub(super) fn execute_workspace_patch_with_policy(
     workspace_root: &Path,
     task_id: &str,
     args: &Map<String, Value>,
+    filesystem: &HostFilesystemPolicy,
+    backend: ToolSandboxBackend,
 ) -> Result<String, String> {
     let action = required_token(args, "action")?;
     match action {
-        "apply_patch" => apply_patch(workspace_root, task_id, args),
-        "apply_patch_shard" => transaction::apply_patch_shard(workspace_root, task_id, args),
-        "transaction_status" => transaction::transaction_status(workspace_root, task_id, args),
-        "transaction_rewind" => transaction::transaction_rewind(workspace_root, task_id, args),
+        "apply_patch" => apply_patch(workspace_root, task_id, args, filesystem, backend),
+        "apply_patch_shard" => {
+            transaction::apply_patch_shard(workspace_root, task_id, args, filesystem, backend)
+        }
+        "transaction_status" => {
+            transaction::transaction_status(workspace_root, task_id, args, filesystem)
+        }
+        "transaction_rewind" => {
+            transaction::transaction_rewind(workspace_root, task_id, args, filesystem)
+        }
         "preview_replace_text" | "replace_text" => {
-            super::builtin_workspace_replace::execute_workspace_replace_for_root(
+            super::builtin_workspace_replace::execute_workspace_replace_with_policy(
                 workspace_root,
                 task_id,
                 args,
+                filesystem,
             )
         }
-        "diff" => diff(workspace_root, args),
-        "rewind" => rewind(workspace_root, args),
+        "diff" => diff(workspace_root, args, filesystem, backend),
+        "rewind" => rewind(workspace_root, args, filesystem),
         _ => Err(patch_error(
             "unsupported_action",
             "workspace.patch.unsupported_action",
@@ -89,6 +109,27 @@ fn apply_patch(
     workspace_root: &Path,
     task_id: &str,
     args: &Map<String, Value>,
+    filesystem: &HostFilesystemPolicy,
+    backend: ToolSandboxBackend,
+) -> Result<String, String> {
+    let checkpoint_id = format!("patch_{}", uuid::Uuid::new_v4().simple());
+    apply_patch_at_checkpoint(
+        workspace_root,
+        task_id,
+        args,
+        filesystem,
+        backend,
+        &checkpoint_id,
+    )
+}
+
+fn apply_patch_at_checkpoint(
+    workspace_root: &Path,
+    task_id: &str,
+    args: &Map<String, Value>,
+    filesystem: &HostFilesystemPolicy,
+    backend: ToolSandboxBackend,
+    checkpoint_id: &str,
 ) -> Result<String, String> {
     ensure_only_keys(args, &["action", "patch", "precondition_hashes"])
         .map_err(pre_dispatch_replan_error)?;
@@ -111,14 +152,19 @@ fn apply_patch(
         )));
     }
 
+    validate_checkpoint_id(checkpoint_id).map_err(pre_dispatch_replan_error)?;
+    let checkpoint_id = checkpoint_id.to_string();
     let root = canonical_workspace_root(workspace_root).map_err(pre_dispatch_replan_error)?;
-    let checkpoint_id = format!("patch_{}", uuid::Uuid::new_v4().simple());
-    let checkpoint_dir =
-        create_checkpoint_dir(&root, &checkpoint_id).map_err(pre_dispatch_replan_error)?;
-    restrict_directory_permissions(&checkpoint_dir);
+    let checkpoint_dir = create_checkpoint_dir(&root, &checkpoint_id, filesystem)
+        .map_err(pre_dispatch_replan_error)?;
     let patch_file = checkpoint_dir.join("change.patch");
-    if let Err(err) = fs::write(&patch_file, patch.as_bytes()) {
-        remove_checkpoint_dir(&checkpoint_dir);
+    if let Err(err) = filesystem.atomic_write_file_with_options(
+        Some(&checkpoint_dir),
+        &patch_file,
+        patch.as_bytes(),
+        false,
+    ) {
+        remove_checkpoint_dir(&root, &checkpoint_dir, filesystem);
         return Err(pre_dispatch_replan_error(patch_io_error(
             "patch_stage_failed",
             "workspace.patch.stage_failed",
@@ -126,22 +172,22 @@ fn apply_patch(
         )));
     }
 
-    let git_workspace = is_git_workspace(&root);
+    let git_workspace = is_git_workspace(&root, filesystem, backend)?;
     let mut git_path_strip = 1;
     let mut pure_patch = None;
     let stats = if git_workspace {
-        match inspect_patch(&root, &patch_file) {
+        match inspect_patch(&root, &patch_file, filesystem, backend) {
             Ok((stats, path_strip)) => {
                 git_path_strip = path_strip;
                 stats
             }
             Err(err) => {
-                remove_checkpoint_dir(&checkpoint_dir);
+                remove_checkpoint_dir(&root, &checkpoint_dir, filesystem);
                 return Err(pre_dispatch_replan_error(err));
             }
         }
     } else {
-        match unified_diff::inspect(&root, patch) {
+        match unified_diff::inspect(&root, patch, filesystem) {
             Ok((parsed, pure_stats)) => {
                 pure_patch = Some(parsed);
                 pure_stats
@@ -154,13 +200,13 @@ fn apply_patch(
                     .collect()
             }
             Err(err) => {
-                remove_checkpoint_dir(&checkpoint_dir);
+                remove_checkpoint_dir(&root, &checkpoint_dir, filesystem);
                 return Err(pre_dispatch_replan_error(err));
             }
         }
     };
     if stats.is_empty() {
-        remove_checkpoint_dir(&checkpoint_dir);
+        remove_checkpoint_dir(&root, &checkpoint_dir, filesystem);
         return Err(pre_dispatch_replan_error(patch_error(
             "empty_patch",
             "workspace.patch.empty",
@@ -169,24 +215,47 @@ fn apply_patch(
     }
     for stat in &stats {
         if let Err(err) = validate_relative_patch_path(&root, &stat.path) {
-            remove_checkpoint_dir(&checkpoint_dir);
+            remove_checkpoint_dir(&root, &checkpoint_dir, filesystem);
             return Err(pre_dispatch_replan_error(err));
         }
     }
-    if let Err(err) = verify_preconditions(&root, args, &stats) {
-        remove_checkpoint_dir(&checkpoint_dir);
+    if let Err(err) = verify_preconditions(&root, args, &stats, filesystem) {
+        remove_checkpoint_dir(&root, &checkpoint_dir, filesystem);
         return Err(pre_dispatch_replan_error(err));
     }
 
-    let mut files = match snapshot_files(&root, &checkpoint_dir, &stats) {
+    let mut files = match snapshot_files(&root, &checkpoint_dir, &stats, filesystem) {
         Ok(files) => files,
         Err(err) => {
-            remove_checkpoint_dir(&checkpoint_dir);
+            remove_checkpoint_dir(&root, &checkpoint_dir, filesystem);
             return Err(pre_dispatch_replan_error(err));
         }
     };
+    let prepared_manifest = PatchCheckpoint {
+        schema_version: CHECKPOINT_SCHEMA_VERSION,
+        checkpoint_id: checkpoint_id.clone(),
+        task_id: task_id.to_string(),
+        patch_id: format!("sha256:{}", sha256_hex(patch.as_bytes())),
+        state: "prepared".to_string(),
+        created_at: crate::now_ts_u64() as i64,
+        files: files.clone(),
+    };
+    if let Err(error) = validate_checkpoint_capacity(&prepared_manifest)
+        .and_then(|()| write_manifest(&checkpoint_dir, &prepared_manifest, filesystem))
+    {
+        remove_checkpoint_dir(&root, &checkpoint_dir, filesystem);
+        return Err(pre_dispatch_replan_error(error));
+    }
     if git_workspace {
-        let check = git_apply(&root, &patch_file, true, git_path_strip).map_err(|err| {
+        let check = git_apply(
+            &root,
+            &patch_file,
+            true,
+            git_path_strip,
+            filesystem,
+            backend,
+        )
+        .map_err(|err| {
             pre_dispatch_replan_error(patch_io_error(
                 "patch_check_failed",
                 "workspace.patch.check_failed",
@@ -194,7 +263,7 @@ fn apply_patch(
             ))
         })?;
         if !check.status.success() {
-            remove_checkpoint_dir(&checkpoint_dir);
+            remove_checkpoint_dir(&root, &checkpoint_dir, filesystem);
             return Err(pre_dispatch_replan_error(command_error(
                 "patch_context_mismatch",
                 "workspace.patch.context_mismatch",
@@ -202,16 +271,36 @@ fn apply_patch(
             )));
         }
 
-        let applied = git_apply(&root, &patch_file, false, git_path_strip).map_err(|err| {
-            patch_io_error("patch_apply_failed", "workspace.patch.apply_failed", err)
-        })?;
+        let applied = match git_apply(
+            &root,
+            &patch_file,
+            false,
+            git_path_strip,
+            filesystem,
+            backend,
+        ) {
+            Ok(output) => output,
+            Err(error) => {
+                return Err(compensate_failed_patch(
+                    &root,
+                    &checkpoint_dir,
+                    &files,
+                    patch_io_error("patch_apply_failed", "workspace.patch.apply_failed", error),
+                    filesystem,
+                ))
+            }
+        };
         if !applied.status.success() {
-            restore_snapshot(&root, &checkpoint_dir, &files);
-            remove_checkpoint_dir(&checkpoint_dir);
-            return Err(command_error(
-                "patch_apply_failed",
-                "workspace.patch.apply_failed",
-                &applied,
+            return Err(compensate_failed_patch(
+                &root,
+                &checkpoint_dir,
+                &files,
+                command_error(
+                    "patch_apply_failed",
+                    "workspace.patch.apply_failed",
+                    &applied,
+                ),
+                filesystem,
             ));
         }
     } else if let Err(err) = unified_diff::apply(
@@ -219,16 +308,25 @@ fn apply_patch(
         pure_patch
             .as_ref()
             .expect("pure_patch_present_for_non_git_workspace"),
+        filesystem,
     ) {
-        restore_snapshot(&root, &checkpoint_dir, &files);
-        remove_checkpoint_dir(&checkpoint_dir);
-        return Err(err);
+        return Err(compensate_failed_patch(
+            &root,
+            &checkpoint_dir,
+            &files,
+            err,
+            filesystem,
+        ));
     }
 
-    if let Err(err) = capture_after_hashes(&root, &mut files) {
-        restore_snapshot(&root, &checkpoint_dir, &files);
-        remove_checkpoint_dir(&checkpoint_dir);
-        return Err(err);
+    if let Err(err) = capture_after_hashes(&root, &mut files, filesystem) {
+        return Err(compensate_failed_patch(
+            &root,
+            &checkpoint_dir,
+            &files,
+            err,
+            filesystem,
+        ));
     }
 
     let patch_id = format!("sha256:{}", sha256_hex(patch.as_bytes()));
@@ -238,14 +336,10 @@ fn apply_patch(
         task_id: task_id.to_string(),
         patch_id: patch_id.clone(),
         state: "applied".to_string(),
-        created_at: crate::now_ts_u64() as i64,
+        created_at: prepared_manifest.created_at,
         files,
     };
-    if let Err(err) = write_manifest(&checkpoint_dir, &manifest) {
-        restore_snapshot(&root, &checkpoint_dir, &manifest.files);
-        remove_checkpoint_dir(&checkpoint_dir);
-        return Err(err);
-    }
+    publish_applied_checkpoint(&checkpoint_dir, &manifest, filesystem)?;
 
     let additions = manifest
         .files
@@ -281,26 +375,99 @@ fn apply_patch(
     }))
 }
 
-fn diff(workspace_root: &Path, args: &Map<String, Value>) -> Result<String, String> {
+fn publish_applied_checkpoint(
+    checkpoint_dir: &Path,
+    manifest: &PatchCheckpoint,
+    filesystem: &HostFilesystemPolicy,
+) -> Result<(), String> {
+    write_manifest(checkpoint_dir, manifest, filesystem).map_err(|error| {
+        super::checkpoint_commit_unconfirmed_error(
+            "workspace_patch",
+            "workspace.patch.commit_unconfirmed",
+            &manifest.task_id,
+            &manifest.checkpoint_id,
+            "commit",
+            error,
+        )
+    })
+}
+
+fn diff(
+    workspace_root: &Path,
+    args: &Map<String, Value>,
+    filesystem: &HostFilesystemPolicy,
+    backend: ToolSandboxBackend,
+) -> Result<String, String> {
     ensure_only_keys(args, &["action", "checkpoint_id", "paths"])?;
     let root = canonical_workspace_root(workspace_root)?;
     if let Some(checkpoint_id) = optional_string(args, "checkpoint_id") {
         validate_checkpoint_id(checkpoint_id)?;
-        let checkpoint_dir = resolve_checkpoint_dir(&root, checkpoint_id)?;
-        if super::builtin_workspace_mutation::checkpoint_is_structured_mutation(&checkpoint_dir)? {
-            return super::builtin_workspace_mutation::structured_mutation_diff(
+        let checkpoint_dir = resolve_checkpoint_dir(&root, checkpoint_id, filesystem)?;
+        if super::builtin_workspace_mutation::checkpoint_is_structured_mutation(
+            &checkpoint_dir,
+            filesystem,
+        )? {
+            return super::builtin_workspace_mutation::structured_mutation_diff_with_policy(
                 workspace_root,
                 checkpoint_id,
+                filesystem,
             );
         }
-        let manifest = read_manifest(&checkpoint_dir)?;
-        let patch = fs::read_to_string(checkpoint_dir.join("change.patch")).map_err(|err| {
+        let manifest = read_manifest(&checkpoint_dir, filesystem)?;
+        // Saved diffs re-admit current paths without materializing their contents.
+        for file in &manifest.files {
+            drop(open_optional_regular_file(
+                &root,
+                &root.join(&file.path),
+                filesystem,
+            )?);
+        }
+        let bytes = filesystem
+            .read_file_bounded(
+                Some(&checkpoint_dir),
+                &checkpoint_dir.join("change.patch"),
+                MAX_PATCH_BYTES,
+            )
+            .map_err(|error| match error {
+                BoundedFileReadError::Io(error) => patch_io_error(
+                    "checkpoint_patch_read_failed",
+                    "workspace.patch.read_failed",
+                    error,
+                ),
+                BoundedFileReadError::LimitExceeded {
+                    limit_bytes,
+                    observed_bytes_at_least,
+                } => patch_error(
+                    "checkpoint_too_large",
+                    "workspace.patch.checkpoint_too_large",
+                    serde_json::json!({"max_bytes":limit_bytes,
+                        "patch_bytes_at_least":observed_bytes_at_least}),
+                ),
+            })?;
+        let patch = String::from_utf8(bytes).map_err(|error| {
             patch_io_error(
                 "checkpoint_patch_read_failed",
                 "workspace.patch.read_failed",
-                err,
+                std::io::Error::new(std::io::ErrorKind::InvalidData, error),
             )
         })?;
+        let observed_patch_id = sha256_label(patch.as_bytes());
+        let expected_patch_id = manifest
+            .patch_id
+            .strip_prefix("sha256:")
+            .filter(|digest| {
+                digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+            .map(|_| manifest.patch_id.as_str());
+        if expected_patch_id != Some(observed_patch_id.as_str()) {
+            return Err(patch_error(
+                "checkpoint_patch_hash_mismatch",
+                "workspace.patch.patch_hash_mismatch",
+                serde_json::json!({"expected_patch_id":expected_patch_id,
+                    "expected_patch_id_valid":expected_patch_id.is_some(),
+                    "observed_patch_id":observed_patch_id}),
+            ));
+        }
         return encode_result(serde_json::json!({
             "schema_version": 1,
             "source": "workspace_patch",
@@ -321,11 +488,15 @@ fn diff(workspace_root: &Path, args: &Map<String, Value>) -> Result<String, Stri
     for path in &paths {
         validate_relative_patch_path(&root, path)?;
     }
-    let mut command = Command::new("git");
-    command
-        .arg("-C")
-        .arg(&root)
-        .args(["diff", "--no-ext-diff", "--no-color", "--binary", "--"]);
+    let mut command = git_command(&root, filesystem, backend, false)?;
+    command.arg("-C").arg(&root).args([
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-color",
+        "--binary",
+        "--",
+    ]);
     command.args(&paths);
     let output = command.output().map_err(|err| {
         patch_io_error("workspace_diff_failed", "workspace.patch.diff_failed", err)
@@ -366,19 +537,31 @@ fn diff(workspace_root: &Path, args: &Map<String, Value>) -> Result<String, Stri
     }))
 }
 
-fn rewind(workspace_root: &Path, args: &Map<String, Value>) -> Result<String, String> {
+#[cfg(test)]
+#[path = "builtin_workspace_checkpoint_finalization_tests.rs"]
+mod finalization_tests;
+
+fn rewind(
+    workspace_root: &Path,
+    args: &Map<String, Value>,
+    filesystem: &HostFilesystemPolicy,
+) -> Result<String, String> {
     ensure_only_keys(args, &["action", "checkpoint_id"])?;
     let root = canonical_workspace_root(workspace_root)?;
     let checkpoint_id = required_string(args, "checkpoint_id")?;
     validate_checkpoint_id(checkpoint_id)?;
-    let checkpoint_dir = resolve_checkpoint_dir(&root, checkpoint_id)?;
-    if super::builtin_workspace_mutation::checkpoint_is_structured_mutation(&checkpoint_dir)? {
-        return super::builtin_workspace_mutation::rewind_structured_mutation(
+    let checkpoint_dir = resolve_checkpoint_dir(&root, checkpoint_id, filesystem)?;
+    if super::builtin_workspace_mutation::checkpoint_is_structured_mutation(
+        &checkpoint_dir,
+        filesystem,
+    )? {
+        return super::builtin_workspace_mutation::rewind_structured_mutation_with_policy(
             workspace_root,
             checkpoint_id,
+            filesystem,
         );
     }
-    let mut manifest = read_manifest(&checkpoint_dir)?;
+    let mut manifest = read_manifest(&checkpoint_dir, filesystem)?;
     if manifest.state != "applied" {
         return Err(patch_error(
             "checkpoint_not_applied",
@@ -390,9 +573,10 @@ fn rewind(workspace_root: &Path, args: &Map<String, Value>) -> Result<String, St
         ));
     }
 
+    validate_restore_metadata(&root, &manifest.files)?;
     for file in &manifest.files {
         validate_relative_patch_path(&root, &file.path)?;
-        let current_hash = hash_existing_file(&root, &root.join(&file.path))?;
+        let current_hash = hash_existing_file(&root, &root.join(&file.path), filesystem)?;
         if current_hash != file.after_sha256 {
             return Err(patch_error(
                 "rewind_precondition_failed",
@@ -406,9 +590,9 @@ fn rewind(workspace_root: &Path, args: &Map<String, Value>) -> Result<String, St
             ));
         }
     }
-    restore_snapshot_strict(&root, &checkpoint_dir, &manifest.files)?;
+    restore_snapshot_strict(&root, &checkpoint_dir, &manifest.files, filesystem)?;
     manifest.state = "rewound".to_string();
-    write_manifest(&checkpoint_dir, &manifest)?;
+    write_manifest(&checkpoint_dir, &manifest, filesystem)?;
     encode_result(serde_json::json!({
         "schema_version": 1,
         "source": "workspace_patch",
@@ -429,8 +613,13 @@ fn rewind(workspace_root: &Path, args: &Map<String, Value>) -> Result<String, St
     }))
 }
 
-fn inspect_patch(root: &Path, patch_file: &Path) -> Result<(Vec<PatchStat>, u8), String> {
-    let output = Command::new("git")
+fn inspect_patch(
+    root: &Path,
+    patch_file: &Path,
+    filesystem: &HostFilesystemPolicy,
+    backend: ToolSandboxBackend,
+) -> Result<(Vec<PatchStat>, u8), String> {
+    let output = git_command(root, filesystem, backend, false)?
         .arg("-C")
         .arg(root)
         .args(["apply", "--numstat", "-z", "-p0", "--"])
@@ -549,28 +738,48 @@ fn snapshot_files(
     root: &Path,
     checkpoint_dir: &Path,
     stats: &[PatchStat],
+    filesystem: &HostFilesystemPolicy,
 ) -> Result<Vec<CheckpointFile>, String> {
+    let mut targets = std::collections::BTreeSet::new();
+    for stat in stats {
+        if !targets.insert(lexical_workspace_path(root, &stat.path)?) {
+            return Err(patch_error(
+                "duplicate_patch_path",
+                "workspace.patch.duplicate_path",
+                serde_json::json!({"path":stat.path}),
+            ));
+        }
+    }
     let backup_dir = checkpoint_dir.join("before");
-    fs::create_dir_all(&backup_dir).map_err(|err| {
-        patch_io_error(
-            "checkpoint_create_failed",
-            "workspace.patch.checkpoint_create_failed",
-            err,
-        )
-    })?;
+    filesystem
+        .create_directory(Some(checkpoint_dir), &backup_dir, true)
+        .map_err(|err| {
+            patch_io_error(
+                "checkpoint_create_failed",
+                "workspace.patch.checkpoint_create_failed",
+                err,
+            )
+        })?;
     let mut files = Vec::with_capacity(stats.len());
     for (index, stat) in stats.iter().enumerate() {
         let path = root.join(&stat.path);
-        let bytes = read_optional_regular_file(root, &path)?;
+        let bytes = read_optional_regular_file(root, &path, filesystem)?;
         let backup_file = bytes.as_ref().map(|_| format!("before/{index}.bin"));
         if let (Some(bytes), Some(backup_file)) = (&bytes, &backup_file) {
-            fs::write(checkpoint_dir.join(backup_file), bytes).map_err(|err| {
-                patch_io_error(
-                    "checkpoint_write_failed",
-                    "workspace.patch.checkpoint_write_failed",
-                    err,
+            filesystem
+                .atomic_write_file_with_options(
+                    Some(checkpoint_dir),
+                    &checkpoint_dir.join(backup_file),
+                    bytes,
+                    false,
                 )
-            })?;
+                .map_err(|err| {
+                    patch_io_error(
+                        "checkpoint_write_failed",
+                        "workspace.patch.checkpoint_write_failed",
+                        err,
+                    )
+                })?;
         }
         files.push(CheckpointFile {
             path: stat.path.clone(),
@@ -585,10 +794,14 @@ fn snapshot_files(
     Ok(files)
 }
 
-fn capture_after_hashes(root: &Path, files: &mut [CheckpointFile]) -> Result<(), String> {
+fn capture_after_hashes(
+    root: &Path,
+    files: &mut [CheckpointFile],
+    filesystem: &HostFilesystemPolicy,
+) -> Result<(), String> {
     for file in files {
         validate_relative_patch_path(root, &file.path)?;
-        file.after_sha256 = hash_existing_file(root, &root.join(&file.path))?;
+        file.after_sha256 = hash_existing_file(root, &root.join(&file.path), filesystem)?;
     }
     Ok(())
 }
@@ -597,6 +810,7 @@ fn verify_preconditions(
     root: &Path,
     args: &Map<String, Value>,
     stats: &[PatchStat],
+    filesystem: &HostFilesystemPolicy,
 ) -> Result<(), String> {
     let Some(value) = args.get("precondition_hashes") else {
         return Ok(());
@@ -624,7 +838,7 @@ fn verify_preconditions(
                 serde_json::json!({"path": path}),
             )
         })?;
-        let actual = hash_existing_file(root, &root.join(path))?;
+        let actual = hash_existing_file(root, &root.join(path), filesystem)?;
         let matches = match expected {
             "missing" => actual.is_none(),
             value => actual.as_deref() == Some(value),
@@ -674,50 +888,210 @@ pub(super) fn validate_relative_patch_path(root: &Path, path: &str) -> Result<Pa
     Ok(target)
 }
 
-fn read_optional_regular_file(root: &Path, path: &Path) -> Result<Option<Vec<u8>>, String> {
-    match crate::secure_workspace_fs::read_workspace_file(root, path) {
-        Ok(bytes) => Ok(Some(bytes)),
+fn read_optional_regular_file(
+    root: &Path,
+    path: &Path,
+    filesystem: &HostFilesystemPolicy,
+) -> Result<Option<Vec<u8>>, String> {
+    let Some(mut file) = open_optional_regular_file(root, path, filesystem)? else {
+        return Ok(None);
+    };
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|error| regular_file_error(path, error))?;
+    Ok(Some(bytes))
+}
+
+fn open_optional_regular_file(
+    root: &Path,
+    path: &Path,
+    filesystem: &HostFilesystemPolicy,
+) -> Result<Option<fs::File>, String> {
+    match filesystem.open_file(Some(root), path) {
+        Ok((file, _)) => Ok(Some(file)),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => Err(patch_error(
+        Err(err) => Err(regular_file_error(path, err)),
+    }
+}
+
+fn regular_file_error(path: &Path, err: std::io::Error) -> String {
+    if HostFilesystemPolicy::is_private_access_denied(&err) {
+        patch_io_error(
+            "host_private_directory_access_denied",
+            "workspace.patch.private_path_denied",
+            err,
+        )
+    } else if err.kind() == std::io::ErrorKind::PermissionDenied {
+        patch_error(
             "unsupported_file_type",
             "workspace.patch.unsupported_file_type",
             serde_json::json!({"path": path.display().to_string()}),
-        )),
-        Err(err) => Err(patch_io_error(
-            "file_read_failed",
-            "workspace.patch.file_read_failed",
-            err,
-        )),
+        )
+    } else {
+        patch_io_error("file_read_failed", "workspace.patch.file_read_failed", err)
     }
 }
 
-fn hash_existing_file(root: &Path, path: &Path) -> Result<Option<String>, String> {
-    read_optional_regular_file(root, path).map(|bytes| bytes.as_deref().map(sha256_label))
+fn hash_existing_file(
+    root: &Path,
+    path: &Path,
+    filesystem: &HostFilesystemPolicy,
+) -> Result<Option<String>, String> {
+    let Some(mut file) = open_optional_regular_file(root, path, filesystem)? else {
+        return Ok(None);
+    };
+    let mut digest = Sha256::new();
+    let mut buffer = [0; 8192];
+    loop {
+        let size = match file.read(&mut buffer) {
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            result => result.map_err(|error| regular_file_error(path, error))?,
+        };
+        if size == 0 {
+            break;
+        }
+        digest.update(&buffer[..size]);
+    }
+    Ok(Some(format!("sha256:{:x}", digest.finalize())))
 }
 
-fn restore_snapshot(root: &Path, checkpoint_dir: &Path, files: &[CheckpointFile]) {
-    if let Err(err) = restore_snapshot_strict(root, checkpoint_dir, files) {
-        tracing::error!(error = %err, "workspace_patch_restore_failed");
+fn compensate_failed_patch(
+    root: &Path,
+    checkpoint_dir: &Path,
+    files: &[CheckpointFile],
+    cause: String,
+    filesystem: &HostFilesystemPolicy,
+) -> String {
+    if let Err(restore_error) = restore_snapshot_strict(root, checkpoint_dir, files, filesystem) {
+        if let Ok(mut manifest) = read_manifest(checkpoint_dir, filesystem) {
+            manifest.state = CHECKPOINT_RESTORE_FAILED_STATE.to_string();
+            if let Err(error) = write_manifest(checkpoint_dir, &manifest, filesystem) {
+                tracing::error!(error = %error, "workspace_patch_recovery_state_write_failed");
+            }
+        }
+        let retained = match filesystem.open_directory(Some(root), checkpoint_dir) {
+            Ok(_) => Some(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Some(false),
+            Err(_) => None,
+        };
+        let checkpoint_id = checkpoint_dir.file_name().and_then(|name| name.to_str());
+        return super::builtin_error(
+            "workspace_patch",
+            "patch_apply_and_restore_failed",
+            "workspace.patch.restore_failed",
+            None,
+            None,
+            Some(serde_json::json!({
+                "error_code":"patch_apply_and_restore_failed",
+                "message_key":"workspace.patch.restore_failed",
+                "retryable":false, "failure_phase":"execution", "side_effect_applied":null,
+                "checkpoint_retained":retained, "checkpoint_id":checkpoint_id,
+                "artifact_refs":checkpoint_id.map(|id| serde_json::json!([{
+                    "kind":"workspace_checkpoint", "ref":format!("workspace_checkpoint:{id}")
+                }])),
+                "details":{"operation_error":cause, "restore_error":restore_error},
+            })),
+        );
     }
+    remove_checkpoint_dir(root, checkpoint_dir, filesystem);
+    cause
+}
+
+fn validate_restore_metadata(root: &Path, files: &[CheckpointFile]) -> Result<(), String> {
+    if files.is_empty() {
+        return Err(patch_error(
+            "checkpoint_invalid",
+            "workspace.patch.checkpoint_invalid",
+            serde_json::json!({"reason":"empty_file_set"}),
+        ));
+    }
+    let mut targets = std::collections::BTreeSet::new();
+    // Complete metadata admission precedes backup IO and every target effect.
+    for (index, file) in files.iter().enumerate() {
+        let target = lexical_workspace_path(root, &file.path)?;
+        let invalid = |code, reason| {
+            patch_error(
+                code,
+                if code == "checkpoint_backup_invalid" {
+                    "workspace.patch.backup_invalid"
+                } else {
+                    "workspace.patch.checkpoint_invalid"
+                },
+                serde_json::json!({"path":file.path,"reason":reason}),
+            )
+        };
+        if !targets.insert(target) {
+            return Err(invalid("checkpoint_invalid", "duplicate_target"));
+        }
+        if file.existed {
+            let backup = file.backup_file.as_deref().ok_or_else(|| {
+                patch_error(
+                    "checkpoint_backup_missing",
+                    "workspace.patch.checkpoint_backup_missing",
+                    serde_json::json!({"path":file.path}),
+                )
+            })?;
+            if backup != format!("before/{index}.bin") {
+                return Err(invalid(
+                    "checkpoint_backup_invalid",
+                    "backup_reference_invalid",
+                ));
+            }
+            if !file
+                .before_sha256
+                .as_deref()
+                .is_some_and(valid_sha256_label)
+            {
+                return Err(invalid("checkpoint_backup_invalid", "before_hash_invalid"));
+            }
+        } else if file.backup_file.is_some() || file.before_sha256.is_some() {
+            return Err(invalid(
+                "checkpoint_invalid",
+                "missing_preimage_has_payload",
+            ));
+        }
+        if file
+            .after_sha256
+            .as_deref()
+            .is_some_and(|hash| !valid_sha256_label(hash))
+        {
+            return Err(invalid("checkpoint_invalid", "after_hash_invalid"));
+        }
+    }
+    Ok(())
+}
+
+fn valid_sha256_label(value: &str) -> bool {
+    value.strip_prefix("sha256:").is_some_and(|hash| {
+        hash.len() == 64
+            && hash
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+    })
 }
 
 fn restore_snapshot_strict(
     root: &Path,
     checkpoint_dir: &Path,
     files: &[CheckpointFile],
+    filesystem: &HostFilesystemPolicy,
 ) -> Result<(), String> {
+    validate_restore_metadata(root, files)?;
+    let mut restored = Vec::new();
     for file in files {
         let path = validate_restore_path(root, &file.path)?;
-        if fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
-            fs::remove_file(&path).map_err(|err| {
-                patch_io_error(
-                    "restore_remove_failed",
-                    "workspace.patch.restore_remove_failed",
-                    err,
-                )
-            })?;
+        match filesystem.metadata(Some(root), &path) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(patch_io_error(
+                    "restore_inspection_failed",
+                    "workspace.patch.restore_failed",
+                    error,
+                ))
+            }
         }
-        if file.existed {
+        let bytes = if file.existed {
             let backup = file.backup_file.as_deref().ok_or_else(|| {
                 patch_error(
                     "checkpoint_backup_missing",
@@ -725,31 +1099,55 @@ fn restore_snapshot_strict(
                     serde_json::json!({"path": file.path}),
                 )
             })?;
-            let bytes = fs::read(checkpoint_dir.join(backup)).map_err(|err| {
-                patch_io_error(
-                    "checkpoint_read_failed",
-                    "workspace.patch.checkpoint_read_failed",
-                    err,
-                )
-            })?;
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).map_err(|err| {
+            let bytes = filesystem
+                .read_file(Some(checkpoint_dir), &checkpoint_dir.join(backup))
+                .map_err(|err| {
                     patch_io_error(
-                        "restore_create_failed",
-                        "workspace.patch.restore_create_failed",
+                        "checkpoint_read_failed",
+                        "workspace.patch.checkpoint_read_failed",
                         err,
                     )
                 })?;
+            if file.before_sha256.as_deref() != Some(sha256_label(&bytes).as_str()) {
+                return Err(patch_error(
+                    "checkpoint_backup_invalid",
+                    "workspace.patch.backup_invalid",
+                    serde_json::json!({"path": file.path}),
+                ));
             }
-            fs::write(&path, bytes).map_err(|err| {
-                patch_io_error(
-                    "restore_write_failed",
-                    "workspace.patch.restore_write_failed",
-                    err,
-                )
-            })?;
+            Some(bytes)
         } else {
-            match fs::remove_file(&path) {
+            None
+        };
+        restored.push((path, bytes));
+    }
+    for (path, bytes) in restored {
+        if let Some(bytes) = bytes {
+            if filesystem
+                .metadata(Some(root), &path)
+                .is_ok_and(|metadata| metadata.file_type == rustix::fs::FileType::Symlink)
+            {
+                filesystem
+                    .remove_path(Some(root), &path, false)
+                    .map_err(|error| {
+                        patch_io_error(
+                            "restore_remove_failed",
+                            "workspace.patch.restore_remove_failed",
+                            error,
+                        )
+                    })?;
+            }
+            filesystem
+                .atomic_write_file_with_options(Some(root), &path, &bytes, true)
+                .map_err(|err| {
+                    patch_io_error(
+                        "restore_write_failed",
+                        "workspace.patch.restore_write_failed",
+                        err,
+                    )
+                })?;
+        } else {
+            match filesystem.remove_path(Some(root), &path, false) {
                 Ok(()) => {}
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
                 Err(err) => {
@@ -770,8 +1168,11 @@ fn git_apply(
     patch_file: &Path,
     check: bool,
     path_strip: u8,
+    filesystem: &HostFilesystemPolicy,
+    backend: ToolSandboxBackend,
 ) -> std::io::Result<Output> {
-    let mut command = Command::new("git");
+    let mut command =
+        git_command(root, filesystem, backend, !check).map_err(std::io::Error::other)?;
     command.arg("-C").arg(root).arg("apply");
     command.arg(format!("-p{path_strip}"));
     if check {
@@ -781,8 +1182,23 @@ fn git_apply(
     command.arg(patch_file).output()
 }
 
-fn is_git_workspace(root: &Path) -> bool {
-    Command::new("git")
+fn is_git_workspace(
+    root: &Path,
+    filesystem: &HostFilesystemPolicy,
+    backend: ToolSandboxBackend,
+) -> Result<bool, String> {
+    match filesystem.metadata(Some(root), &root.join(".git")) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(patch_io_error(
+                "git_metadata_inspection_failed",
+                "workspace.patch.git_metadata_failed",
+                error,
+            ))
+        }
+    }
+    Ok(git_command(root, filesystem, backend, false)?
         .arg("-C")
         .arg(root)
         .args(["rev-parse", "--show-toplevel"])
@@ -797,7 +1213,60 @@ fn is_git_workspace(root: &Path) -> bool {
             Path::new(path.trim_end_matches(['\r', '\n']))
                 .canonicalize()
                 .is_ok_and(|git_root| git_root == root)
-        })
+        }))
+}
+
+fn git_command(
+    root: &Path,
+    filesystem: &HostFilesystemPolicy,
+    backend: ToolSandboxBackend,
+    writable: bool,
+) -> Result<Command, String> {
+    let private = filesystem.process_directories().map_err(|error| {
+        patch_io_error(
+            "host_policy_changed",
+            "workspace.patch.host_policy_changed",
+            error,
+        )
+    })?;
+    let prepared = crate::process_sandbox::prepare_process_command(
+        "git",
+        crate::process_sandbox::ProcessSandboxRequest {
+            mode: if writable {
+                ToolSandboxMode::WorkspaceWrite
+            } else {
+                ToolSandboxMode::ReadOnly
+            },
+            backend,
+            workspace_root: root,
+            execution_root: root,
+            network: crate::process_sandbox::ProcessNetworkPolicy::Deny,
+            additional_writable_paths: &[],
+            host_private_directories: &private,
+            browser_subprocess: false,
+        },
+    )
+    .map_err(|code| patch_error("sandbox_unavailable", code, Value::Null))?;
+    let mut command = prepared.command.into_std();
+    command
+        .args([
+            "--no-pager",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+        ])
+        .current_dir(root)
+        .env_clear()
+        .envs(crate::skills::SkillRunnerEnvironment::capture().into_pairs())
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_NO_REPLACE_OBJECTS", "1")
+        .env("GIT_NO_LAZY_FETCH", "1")
+        .stdin(std::process::Stdio::null());
+    Ok(command)
 }
 
 pub(super) fn canonical_workspace_root(root: &Path) -> Result<PathBuf, String> {
@@ -814,25 +1283,33 @@ fn checkpoint_root(root: &Path) -> PathBuf {
     claw_core::workspace_state::workspace_state_root(root).join("checkpoints")
 }
 
-pub(super) fn create_checkpoint_dir(root: &Path, checkpoint_id: &str) -> Result<PathBuf, String> {
+pub(super) fn create_checkpoint_dir(
+    root: &Path,
+    checkpoint_id: &str,
+    filesystem: &HostFilesystemPolicy,
+) -> Result<PathBuf, String> {
     let state_dir = claw_core::workspace_state::workspace_state_root(root);
     reject_symlink_if_present(&state_dir)?;
-    fs::create_dir_all(&state_dir).map_err(|err| {
-        patch_io_error(
-            "checkpoint_create_failed",
-            "workspace.patch.checkpoint_create_failed",
-            err,
-        )
-    })?;
+    filesystem
+        .create_directory(Some(root), &state_dir, true)
+        .map_err(|err| {
+            patch_io_error(
+                "checkpoint_create_failed",
+                "workspace.patch.checkpoint_create_failed",
+                err,
+            )
+        })?;
     let checkpoints = checkpoint_root(root);
     reject_symlink_if_present(&checkpoints)?;
-    fs::create_dir_all(&checkpoints).map_err(|err| {
-        patch_io_error(
-            "checkpoint_create_failed",
-            "workspace.patch.checkpoint_create_failed",
-            err,
-        )
-    })?;
+    filesystem
+        .create_directory(Some(root), &checkpoints, true)
+        .map_err(|err| {
+            patch_io_error(
+                "checkpoint_create_failed",
+                "workspace.patch.checkpoint_create_failed",
+                err,
+            )
+        })?;
     let canonical = checkpoints.canonicalize().map_err(|err| {
         patch_io_error(
             "checkpoint_create_failed",
@@ -848,17 +1325,33 @@ pub(super) fn create_checkpoint_dir(root: &Path, checkpoint_id: &str) -> Result<
         ));
     }
     let checkpoint_dir = canonical.join(checkpoint_id);
-    fs::create_dir(&checkpoint_dir).map_err(|err| {
-        patch_io_error(
-            "checkpoint_create_failed",
-            "workspace.patch.checkpoint_create_failed",
-            err,
-        )
-    })?;
+    filesystem
+        .create_directory(Some(root), &checkpoint_dir, false)
+        .map_err(|err| {
+            patch_io_error(
+                "checkpoint_create_failed",
+                "workspace.patch.checkpoint_create_failed",
+                err,
+            )
+        })?;
+    restrict_directory_permissions(root, &checkpoint_dir, filesystem)?;
     Ok(checkpoint_dir)
 }
 
-pub(super) fn resolve_checkpoint_dir(root: &Path, checkpoint_id: &str) -> Result<PathBuf, String> {
+pub(super) fn resolve_checkpoint_dir(
+    root: &Path,
+    checkpoint_id: &str,
+    filesystem: &HostFilesystemPolicy,
+) -> Result<PathBuf, String> {
+    filesystem
+        .open_directory(Some(root), &checkpoint_root(root))
+        .map_err(|error| {
+            patch_io_error(
+                "checkpoint_read_failed",
+                "workspace.patch.checkpoint_read_failed",
+                error,
+            )
+        })?;
     let checkpoints = checkpoint_root(root).canonicalize().map_err(|err| {
         patch_io_error(
             "checkpoint_read_failed",
@@ -874,6 +1367,15 @@ pub(super) fn resolve_checkpoint_dir(root: &Path, checkpoint_id: &str) -> Result
         ));
     }
     let checkpoint_dir = checkpoints.join(checkpoint_id);
+    filesystem
+        .open_directory(Some(root), &checkpoint_dir)
+        .map_err(|error| {
+            patch_io_error(
+                "checkpoint_read_failed",
+                "workspace.patch.checkpoint_read_failed",
+                error,
+            )
+        })?;
     reject_symlink_if_present(&checkpoint_dir)?;
     let canonical = checkpoint_dir.canonicalize().map_err(|err| {
         patch_io_error(
@@ -969,46 +1471,89 @@ fn lexical_workspace_path(root: &Path, path: &str) -> Result<PathBuf, String> {
     Ok(root.join(relative))
 }
 
-fn write_manifest(checkpoint_dir: &Path, manifest: &PatchCheckpoint) -> Result<(), String> {
-    let bytes = serde_json::to_vec_pretty(manifest).map_err(|err| {
-        patch_error(
+fn write_manifest(
+    checkpoint_dir: &Path,
+    manifest: &PatchCheckpoint,
+    filesystem: &HostFilesystemPolicy,
+) -> Result<(), String> {
+    let bytes = encode_checkpoint_manifest(manifest, "current_metadata")?;
+    filesystem
+        .atomic_write_file_with_options(
+            Some(checkpoint_dir),
+            &checkpoint_dir.join("manifest.json"),
+            &bytes,
+            false,
+        )
+        .map_err(|err| {
+            patch_io_error(
+                "checkpoint_write_failed",
+                "workspace.patch.checkpoint_write_failed",
+                err,
+            )
+        })
+}
+
+fn validate_checkpoint_capacity(manifest: &PatchCheckpoint) -> Result<(), String> {
+    let mut projected = manifest.clone();
+    // This is the longest produced state; each optional after hash may become
+    // a fixed-width digest. No path, statistic or backup name grows at dispatch.
+    projected.state = CHECKPOINT_RESTORE_FAILED_STATE.to_string();
+    let digest = sha256_label(&[]);
+    for file in &mut projected.files {
+        file.after_sha256 = Some(digest.clone());
+    }
+    encode_checkpoint_manifest(&projected, "projected_metadata").map(|_| ())
+}
+
+fn encode_checkpoint_manifest(
+    manifest: &PatchCheckpoint,
+    metadata_scope: &str,
+) -> Result<Vec<u8>, String> {
+    use super::builtin_workspace_checkpoint_json::{encode_pretty, EncodeError};
+    encode_pretty(manifest, MAX_CHECKPOINT_METADATA_BYTES).map_err(|error| match error {
+        EncodeError::LimitExceeded { limit_bytes } => patch_error(
+            "checkpoint_too_large",
+            "workspace.patch.checkpoint_too_large",
+            serde_json::json!({
+                "max_bytes": limit_bytes,
+                "manifest_bytes_at_least": limit_bytes + 1,
+                "metadata_scope": metadata_scope,
+            }),
+        ),
+        EncodeError::Serialization(error) => patch_error(
             "checkpoint_encode_failed",
             "workspace.patch.checkpoint_encode_failed",
-            serde_json::json!({"error": err.to_string()}),
-        )
-    })?;
-    let temporary = checkpoint_dir.join("manifest.json.tmp");
-    fs::write(&temporary, bytes).map_err(|err| {
-        patch_io_error(
-            "checkpoint_write_failed",
-            "workspace.patch.checkpoint_write_failed",
-            err,
-        )
-    })?;
-    fs::rename(temporary, checkpoint_dir.join("manifest.json")).map_err(|err| {
-        patch_io_error(
-            "checkpoint_write_failed",
-            "workspace.patch.checkpoint_write_failed",
-            err,
-        )
+            serde_json::json!({"error":error.to_string(),"metadata_scope":metadata_scope}),
+        ),
     })
 }
 
-fn read_manifest(checkpoint_dir: &Path) -> Result<PatchCheckpoint, String> {
-    let bytes = fs::read(checkpoint_dir.join("manifest.json")).map_err(|err| {
-        patch_io_error(
-            "checkpoint_read_failed",
-            "workspace.patch.checkpoint_read_failed",
-            err,
+fn read_manifest(
+    checkpoint_dir: &Path,
+    filesystem: &HostFilesystemPolicy,
+) -> Result<PatchCheckpoint, String> {
+    let bytes = filesystem
+        .read_file_bounded(
+            Some(checkpoint_dir),
+            &checkpoint_dir.join("manifest.json"),
+            MAX_CHECKPOINT_METADATA_BYTES,
         )
-    })?;
-    if bytes.len() > MAX_PATCH_BYTES {
-        return Err(patch_error(
-            "checkpoint_too_large",
-            "workspace.patch.checkpoint_too_large",
-            serde_json::json!({"manifest_bytes": bytes.len()}),
-        ));
-    }
+        .map_err(|error| match error {
+            BoundedFileReadError::Io(error) => patch_io_error(
+                "checkpoint_read_failed",
+                "workspace.patch.checkpoint_read_failed",
+                error,
+            ),
+            BoundedFileReadError::LimitExceeded {
+                limit_bytes,
+                observed_bytes_at_least,
+            } => patch_error(
+                "checkpoint_too_large",
+                "workspace.patch.checkpoint_too_large",
+                serde_json::json!({"max_bytes":limit_bytes,
+                    "manifest_bytes_at_least":observed_bytes_at_least}),
+            ),
+        })?;
     let manifest: PatchCheckpoint = serde_json::from_slice(&bytes).map_err(|err| {
         patch_error(
             "checkpoint_invalid",
@@ -1139,6 +1684,11 @@ fn command_error(error_code: &str, message_key: &str, output: &Output) -> String
 }
 
 fn patch_io_error(error_code: &str, message_key: &str, err: std::io::Error) -> String {
+    let error_code = if HostFilesystemPolicy::is_private_access_denied(&err) {
+        "host_private_directory_access_denied"
+    } else {
+        error_code
+    };
     patch_error(
         error_code,
         message_key,
@@ -1173,20 +1723,28 @@ fn bounded_text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(&bytes[..bytes.len().min(4096)]).to_string()
 }
 
-pub(super) fn remove_checkpoint_dir(path: &Path) {
-    if let Err(err) = fs::remove_dir_all(path) {
+pub(super) fn remove_checkpoint_dir(root: &Path, path: &Path, filesystem: &HostFilesystemPolicy) {
+    if let Err(err) = filesystem.remove_path(Some(root), path, true) {
         tracing::warn!(error = %err, path = %path.display(), "workspace_patch_checkpoint_cleanup_failed");
     }
 }
 
-#[cfg(unix)]
-pub(super) fn restrict_directory_permissions(path: &Path) {
+pub(super) fn restrict_directory_permissions(
+    root: &Path,
+    path: &Path,
+    filesystem: &HostFilesystemPolicy,
+) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
-    let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
+    filesystem
+        .set_directory_permissions(Some(root), path, fs::Permissions::from_mode(0o700))
+        .map_err(|error| {
+            patch_io_error(
+                "checkpoint_permissions_failed",
+                "workspace.patch.checkpoint_create_failed",
+                error,
+            )
+        })
 }
-
-#[cfg(not(unix))]
-pub(super) fn restrict_directory_permissions(_path: &Path) {}
 
 #[cfg(test)]
 #[path = "builtin_workspace_patch_tests.rs"]
@@ -1195,3 +1753,23 @@ mod tests;
 #[cfg(test)]
 #[path = "builtin_workspace_unified_diff_tests.rs"]
 mod unified_diff_tests;
+
+#[cfg(test)]
+#[path = "builtin_workspace_patch_recovery_tests.rs"]
+mod recovery_tests;
+
+#[cfg(test)]
+#[path = "builtin_workspace_patch_hash_tests.rs"]
+mod hash_tests;
+
+#[cfg(test)]
+#[path = "builtin_workspace_patch_diff_read_tests.rs"]
+mod diff_read_tests;
+
+#[cfg(test)]
+#[path = "builtin_workspace_patch_restore_metadata_tests.rs"]
+mod restore_metadata_tests;
+
+#[cfg(test)]
+#[path = "builtin_workspace_patch_capacity_tests.rs"]
+mod capacity_tests;

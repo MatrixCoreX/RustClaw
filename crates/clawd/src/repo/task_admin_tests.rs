@@ -6,6 +6,10 @@ use uuid::Uuid;
 
 use super::*;
 
+#[cfg(unix)]
+#[path = "task_admin_cancellation_observation_tests.rs"]
+mod cancellation_observation;
+
 struct TempDir(PathBuf);
 
 impl TempDir {

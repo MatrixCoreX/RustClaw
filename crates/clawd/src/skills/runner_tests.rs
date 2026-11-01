@@ -284,15 +284,26 @@ fn package_environment_cannot_override_parent_execution_backend() {
         (Some("macos_seatbelt"), Some("macos_seatbelt")),
         (Some("direct"), Some("direct")),
     ] {
-        let mut command = tokio::process::Command::new("unused-test-program");
-        command.env(skill_sdk::PARENT_SANDBOX_BACKEND_ENV, "direct");
-        apply_parent_execution_backend(&mut command, backend);
+        let mut launch = RunnerLaunch::new(
+            crate::process_invocation::ProcessInvocation::new("unused-test-program"),
+            &std::env::current_dir().unwrap(),
+            vec![],
+        )
+        .unwrap();
+        launch.env(skill_sdk::PARENT_SANDBOX_BACKEND_ENV, "direct");
+        apply_parent_execution_backend(&mut launch, backend);
+        let command = launch
+            .finish(PayloadIo {
+                stdin: None,
+                stdout: None,
+                stderr: None,
+            })
+            .unwrap()
+            .into_command();
         let observed = command
-            .as_std()
             .get_envs()
             .find(|(key, _)| *key == std::ffi::OsStr::new(skill_sdk::PARENT_SANDBOX_BACKEND_ENV))
-            .expect("host must explicitly set or remove the inherited field")
-            .1;
+            .and_then(|(_, value)| value);
         assert_eq!(observed.and_then(|value| value.to_str()), expected);
     }
 }
@@ -474,17 +485,27 @@ fn authentication_storage_requires_its_own_mapped_sandbox_directory() {
     let ordinary_json = serde_json::to_value(&ordinary).unwrap();
     map_browser_authentication_to_sandbox(&mut ordinary, None).unwrap();
     assert_eq!(serde_json::to_value(&ordinary).unwrap(), ordinary_json);
-    ordinary.as_mut().unwrap().browser_authentication = Some(crate::skill_storage::BrowserAuthenticationStorage {
-        schema_version: 1,
-        scope_id: "a".repeat(64),
-        directory_path: "/private/application-authentication".into(),
-    });
+    ordinary.as_mut().unwrap().browser_authentication =
+        Some(crate::skill_storage::BrowserAuthenticationStorage {
+            schema_version: 1,
+            scope_id: "a".repeat(64),
+            directory_path: "/private/application-authentication".into(),
+        });
     assert!(map_browser_authentication_to_sandbox(&mut ordinary, None).is_err());
     let target = std::path::Path::new("/run/agent-runtime-writable/4");
     map_browser_authentication_to_sandbox(&mut ordinary, Some(target)).unwrap();
     let mapped = ordinary.unwrap();
-    assert_eq!(mapped.browser_authentication.unwrap().directory_path, target.display().to_string());
-    assert_eq!(mapped.directory_path, resolver.directory_descriptor("fixture", 1).unwrap().directory_path);
+    assert_eq!(
+        mapped.browser_authentication.unwrap().directory_path,
+        target.display().to_string()
+    );
+    assert_eq!(
+        mapped.directory_path,
+        resolver
+            .directory_descriptor("fixture", 1)
+            .unwrap()
+            .directory_path
+    );
     std::fs::remove_dir_all(resolver.root()).unwrap();
 }
 

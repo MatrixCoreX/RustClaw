@@ -505,3 +505,7 @@ pub(crate) fn maybe_escalate_cancel(job_dir: &Path, now_ts: i64) -> &'static str
 #[cfg(test)]
 #[path = "local_process_job_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "local_process_observation_test_support.rs"]
+pub(crate) mod observation_test_support;

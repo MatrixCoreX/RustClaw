@@ -5,6 +5,13 @@ use claw_core::config::{ToolSandboxBackend, ToolSandboxMode};
 use serde::Serialize;
 use tokio::process::Command;
 
+use crate::process_invocation::ProcessInvocation;
+
+#[cfg(target_os = "macos")]
+use skill_sdk::sandbox_private::seatbelt_path_literal;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use skill_sdk::sandbox_private::DirectoryExclusions;
+
 #[cfg(target_os = "linux")]
 const BUBBLEWRAP_BACKEND: &str = "bubblewrap";
 #[cfg(target_os = "macos")]
@@ -80,6 +87,9 @@ pub(crate) struct ProcessSandboxRequest<'a> {
     pub(crate) execution_root: &'a Path,
     pub(crate) network: ProcessNetworkPolicy,
     pub(crate) additional_writable_paths: &'a [PathBuf],
+    /// Host-only filesystem exclusions, never skill-supplied policy. This does
+    /// not assert process/descriptor isolation or protect a direct host launch.
+    pub(crate) host_private_directories: &'a [PathBuf],
     /// Allow only the extra macOS services required by an admitted local
     /// browser subprocess. The caller derives this from the capability's
     /// host-approved browser resource request, never from a skill name.
@@ -89,8 +99,22 @@ pub(crate) struct ProcessSandboxRequest<'a> {
 
 pub(crate) struct PreparedProcessCommand {
     pub(crate) command: Command,
+    pub(crate) additional_writable_targets: Vec<PathBuf>,
+}
+
+pub(crate) struct PreparedSandboxInvocation {
+    pub(crate) invocation: ProcessInvocation,
     pub(crate) backend: &'static str,
     pub(crate) additional_writable_targets: Vec<PathBuf>,
+}
+
+impl PreparedSandboxInvocation {
+    fn into_process_command(self) -> PreparedProcessCommand {
+        PreparedProcessCommand {
+            command: Command::from(self.invocation.into_command()),
+            additional_writable_targets: self.additional_writable_targets,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -136,7 +160,8 @@ trait ProcessSandboxBackend {
         program: &OsStr,
         request: ProcessSandboxRequest<'_>,
         lifetime: ProcessLifetime,
-    ) -> Result<PreparedProcessCommand, &'static str>;
+        readonly_paths: &[PathBuf],
+    ) -> Result<PreparedSandboxInvocation, &'static str>;
 }
 
 #[cfg(target_os = "linux")]
@@ -218,59 +243,93 @@ pub(crate) fn prepare_process_command(
     program: impl AsRef<OsStr>,
     request: ProcessSandboxRequest<'_>,
 ) -> Result<PreparedProcessCommand, &'static str> {
-    prepare_process_command_for_lifetime(
+    prepare_process_invocation(program, request)
+        .map(PreparedSandboxInvocation::into_process_command)
+}
+
+pub(crate) fn prepare_process_invocation(
+    program: impl AsRef<OsStr>,
+    request: ProcessSandboxRequest<'_>,
+) -> Result<PreparedSandboxInvocation, &'static str> {
+    prepare_invocation_for_lifetime(
         program,
         request,
         ProcessLifetime::ParentBound,
         ProcessNamespacePolicy::Isolated,
+        &[],
     )
 }
 
-pub(crate) fn prepare_host_process_command(
+pub(crate) fn prepare_readonly_process_command(
     program: impl AsRef<OsStr>,
     request: ProcessSandboxRequest<'_>,
+    readonly_paths: &[PathBuf],
 ) -> Result<PreparedProcessCommand, &'static str> {
-    prepare_process_command_for_lifetime(
+    if request.mode != ToolSandboxMode::ReadOnly {
+        return Err("sandbox_readonly_mapping_requires_readonly_mode");
+    }
+    prepare_invocation_for_lifetime(
+        program,
+        request,
+        ProcessLifetime::ParentBound,
+        ProcessNamespacePolicy::Isolated,
+        readonly_paths,
+    )
+    .map(PreparedSandboxInvocation::into_process_command)
+}
+
+pub(crate) fn prepare_host_process_invocation(
+    program: impl AsRef<OsStr>,
+    request: ProcessSandboxRequest<'_>,
+) -> Result<PreparedSandboxInvocation, &'static str> {
+    prepare_invocation_for_lifetime(
         program,
         request,
         ProcessLifetime::ParentBound,
         ProcessNamespacePolicy::HostVisible,
+        &[],
     )
 }
 
-pub(crate) fn prepare_durable_process_command(
+pub(crate) fn prepare_durable_process_invocation(
     program: impl AsRef<OsStr>,
     request: ProcessSandboxRequest<'_>,
-) -> Result<PreparedProcessCommand, &'static str> {
-    prepare_process_command_for_lifetime(
+) -> Result<PreparedSandboxInvocation, &'static str> {
+    prepare_invocation_for_lifetime(
         program,
         request,
         ProcessLifetime::DurableAsync,
         ProcessNamespacePolicy::Isolated,
+        &[],
     )
 }
 
-pub(crate) fn prepare_durable_host_process_command(
+pub(crate) fn prepare_durable_host_process_invocation(
     program: impl AsRef<OsStr>,
     request: ProcessSandboxRequest<'_>,
-) -> Result<PreparedProcessCommand, &'static str> {
-    prepare_process_command_for_lifetime(
+) -> Result<PreparedSandboxInvocation, &'static str> {
+    prepare_invocation_for_lifetime(
         program,
         request,
         ProcessLifetime::DurableAsync,
         ProcessNamespacePolicy::HostVisible,
+        &[],
     )
 }
 
-fn prepare_process_command_for_lifetime(
+fn prepare_invocation_for_lifetime(
     program: impl AsRef<OsStr>,
     request: ProcessSandboxRequest<'_>,
     lifetime: ProcessLifetime,
     process_namespace: ProcessNamespacePolicy,
-) -> Result<PreparedProcessCommand, &'static str> {
+    readonly_paths: &[PathBuf],
+) -> Result<PreparedSandboxInvocation, &'static str> {
     if request.mode == ToolSandboxMode::DangerFull {
-        return Ok(PreparedProcessCommand {
-            command: Command::new(program),
+        if !request.host_private_directories.is_empty() {
+            return Err("sandbox_private_directories_require_isolation");
+        }
+        return Ok(PreparedSandboxInvocation {
+            invocation: ProcessInvocation::new(program),
             backend: DIRECT_BACKEND,
             additional_writable_targets: request.additional_writable_paths.to_vec(),
         });
@@ -285,7 +344,9 @@ fn prepare_process_command_for_lifetime(
         });
     }
     match process_namespace {
-        ProcessNamespacePolicy::Isolated => driver.prepare(program.as_ref(), request, lifetime),
+        ProcessNamespacePolicy::Isolated => {
+            driver.prepare(program.as_ref(), request, lifetime, readonly_paths)
+        }
         ProcessNamespacePolicy::HostVisible => {
             #[cfg(target_os = "linux")]
             {
@@ -295,13 +356,14 @@ fn prepare_process_command_for_lifetime(
                         request,
                         lifetime,
                         ProcessNamespacePolicy::HostVisible,
+                        readonly_paths,
                     ),
                     _ => Err("sandbox_host_process_backend_unsupported"),
                 }
             }
             #[cfg(target_os = "macos")]
             {
-                driver.prepare(program.as_ref(), request, lifetime)
+                driver.prepare(program.as_ref(), request, lifetime, readonly_paths)
             }
             #[cfg(not(any(target_os = "linux", target_os = "macos")))]
             {
@@ -379,8 +441,9 @@ impl ProcessSandboxBackend for BubblewrapBackend {
         program: &OsStr,
         request: ProcessSandboxRequest<'_>,
         lifetime: ProcessLifetime,
-    ) -> Result<PreparedProcessCommand, &'static str> {
-        prepare_bubblewrap(program, request, lifetime)
+        readonly_paths: &[PathBuf],
+    ) -> Result<PreparedSandboxInvocation, &'static str> {
+        prepare_bubblewrap(program, request, lifetime, readonly_paths)
     }
 }
 
@@ -410,8 +473,9 @@ impl ProcessSandboxBackend for MacosSeatbeltBackend {
         program: &OsStr,
         request: ProcessSandboxRequest<'_>,
         lifetime: ProcessLifetime,
-    ) -> Result<PreparedProcessCommand, &'static str> {
-        prepare_macos_seatbelt(program, request, lifetime)
+        readonly_paths: &[PathBuf],
+    ) -> Result<PreparedSandboxInvocation, &'static str> {
+        prepare_macos_seatbelt(program, request, lifetime, readonly_paths)
     }
 }
 
@@ -433,7 +497,8 @@ impl ProcessSandboxBackend for RemoteContainerBackend {
         _program: &OsStr,
         _request: ProcessSandboxRequest<'_>,
         _lifetime: ProcessLifetime,
-    ) -> Result<PreparedProcessCommand, &'static str> {
+        _readonly_paths: &[PathBuf],
+    ) -> Result<PreparedSandboxInvocation, &'static str> {
         Err("sandbox_remote_backend_not_configured")
     }
 }
@@ -443,12 +508,14 @@ fn prepare_bubblewrap(
     program: &OsStr,
     request: ProcessSandboxRequest<'_>,
     lifetime: ProcessLifetime,
-) -> Result<PreparedProcessCommand, &'static str> {
+    readonly_paths: &[PathBuf],
+) -> Result<PreparedSandboxInvocation, &'static str> {
     prepare_bubblewrap_with_process_namespace(
         program,
         request,
         lifetime,
         ProcessNamespacePolicy::Isolated,
+        readonly_paths,
     )
 }
 
@@ -458,14 +525,21 @@ fn prepare_bubblewrap_with_process_namespace(
     request: ProcessSandboxRequest<'_>,
     lifetime: ProcessLifetime,
     process_namespace: ProcessNamespacePolicy,
-) -> Result<PreparedProcessCommand, &'static str> {
+    readonly_paths: &[PathBuf],
+) -> Result<PreparedSandboxInvocation, &'static str> {
     let backend = find_bubblewrap().ok_or("sandbox_backend_unavailable")?;
     let (workspace_root, execution_root) = canonical_roots(request)?;
-    let mut command = Command::new(backend);
+    let exclusions = DirectoryExclusions::admit(request.host_private_directories, &execution_root)?;
+    let mut command = ProcessInvocation::new(backend);
     if lifetime == ProcessLifetime::ParentBound {
         command.arg("--die-with-parent");
     }
     command.arg("--new-session");
+    // Private scopes cannot depend on bwrap's installation-specific implicit
+    // user namespace. Preserve host PID visibility without host process access.
+    if !exclusions.is_empty() {
+        command.arg("--unshare-user");
+    }
     if process_namespace == ProcessNamespacePolicy::Isolated {
         command.arg("--unshare-pid");
     }
@@ -475,9 +549,6 @@ fn prepare_bubblewrap_with_process_namespace(
         .arg("--ro-bind")
         .arg("/")
         .arg("/");
-    if process_namespace == ProcessNamespacePolicy::Isolated {
-        command.arg("--proc").arg("/proc");
-    }
     command.arg("--dev").arg("/dev");
     if request.network == ProcessNetworkPolicy::Deny {
         command.arg("--unshare-net");
@@ -495,12 +566,28 @@ fn prepare_bubblewrap_with_process_namespace(
             .arg(&workspace_root);
     }
     let mut additional_writable_targets = Vec::new();
+    let mut visible_mappings = Vec::new();
+    let mut writable_mappings = Vec::new();
+    for source in canonical_readonly_directories(readonly_paths)? {
+        visible_mappings.push((source.clone(), source.clone()));
+        command.arg("--ro-bind").arg(&source).arg(&source);
+    }
+    if !request.host_private_directories.is_empty() {
+        visible_mappings.push((workspace_root.clone(), workspace_root.clone()));
+        if sandbox_writes_workspace(request.mode) {
+            writable_mappings.push((workspace_root.clone(), workspace_root.clone()));
+        }
+    }
     if !request.additional_writable_paths.is_empty() {
         command.arg("--dir").arg(INTERNAL_WRITABLE_ROOT);
     }
     for (index, path) in request.additional_writable_paths.iter().enumerate() {
         let source = canonical_directory(path)?;
         let target = Path::new(INTERNAL_WRITABLE_ROOT).join(index.to_string());
+        if !request.host_private_directories.is_empty() {
+            visible_mappings.push((source.clone(), target.clone()));
+            writable_mappings.push((source.clone(), target.clone()));
+        }
         command
             .arg("--dir")
             .arg(&target)
@@ -509,13 +596,32 @@ fn prepare_bubblewrap_with_process_namespace(
             .arg(&target);
         additional_writable_targets.push(target);
     }
+    for (source, target) in exclusions.mount_anchors(&writable_mappings)? {
+        command.arg("--bind").arg(source).arg(target);
+    }
+    // Workspace/ancestor mounts must not replace the selected process view.
+    if process_namespace == ProcessNamespacePolicy::Isolated {
+        command.arg("--proc").arg("/proc");
+    }
+    // Keep explicitly scoped data workspaces such as /dev/shm usable, while
+    // binding the device root itself cannot replace the private device tree.
+    if workspace_root == Path::new("/dev") {
+        command.arg("--dev").arg("/dev");
+    }
+    for target in exclusions.mount_targets(&visible_mappings)? {
+        command
+            .arg("--tmpfs")
+            .arg(&target)
+            .arg("--remount-ro")
+            .arg(&target);
+    }
     command
         .arg("--chdir")
         .arg(&execution_root)
         .arg("--")
         .arg(program);
-    Ok(PreparedProcessCommand {
-        command,
+    Ok(PreparedSandboxInvocation {
+        invocation: command,
         backend: BUBBLEWRAP_BACKEND,
         additional_writable_targets,
     })
@@ -526,9 +632,12 @@ fn prepare_macos_seatbelt(
     program: &OsStr,
     request: ProcessSandboxRequest<'_>,
     _lifetime: ProcessLifetime,
-) -> Result<PreparedProcessCommand, &'static str> {
+    readonly_paths: &[PathBuf],
+) -> Result<PreparedSandboxInvocation, &'static str> {
     let backend = seatbelt_path().ok_or("sandbox_backend_unavailable")?;
-    let (workspace_root, _execution_root) = canonical_roots(request)?;
+    let (workspace_root, execution_root) = canonical_roots(request)?;
+    let exclusions = DirectoryExclusions::admit(request.host_private_directories, &execution_root)?;
+    let readonly_paths = canonical_readonly_directories(readonly_paths)?;
     let mut writable_paths = request
         .additional_writable_paths
         .iter()
@@ -551,12 +660,20 @@ fn prepare_macos_seatbelt(
             }
         }
     }
-    let profile =
+    for path in &writable_paths {
+        exclusions.check_writable(path)?;
+    }
+    let mut profile =
         build_macos_seatbelt_profile(request.network, &writable_paths, request.browser_subprocess)?;
-    let mut command = Command::new(backend);
+    for path in readonly_paths {
+        let literal = seatbelt_path_literal(&path)?;
+        profile.push_str(&format!("(deny file-write* (subpath \"{literal}\"))\n"));
+    }
+    profile.push_str(&exclusions.seatbelt_rules()?);
+    let mut command = ProcessInvocation::new(backend);
     command.arg("-p").arg(profile).arg(program);
-    Ok(PreparedProcessCommand {
-        command,
+    Ok(PreparedSandboxInvocation {
+        invocation: command,
         backend: MACOS_SEATBELT_BACKEND,
         additional_writable_targets: request
             .additional_writable_paths
@@ -585,6 +702,26 @@ fn canonical_directory(path: &Path) -> Result<PathBuf, &'static str> {
         return Err("sandbox_path_not_directory");
     }
     Ok(canonical)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn canonical_readonly_directories(paths: &[PathBuf]) -> Result<Vec<PathBuf>, &'static str> {
+    paths
+        .iter()
+        .map(|path| {
+            let source = canonical_directory(path)?;
+            // A mapping must not replace namespace infrastructure or expose all temp files.
+            if ["/proc", "/dev", "/tmp", "/private/tmp"]
+                .iter()
+                .any(|special| Path::new(special).starts_with(&source))
+                || source.starts_with("/proc")
+                || source.starts_with("/dev")
+            {
+                return Err("sandbox_readonly_mapping_invalid");
+            }
+            Ok(source)
+        })
+        .collect()
 }
 
 fn sandbox_writes_workspace(mode: ToolSandboxMode) -> bool {
@@ -673,18 +810,14 @@ fn build_macos_seatbelt_profile(
     Ok(profile)
 }
 
-#[cfg(target_os = "macos")]
-fn seatbelt_path_literal(path: &Path) -> Result<String, &'static str> {
-    let value = path.to_string_lossy();
-    if value
-        .chars()
-        .any(|value| value == '\0' || value == '\n' || value == '\r')
-    {
-        return Err("sandbox_path_invalid");
-    }
-    Ok(value.replace('\\', "\\\\").replace('"', "\\\""))
-}
-
 #[cfg(test)]
 #[path = "process_sandbox_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "process_sandbox_visibility_tests.rs"]
+mod visibility_tests;
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "process_sandbox_host_boundary_tests.rs"]
+mod host_boundary_tests;

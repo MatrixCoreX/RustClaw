@@ -17,6 +17,15 @@ mod run_cmd_preflight;
 #[path = "builtin_run_cmd_literal_tests.rs"]
 mod run_cmd_literal;
 
+#[path = "builtin_host_filesystem_tests.rs"]
+mod host_filesystem;
+
+#[path = "builtin_workspace_private_tests.rs"]
+mod workspace_private;
+
+#[path = "builtin_code_index_policy_tests.rs"]
+mod code_index_policy;
+
 struct TempDirGuard {
     path: PathBuf,
 }
@@ -46,7 +55,7 @@ impl Drop for TempDirGuard {
     }
 }
 
-fn test_state(workspace_root: PathBuf) -> AppState {
+pub(super) fn test_state(workspace_root: PathBuf) -> AppState {
     let skills_list = Arc::new(
         ["list_dir"]
             .into_iter()

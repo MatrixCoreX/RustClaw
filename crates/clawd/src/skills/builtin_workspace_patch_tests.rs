@@ -1,7 +1,75 @@
-use super::{execute_workspace_patch_for_root, sha256_label};
+use super::super::workspace_test_support::execute_workspace_patch_for_root;
+use super::sha256_label;
 use serde_json::{json, Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+#[cfg(target_os = "linux")]
+#[test]
+fn checkpoint_metadata_reader_rejects_large_files_without_exhausting_memory() {
+    super::super::checkpoint_read_tests::assert_oversized_metadata_is_bounded(
+        "skills::builtin::builtin_workspace_patch::tests::checkpoint_metadata_reader_rejects_large_files_without_exhausting_memory",
+        |root| super::read_manifest(root, &super::HostFilesystemPolicy::without_private_authority())
+            .map(|_| ()),
+    );
+}
+
+#[test]
+fn checkpoint_metadata_reader_preserves_exact_boundary_validation_and_file_contents() {
+    let workspace = TestWorkspace::new();
+    fs::write(workspace.root.join("a.txt"), b"before\n").unwrap();
+    let patch =
+        "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-before\n+after\n";
+    let result = workspace
+        .run(json!({"action":"apply_patch","patch":patch}))
+        .unwrap();
+    let root = workspace.root.canonicalize().unwrap();
+    let filesystem = super::HostFilesystemPolicy::without_private_authority();
+    let directory = super::resolve_checkpoint_dir(
+        &root,
+        result["checkpoint_id"].as_str().unwrap(),
+        &filesystem,
+    )
+    .unwrap();
+    let path = directory.join("manifest.json");
+    let mut bytes = fs::read(&path).unwrap();
+    bytes.resize(super::MAX_CHECKPOINT_METADATA_BYTES, b' ');
+    fs::write(&path, &bytes).unwrap();
+    assert_eq!(
+        super::read_manifest(&directory, &filesystem).unwrap().state,
+        "applied"
+    );
+    bytes.push(b' ');
+    fs::write(&path, &bytes).unwrap();
+    let error = super::read_manifest(&directory, &filesystem).unwrap_err();
+    let parsed = crate::skills::parse_structured_skill_error(&error).unwrap();
+    assert_eq!(parsed.error_code, "checkpoint_too_large");
+    let details = &parsed.extra.unwrap()["details"];
+    assert_eq!(details["max_bytes"], super::MAX_CHECKPOINT_METADATA_BYTES);
+    assert_eq!(
+        details["manifest_bytes_at_least"],
+        super::MAX_CHECKPOINT_METADATA_BYTES + 1
+    );
+    for invalid in [b"".as_slice(), b"{".as_slice(), &[0xff]] {
+        fs::write(&path, invalid).unwrap();
+        let error = super::read_manifest(&directory, &filesystem).unwrap_err();
+        assert_eq!(
+            crate::skills::parse_structured_skill_error(&error)
+                .unwrap()
+                .error_code,
+            "checkpoint_invalid"
+        );
+    }
+    fs::remove_file(&path).unwrap();
+    let error = super::read_manifest(&directory, &filesystem).unwrap_err();
+    assert_eq!(
+        crate::skills::parse_structured_skill_error(&error)
+            .unwrap()
+            .error_code,
+        "checkpoint_read_failed"
+    );
+    assert_eq!(fs::read(root.join("a.txt")).unwrap(), b"after\n");
+}
 
 struct TestWorkspace {
     root: PathBuf,

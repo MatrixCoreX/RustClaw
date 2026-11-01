@@ -3,6 +3,7 @@ use claw_core::skill_registry::{
     SkillRiskLevel,
 };
 use serde_json::{json, Map, Value};
+use std::ffi::{OsStr, OsString};
 use std::path::{Component, Path};
 use std::sync::Arc;
 use tokio::process::Command;
@@ -14,8 +15,8 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 ///   PATH 之类），其它一切配置（API key、model、workspace 路径等）必须由 clawd 通过
 ///   `cmd.env(...)` 显式注入或经 `SecretsBroker` 走 `secrets.<usage>_<vendor>_api_key`
 ///   契约下来 —— 这才是 §3.4 "secrets 成为唯一渠道" 的真正落地。
-/// * 严格模式默认开启；只有显式设置 `APP_SKILL_ENV_STRICT=0|false|off|no`
-///   才临时关闭。skill 若依赖未声明的环境变量会立即暴露配置缺口。
+/// * 主机边界强制开启环境隔离，不提供环境变量关闭入口。
+///   skill 若依赖未声明的环境变量会立即暴露配置缺口。
 /// * 列表保持小而稳：扩列前请先评估能否用 manifest capability 替代。
 pub(crate) const SKILL_RUNNER_ENV_WHITELIST: &[&str] = &[
     "PATH",
@@ -41,20 +42,20 @@ pub(crate) fn skill_runner_env_strict_enabled() -> bool {
 
 /// §E2 step1: 在 strict 模式下从一个 source env map 计算应当注入子进程的白名单 env。
 ///
-/// 抽成纯函数便于单元测试 —— `apply_skill_runner_env_isolation` 内部用 `std::env::vars()`
-/// 作为 source，但测试时我们想喂一个固定 map 验证白名单语义。
+/// Preserve raw OS values; unrelated non-UTF-8 variables must not panic during
+/// isolation. Tests use explicit source maps without mutating the parent env.
 ///
 /// 返回值已按 key 字典序排序、过滤掉空值（避免把空字符串传下去再触发 fail-loud）。
-pub(crate) fn collect_whitelisted_env_pairs<I, K, V>(source: I) -> Vec<(String, String)>
+pub(crate) fn collect_whitelisted_env_pairs<I, K, V>(source: I) -> Vec<(OsString, OsString)>
 where
     I: IntoIterator<Item = (K, V)>,
-    K: AsRef<str>,
-    V: AsRef<str>,
+    K: AsRef<OsStr>,
+    V: AsRef<OsStr>,
 {
     use std::collections::BTreeMap;
-    let allowed: std::collections::HashSet<&'static str> =
-        SKILL_RUNNER_ENV_WHITELIST.iter().copied().collect();
-    let mut kept: BTreeMap<String, String> = BTreeMap::new();
+    let allowed: std::collections::HashSet<&OsStr> =
+        SKILL_RUNNER_ENV_WHITELIST.iter().map(OsStr::new).collect();
+    let mut kept: BTreeMap<OsString, OsString> = BTreeMap::new();
     for (k, v) in source {
         let key = k.as_ref();
         if !allowed.contains(key) {
@@ -64,12 +65,12 @@ where
         if val.is_empty() {
             continue;
         }
-        kept.insert(key.to_string(), val.to_string());
+        kept.insert(key.to_owned(), val.to_owned());
     }
     kept.into_iter().collect()
 }
 
-/// §E2 step1: 打开 strict 隔离时，把白名单变量原样塞回 `cmd`，并返回剥离 / 保留的统计。
+/// §E2 step1: 强制环境隔离，把白名单变量原样塞回 `cmd`，并返回剥离 / 保留的统计。
 ///
 /// 只做"清空 + 白名单注入"，不碰任何后续 `.env(K, V)` 调用 —— 那部分仍是 clawd 显式
 /// 配置 + broker secrets，是子进程的**唯一**真实 env 来源。
@@ -82,21 +83,48 @@ pub(crate) struct StrictEnvReport {
     pub(crate) stripped_count: usize,
 }
 
+pub(crate) struct SkillRunnerEnvironment {
+    pairs: Vec<(OsString, OsString)>,
+    total: usize,
+}
+
+impl SkillRunnerEnvironment {
+    pub(crate) fn capture() -> Self {
+        let source: Vec<_> = std::env::vars_os().collect();
+        let total = source.len();
+        Self {
+            pairs: collect_whitelisted_env_pairs(source),
+            total,
+        }
+    }
+
+    pub(crate) fn into_pairs(self) -> Vec<(OsString, OsString)> {
+        self.pairs
+    }
+
+    pub(crate) fn report(&self) -> StrictEnvReport {
+        StrictEnvReport {
+            preserved: self
+                .pairs
+                .iter()
+                .map(|(key, _)| key.to_str().expect("whitelisted key is UTF-8").to_owned())
+                .collect(),
+            stripped_count: self.total.saturating_sub(self.pairs.len()),
+        }
+    }
+
+    fn apply(self, cmd: &mut Command) -> StrictEnvReport {
+        let report = self.report();
+        cmd.env_clear().envs(self.pairs);
+        report
+    }
+}
+
 pub(crate) fn apply_skill_runner_env_isolation(cmd: &mut Command) -> Option<StrictEnvReport> {
     if !skill_runner_env_strict_enabled() {
         return None;
     }
-    let kept = collect_whitelisted_env_pairs(std::env::vars());
-    let total_env = std::env::vars().count();
-    cmd.env_clear();
-    let preserved: Vec<String> = kept.iter().map(|(k, _)| k.clone()).collect();
-    for (k, v) in &kept {
-        cmd.env(k, v);
-    }
-    Some(StrictEnvReport {
-        preserved,
-        stripped_count: total_env.saturating_sub(kept.len()),
-    })
+    Some(SkillRunnerEnvironment::capture().apply(cmd))
 }
 
 #[cfg(unix)]
@@ -1279,18 +1307,20 @@ fn pending_local_process_job_directory(response: &Value) -> Option<std::path::Pa
     (path.is_absolute() && path.is_dir()).then_some(path)
 }
 
-fn dispatch_queue_job_is_terminal(job_dir: &Path, now_ts: i64) -> bool {
-    if !job_dir.exists()
-        || job_dir.join("exit_code").is_file()
-        || job_dir.join("startup_failed").is_file()
-    {
-        return true;
-    }
-    let Some(pid) = crate::local_process_job::read_pid(job_dir) else {
+fn dispatch_queue_job_is_terminal(job_dir: &Path, expected_pid: Option<u32>, now_ts: i64) -> bool {
+    let Some(pid) = expected_pid
+        .filter(|expected| crate::local_process_job::read_pid(job_dir) == Some(*expected))
+    else {
+        // A missing directory/record cannot retarget an existing permit.
         return false;
     };
     let identity = crate::local_process_job::process_identity_state(job_dir, pid);
-    crate::local_process_job::process_loss_is_stable(job_dir, identity, now_ts, 5)
+    let loss_stable =
+        crate::local_process_job::process_loss_is_stable(job_dir, identity, now_ts, 5);
+    identity.alive() == Some(false)
+        && (job_dir.join("exit_code").is_file()
+            || job_dir.join("startup_failed").is_file()
+            || loss_stable)
 }
 
 fn retain_dispatch_queue_permit_until_job_terminal(
@@ -1300,10 +1330,21 @@ fn retain_dispatch_queue_permit_until_job_terminal(
     skill_name: String,
     queue_scope: &'static str,
 ) {
+    // Capture before the future can be scheduled or public metadata replaced.
+    // This is a negative observation fence, not authenticated scope ownership.
+    let expected_pid = crate::local_process_job::read_pid(&job_dir);
+    if expected_pid.is_none() {
+        tracing::warn!(
+            task_id,
+            skill = skill_name,
+            queue_scope,
+            "skill_dispatch_queue_process_binding_unavailable"
+        );
+    }
     tokio::spawn(async move {
         loop {
             let now_ts = crate::now_ts_u64().min(i64::MAX as u64) as i64;
-            if dispatch_queue_job_is_terminal(&job_dir, now_ts) {
+            if dispatch_queue_job_is_terminal(&job_dir, expected_pid, now_ts) {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;

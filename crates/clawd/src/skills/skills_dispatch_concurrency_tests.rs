@@ -260,28 +260,32 @@ async fn user_scoped_queue_serializes_one_user_without_blocking_another() {
     drop(same_user.await.expect("join").expect("same user continues"));
 }
 
+#[cfg(unix)]
 #[tokio::test]
-async fn durable_queue_permit_is_released_only_after_terminal_marker() {
+async fn durable_queue_permit_is_released_only_after_observed_process_stops() {
+    let mut fixture = crate::local_process_job::observation_test_support::LiveJobFixture::new();
     let semaphore = Arc::new(Semaphore::new(1));
     let permit = semaphore
         .clone()
         .acquire_owned()
         .await
         .expect("queue permit");
-    let job_dir = std::env::temp_dir().join(format!(
-        "agent-skill-queue-terminal-{}",
-        uuid::Uuid::new_v4()
-    ));
-    std::fs::create_dir_all(&job_dir).expect("job dir");
     retain_dispatch_queue_permit_until_job_terminal(
         permit,
-        job_dir.clone(),
+        fixture.path().to_path_buf(),
         "queue-task".to_string(),
         "fixture".to_string(),
         "user",
     );
     assert_eq!(semaphore.available_permits(), 0);
-    std::fs::write(job_dir.join("exit_code"), "1\n").expect("failed terminal marker");
+    fixture.write("exit_code", "1");
+    assert!(tokio::time::timeout(
+        Duration::from_millis(600),
+        semaphore.clone().acquire_owned()
+    )
+    .await
+    .is_err());
+    fixture.finish();
     tokio::time::timeout(Duration::from_secs(2), async {
         while semaphore.available_permits() == 0 {
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -289,7 +293,6 @@ async fn durable_queue_permit_is_released_only_after_terminal_marker() {
     })
     .await
     .expect("queue permit release");
-    let _ = std::fs::remove_dir_all(job_dir);
 }
 
 #[test]
@@ -302,7 +305,13 @@ fn durable_queue_terminal_detection_handles_startup_failure_and_process_loss() {
     std::fs::create_dir_all(&startup_failed).expect("startup failure dir");
     std::fs::write(startup_failed.join("startup_failed"), "spawn_failed\n")
         .expect("startup failure marker");
-    assert!(dispatch_queue_job_is_terminal(&startup_failed, 100));
+    assert!(!dispatch_queue_job_is_terminal(&startup_failed, None, 100));
+    std::fs::write(startup_failed.join("pid"), "2147483647\n").expect("stopped pid marker");
+    assert!(dispatch_queue_job_is_terminal(
+        &startup_failed,
+        Some(2147483647),
+        100
+    ));
 
     let process_lost = root.join("process-lost");
     std::fs::create_dir_all(&process_lost).expect("process loss dir");
@@ -312,7 +321,137 @@ fn durable_queue_terminal_detection_handles_startup_failure_and_process_loss() {
         "missing-runner\n",
     )
     .expect("command marker");
-    assert!(!dispatch_queue_job_is_terminal(&process_lost, 100));
-    assert!(dispatch_queue_job_is_terminal(&process_lost, 105));
+    assert!(!dispatch_queue_job_is_terminal(
+        &process_lost,
+        Some(2147483647),
+        100
+    ));
+    assert!(dispatch_queue_job_is_terminal(
+        &process_lost,
+        Some(2147483647),
+        105
+    ));
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+fn reject_live_terminal_marker(marker: &str) {
+    let mut fixture = crate::local_process_job::observation_test_support::LiveJobFixture::new();
+    fixture.write(marker, "1");
+    fixture.write("process_missing_observed_at", "0");
+    assert!(
+        !dispatch_queue_job_is_terminal(fixture.path(), Some(fixture.pid()), 100),
+        "dispatch_queue_live_marker_released"
+    );
+    assert!(!fixture.path().join("process_missing_observed_at").exists());
+    fixture.finish();
+    assert!(dispatch_queue_job_is_terminal(
+        fixture.path(),
+        Some(fixture.pid()),
+        101
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn live_dispatch_queue_ignores_a_public_exit_record() {
+    reject_live_terminal_marker("exit_code");
+}
+
+#[cfg(unix)]
+#[test]
+fn live_dispatch_queue_ignores_a_public_startup_failure_record() {
+    reject_live_terminal_marker("startup_failed");
+}
+
+#[cfg(unix)]
+struct RestoreJobDirectory {
+    original: std::path::PathBuf,
+    moved: std::path::PathBuf,
+}
+
+#[cfg(unix)]
+impl Drop for RestoreJobDirectory {
+    fn drop(&mut self) {
+        std::fs::rename(&self.moved, &self.original).unwrap();
+    }
+}
+
+#[cfg(unix)]
+async fn actual_queue_custody(case: &str) {
+    let mut fixture = crate::local_process_job::observation_test_support::LiveJobFixture::new();
+    let semaphore = Arc::new(Semaphore::new(1));
+    let permit = semaphore.clone().acquire_owned().await.unwrap();
+    retain_dispatch_queue_permit_until_job_terminal(
+        permit,
+        fixture.path().to_path_buf(),
+        "owned-queue-task".to_string(),
+        "fixture".to_string(),
+        "user",
+    );
+    fixture.write("exit_code", "0");
+    fixture.write("process_missing_observed_at", "0");
+    let restore = match case {
+        "live_exit" => None,
+        "pid_retargeted" => {
+            fixture.write("pid", "2147483647");
+            None
+        }
+        "pid_missing" => {
+            std::fs::remove_file(fixture.path().join("pid")).unwrap();
+            None
+        }
+        "directory_missing" => {
+            let moved = fixture.path().with_extension("moved");
+            assert!(!moved.exists());
+            std::fs::rename(fixture.path(), &moved).unwrap();
+            Some(RestoreJobDirectory {
+                original: fixture.path().to_path_buf(),
+                moved,
+            })
+        }
+        _ => unreachable!(),
+    };
+    let early = tokio::time::timeout(
+        Duration::from_millis(600),
+        semaphore.clone().acquire_owned(),
+    )
+    .await;
+    let released_early = early.is_ok();
+    drop(early);
+    drop(restore);
+    fixture.write("pid", &fixture.pid().to_string());
+    fixture.finish();
+    assert!(!released_early, "dispatch_queue_premature_release:{case}");
+    let permit = tokio::time::timeout(Duration::from_secs(2), semaphore.clone().acquire_owned())
+        .await
+        .expect("dispatch_queue_stopped_release_timeout")
+        .unwrap();
+    drop(permit);
+    assert_eq!(semaphore.available_permits(), 1);
+    println!("DISPATCH_QUEUE_CASE case={case} owned_process=true retained_while_live_or_unknown=true released_after_stopped=true llm_calls=0");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn actual_queue_permit_stays_held_while_the_process_is_live() {
+    actual_queue_custody("live_exit").await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn actual_queue_permit_cannot_follow_a_retargeted_pid() {
+    actual_queue_custody("pid_retargeted").await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn actual_queue_permit_stays_held_when_pid_metadata_disappears() {
+    actual_queue_custody("pid_missing").await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn actual_queue_permit_stays_held_when_the_job_directory_disappears() {
+    actual_queue_custody("directory_missing").await;
 }

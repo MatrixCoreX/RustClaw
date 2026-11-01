@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -126,8 +126,11 @@ struct ReservedResources {
 
 #[derive(Debug)]
 struct ResourceBrokerState {
+    owner_recovery_pending: bool,
     next_lease_id: u64,
     leases: BTreeMap<u64, ReservedResources>,
+    owner_custody: BTreeMap<u64, owner_custody::OwnerResourceBinding>,
+    owner_closed: BTreeSet<owner_custody::OwnerResourceBinding>,
     pressure: ResourcePressureTracker,
     recent_admission_refusal_reason: Option<&'static str>,
     recent_admission_refusal_at_epoch: Option<u64>,
@@ -212,8 +215,11 @@ impl ResourceLease {
         {
             return Ok(());
         }
-        if let Some(memory_mib) = crate::skills::runner_pool::process_tree_resident_memory_mib(pid)
-        {
+        if let Some(memory_mib) = sample_durable_process_memory(
+            observe_durable_process(&job_dir, pid),
+            Some(pid),
+            crate::skills::runner_pool::process_tree_resident_memory_mib,
+        ) {
             self.refresh_materialized_memory(memory_mib);
         }
         self.mark_background();
@@ -240,7 +246,7 @@ impl ResourceLease {
                 crate::local_process_job::terminate_verified_process_group(&job_dir, pid, "TERM");
             return Err(format!("durable_resource_lease_write_failed: {error}"));
         }
-        spawn_durable_resource_lease_monitor(self, job_dir);
+        spawn_durable_resource_lease_monitor(self, job_dir, pid);
         Ok(())
     }
 
@@ -283,19 +289,30 @@ async fn await_durable_process_identity_or_terminal(
 ) -> Result<bool, String> {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
-        if job_dir.join("exit_code").is_file() {
-            return Ok(false);
-        }
-        if crate::local_process_job::process_identity_state(job_dir, pid)
-            == crate::local_process_job::ProcessIdentityState::AliveVerified
-        {
+        let identity = observe_durable_process(job_dir, pid);
+        if identity == crate::local_process_job::ProcessIdentityState::AliveVerified {
             return Ok(true);
+        }
+        if identity.alive() == Some(false) && job_dir.join("exit_code").is_file() {
+            return Ok(false);
         }
         if tokio::time::Instant::now() >= deadline {
             return Err("durable_resource_lease_process_identity_unverified".to_string());
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
+}
+
+fn observe_durable_process(
+    job_dir: &Path,
+    expected_pid: u32,
+) -> crate::local_process_job::ProcessIdentityState {
+    crate::local_process_job::read_pid(job_dir)
+        .filter(|pid| *pid == expected_pid)
+        .map_or(
+            crate::local_process_job::ProcessIdentityState::Unknown,
+            |pid| crate::local_process_job::process_identity_state(job_dir, pid),
+        )
 }
 
 fn durable_resource_identity_handoff_timeout() -> Duration {
@@ -305,7 +322,9 @@ fn durable_resource_identity_handoff_timeout() -> Duration {
 impl Drop for ResourceLease {
     fn drop(&mut self) {
         let mut state = self.broker.state.lock().unwrap();
-        state.leases.remove(&self.lease_id);
+        if !state.owner_custody.contains_key(&self.lease_id) {
+            state.leases.remove(&self.lease_id);
+        }
     }
 }
 
@@ -322,8 +341,11 @@ impl ResourceBroker {
     ) -> Self {
         Self {
             state: Arc::new(Mutex::new(ResourceBrokerState {
+                owner_recovery_pending: false,
                 next_lease_id: 0,
                 leases: BTreeMap::new(),
+                owner_custody: BTreeMap::new(),
+                owner_closed: BTreeSet::new(),
                 pressure: ResourcePressureTracker::new(pressure_policy),
                 recent_admission_refusal_reason: None,
                 recent_admission_refusal_at_epoch: None,
@@ -421,6 +443,14 @@ impl ResourceBroker {
         background: bool,
     ) -> Result<ResourceLease, ResourceGrant> {
         let mut state = self.state.lock().unwrap();
+        if state.owner_recovery_pending {
+            return Err(ResourceGrant {
+                admitted: false,
+                max_concurrency: 0,
+                wait_reason: Some("owner_recovery_pending"),
+                projection: json!({"schema_version":1,"admitted":false,"wait_reason":"owner_recovery_pending"}),
+            });
+        }
         let pressure = state.pressure.observe(&snapshot);
         let reserved_before = state
             .leases
@@ -775,15 +805,21 @@ impl ResourceBroker {
         &self,
         metadata: &DurableResourceLeaseMetadata,
     ) -> Option<ResourceLease> {
+        if self.state.lock().unwrap().owner_recovery_pending {
+            return None;
+        }
+        let budget = crate::local_process_owner::OwnerResourceBudget {
+            memory_mib: metadata.memory_mib,
+            cpu_cores: metadata.cpu_cores,
+            network_slots: metadata.network_slots,
+            provider_slots: metadata.provider_slots,
+            browser_slots: metadata.browser_slots,
+            heavy: metadata.heavy,
+            background: metadata.background,
+        };
         if metadata.schema_version != 1
             || uuid::Uuid::parse_str(&metadata.lease_token).is_err()
-            || metadata.memory_mib == 0
-            || metadata.memory_mib > 1_048_576
-            || metadata.cpu_cores == 0
-            || metadata.cpu_cores > 4_096
-            || metadata.network_slots > 4_096
-            || metadata.provider_slots > 4_096
-            || metadata.browser_slots > 64
+            || budget.validate().is_err()
             || metadata
                 .estimate_key
                 .as_ref()
@@ -847,6 +883,12 @@ impl ResourceBroker {
             .sum()
     }
 }
+
+#[path = "resource_scheduler_owner_custody.rs"]
+mod owner_custody;
+
+#[path = "resource_scheduler_owner_recovery.rs"]
+mod owner_recovery;
 
 fn observed_memory_estimate(
     estimates: &BTreeMap<ResourceEstimateKey, ObservedResourceEstimate>,
@@ -963,10 +1005,7 @@ pub(crate) fn restore_durable_resource_leases(state: &crate::AppState) -> usize 
     let mut restored = 0;
     for entry in entries.flatten() {
         let job_dir = entry.path();
-        if !job_dir.is_dir()
-            || job_dir.join("exit_code").is_file()
-            || !job_dir.join("lease_ready").is_file()
-        {
+        if !job_dir.is_dir() || !job_dir.join("lease_ready").is_file() {
             continue;
         }
         let Some(metadata) = read_durable_resource_lease_metadata(&job_dir) else {
@@ -984,7 +1023,7 @@ pub(crate) fn restore_durable_resource_leases(state: &crate::AppState) -> usize 
         let Some(lease) = broker.restore_durable_lease(&metadata) else {
             continue;
         };
-        spawn_durable_resource_lease_monitor(lease, job_dir);
+        spawn_durable_resource_lease_monitor(lease, job_dir, pid);
         restored += 1;
     }
     restored
@@ -1001,27 +1040,34 @@ fn read_durable_resource_lease_metadata(job_dir: &Path) -> Option<DurableResourc
     serde_json::from_str(&payload).ok()
 }
 
-fn spawn_durable_resource_lease_monitor(lease: ResourceLease, job_dir: PathBuf) {
-    let monitor = crate::task_result_retention::monitors::DurableJobMonitorGuard::register(&job_dir);
+fn spawn_durable_resource_lease_monitor(lease: ResourceLease, job_dir: PathBuf, expected_pid: u32) {
+    let monitor =
+        crate::task_result_retention::monitors::DurableJobMonitorGuard::register(&job_dir);
     tokio::spawn(async move {
         let _monitor = monitor;
-        let pid = crate::local_process_job::read_pid(&job_dir);
         let mut observed_peak_memory_mib = 0_u64;
         loop {
-            if job_dir.join("exit_code").is_file() {
+            // Mutable job files are not ownership proof. They cannot settle a
+            // live/unknown observation or retarget this existing reservation.
+            let identity = observe_durable_process(&job_dir, expected_pid);
+            if identity.alive() == Some(false) && job_dir.join("exit_code").is_file() {
                 let _ = crate::local_process_job::write_atomic(
                     &job_dir.join("resource_lease_release_reason"),
                     "terminal_recorded",
                 );
                 break;
             }
-            let identity = pid.map_or(
-                crate::local_process_job::ProcessIdentityState::Missing,
-                |pid| crate::local_process_job::process_identity_state(&job_dir, pid),
+            let process_loss_stable = crate::local_process_job::process_loss_is_stable(
+                &job_dir,
+                identity,
+                crate::now_ts_u64().min(i64::MAX as u64) as i64,
+                5,
             );
-            if let Some(memory_mib) =
-                pid.and_then(crate::skills::runner_pool::process_tree_resident_memory_mib)
-            {
+            if let Some(memory_mib) = sample_durable_process_memory(
+                identity,
+                Some(expected_pid),
+                crate::skills::runner_pool::process_tree_resident_memory_mib,
+            ) {
                 observed_peak_memory_mib = observed_peak_memory_mib.max(memory_mib);
                 lease.refresh_materialized_memory(memory_mib);
             }
@@ -1035,12 +1081,7 @@ fn spawn_durable_resource_lease_monitor(lease: ResourceLease, job_dir: PathBuf) 
                 }
                 crate::local_process_job::ProcessIdentityState::Missing
                 | crate::local_process_job::ProcessIdentityState::IdentityMismatch => {
-                    if crate::local_process_job::process_loss_is_stable(
-                        &job_dir,
-                        identity,
-                        crate::now_ts_u64().min(i64::MAX as u64) as i64,
-                        5,
-                    ) {
+                    if process_loss_stable {
                         let _ = crate::local_process_job::write_atomic(
                             &job_dir.join("resource_lease_release_reason"),
                             identity.as_token(),
@@ -1058,6 +1099,17 @@ fn spawn_durable_resource_lease_monitor(lease: ResourceLease, job_dir: PathBuf) 
         }
         drop(lease);
     });
+}
+
+fn sample_durable_process_memory(
+    identity: crate::local_process_job::ProcessIdentityState,
+    pid: Option<u32>,
+    observe: impl FnOnce(u32) -> Option<u64>,
+) -> Option<u64> {
+    if identity != crate::local_process_job::ProcessIdentityState::AliveVerified {
+        return None;
+    }
+    pid.and_then(observe)
 }
 
 fn durable_resource_monitor_interval() -> Duration {
@@ -1410,3 +1462,7 @@ fn gpu_device_available() -> bool {
 #[cfg(test)]
 #[path = "resource_scheduler_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "resource_scheduler_memory_tests.rs"]
+mod memory_tests;

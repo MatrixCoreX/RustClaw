@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashSet};
+use std::ffi::{OsStr, OsString};
 
 /// Preserve only non-sensitive parent values that the pinned package receipt
 /// explicitly declared. These values are injected into `skill-runner`, which
@@ -7,16 +8,18 @@ use std::collections::{BTreeMap, HashSet};
 pub(crate) fn collect_declared_skill_env_pairs<I, K, V>(
     declared: &[String],
     source: I,
-) -> Vec<(String, String)>
+) -> Vec<(String, OsString)>
 where
     I: IntoIterator<Item = (K, V)>,
-    K: AsRef<str>,
-    V: AsRef<str>,
+    K: AsRef<OsStr>,
+    V: AsRef<OsStr>,
 {
     let declared: HashSet<&str> = declared.iter().map(String::as_str).collect();
     let mut kept = BTreeMap::new();
     for (key, value) in source {
-        let key = key.as_ref();
+        let Some(key) = key.as_ref().to_str() else {
+            continue;
+        };
         let value = value.as_ref();
         if !declared.contains(key)
             || value.is_empty()
@@ -24,7 +27,7 @@ where
         {
             continue;
         }
-        kept.insert(key.to_string(), value.to_string());
+        kept.insert(key.to_string(), value.to_owned());
     }
     kept.into_iter().collect()
 }

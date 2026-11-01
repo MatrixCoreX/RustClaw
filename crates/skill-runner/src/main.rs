@@ -21,10 +21,11 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use skill_sdk::{
-    prepare_sandboxed_command, validate_progress_frame_line, validate_response_line, LauncherKind,
-    ProtocolResponse, ProtocolStatus, SandboxNetwork, SandboxProfile, SkillLaunchSpec,
-    SkillRuntimeResolver, MAX_PROGRESS_FRAMES_PER_INVOCATION, MAX_PROGRESS_FRAMES_PER_SECOND,
-    MAX_PROTOCOL_LINE_BYTES, PARENT_SANDBOX_BACKEND_ENV, SKILL_STORAGE_WRITABLE_DIRECTORY_ENV,
+    prepare_sandboxed_invocation, validate_progress_frame_line, validate_response_line,
+    LauncherKind, ProcessInvocation, ProtocolResponse, ProtocolStatus, SandboxNetwork,
+    SandboxProfile, SkillLaunchSpec, SkillRuntimeResolver, MAX_PROGRESS_FRAMES_PER_INVOCATION,
+    MAX_PROGRESS_FRAMES_PER_SECOND, MAX_PROTOCOL_LINE_BYTES, PARENT_PRIVATE_DIRECTORIES_DIGEST_ENV,
+    PARENT_SANDBOX_BACKEND_ENV, SKILL_STORAGE_WRITABLE_DIRECTORY_ENV,
 };
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -114,6 +115,7 @@ struct SkillRequest {
     expected_admission_receipt_digest: Option<String>,
     args: Value,
     context: Option<Value>,
+    host_private_directories: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
@@ -450,14 +452,7 @@ async fn execute_skill(
         }
     };
 
-    let child_req = serde_json::json!({
-        "request_id": req.request_id,
-        "args": req.args,
-        "context": req.context,
-        "user_id": req.user_id,
-        "chat_id": req.chat_id,
-        "user_key": req.user_key,
-    });
+    let child_req = child_request_payload(&req);
 
     let timeout_seconds = durable
         .is_none()
@@ -561,6 +556,17 @@ async fn execute_skill(
         }
     };
     attach_execution_binding(response, child_launch.execution_binding.as_ref())
+}
+
+fn child_request_payload(request: &SkillRequest) -> Value {
+    serde_json::json!({
+        "request_id": request.request_id,
+        "args": request.args,
+        "context": request.context,
+        "user_id": request.user_id,
+        "chat_id": request.chat_id,
+        "user_key": request.user_key,
+    })
 }
 
 fn attach_progress_diagnostics(
@@ -1021,6 +1027,7 @@ struct ChildLaunch {
     install_root: Option<PathBuf>,
     sandbox_profile: SandboxProfile,
     execution_binding: Option<ExecutionBinding>,
+    host_private_directories: Vec<PathBuf>,
 }
 
 const RUNTIME_CHILD_ENV_ALLOWLIST: [&str; 4] = [
@@ -1054,10 +1061,11 @@ impl ChildLaunch {
             install_root: None,
             sandbox_profile: SandboxProfile::Required,
             execution_binding: None,
+            host_private_directories: Vec::new(),
         }
     }
 
-    fn installed(spec: SkillLaunchSpec) -> Self {
+    fn installed(spec: SkillLaunchSpec, host_private_directories: Vec<PathBuf>) -> Self {
         let execution_binding = ExecutionBinding {
             skill_name: spec.skill_name.clone(),
             version: spec.version.clone(),
@@ -1087,6 +1095,7 @@ impl ChildLaunch {
             install_root: Some(spec.install_root),
             sandbox_profile: spec.sandbox_profile,
             execution_binding: Some(execution_binding),
+            host_private_directories,
         }
     }
 }
@@ -1102,7 +1111,7 @@ fn resolve_child_launch(request: &SkillRequest) -> Result<ChildLaunch, String> {
             &request.expected_manifest_digest,
             &request.expected_receipt_digest,
         )
-        .map(ChildLaunch::installed)
+        .map(|spec| ChildLaunch::installed(spec, request.host_private_directories.clone()))
         .map_err(|error| {
             format!(
                 "installed receipt resolution failed: code={} detail={}",
@@ -1410,16 +1419,27 @@ async fn read_framed_child_output(
 }
 
 fn child_process_command(launch: &ChildLaunch) -> Result<Command, String> {
-    child_process_command_for_parent(launch, inherited_parent_sandbox_backend())
+    let parent_digest = std::env::var(PARENT_PRIVATE_DIRECTORIES_DIGEST_ENV).ok();
+    child_process_command_for_parent(
+        launch,
+        inherited_parent_sandbox_backend(),
+        parent_digest.as_deref(),
+    )
 }
 
 fn child_process_command_for_parent(
     launch: &ChildLaunch,
     parent_backend: Option<&str>,
+    parent_private_digest: Option<&str>,
 ) -> Result<Command, String> {
     if !launch.installed {
-        let mut command = Command::new(&launch.program);
-        command.args(&launch.args).envs(&launch.environment);
+        if !launch.host_private_directories.is_empty() {
+            return Err("sandbox_private_directories_require_isolation".to_string());
+        }
+        let mut invocation = ProcessInvocation::new(&launch.program);
+        invocation.args(&launch.args);
+        let mut command = Command::from(invocation.into_command());
+        command.envs(&launch.environment);
         if let Some(working_directory) = &launch.working_directory {
             command.current_dir(working_directory);
         }
@@ -1433,7 +1453,19 @@ fn child_process_command_for_parent(
         .and_then(inherited_parent_sandbox_backend_token)
         .is_some()
     {
-        let mut command = std::process::Command::new(&launch.program);
+        if !launch.host_private_directories.is_empty() {
+            if parent_backend == Some("direct") {
+                return Err("sandbox_private_directories_require_isolation".to_string());
+            }
+            let expected = skill_sdk::private_directories_digest(&launch.host_private_directories)
+                .map_err(|error| error.code)?;
+            if parent_private_digest != Some(expected.as_str()) {
+                return Err("sandbox_parent_private_directories_mismatch".to_string());
+            }
+        }
+        let mut invocation = ProcessInvocation::new(&launch.program);
+        invocation.args(&launch.args);
+        let mut command = invocation.into_command();
         command.current_dir(working_directory);
         command
     } else {
@@ -1443,20 +1475,23 @@ fn child_process_command_for_parent(
             SandboxNetwork::Deny
         };
         let writable_paths = installed_writable_paths(launch)?;
-        prepare_sandboxed_command(&launch.program, working_directory, &writable_paths, network)
-            .map_err(|error| {
-                format!(
-                    "sandbox failed closed: code={} detail={}",
-                    error.code, error.detail
-                )
-            })?
-            .command
+        let mut prepared = prepare_sandboxed_invocation(
+            &launch.program,
+            working_directory,
+            &writable_paths,
+            network,
+            &launch.host_private_directories,
+        )
+        .map_err(|error| {
+            format!(
+                "sandbox failed closed: code={} detail={}",
+                error.code, error.detail
+            )
+        })?;
+        prepared.invocation.args(&launch.args);
+        prepared.into_command()
     };
-    let mut command = Command::new(std_command.get_program());
-    command.args(std_command.get_args());
-    if let Some(directory) = std_command.get_current_dir() {
-        command.current_dir(directory);
-    }
+    let mut command = Command::from(std_command);
     command.env_clear();
     command.envs(&launch.environment);
     for key in &launch.environment_allowlist {
@@ -1473,6 +1508,8 @@ fn child_process_command_for_parent(
             }
         }
     }
+    command.env_remove(PARENT_PRIVATE_DIRECTORIES_DIGEST_ENV);
+    command.env_remove(PARENT_SANDBOX_BACKEND_ENV);
     if launch.runtime_deadline_enabled {
         // Foreground execution keeps the manifest/host deadline. Durable
         // background execution intentionally removes the inherited deadline.
@@ -1480,7 +1517,6 @@ fn child_process_command_for_parent(
     } else {
         command.env_remove("SKILL_TIMEOUT_SECONDS");
     }
-    command.args(&launch.args);
     Ok(command)
 }
 
@@ -1682,3 +1718,11 @@ async fn terminate_child_process_group(_pid: Option<u32>) {}
 #[cfg(test)]
 #[path = "main_tests.rs"]
 mod tests;
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+#[path = "private_filesystem_tests.rs"]
+mod private_filesystem_tests;
+
+#[cfg(test)]
+#[path = "child_invocation_tests.rs"]
+mod child_invocation_tests;

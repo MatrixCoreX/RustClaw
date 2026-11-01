@@ -1,10 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
 use std::sync::{Mutex, OnceLock};
-use std::time::UNIX_EPOCH;
+
+use crate::runtime::host_filesystem::HostFilesystemPolicy;
+use claw_core::config::ToolSandboxBackend;
 
 use proc_macro2::{Span, TokenStream, TokenTree};
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,8 @@ use sha2::{Digest, Sha256};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
+#[path = "builtin_code_index/git_observation.rs"]
+mod git_observation;
 #[path = "builtin_code_index/language_parsers.rs"]
 mod language_parsers;
 #[path = "builtin_code_index/large_rust_source.rs"]
@@ -113,6 +115,8 @@ struct RefreshStats {
     reused_files: usize,
     removed_files: usize,
     skipped_files: usize,
+    policy_excluded_entries: usize,
+    cache_rejected_files: usize,
     scan_truncated: bool,
     total_candidates: usize,
     scan_start: usize,
@@ -131,7 +135,12 @@ struct SourceCandidate {
     modified_ns: u64,
 }
 
-pub(super) fn execute(workspace_root: &Path, args: &Value) -> Result<String, CodeIndexError> {
+pub(super) fn execute(
+    workspace_root: &Path,
+    args: &Value,
+    filesystem: &HostFilesystemPolicy,
+    backend: ToolSandboxBackend,
+) -> Result<String, CodeIndexError> {
     let object = args
         .as_object()
         .ok_or_else(|| CodeIndexError::new("invalid_args", "code_index.args_not_object"))?;
@@ -143,6 +152,20 @@ pub(super) fn execute(workspace_root: &Path, args: &Value) -> Result<String, Cod
         HARD_MAX_FILES,
     )?;
     let scan_continuation = optional_machine_string(object, "scan_continuation");
+    if matches!(action, "retrieve_context" | "changed_impact") {
+        for path in machine_paths(object.get("paths"))?.unwrap_or_default() {
+            if let Err(error) =
+                filesystem.open_file(Some(workspace_root), &workspace_root.join(path))
+            {
+                if HostFilesystemPolicy::is_private_access_denied(&error) {
+                    return Err(CodeIndexError::new(
+                        "host_private_directory_access_denied",
+                        "code_index.private_source_denied",
+                    ));
+                }
+            }
+        }
+    }
 
     let lock = INDEX_LOCK.get_or_init(|| Mutex::new(()));
     let _guard = lock
@@ -152,7 +175,13 @@ pub(super) fn execute(workspace_root: &Path, args: &Value) -> Result<String, Cod
     // index as an incremental input, but only the explicit refresh action is
     // allowed to update the workspace cache.
     let persist = action == "refresh";
-    let (index, refresh) = refresh_index(workspace_root, max_files, scan_continuation, persist)?;
+    let (index, refresh) = refresh_index(
+        workspace_root,
+        max_files,
+        scan_continuation,
+        persist,
+        filesystem,
+    )?;
     let result = match action {
         "refresh" => json!({
             "schema_version": INDEX_SCHEMA_VERSION,
@@ -165,8 +194,17 @@ pub(super) fn execute(workspace_root: &Path, args: &Value) -> Result<String, Cod
         "find_definitions" => find_definitions(&index, object, &refresh)?,
         "find_references" => find_references(&index, object, &refresh)?,
         "list_tests" => list_tests(&index, object, &refresh)?,
-        "changed_impact" => changed_impact(workspace_root, &index, object, &refresh)?,
-        "retrieve_context" => retrieve_context(workspace_root, &index, object, &refresh)?,
+        "changed_impact" => changed_impact(
+            workspace_root,
+            &index,
+            object,
+            &refresh,
+            filesystem,
+            backend,
+        )?,
+        "retrieve_context" => {
+            retrieve_context(workspace_root, &index, object, &refresh, filesystem)?
+        }
         _ => {
             return Err(CodeIndexError::new(
                 "unsupported_action",
@@ -183,10 +221,36 @@ fn refresh_index(
     max_files: usize,
     scan_continuation: Option<&str>,
     persist: bool,
+    filesystem: &HostFilesystemPolicy,
 ) -> Result<(RepositoryIndex, RefreshStats), CodeIndexError> {
     let index_path = workspace_root.join(INDEX_RELATIVE_PATH);
-    let previous = load_index(workspace_root, &index_path);
-    let (candidates, unreadable_entries) = collect_source_candidates(workspace_root)?;
+    let mut previous = load_index(workspace_root, &index_path, filesystem)?;
+    let mut stats = RefreshStats {
+        refreshed_at: crate::now_ts_u64(),
+        ..RefreshStats::default()
+    };
+    // A cache is historical evidence, never current filesystem authorization.
+    previous.files.retain(|path, _| {
+        let admissible_path =
+            normalize_relative_path(path).is_ok_and(|normalized| normalized == *path);
+        let result = admissible_path
+            .then(|| filesystem.open_file(Some(workspace_root), &workspace_root.join(path)));
+        if result.as_ref().is_some_and(Result::is_ok) {
+            return true;
+        }
+        stats.cache_rejected_files += 1;
+        stats.removed_files += 1;
+        if let Some(Err(error)) = result {
+            if HostFilesystemPolicy::is_private_access_denied(&error) {
+                stats.policy_excluded_entries += 1;
+            }
+            if error.kind() != std::io::ErrorKind::NotFound {
+                stats.skipped_files += 1;
+            }
+        }
+        false
+    });
+    let candidates = collect_source_candidates(workspace_root, filesystem, &mut stats)?;
     let scan_snapshot_sha256 = source_candidate_snapshot(workspace_root, &candidates);
     let scan_start = decode_scan_continuation(scan_continuation, &scan_snapshot_sha256)?;
     if scan_start > candidates.len() {
@@ -197,19 +261,14 @@ fn refresh_index(
     }
     let scan_end = scan_start.saturating_add(max_files).min(candidates.len());
     let scan_truncated = scan_end < candidates.len();
-    let scan_complete = !scan_truncated && unreadable_entries == 0;
-    let mut stats = RefreshStats {
-        skipped_files: unreadable_entries,
-        scan_truncated,
-        total_candidates: candidates.len(),
-        scan_start,
-        scan_end,
-        scan_snapshot_sha256: scan_snapshot_sha256.clone(),
-        next_continuation: scan_truncated
-            .then(|| encode_scan_continuation(&scan_snapshot_sha256, scan_end)),
-        refreshed_at: crate::now_ts_u64(),
-        ..RefreshStats::default()
-    };
+    let scan_complete = !scan_truncated && stats.skipped_files == 0;
+    stats.scan_truncated = scan_truncated;
+    stats.total_candidates = candidates.len();
+    stats.scan_start = scan_start;
+    stats.scan_end = scan_end;
+    stats.scan_snapshot_sha256 = scan_snapshot_sha256.clone();
+    stats.next_continuation =
+        scan_truncated.then(|| encode_scan_continuation(&scan_snapshot_sha256, scan_end));
     let mut files = previous.files.clone();
 
     for candidate in &candidates[scan_start..scan_end] {
@@ -223,7 +282,7 @@ fn refresh_index(
                 continue;
             }
         }
-        let indexed = index_source_file(workspace_root, candidate)?;
+        let indexed = index_source_file(workspace_root, candidate, filesystem)?;
         if indexed.parse_status == "parsed" {
             stats.parsed_files += 1;
         } else {
@@ -241,7 +300,7 @@ fn refresh_index(
             .filter(|path| !current_paths.contains(path.as_str()))
             .cloned()
             .collect::<Vec<_>>();
-        stats.removed_files = stale_paths.len();
+        stats.removed_files += stale_paths.len();
         for path in stale_paths {
             files.remove(&path);
         }
@@ -254,14 +313,25 @@ fn refresh_index(
         files,
     };
     if persist {
-        persist_index(workspace_root, &index_path, &index)?;
+        persist_index(workspace_root, &index_path, &index, filesystem)?;
     }
     Ok((index, stats))
 }
 
-fn load_index(workspace_root: &Path, path: &Path) -> RepositoryIndex {
-    let Ok(file) = crate::secure_workspace_fs::open_workspace_file(workspace_root, path) else {
-        return RepositoryIndex::default();
+fn load_index(
+    workspace_root: &Path,
+    path: &Path,
+    filesystem: &HostFilesystemPolicy,
+) -> Result<RepositoryIndex, CodeIndexError> {
+    let file = match filesystem.open_file(Some(workspace_root), path) {
+        Ok((file, _)) => file,
+        Err(error) if HostFilesystemPolicy::is_private_access_denied(&error) => {
+            return Err(CodeIndexError::new(
+                "host_private_directory_access_denied",
+                "code_index.private_cache_denied",
+            ));
+        }
+        Err(_) => return Ok(RepositoryIndex::default()),
     };
     let mut bytes = Vec::new();
     if file
@@ -270,39 +340,63 @@ fn load_index(workspace_root: &Path, path: &Path) -> RepositoryIndex {
         .is_err()
         || bytes.len() > 128 * 1024 * 1024
     {
-        return RepositoryIndex::default();
+        return Ok(RepositoryIndex::default());
     }
     let Ok(index) = serde_json::from_slice::<RepositoryIndex>(&bytes) else {
-        return RepositoryIndex::default();
+        return Ok(RepositoryIndex::default());
     };
     if index.schema_version != INDEX_SCHEMA_VERSION || index.parser_revision != PARSER_REVISION {
-        return RepositoryIndex::default();
+        return Ok(RepositoryIndex::default());
     }
-    index
+    Ok(index)
 }
 
 fn persist_index(
     workspace_root: &Path,
     path: &Path,
     index: &RepositoryIndex,
+    filesystem: &HostFilesystemPolicy,
 ) -> Result<(), CodeIndexError> {
     let bytes = serde_json::to_vec(index)
         .map_err(|error| CodeIndexError::new("serialize_failed", error.to_string()))?;
-    crate::secure_workspace_fs::atomic_write_workspace_file(workspace_root, path, &bytes)
+    filesystem
+        .atomic_write_file(workspace_root, path, &bytes)
         .map_err(|error| CodeIndexError::new("index_write_failed", error.to_string()))
 }
 
 fn collect_source_candidates(
     workspace_root: &Path,
-) -> Result<(Vec<SourceCandidate>, usize), CodeIndexError> {
+    filesystem: &HostFilesystemPolicy,
+    stats: &mut RefreshStats,
+) -> Result<Vec<SourceCandidate>, CodeIndexError> {
     let mut candidates = Vec::new();
-    let mut unreadable_entries = 0;
     let mut stack = vec![workspace_root.to_path_buf()];
     while let Some(directory) = stack.pop() {
-        let entries = match fs::read_dir(&directory) {
+        let handle = match filesystem.open_directory(Some(workspace_root), &directory) {
+            Ok(handle) => handle,
+            Err(error)
+                if directory != workspace_root
+                    && HostFilesystemPolicy::is_private_access_denied(&error) =>
+            {
+                stats.policy_excluded_entries += 1;
+                stats.skipped_files += 1;
+                continue;
+            }
+            Err(_) if directory != workspace_root => {
+                stats.skipped_files += 1;
+                continue;
+            }
+            Err(error) => {
+                return Err(CodeIndexError::new(
+                    "repository_read_failed",
+                    error.to_string(),
+                ))
+            }
+        };
+        let entries = match handle.entries() {
             Ok(entries) => entries,
             Err(_) if directory != workspace_root => {
-                unreadable_entries += 1;
+                stats.skipped_files += 1;
                 continue;
             }
             Err(error) => {
@@ -313,55 +407,39 @@ fn collect_source_candidates(
             }
         };
         for entry in entries {
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(_) => {
-                    unreadable_entries += 1;
-                    continue;
-                }
-            };
-            let file_type = match entry.file_type() {
-                Ok(file_type) => file_type,
-                Err(_) => {
-                    unreadable_entries += 1;
-                    continue;
-                }
-            };
-            if file_type.is_symlink() {
+            let file_type = entry.file_type;
+            if file_type == rustix::fs::FileType::Symlink {
                 continue;
-            }
-            let path = entry.path();
-            if file_type.is_dir() {
-                if !excluded_directory(entry.file_name().to_string_lossy().as_ref()) {
+            };
+            let path = directory.join(&entry.name);
+            if file_type == rustix::fs::FileType::Directory {
+                if !excluded_directory(entry.name.to_string_lossy().as_ref()) {
                     stack.push(path);
                 }
                 continue;
             }
-            if !file_type.is_file() {
+            if file_type != rustix::fs::FileType::RegularFile {
                 continue;
             }
             let Some(language) = source_language(&path) else {
                 continue;
             };
-            let metadata = match entry.metadata() {
-                Ok(metadata) => metadata,
-                Err(_) => {
-                    unreadable_entries += 1;
-                    continue;
-                }
+            let Some(size_bytes) = entry.size_bytes else {
+                stats.skipped_files += 1;
+                continue;
             };
             let relative_path = relative_workspace_path(workspace_root, &path)?;
             candidates.push(SourceCandidate {
                 path,
                 relative_path,
                 language,
-                size_bytes: metadata.len(),
-                modified_ns: modified_ns(&metadata),
+                size_bytes,
+                modified_ns: entry.modified_ns,
             });
         }
     }
     candidates.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
-    Ok((candidates, unreadable_entries))
+    Ok(candidates)
 }
 
 fn source_candidate_snapshot(workspace_root: &Path, candidates: &[SourceCandidate]) -> String {
@@ -444,13 +522,15 @@ fn source_language(path: &Path) -> Option<&'static str> {
 fn index_source_file(
     workspace_root: &Path,
     candidate: &SourceCandidate,
+    filesystem: &HostFilesystemPolicy,
 ) -> Result<IndexedFile, CodeIndexError> {
     if candidate.language == "rust" && candidate.size_bytes > MAX_SOURCE_BYTES {
-        return index_large_rust_source(workspace_root, candidate);
+        return index_large_rust_source(workspace_root, candidate, filesystem);
     }
-    let mut source_file =
-        crate::secure_workspace_fs::open_workspace_file(workspace_root, &candidate.path)
-            .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
+    let mut source_file = filesystem
+        .open_file(Some(workspace_root), &candidate.path)
+        .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?
+        .0;
     let mut bytes = Vec::new();
     (&mut source_file)
         .take(MAX_SOURCE_BYTES + 1)
@@ -511,9 +591,12 @@ fn index_source_file(
 fn index_large_rust_source(
     workspace_root: &Path,
     candidate: &SourceCandidate,
+    filesystem: &HostFilesystemPolicy,
 ) -> Result<IndexedFile, CodeIndexError> {
-    let file = crate::secure_workspace_fs::open_workspace_file(workspace_root, &candidate.path)
-        .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
+    let file = filesystem
+        .open_file(Some(workspace_root), &candidate.path)
+        .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?
+        .0;
     let scanned = large_rust_source::scan(file)
         .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
     Ok(IndexedFile {
@@ -931,9 +1014,23 @@ fn changed_impact(
     index: &RepositoryIndex,
     args: &JsonMap<String, Value>,
     refresh: &RefreshStats,
+    filesystem: &HostFilesystemPolicy,
+    backend: ToolSandboxBackend,
 ) -> Result<Value, CodeIndexError> {
-    let changed_paths =
-        machine_paths(args.get("paths"))?.unwrap_or_else(|| git_changed_paths(workspace_root));
+    let (changed_paths, policy_excluded_paths, git_query_failures, uninspected_submodules) =
+        match machine_paths(args.get("paths"))? {
+            Some(paths) => (paths, 0, 0, 0),
+            None => {
+                let observation =
+                    git_observation::changed_paths(workspace_root, filesystem, backend)?;
+                (
+                    observation.paths,
+                    observation.excluded_paths,
+                    observation.query_failures,
+                    observation.uninspected_submodules,
+                )
+            }
+        };
     let changed = changed_paths.iter().cloned().collect::<BTreeSet<_>>();
     let changed_symbols = all_definitions(index)
         .filter(|(path, _)| changed.contains(*path))
@@ -964,6 +1061,15 @@ fn changed_impact(
         refresh,
         json!({
             "changed_paths": changed_paths,
+            "changed_paths_complete": policy_excluded_paths == 0 && git_query_failures == 0 && uninspected_submodules == 0,
+            "policy_excluded_paths": policy_excluded_paths,
+            "git_query_failures": git_query_failures,
+            "git_submodule_worktrees_uninspected": uninspected_submodules,
+            "changed_paths_semantics": if args.contains_key("paths") {
+                "caller_supplied"
+            } else {
+                "without_executable_repository_config"
+            },
             "changed_symbols": changed_symbols,
             "dependent_files": dependent_files,
             "impacted_tests": impacted_tests,
@@ -981,6 +1087,7 @@ fn retrieve_context(
     index: &RepositoryIndex,
     args: &JsonMap<String, Value>,
     refresh: &RefreshStats,
+    filesystem: &HostFilesystemPolicy,
 ) -> Result<Value, CodeIndexError> {
     let symbols = machine_strings(args.get("symbols"))?.unwrap_or_default();
     let paths = machine_paths(args.get("paths"))?.unwrap_or_default();
@@ -1018,6 +1125,7 @@ fn retrieve_context(
             &path,
             &definition,
             context_lines,
+            filesystem,
         )?);
     }
     let selected_paths = snippets
@@ -1051,12 +1159,15 @@ fn context_snippet(
     relative_path: &str,
     definition: &SymbolDefinition,
     context_lines: usize,
+    filesystem: &HostFilesystemPolicy,
 ) -> Result<Value, CodeIndexError> {
     let start_line = definition.line.saturating_sub(context_lines).max(1);
     let end_line = definition.end_line.saturating_add(context_lines);
     let path = workspace_root.join(relative_path);
-    let file = crate::secure_workspace_fs::open_workspace_file(workspace_root, &path)
-        .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?;
+    let file = filesystem
+        .open_file(Some(workspace_root), &path)
+        .map_err(|error| CodeIndexError::new("source_read_failed", error.to_string()))?
+        .0;
     let mut bytes = Vec::new();
     file.take(MAX_SOURCE_BYTES + 1)
         .read_to_end(&mut bytes)
@@ -1176,6 +1287,8 @@ fn index_summary(index: &RepositoryIndex, refresh: &RefreshStats) -> Value {
         "reused_files": refresh.reused_files,
         "removed_files": refresh.removed_files,
         "skipped_files": refresh.skipped_files,
+        "policy_excluded_entries": refresh.policy_excluded_entries,
+        "cache_rejected_files": refresh.cache_rejected_files,
         "scan_truncated": refresh.scan_truncated,
         "scan_complete": index.scan_complete,
         "complete": index.scan_complete,
@@ -1435,7 +1548,7 @@ fn machine_paths(value: Option<&Value>) -> Result<Option<Vec<String>>, CodeIndex
 }
 
 fn normalize_relative_path(value: &str) -> Result<String, CodeIndexError> {
-    let path = Path::new(value.trim());
+    let path = Path::new(value);
     if path.is_absolute() {
         return Err(CodeIndexError::new(
             "path_outside_workspace",
@@ -1455,7 +1568,7 @@ fn normalize_relative_path(value: &str) -> Result<String, CodeIndexError> {
             }
         }
     }
-    Ok(normalized.to_string_lossy().replace('\\', "/"))
+    Ok(normalized.to_string_lossy().into_owned())
 }
 
 fn relative_workspace_path(root: &Path, path: &Path) -> Result<String, CodeIndexError> {
@@ -1466,42 +1579,6 @@ fn relative_workspace_path(root: &Path, path: &Path) -> Result<String, CodeIndex
         )
     })?;
     normalize_relative_path(&relative.to_string_lossy())
-}
-
-fn modified_ns(metadata: &fs::Metadata) -> u64 {
-    metadata
-        .modified()
-        .ok()
-        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-        .map(|duration| duration.as_nanos().min(u64::MAX as u128) as u64)
-        .unwrap_or_default()
-}
-
-fn git_changed_paths(workspace_root: &Path) -> Vec<String> {
-    let mut paths = BTreeSet::new();
-    for args in [
-        vec!["diff", "--name-only", "--relative", "HEAD"],
-        vec!["ls-files", "--others", "--exclude-standard"],
-    ] {
-        let Ok(output) = Command::new("git")
-            .args(args)
-            .current_dir(workspace_root)
-            .output()
-        else {
-            continue;
-        };
-        if !output.status.success() {
-            continue;
-        }
-        for line in String::from_utf8_lossy(&output.stdout).lines() {
-            if let Ok(path) = normalize_relative_path(line) {
-                if !path.is_empty() {
-                    paths.insert(path);
-                }
-            }
-        }
-    }
-    paths.into_iter().collect()
 }
 
 fn safe_char_boundary(value: &str, limit: usize) -> usize {
