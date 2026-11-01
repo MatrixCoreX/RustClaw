@@ -83,6 +83,12 @@ jobs:
           cargo test --locked -p agent-skill-sdk
           cargo test --locked -p skill-runner
 
+      - name: Test core configuration and model catalog
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p claw-core
+
       - name: Test actual owner and package custody
         shell: bash
         run: |

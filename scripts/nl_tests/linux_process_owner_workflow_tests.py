@@ -32,7 +32,7 @@ def validate(workflow):
     if events["push"].get("branches") != ["main", "ci/runtime-hardening-*"]:
         return False
     for event in ("push", "pull_request"):
-        if not {"crates/skill-sdk/**", "scripts/clean_dev_artifacts.py",
+        if not {"crates/claw-core/**", "crates/skill-sdk/**", "scripts/clean_dev_artifacts.py",
                 "scripts/tests/test_clean_dev_artifacts.py", "scripts/check-secrets.sh",
                 "scripts/check_staged_secrets.py", "scripts/tests/test_check_staged_secrets.py"}.issubset(events[event].get("paths", [])):
             return False
@@ -76,6 +76,7 @@ def validate(workflow):
         "python3 -m unittest discover -s scripts/tests -p test_check_staged_secrets.py -v",
         "cargo test --locked -p agent-skill-sdk",
         "cargo test --locked -p skill-runner",
+        "cargo test --locked -p claw-core",
         "cargo build --locked -p clawd --bin clawd",
         *[f'APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test --locked -p clawd --bin clawd {case} -- --exact --ignored --test-threads=1 --nocapture'
           for case in OWNER_CASES],
@@ -176,6 +177,21 @@ class LinuxProcessOwnerWorkflowTests(unittest.TestCase):
         changed = deepcopy(self.workflow)
         changed["on"]["push"]["branches"] = ["main"]
         self.assertFalse(validate(changed))
+
+    def test_core_suite_cannot_be_removed_filtered_or_forced_serial(self):
+        command = "cargo test --locked -p claw-core"
+        for replacement in ("", "true", command + " model_catalog::",
+                            command + " -- --test-threads=1"):
+            changed = deepcopy(self.workflow)
+            for step in changed["jobs"]["process-owner-linux"]["steps"]:
+                if "run" in step:
+                    step["run"] = step["run"].replace(command, replacement)
+            with self.subTest(replacement=replacement):
+                self.assertFalse(validate(changed))
+        for event in ("push", "pull_request"):
+            changed = deepcopy(self.workflow)
+            changed["on"][event]["paths"].remove("crates/claw-core/**")
+            self.assertFalse(validate(changed))
 
     def test_staged_guard_selection_and_all_triggers_are_required(self):
         command = "python3 -m unittest discover -s scripts/tests -p test_check_staged_secrets.py -v"
