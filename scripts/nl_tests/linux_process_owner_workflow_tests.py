@@ -1,6 +1,8 @@
 """Require actual Linux owner/SDK acceptance without bypassing identity gates."""
 from copy import deepcopy
+import json
 from pathlib import Path
+import re
 import unittest
 
 import yaml
@@ -20,6 +22,8 @@ OWNER_CASES = (
 
 
 def validate(workflow):
+    if re.search(r"\$\{\{[^}]*\bsecrets\s*(?:\.|\[)", json.dumps(workflow)):
+        return False
     if workflow.get("permissions") != {"contents": "read"}:
         return False
     events = workflow.get("on", {})
@@ -29,7 +33,8 @@ def validate(workflow):
         return False
     for event in ("push", "pull_request"):
         if not {"crates/skill-sdk/**", "scripts/clean_dev_artifacts.py",
-                "scripts/tests/test_clean_dev_artifacts.py"}.issubset(events[event].get("paths", [])):
+                "scripts/tests/test_clean_dev_artifacts.py", "scripts/check-secrets.sh",
+                "scripts/check_staged_secrets.py", "scripts/tests/test_check_staged_secrets.py"}.issubset(events[event].get("paths", [])):
             return False
     if set(workflow.get("jobs", {})) != {"process-owner-linux"}:
         return False
@@ -59,7 +64,7 @@ def validate(workflow):
             lines = step["run"].strip().splitlines()
             if step.get("shell") != "bash" or lines[0] != "set -euo pipefail":
                 return False
-            if any("||" in line or "secrets." in line for line in lines):
+            if any("||" in line for line in lines):
                 return False
             commands.extend(lines[1:])
     if python_setups != 1:
@@ -68,6 +73,7 @@ def validate(workflow):
         "python3 scripts/check_github_action_pins.py",
         "python3 scripts/nl_tests/linux_process_owner_workflow_tests.py",
         "python3 -m unittest discover -s scripts/tests -p test_clean_dev_artifacts.py -v",
+        "python3 -m unittest discover -s scripts/tests -p test_check_staged_secrets.py -v",
         "cargo test --locked -p agent-skill-sdk",
         "cargo test --locked -p skill-runner",
         "cargo build --locked -p clawd --bin clawd",
@@ -121,7 +127,7 @@ class LinuxProcessOwnerWorkflowTests(unittest.TestCase):
             changed["jobs"]["process-owner-linux"][location] = value
             with self.subTest(mutation=location):
                 self.assertFalse(validate(changed))
-        for mutation in ("continue", "conditional", "shell", "failure", "credentials"):
+        for mutation in ("continue", "conditional", "shell", "failure", "credentials", "secret_context"):
             changed = deepcopy(self.workflow)
             steps = changed["jobs"]["process-owner-linux"]["steps"]
             if mutation == "continue":
@@ -132,8 +138,10 @@ class LinuxProcessOwnerWorkflowTests(unittest.TestCase):
                 steps[-1]["run"] = steps[-1]["run"].replace("set -euo pipefail", "set +e")
             elif mutation == "failure":
                 steps[-1]["run"] += "true || true\n"
-            else:
+            elif mutation == "credentials":
                 steps[0]["with"]["persist-credentials"] = True
+            else:
+                steps[-1]["env"] = {"TOKEN": "${{ secrets.PROVIDER_TOKEN }}"}
             with self.subTest(mutation=mutation):
                 self.assertFalse(validate(changed))
 
@@ -168,6 +176,20 @@ class LinuxProcessOwnerWorkflowTests(unittest.TestCase):
         changed = deepcopy(self.workflow)
         changed["on"]["push"]["branches"] = ["main"]
         self.assertFalse(validate(changed))
+
+    def test_staged_guard_selection_and_all_triggers_are_required(self):
+        command = "python3 -m unittest discover -s scripts/tests -p test_check_staged_secrets.py -v"
+        changed = deepcopy(self.workflow)
+        for step in changed["jobs"]["process-owner-linux"]["steps"]:
+            if "run" in step:
+                step["run"] = step["run"].replace(command, "")
+        self.assertFalse(validate(changed))
+        for event in ("push", "pull_request"):
+            for path in ("scripts/check-secrets.sh", "scripts/check_staged_secrets.py",
+                         "scripts/tests/test_check_staged_secrets.py"):
+                changed = deepcopy(self.workflow)
+                changed["on"][event]["paths"].remove(path)
+                self.assertFalse(validate(changed))
         for original in (
             "cargo test --locked -p clawd --bin clawd workspace_ -- --test-threads=1 --nocapture",
             "cargo test --locked -p clawd --bin clawd -- --test-threads=1 --nocapture",

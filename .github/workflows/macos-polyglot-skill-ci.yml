@@ -40,6 +40,9 @@ name: Polyglot Skill macOS CI
       - "scripts/nl_tests/macos_runner_workflow_tests.py"
       - "scripts/clean_dev_artifacts.py"
       - "scripts/tests/test_clean_dev_artifacts.py"
+      - "scripts/check-secrets.sh"
+      - "scripts/check_staged_secrets.py"
+      - "scripts/tests/test_check_staged_secrets.py"
       - "scripts/skill_store_packages.py"
       - "scripts/nl_tests/run_manual_test.sh"
       - "scripts/nl_tests/manual_case_observation*.py"
@@ -95,6 +98,9 @@ name: Polyglot Skill macOS CI
       - "scripts/nl_tests/macos_runner_workflow_tests.py"
       - "scripts/clean_dev_artifacts.py"
       - "scripts/tests/test_clean_dev_artifacts.py"
+      - "scripts/check-secrets.sh"
+      - "scripts/check_staged_secrets.py"
+      - "scripts/tests/test_check_staged_secrets.py"
       - "scripts/skill_store_packages.py"
       - "scripts/nl_tests/run_manual_test.sh"
       - "scripts/nl_tests/manual_case_observation*.py"
@@ -174,6 +180,7 @@ jobs:
           python3 -m unittest discover -s scripts/tests -p 'test_release_native_libraries.py'
           python3 -m unittest discover -s scripts/tests -p 'test_release_managed_files.py'
           python3 -m unittest discover -s scripts/tests -p test_clean_dev_artifacts.py -v
+          python3 -m unittest discover -s scripts/tests -p test_check_staged_secrets.py -v
 
       - name: Test retained-task acceptance without resubmission
         shell: bash

@@ -29,6 +29,16 @@ def valid_job(job, runner, target):
 
 
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_staged_secret_guard_is_selected_on_native_macos(self):
+        workflow = load("macos-polyglot-skill-ci.yml")
+        for event in ("push", "pull_request"):
+            self.assertTrue({"scripts/check-secrets.sh", "scripts/check_staged_secrets.py",
+                             "scripts/tests/test_check_staged_secrets.py"}
+                            .issubset(workflow["on"][event]["paths"]))
+        command = "python3 -m unittest discover -s scripts/tests -p test_check_staged_secrets.py -v"
+        steps = workflow["jobs"]["polyglot-skill-macos"]["steps"]
+        self.assertEqual(sum(command in step.get("run", "") for step in steps), 1)
+
     def test_cache_cleanup_regression_is_selected_on_native_macos(self):
         workflow = load("macos-polyglot-skill-ci.yml")
         for event in ("push", "pull_request"):
