@@ -89,7 +89,10 @@ pub(crate) fn output_contract_exact_scalar_field(
         .then(|| field.to_string())
 }
 
-fn structured_json_contains_field_path(value: &serde_json::Value, path: &[&str]) -> bool {
+pub(crate) fn structured_json_contains_field_path(
+    value: &serde_json::Value,
+    path: &[&str],
+) -> bool {
     if path.is_empty() {
         return false;
     }
