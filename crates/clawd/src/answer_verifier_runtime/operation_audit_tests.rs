@@ -2,7 +2,7 @@ use super::*;
 use crate::task_journal::TaskJournalStepTrace;
 use serde_json::json;
 
-fn journal() -> TaskJournal {
+pub(super) fn journal() -> TaskJournal {
     let mut journal = TaskJournal::for_task("audit-fixture", "ask", "fixture request");
     journal
         .step_results
@@ -19,7 +19,7 @@ fn journal() -> TaskJournal {
     journal
 }
 
-fn model(mut checks: serde_json::Value) -> ModelVerifierOut {
+pub(super) fn model(mut checks: serde_json::Value) -> ModelVerifierOut {
     for check in checks.as_array_mut().unwrap() {
         check
             .as_object_mut()

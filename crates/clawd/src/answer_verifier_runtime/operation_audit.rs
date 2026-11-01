@@ -23,9 +23,13 @@ pub(super) fn host_output_field_checks(
     output_contract: &crate::IntentOutputContract,
     candidate_answer: &str,
 ) -> Vec<OutputFieldCheck> {
-    if !output_contract.requests_exact_structured_fields() {
+    // Scalar and file-token contracts expose values, not visible field labels.
+    if output_contract.response_shape != crate::OutputResponseShape::Strict
+        || !output_contract.requests_exact_structured_fields()
+    {
         return Vec::new();
     }
+    let structured = serde_json::from_str::<serde_json::Value>(candidate_answer.trim()).ok();
     output_contract
         .selection
         .structured_field_selector
@@ -34,10 +38,29 @@ pub(super) fn host_output_field_checks(
         .unwrap_or_default()
         .into_iter()
         .map(|requested_field| OutputFieldCheck {
-            exact_label_present: candidate_answer.contains(&requested_field),
+            exact_label_present: candidate_field_is_present(
+                &requested_field,
+                candidate_answer,
+                structured.as_ref(),
+            ),
             requested_field,
         })
         .collect()
+}
+
+fn candidate_field_is_present(
+    field: &str,
+    candidate: &str,
+    structured: Option<&serde_json::Value>,
+) -> bool {
+    match structured {
+        Some(value) => crate::machine_selector::structured_json_contains_field_path(
+            value,
+            &field.split('.').collect::<Vec<_>>(),
+        ),
+        // Keep existing text-label behavior; do not infer new prose requirements.
+        None => candidate.contains(field),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -315,8 +338,14 @@ pub(super) fn validate_output_field_audit(
     checks: &[OutputFieldCheck],
     candidate_answer: &str,
 ) -> AnswerVerifierOut {
+    let structured = serde_json::from_str::<serde_json::Value>(candidate_answer.trim()).ok();
     let output_format_gap = checks.iter().any(|check| {
-        !check.exact_label_present || !candidate_answer.contains(check.requested_field.as_str())
+        !check.exact_label_present
+            || !candidate_field_is_present(
+                &check.requested_field,
+                candidate_answer,
+                structured.as_ref(),
+            )
     });
     if output_format_gap {
         verdict.pass = false;
@@ -341,3 +370,7 @@ pub(super) fn validate_output_field_audit(
 #[cfg(test)]
 #[path = "operation_audit_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "field_label_tests.rs"]
+mod field_label_tests;
