@@ -123,6 +123,35 @@ async fn output(mut command: Command) -> std::process::Output {
         .unwrap()
 }
 
+fn readonly_fixture_command(
+    request: ProcessSandboxRequest<'_>,
+    fixture_root: &std::path::Path,
+    durable: bool,
+    host_visible: bool,
+) -> Command {
+    assert_eq!(request.mode, ToolSandboxMode::ReadOnly);
+    // The fixture may be under the private /tmp mount. Declare only this
+    // owned read scope; never restore the host temporary or process trees.
+    prepare_invocation_for_lifetime(
+        "/bin/sh",
+        request,
+        if durable {
+            ProcessLifetime::DurableAsync
+        } else {
+            ProcessLifetime::ParentBound
+        },
+        if host_visible {
+            ProcessNamespacePolicy::HostVisible
+        } else {
+            ProcessNamespacePolicy::Isolated
+        },
+        &[fixture_root.to_path_buf()],
+    )
+    .unwrap()
+    .into_process_command()
+    .command
+}
+
 async fn broad_workspace_keeps_owned_parent_hidden(workspace: &str) {
     let mut fixture = Fixture::new().await;
     let parent = std::process::id();
@@ -138,12 +167,7 @@ async fn broad_workspace_keeps_owned_parent_hidden(workspace: &str) {
             let mut request = fixture.request(&private);
             request.mode = ToolSandboxMode::ReadOnly;
             request.workspace_root = std::path::Path::new(workspace);
-            let prepare = if durable {
-                prepare_durable_process_command
-            } else {
-                prepare_process_command
-            };
-            let mut command = prepare("/bin/sh", request).unwrap().command;
+            let mut command = readonly_fixture_command(request, &fixture.root, durable, false);
             command.args(["-c", "set -eu; if [ \"$(cat \"/proc/$1/comm\" 2>/dev/null || :)\" = \"$2\" ]; then printf parent_visible; else printf parent_hidden; fi; printf '\\n'; cat \"$3\"", "fixture"])
                 .arg(parent.to_string()).arg(parent_comm.trim_end()).arg(fixture.root.join("public"));
             let result = output(command).await;
@@ -190,7 +214,7 @@ async fn device_workspace_keeps_owned_shm_marker_outside_private_dev() {
         let mut request = fixture.request(&private);
         request.mode = ToolSandboxMode::ReadOnly;
         request.workspace_root = std::path::Path::new("/dev");
-        let mut command = prepare_process_command("/bin/sh", request).unwrap().command;
+        let mut command = readonly_fixture_command(request, &fixture.root, false, false);
         command.args(["-c", "set -eu; if [ -e \"$1\" ]; then printf device_marker_visible; else printf device_marker_hidden; fi; printf '\\n'; cat \"$2\"", "fixture"])
             .arg(&marker).arg(fixture.root.join("public"));
         let result = output(command).await;
@@ -244,12 +268,7 @@ async fn proc_workspace_preserves_explicit_host_visible_policy() {
         let mut request = fixture.request(&private);
         request.mode = ToolSandboxMode::ReadOnly;
         request.workspace_root = std::path::Path::new("/proc");
-        let prepare = if durable {
-            prepare_durable_host_process_command
-        } else {
-            prepare_host_process_command
-        };
-        let mut command = prepare("/bin/sh", request).unwrap().command;
+        let mut command = readonly_fixture_command(request, &fixture.root, durable, true);
         command
             .args([
                 "-c",
@@ -265,6 +284,41 @@ async fn proc_workspace_preserves_explicit_host_visible_policy() {
     for result in results {
         assert!(result.status.success(), "{result:?}");
         assert_eq!(result.stdout, b"public-marker");
+    }
+}
+
+#[tokio::test]
+async fn temporary_execution_fixture_needs_an_explicit_readonly_mapping() {
+    let directory = tempfile::Builder::new()
+        .prefix("owned-readonly-execution-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let public = directory.path().join("public");
+    fs::write(&public, b"public-temporary-marker").unwrap();
+    let request = ProcessSandboxRequest {
+        mode: ToolSandboxMode::ReadOnly,
+        backend: ToolSandboxBackend::Auto,
+        workspace_root: std::path::Path::new("/proc"),
+        execution_root: directory.path(),
+        network: ProcessNetworkPolicy::Deny,
+        additional_writable_paths: &[],
+        host_private_directories: &[],
+        browser_subprocess: false,
+    };
+    let mut hidden = prepare_process_command("/bin/sh", request).unwrap().command;
+    hidden.args(["-c", "cat public"]);
+    assert!(!output(hidden).await.status.success());
+
+    for durable in [false, true] {
+        let mut mapped = readonly_fixture_command(request, directory.path(), durable, false);
+        mapped.args([
+            "-c",
+            "set -eu; cat public; if (printf changed > public) 2>/dev/null; then exit 42; fi",
+        ]);
+        let result = output(mapped).await;
+        assert!(result.status.success(), "{result:?}");
+        assert_eq!(result.stdout, b"public-temporary-marker");
+        assert_eq!(fs::read(&public).unwrap(), b"public-temporary-marker");
     }
 }
 
