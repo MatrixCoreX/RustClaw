@@ -178,7 +178,6 @@ fn private_mount_anchors_cover_nested_ancestors_aliases_and_shared_parents_once(
 
 #[test]
 fn private_seatbelt_rules_escape_paths_and_reject_lossy_or_multiline_names() {
-    use std::os::unix::ffi::OsStringExt;
     let root = Fixture::new();
     let private = root.directory("private\"quoted\\path");
     let exclusions = DirectoryExclusions::admit(&[private], &root.0).unwrap();
@@ -186,10 +185,7 @@ fn private_seatbelt_rules_escape_paths_and_reject_lossy_or_multiline_names() {
     assert!(rules.contains("(deny file-read* (subpath \""));
     assert!(rules.contains("(deny file-write* (subpath \""));
     assert!(rules.contains("\\\"quoted\\\\path"));
-    for name in [
-        std::ffi::OsString::from("line\nbreak"),
-        std::ffi::OsString::from_vec(vec![0xff]),
-    ] {
+    for name in ["line\nbreak", "line\rbreak"] {
         let path = root.0.join(name);
         fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
         assert_eq!(
@@ -197,6 +193,22 @@ fn private_seatbelt_rules_escape_paths_and_reject_lossy_or_multiline_names() {
                 .unwrap()
                 .seatbelt_rules()
                 .err(),
+            Some("sandbox_private_directory_invalid")
+        );
+    }
+}
+
+#[test]
+fn private_seatbelt_rules_reject_non_utf8_without_requiring_filesystem_support() {
+    use std::os::unix::ffi::OsStringExt;
+    let root = Fixture::new();
+    // APFS rejects these filenames at creation. Profile encoding must reject
+    // the same raw values on every backend, without lossy replacement.
+    for bytes in [vec![0xff], vec![0xc0, 0xaf], vec![0xe2, 0x82]] {
+        let path = root.0.join(std::ffi::OsString::from_vec(bytes));
+        let exclusions = DirectoryExclusions { roots: vec![path] };
+        assert_eq!(
+            exclusions.seatbelt_rules().err(),
             Some("sandbox_private_directory_invalid")
         );
     }

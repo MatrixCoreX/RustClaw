@@ -39,7 +39,26 @@ fn protocol_smoke_uses_host_exclusions_and_never_embeds_them_in_receipts() {
         adapter_version: "fixture-v1".to_string(), artifacts: Vec::new(), phases: Vec::new(),
         launch: ReceiptLaunch { launcher: LauncherKind::Process, program: python.display().to_string(),
             program_scope: LaunchProgramScope::TrustedRuntime,
-            args: vec!["-c".to_string(), "import json,sys,pathlib; r=json.loads(sys.stdin.readline()); assert pathlib.Path('public').read_bytes()==b'public-marker'; assert not pathlib.Path(sys.argv[1]).exists(); print(json.dumps({'request_id':r['request_id'],'status':'ok','text':'fixture','error_text':None,'extra':None}))".to_string(), private.join("marker").display().to_string()],
+            args: vec!["-c".to_string(), r#"
+import errno, json, pathlib, sys
+request = json.loads(sys.stdin.readline())
+assert pathlib.Path('public').read_bytes() == b'public-marker'
+marker = pathlib.Path(sys.argv[1])
+try:
+    marker.read_bytes()
+except OSError as error:
+    assert error.errno in (errno.ENOENT, errno.EACCES, errno.EPERM)
+else:
+    raise AssertionError('private read unexpectedly allowed')
+for target in (marker, marker.with_name('future-record')):
+    try:
+        target.write_bytes(b'changed')
+    except OSError as error:
+        assert error.errno in (errno.ENOENT, errno.EACCES, errno.EPERM, errno.EROFS)
+    else:
+        raise AssertionError('private write unexpectedly allowed')
+print(json.dumps({'request_id':request['request_id'], 'status':'ok', 'text':'fixture', 'error_text':None, 'extra':None}))
+"#.to_string(), private.join("marker").display().to_string()],
             working_directory: ".".to_string(), environment: BTreeMap::new(), environment_allowlist: Vec::new(),
             trusted_runtime_sha256: None, trusted_runtime_version: None, remote_endpoint: None },
     };
@@ -73,4 +92,5 @@ fn protocol_smoke_uses_host_exclusions_and_never_embeds_them_in_receipts() {
         fs::read(private.join("marker")).unwrap(),
         b"non-secret-private-marker"
     );
+    assert!(!private.join("future-record").exists());
 }
