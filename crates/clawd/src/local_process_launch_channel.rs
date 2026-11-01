@@ -428,6 +428,10 @@ impl LaunchChannel {
 #[path = "local_process_launch_channel_diagnostics_tests.rs"]
 pub(super) mod diagnostics_tests;
 
+#[cfg(test)]
+#[path = "local_process_launch_channel_truncation_tests.rs"]
+mod truncation_tests;
+
 fn validate_data_handle(file: &File) -> Result<(), LaunchChannelFailure> {
     let kind = file
         .metadata()
