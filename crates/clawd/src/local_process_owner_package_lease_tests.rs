@@ -99,10 +99,10 @@ fn package_lease_receiver_refuses_readonly_handles_without_mutating_flags() {
     .unwrap();
     super::super::tests::raw_send(&sender, &raw(&value), &[&lease, &record]);
     drop(sender);
-    assert!(matches!(
+    super::super::diagnostics_tests::assert_failure(
         receiver.receive_package_lease(&expected, BINDING, deadline()),
-        Err(LaunchChannelFailure::InvalidDescriptor)
-    ));
+        LaunchChannelFailure::InvalidDescriptor,
+    );
     assert_eq!(
         unsafe { libc::fcntl(observer.as_raw_fd(), libc::F_GETFL) },
         before
@@ -210,10 +210,10 @@ fn package_lease_rejects_non_regular_data_and_closes_received_duplicates() {
     super::super::tests::raw_send(&sender, &raw(&value), &[&output, &record]);
     drop(output);
     drop(sender);
-    assert!(matches!(
+    super::super::diagnostics_tests::assert_failure(
         receiver.receive_package_lease(&expected, BINDING, deadline()),
-        Err(LaunchChannelFailure::InvalidDescriptor)
-    ));
+        LaunchChannelFailure::InvalidDescriptor,
+    );
     assert_eq!(input.read(&mut [0]).unwrap(), 0);
 }
 

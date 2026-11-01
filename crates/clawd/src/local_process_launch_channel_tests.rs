@@ -91,10 +91,10 @@ fn bootstrap_rejects_wrong_handle_count_and_closes_every_received_duplicate() {
     raw_send(&sender, &header, &[&output, &output, &output]);
     drop(output);
     drop(sender);
-    assert!(matches!(
+    diagnostics_tests::assert_failure(
         receiver.receive_bootstrap(deadline()),
-        Err(LaunchChannelFailure::InvalidDescriptor)
-    ));
+        LaunchChannelFailure::InvalidDescriptor,
+    );
     let mut byte = [0];
     assert_eq!(input.read(&mut byte).unwrap(), 0);
 }
@@ -208,7 +208,7 @@ fn owner_launch_channel_accepts_fragmented_header_without_repeating_rights() {
     raw_send(&sender.socket, &bytes[..1], &[&cwd]);
     raw_send(&sender.socket, &bytes[1..], &[]);
     drop(sender);
-    assert!(receiver.receive(&expected, deadline()).is_ok());
+    assert_eq!(receiver.receive(&expected, deadline()).map(|_| ()), Ok(()));
 }
 
 #[test]
@@ -236,10 +236,10 @@ fn owner_launch_channel_rejects_wrong_job_nonce_and_owner_binding() {
             &[&File::open(&root.0).unwrap()],
         );
         drop(sender);
-        assert!(matches!(
+        diagnostics_tests::assert_failure(
             receiver.receive(&expected, deadline()),
-            Err(LaunchChannelFailure::CredentialMismatch)
-        ));
+            LaunchChannelFailure::CredentialMismatch,
+        );
     }
 }
 
@@ -308,10 +308,10 @@ fn owner_launch_channel_rejects_unknown_fields_without_a_payload_effect() {
     let (sender, receiver) = channel_pair();
     raw_send(&sender.socket, &bytes, &[&File::open(&root.0).unwrap()]);
     drop(sender);
-    assert!(matches!(
+    diagnostics_tests::assert_failure(
         receiver.receive(&expected, deadline()),
-        Err(LaunchChannelFailure::InvalidFrame)
-    ));
+        LaunchChannelFailure::InvalidFrame,
+    );
 }
 
 #[test]
@@ -441,10 +441,10 @@ fn owner_launch_channel_rejects_rights_attached_to_the_body() {
     raw_send(&sender.socket, &bytes[..8], &[&cwd]);
     raw_send(&sender.socket, &bytes[8..], &[&cwd]);
     drop(sender);
-    assert!(matches!(
+    diagnostics_tests::assert_failure(
         receiver.receive(&expected, deadline()),
-        Err(LaunchChannelFailure::InvalidDescriptor)
-    ));
+        LaunchChannelFailure::InvalidDescriptor,
+    );
 }
 
 #[test]

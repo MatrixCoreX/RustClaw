@@ -195,10 +195,10 @@ fn owner_handshake_control_channel_rejects_and_closes_ancillary_rights() {
     super::super::launch_channel::tests::raw_send(&sender, &frame, &[&output]);
     drop(output);
     drop(sender);
-    assert!(matches!(
+    super::super::launch_channel::diagnostics_tests::assert_failure(
         receiver.receive_control(deadline()),
-        Err(LaunchChannelFailure::InvalidDescriptor)
-    ));
+        LaunchChannelFailure::InvalidDescriptor,
+    );
     assert_eq!(input.read(&mut [0; 1]).unwrap(), 0);
 }
 

@@ -337,7 +337,15 @@ impl LaunchChannel {
         loop {
             self.socket
                 .set_read_timeout(Some(remaining(deadline)?))
-                .map_err(|_| LaunchChannelFailure::TransportUnavailable)?;
+                .map_err(|_error| {
+                    #[cfg(test)]
+                    diagnostics_tests::receive_error(
+                        "set_read_timeout",
+                        bytes.len(),
+                        _error.raw_os_error(),
+                    );
+                    LaunchChannelFailure::TransportUnavailable
+                })?;
             let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(MAX_HANDLES))];
             let mut ancillary = RecvAncillaryBuffer::new(&mut space);
             #[cfg(target_os = "linux")]
@@ -352,12 +360,22 @@ impl LaunchChannel {
             ) {
                 Ok(message) => message,
                 Err(rustix::io::Errno::INTR) => continue,
-                Err(error) => return Err(io_failure(error)),
+                Err(error) => {
+                    #[cfg(test)]
+                    diagnostics_tests::receive_error(
+                        "recvmsg",
+                        bytes.len(),
+                        Some(error.raw_os_error()),
+                    );
+                    return Err(io_failure(error));
+                }
             };
             if message
                 .flags
                 .intersects(ReturnFlags::CTRUNC | ReturnFlags::TRUNC)
             {
+                #[cfg(test)]
+                diagnostics_tests::receive_flags(bytes.len(), message.flags.bits() as u64);
                 return Err(LaunchChannelFailure::InvalidDescriptor);
             }
             let mut handles = handles;
@@ -384,6 +402,8 @@ impl LaunchChannel {
                 }
             }
             return if message.bytes == 0 {
+                #[cfg(test)]
+                diagnostics_tests::receive_zero(bytes.len());
                 Err(LaunchChannelFailure::TransportUnavailable)
             } else {
                 Ok(message.bytes)
@@ -403,6 +423,10 @@ impl LaunchChannel {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "local_process_launch_channel_diagnostics_tests.rs"]
+pub(super) mod diagnostics_tests;
 
 fn validate_data_handle(file: &File) -> Result<(), LaunchChannelFailure> {
     let kind = file

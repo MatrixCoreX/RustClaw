@@ -200,6 +200,30 @@ fn strict_environment_accepts_non_utf8_parent_values_without_panicking() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    let report = raw_environment_completion(&output.stdout)
+        .expect("the exact isolated child must emit its completion report");
+    let source_entries = report["source_entries"].as_u64().unwrap();
+    assert!(source_entries >= 5);
+    assert_eq!(report["preserved"], serde_json::json!(["HOME", "PATH"]));
+    assert_eq!(report["stripped"], source_entries - 2);
+    assert_eq!(report["raw_home"], true);
+    assert_eq!(report["exact_child_environment"], true);
+    println!("STRICT_ENV_ACCEPTANCE {report}");
+}
+
+#[cfg(unix)]
+fn raw_environment_completion(stdout: &[u8]) -> Option<serde_json::Value> {
+    String::from_utf8_lossy(stdout)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|value| value["kind"] == "strict_env_complete")
+}
+
+#[cfg(unix)]
+#[test]
+fn raw_environment_zero_selection_cannot_be_a_completion_report() {
+    assert!(raw_environment_completion(b"running 0 tests\ntest result: ok. 0 passed\n").is_none());
+    assert!(raw_environment_completion(br#"{"kind":"other_report"}"#).is_none());
 }
 
 #[cfg(unix)]
@@ -255,7 +279,9 @@ async fn raw_parent_environment_child() {
     .collect();
     assert_eq!(actual, expected);
     println!(
-        "STRICT_ENV_ACCEPTANCE source_entries={} preserved=2 stripped={} raw_home=true exact_child_environment=true",
-        source.len(), report.stripped_count
+        "\n{}",
+        serde_json::json!({"kind":"strict_env_complete", "source_entries":source.len(),
+            "preserved":report.preserved,"stripped":report.stripped_count,
+            "raw_home":true,"exact_child_environment":true})
     );
 }
