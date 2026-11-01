@@ -266,6 +266,12 @@ jobs:
           set -euo pipefail
           cargo test --locked -p clawd --bin clawd answer_verifier -- --test-threads=1
           cargo test --locked -p clawd --bin clawd machine_selector -- --test-threads=1
+          cargo test --locked -p clawd --bin clawd planning_output_contract -- --test-threads=1
+          cargo test --locked -p clawd --bin clawd prepare_round -- --test-threads=1
+          cargo test --locked -p clawd --bin clawd task_contract -- --test-threads=1
+          cargo test --locked -p clawd --bin clawd pipeline_types -- --test-threads=1
+          cargo test --locked -p clawd --bin clawd task_journal -- --test-threads=1
+          python3 scripts/nl_tests/output_contract_schema_tests.py
 
       - name: Test channel registration response ownership
         shell: bash

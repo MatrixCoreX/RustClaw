@@ -55,7 +55,8 @@ Return a single JSON object with this exact schema:
     "delivery_required": false,
     "locator_kind": "none|path|current_workspace|url|filename",
     "delivery_intent": "none|file_single|directory_lookup|directory_batch_files",
-    "structured_field_selector": null
+    "structured_field_selector": null,
+    "output_field_labels": null
   },
   "steps": [ <AgentAction JSON>, ... ]
 }
@@ -73,9 +74,15 @@ evidence and preserve the machine selector; never repair it by copying prose int
 or token. A path plus content, a value plus source, or two or more requested named fields is a
 compound result and must use `free` or `strict` so every requested deliverable survives final
 projection.
-When the request semantically makes its named fields the exhaustive visible payload, use
-`response_shape="strict"` and map those labels to the selected capability's exact machine field
-identifiers in `structured_field_selector`. This applies across languages and to repeated rows;
+For exact source-field projections, use `structured_field_selector` for real fields exposed by
+the capability, without renaming them. For semantic extraction, renamed output keys, or values
+derived from a read document, preserve `response_shape="strict"`, `structured_field_selector=null`,
+and `output_field_labels` as an array of the exact requested output keys, including localized keys.
+These labels constrain
+presentation only; they never prove source evidence. Keep `requires_content_evidence=true`, read
+the actual source, then synthesize and verify the values. Do not use both selector fields together
+or replace output labels with document-internal keys. Otherwise leave `output_field_labels=null`.
+This applies across languages and repeated rows;
 do not choose `free` merely because the payload has multiple fields or items. Headings, prefaces,
 diagnostics, execution summaries, and compliance footers are outside an exhaustive field payload.
 

@@ -23,6 +23,10 @@
     "OutputContract": {
       "type": "object",
       "additionalProperties": false,
+      "allOf": [{
+        "if": {"required": ["output_field_labels"], "properties": {"output_field_labels": {"type": "array", "minItems": 1}}},
+        "then": {"properties": {"response_shape": {"const": "strict"}, "structured_field_selector": {"type": "null"}}}
+      }],
       "required": ["response_shape", "exact_sentence_count", "requires_content_evidence", "delivery_required", "locator_kind", "delivery_intent", "structured_field_selector"],
       "properties": {
         "response_shape": {"type": "string", "enum": ["free", "one_sentence", "strict", "scalar", "file_token"]},
@@ -35,6 +39,12 @@
           "type": ["string", "null"],
           "maxLength": 256,
           "description": "Optional comma-separated machine field selector. With scalar/strict/file_token it requests exact structured delivery; with free/one_sentence it declares the structured evidence fields that model synthesis must cover. Use null when no named machine fields were requested."
+        },
+        "output_field_labels": {
+          "type": ["array", "null"],
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true,
+          "description": "Strict semantic presentation only: literal output field labels, not source evidence fields. Localized keys are supported. Use structured_field_selector=null; obtain real observations and synthesize/verify the values. Omit, null or empty for exact source projections."
         }
       }
     },

@@ -310,6 +310,7 @@ pub(super) fn output_contract_json(contract: &crate::IntentOutputContract) -> Va
         "locator_kind": contract.locator_kind.as_str(),
         "delivery_intent": contract.delivery_intent.as_str(),
         "structured_field_selector": contract.selection.structured_field_selector,
+        "output_field_labels": contract.selection.output_field_labels,
     })
 }
 

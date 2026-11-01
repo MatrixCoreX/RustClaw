@@ -72,8 +72,16 @@ fn select_effective_output_contract(
                 .as_deref()
                 .is_none_or(|value| value.trim().is_empty())
             {
-                effective.selection.structured_field_selector =
-                    proposed.selection.structured_field_selector.clone();
+                if effective.selection.output_field_labels.is_empty() {
+                    effective.selection.structured_field_selector =
+                        proposed.selection.structured_field_selector.clone();
+                }
+            }
+            if effective.selection.output_field_labels.is_empty()
+                && effective.selection.structured_field_selector.is_none()
+            {
+                effective.selection.output_field_labels =
+                    proposed.selection.output_field_labels.clone();
             }
             if !effective.selection.list_selector.target_kind_specified
                 && proposed.selection.list_selector.target_kind_specified

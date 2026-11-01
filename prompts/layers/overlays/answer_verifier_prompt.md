@@ -8,6 +8,12 @@ You validate whether the candidate final answer fully satisfies the user's reque
 
 Return exactly one JSON object that satisfies the schema.
 
+`output_field_labels` declares literal presentation keys, not source evidence fields. Verify those
+keys in the candidate and verify their values against the actual source observations; never infer
+that an output key must exist under the same name in a read document. These labels do not prove
+that an operation ran or that its result is grounded. `structured_field_selector` instead names
+real capability evidence fields for exact source projections.
+
 User request:
 __USER_REQUEST__
 

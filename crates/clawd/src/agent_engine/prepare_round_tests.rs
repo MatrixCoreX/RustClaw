@@ -7,6 +7,28 @@ use super::{
 };
 
 #[test]
+fn committed_semantic_output_labels_cannot_be_replaced_by_source_field_selectors() {
+    let mut committed = crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        ..Default::default()
+    };
+    committed.selection.output_field_labels =
+        vec!["new_count".into(), "read_count".into(), "play_count".into()];
+    let mut proposed = committed.clone();
+    proposed.selection.output_field_labels = Vec::new();
+    proposed.selection.structured_field_selector =
+        Some("run.new_records,metrics.reads,metrics.views".into());
+    let effective = select_effective_output_contract(Some(&committed), Some(&proposed)).unwrap();
+    assert_eq!(
+        effective.selection.output_field_labels,
+        committed.selection.output_field_labels
+    );
+    assert!(effective.selection.structured_field_selector.is_none());
+    assert!(effective.requires_content_evidence);
+}
+
+#[test]
 fn committed_output_contract_cannot_be_relaxed_by_a_later_round() {
     let committed = crate::IntentOutputContract {
         response_shape: crate::OutputResponseShape::Strict,
@@ -69,6 +91,7 @@ fn later_round_cannot_replace_existing_machine_selector_or_list_constraints() {
         response_shape: crate::OutputResponseShape::Strict,
         selection: crate::pipeline_types::OutputSelectionContract {
             structured_field_selector: Some("name,kind".to_string()),
+            output_field_labels: Vec::new(),
             list_selector: crate::pipeline_types::OutputListSelector {
                 target_kind: crate::OutputScalarCountTargetKind::File,
                 target_kind_specified: true,
@@ -84,6 +107,7 @@ fn later_round_cannot_replace_existing_machine_selector_or_list_constraints() {
         response_shape: crate::OutputResponseShape::Free,
         selection: crate::pipeline_types::OutputSelectionContract {
             structured_field_selector: Some("path,size_bytes".to_string()),
+            output_field_labels: Vec::new(),
             list_selector: crate::pipeline_types::OutputListSelector {
                 target_kind: crate::OutputScalarCountTargetKind::Dir,
                 target_kind_specified: true,

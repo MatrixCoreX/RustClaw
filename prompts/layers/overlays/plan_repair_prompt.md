@@ -59,7 +59,8 @@ Return exactly one JSON object:
     "delivery_required": false,
     "locator_kind": "none|path|current_workspace|url|filename",
     "delivery_intent": "none|file_single|directory_lookup|directory_batch_files",
-    "structured_field_selector": null
+    "structured_field_selector": null,
+    "output_field_labels": null
   },
   "steps": [ <AgentAction JSON>, ... ]
 }
@@ -68,9 +69,13 @@ Preserve or repair the planner-owned `output_contract` using only machine tokens
 contract fields from localized error text or copy user prose into them. Set
 `structured_field_selector` to a comma-separated list of exact machine field identifiers only when
 the request requires named structured fields; otherwise set it to `null`.
-If the requested named fields are semantically the exhaustive visible payload, repair the contract
-to `response_shape="strict"` and map the labels to exact machine field identifiers from the selected
-capability schema. Apply this across languages and repeated rows. Do not retain `free` merely
+For exact source-field projections, preserve the real capability fields in `structured_field_selector`
+without renaming them. For semantic extraction, renamed output keys, or values derived from a read
+document, use `response_shape="strict"`, `structured_field_selector=null`, and `output_field_labels`
+as an array of the exact requested output keys, including localized keys. Keep `requires_content_evidence=true`: labels constrain
+presentation, not source evidence; observe first, then synthesize/verify values. Never populate both
+selector fields or replace committed output labels with source keys. Otherwise leave
+`output_field_labels=null`. Apply this across languages and repeated rows. Do not retain `free` merely
 because the payload is compound, and do not add headings, diagnostics, summaries, or footers.
 
 Each step must use one of:

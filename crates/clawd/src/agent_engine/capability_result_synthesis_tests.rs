@@ -1269,6 +1269,7 @@ fn mtime_ranked_listing_and_excerpts_use_generic_judgment_synthesis() {
                 include_hidden: Some(false),
             },
             structured_field_selector: None,
+            output_field_labels: Vec::new(),
         },
         ..Default::default()
     };

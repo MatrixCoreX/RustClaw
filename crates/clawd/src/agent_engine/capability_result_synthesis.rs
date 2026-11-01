@@ -1126,6 +1126,7 @@ fn delivery_constraints(agent_run_context: Option<&AgentRunContext>) -> Value {
             "include_metadata": contract.selection.list_selector.include_metadata,
             "include_hidden": contract.selection.list_selector.include_hidden,
             "structured_field_selector": contract.selection.structured_field_selector,
+            "output_field_labels": contract.selection.output_field_labels,
         },
     })
 }

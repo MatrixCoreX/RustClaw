@@ -42,6 +42,14 @@ pub(super) fn parse_planner_output_contract(raw: &str) -> Option<IntentOutputCon
         .filter(|value| (1..=20).contains(value));
     let structured_field_selector =
         optional_machine_selector(contract.get("structured_field_selector"))?;
+    let output_field_labels = parse_output_field_labels(contract.get("output_field_labels"))?;
+    // A source projection and a semantic presentation are different contracts.
+    // Never infer an alias mapping or waive source evidence from output labels.
+    if !output_field_labels.is_empty()
+        && (structured_field_selector.is_some() || response_shape != OutputResponseShape::Strict)
+    {
+        return None;
+    }
 
     Some(IntentOutputContract {
         response_shape,
@@ -52,6 +60,7 @@ pub(super) fn parse_planner_output_contract(raw: &str) -> Option<IntentOutputCon
         delivery_intent,
         selection: OutputSelectionContract {
             structured_field_selector,
+            output_field_labels,
             ..OutputSelectionContract::default()
         },
         ..IntentOutputContract::default()
@@ -63,6 +72,26 @@ fn machine_token(value: Option<&Value>) -> Option<&str> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
+}
+
+fn parse_output_field_labels(value: Option<&Value>) -> Option<Vec<String>> {
+    let Some(value) = value.filter(|value| !value.is_null()) else {
+        return Some(Vec::new());
+    };
+    let labels = value
+        .as_array()?
+        .iter()
+        .map(|item| {
+            let label = item.as_str()?;
+            (!label.is_empty() && !label.chars().any(char::is_control)).then(|| label.to_string())
+        })
+        .collect::<Option<Vec<_>>>()?;
+    (labels
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
+        == labels.len())
+    .then_some(labels)
 }
 
 fn optional_machine_selector(value: Option<&Value>) -> Option<Option<String>> {

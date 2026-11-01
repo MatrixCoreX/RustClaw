@@ -74,6 +74,8 @@ impl OutputDeliveryIntent {
 pub(crate) struct OutputSelectionContract {
     pub(crate) list_selector: OutputListSelector,
     pub(crate) structured_field_selector: Option<String>,
+    #[serde(default)]
+    pub(crate) output_field_labels: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

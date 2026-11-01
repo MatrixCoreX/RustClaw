@@ -25,6 +25,8 @@ pub(in crate::answer_verifier) fn output_contract_prompt_block(
         "locator_kind": route_result.output_contract.locator_kind.as_str(),
         "delivery_intent": route_result.output_contract.delivery_intent.as_str(),
         "locator_hint": route_result.output_contract.locator_hint,
+        "output_field_labels": route_result.output_contract.selection.output_field_labels,
+        "structured_field_selector": route_result.output_contract.selection.structured_field_selector,
         "evidence_policy": evidence_policy_trace,
     }))
     .unwrap_or_else(|_| "{}".to_string())

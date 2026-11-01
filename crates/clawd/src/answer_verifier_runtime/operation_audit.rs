@@ -24,25 +24,34 @@ pub(super) fn host_output_field_checks(
     candidate_answer: &str,
 ) -> Vec<OutputFieldCheck> {
     // Scalar and file-token contracts expose values, not visible field labels.
-    if output_contract.response_shape != crate::OutputResponseShape::Strict
-        || !output_contract.requests_exact_structured_fields()
-    {
+    if output_contract.response_shape != crate::OutputResponseShape::Strict {
         return Vec::new();
     }
     let structured = serde_json::from_str::<serde_json::Value>(candidate_answer.trim()).ok();
-    output_contract
-        .selection
-        .structured_field_selector
-        .as_deref()
-        .and_then(crate::machine_selector::exact_machine_field_selector)
-        .unwrap_or_default()
+    let labels = &output_contract.selection.output_field_labels;
+    let fields = if labels.is_empty() {
+        output_contract
+            .selection
+            .structured_field_selector
+            .as_deref()
+            .and_then(crate::machine_selector::exact_machine_field_selector)
+            .unwrap_or_default()
+    } else {
+        labels.clone()
+    };
+    fields
         .into_iter()
         .map(|requested_field| OutputFieldCheck {
-            exact_label_present: candidate_field_is_present(
-                &requested_field,
-                candidate_answer,
-                structured.as_ref(),
-            ),
+            exact_label_present: if let Some(value) =
+                structured.as_ref().filter(|_| !labels.is_empty())
+            {
+                crate::machine_selector::structured_json_contains_field_path(
+                    value,
+                    &[requested_field.as_str()],
+                )
+            } else {
+                candidate_field_is_present(&requested_field, candidate_answer, structured.as_ref())
+            },
             requested_field,
         })
         .collect()
@@ -54,10 +63,13 @@ fn candidate_field_is_present(
     structured: Option<&serde_json::Value>,
 ) -> bool {
     match structured {
-        Some(value) => crate::machine_selector::structured_json_contains_field_path(
-            value,
-            &field.split('.').collect::<Vec<_>>(),
-        ),
+        Some(value) => {
+            crate::machine_selector::structured_json_contains_field_path(value, &[field])
+                || crate::machine_selector::structured_json_contains_field_path(
+                    value,
+                    &field.split('.').collect::<Vec<_>>(),
+                )
+        }
         // Keep existing text-label behavior; do not infer new prose requirements.
         None => candidate.contains(field),
     }
