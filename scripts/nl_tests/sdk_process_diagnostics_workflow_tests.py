@@ -12,6 +12,15 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/sdk-process-diagnostics.yml"
 BUILD = "cargo test --locked -p agent-skill-sdk --lib --no-run"
 RUNNER_BUILD = "cargo test --locked -p skill-runner --no-run"
+TERMINATION_CASE = "process_termination_tests::timeout_termination_keeps_the_callers_group_alive"
+TERMINATION_OBSERVE = f'if timeout --signal=TERM --kill-after=10s 180s cargo test --locked -p skill-runner --bin skill-runner {TERMINATION_CASE} -- --exact --nocapture > "$RUNNER_TEMP/sdk-process-diagnostics/termination.log" 2>&1; then'
+TERMINATION_LINES = [
+    "set -euo pipefail", "result=0", TERMINATION_OBSERVE,
+    f"  if ! grep -Fxq 'test {TERMINATION_CASE} ... ok' \"$RUNNER_TEMP/sdk-process-diagnostics/termination.log\"; then",
+    "    result=1", "  fi", "else", "  result=$?", "fi",
+    'printf \'%s\\n\' "$result" > "$RUNNER_TEMP/sdk-process-diagnostics/termination-exit-code.txt"',
+    'cat "$RUNNER_TEMP/sdk-process-diagnostics/termination.log"', 'exit "$result"',
+]
 OBSERVE = 'if timeout --signal=TERM --kill-after=10s 180s cargo test --locked -p agent-skill-sdk --lib reference_conformance_tests::reference_languages_share_protocol_and_atomic_lifecycle -- --exact --nocapture --test-threads=1 > "$RUNNER_TEMP/sdk-process-diagnostics/reference.log" 2>&1; then'
 OBSERVATION_LINES = [
     "set -euo pipefail", "result=0", OBSERVE, "  result=0", "else", "  result=$?", "fi",
@@ -67,6 +76,7 @@ def valid(workflow):
     observations = []
     parallel = []
     runner = []
+    termination = []
     for step in job["steps"]:
         if "continue-on-error" in step:
             return False
@@ -87,8 +97,12 @@ def valid(workflow):
                 parallel.append(lines)
             if RUNNER_OBSERVE in lines:
                 runner.append(lines)
+            if TERMINATION_OBSERVE in lines:
+                termination.append(lines)
             commands.extend(lines[1:])
     if observations != [OBSERVATION_LINES] or parallel != [PARALLEL_LINES] or runner != [RUNNER_LINES]:
+        return False
+    if termination != [TERMINATION_LINES]:
         return False
     required = [
         'git rev-parse HEAD > "$RUNNER_TEMP/sdk-process-diagnostics/source-sha.txt"',
@@ -99,7 +113,7 @@ def valid(workflow):
         'cat "$RUNNER_TEMP/sdk-process-diagnostics/reference.log"',
         PARALLEL_OBSERVE,
         'cat "$RUNNER_TEMP/sdk-process-diagnostics/parallel.log"',
-        RUNNER_BUILD, RUNNER_OBSERVE,
+        RUNNER_BUILD, TERMINATION_OBSERVE, RUNNER_OBSERVE,
         'cat "$RUNNER_TEMP/sdk-process-diagnostics/runner.log"',
     ]
     if any(commands.count(command) != 1 for command in required):
@@ -177,6 +191,17 @@ class SdkProcessDiagnosticsWorkflowTests(unittest.TestCase):
             changed = deepcopy(self.workflow)
             changed["jobs"]["sdk-process-diagnostics"]["env"].pop(name)
             self.assertFalse(valid(changed))
+
+    def test_owned_regression_cannot_be_skipped_or_accept_zero_selected_tests(self):
+        changed = deepcopy(self.workflow)
+        steps = changed["jobs"]["sdk-process-diagnostics"]["steps"]
+        steps[:] = [step for step in steps if TERMINATION_OBSERVE not in step.get("run", "")]
+        self.assertFalse(valid(changed))
+        changed = deepcopy(self.workflow)
+        for step in changed["jobs"]["sdk-process-diagnostics"]["steps"]:
+            if "run" in step:
+                step["run"] = step["run"].replace("grep -Fxq", "true #")
+        self.assertFalse(valid(changed))
 
     def test_full_arguments_or_environment_must_not_replace_process_names(self):
         changed = deepcopy(self.workflow)

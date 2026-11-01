@@ -61,6 +61,7 @@ jobs:
           node --version
           go version
           bwrap --version
+          /usr/bin/kill --version
 
       - name: Build the exact SDK test executable
         shell: bash
@@ -103,6 +104,22 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p skill-runner --no-run
+
+      - name: Verify timeout termination inside an owned disposable group
+        shell: bash
+        run: |
+          set -euo pipefail
+          result=0
+          if timeout --signal=TERM --kill-after=10s 180s cargo test --locked -p skill-runner --bin skill-runner process_termination_tests::timeout_termination_keeps_the_callers_group_alive -- --exact --nocapture > "$RUNNER_TEMP/sdk-process-diagnostics/termination.log" 2>&1; then
+            if ! grep -Fxq 'test process_termination_tests::timeout_termination_keeps_the_callers_group_alive ... ok' "$RUNNER_TEMP/sdk-process-diagnostics/termination.log"; then
+              result=1
+            fi
+          else
+            result=$?
+          fi
+          printf '%s\n' "$result" > "$RUNNER_TEMP/sdk-process-diagnostics/termination-exit-code.txt"
+          cat "$RUNNER_TEMP/sdk-process-diagnostics/termination.log"
+          exit "$result"
 
       - name: Observe the full runner suite with its default test concurrency
         shell: bash

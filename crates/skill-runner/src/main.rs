@@ -1726,3 +1726,7 @@ mod private_filesystem_tests;
 #[cfg(test)]
 #[path = "child_invocation_tests.rs"]
 mod child_invocation_tests;
+
+#[cfg(all(test, unix))]
+#[path = "process_termination_tests.rs"]
+mod process_termination_tests;
