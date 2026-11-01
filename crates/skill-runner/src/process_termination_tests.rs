@@ -6,6 +6,24 @@ const CHILD_CASE: &str = "process_termination_tests::owned_group_termination_fix
 const CHILD_ENV: &str = "APP_TERMINATION_TEST_CHILD";
 
 #[test]
+fn reserved_and_overflow_identifiers_cannot_become_signal_targets() {
+    for pid in [
+        None,
+        Some(0),
+        Some(1),
+        Some(i32::MAX as u32 + 1),
+        Some(u32::MAX),
+    ] {
+        assert_eq!(super::child_process_group_target(pid), None);
+    }
+    assert_eq!(super::child_process_group_target(Some(2)), Some(-2));
+    assert_eq!(
+        super::child_process_group_target(Some(i32::MAX as u32)),
+        Some(-i32::MAX)
+    );
+}
+
+#[test]
 fn timeout_termination_keeps_the_callers_group_alive() {
     // The legacy kill CLI may target its caller group on some hosts. Execute
     // it only in a new owned group, never in the Cargo/CI/operator group.

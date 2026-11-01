@@ -1701,15 +1701,20 @@ fn exit_signal(_status: &std::process::ExitStatus) -> Option<i32> {
 }
 
 #[cfg(unix)]
+fn child_process_group_target(pid: Option<u32>) -> Option<i32> {
+    i32::try_from(pid?).ok().filter(|pid| *pid > 1).map(|pid| -pid)
+}
+
+#[cfg(unix)]
 async fn terminate_child_process_group(pid: Option<u32>) {
-    let Some(pid) = pid else {
+    let Some(group) = child_process_group_target(pid) else {
         return;
     };
-    let _ = Command::new("kill")
-        .arg("-KILL")
-        .arg(format!("-{pid}"))
-        .status()
-        .await;
+    // The caller retains the child placed in this group. Pass the validated
+    // group directly to the kernel, never through utility option parsing.
+    unsafe {
+        libc::kill(group, libc::SIGKILL);
+    }
 }
 
 #[cfg(not(unix))]
