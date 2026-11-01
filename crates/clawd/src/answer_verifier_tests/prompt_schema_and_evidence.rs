@@ -182,6 +182,8 @@ fn planner_prompts_make_exhaustive_named_fields_a_strict_machine_contract() {
         assert!(prompt.contains("exhaustive visible payload"));
         assert!(prompt.contains("across languages"));
         assert!(prompt.contains("response_shape=\"strict\""));
+        assert!(prompt.contains("output_field_labels"));
+        assert!(prompt.contains("structured_field_selector=null"));
     }
 }
 

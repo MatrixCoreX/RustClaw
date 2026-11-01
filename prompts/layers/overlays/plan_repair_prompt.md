@@ -69,7 +69,9 @@ Preserve or repair the planner-owned `output_contract` using only machine tokens
 contract fields from localized error text or copy user prose into them. Set
 `structured_field_selector` to a comma-separated list of exact machine field identifiers only when
 the request requires named structured fields; otherwise set it to `null`.
-For exact source-field projections, preserve the real capability fields in `structured_field_selector`
+When named fields are the exhaustive visible payload, keep `response_shape="strict"` and emit
+only those requested fields, across languages. For exact source-field projections, preserve the
+real capability fields in `structured_field_selector`
 without renaming them. For semantic extraction, renamed output keys, or values derived from a read
 document, use `response_shape="strict"`, `structured_field_selector=null`, and `output_field_labels`
 as an array of the exact requested output keys, including localized keys. Keep `requires_content_evidence=true`: labels constrain

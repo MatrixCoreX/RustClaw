@@ -74,7 +74,9 @@ evidence and preserve the machine selector; never repair it by copying prose int
 or token. A path plus content, a value plus source, or two or more requested named fields is a
 compound result and must use `free` or `strict` so every requested deliverable survives final
 projection.
-For exact source-field projections, use `structured_field_selector` for real fields exposed by
+When named fields are the exhaustive visible payload, keep `response_shape="strict"` and emit
+only those requested fields, across languages. For exact source-field projections, use
+`structured_field_selector` for real fields exposed by
 the capability, without renaming them. For semantic extraction, renamed output keys, or values
 derived from a read document, preserve `response_shape="strict"`, `structured_field_selector=null`,
 and `output_field_labels` as an array of the exact requested output keys, including localized keys.
