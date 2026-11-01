@@ -1,9 +1,10 @@
 use std::os::unix::process::CommandExt;
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 const CHILD_CASE: &str = "skills::process_termination_tests::owned_group_termination_fixture";
 const CHILD_ENV: &str = "APP_SKILL_TERMINATION_TEST_CHILD";
+const TERMINATION_PROVED: i32 = 42;
 
 #[test]
 fn reserved_and_overflow_identifiers_cannot_become_signal_targets() {
@@ -25,9 +26,28 @@ fn reserved_and_overflow_identifiers_cannot_become_signal_targets() {
 
 #[test]
 fn skill_timeout_termination_keeps_the_callers_group_alive() {
+    let status = run_termination_fixture(CHILD_CASE);
+    assert_eq!(
+        status.code(),
+        Some(TERMINATION_PROVED),
+        "owned skill termination fixture did not prove target termination: {status}"
+    );
+}
+
+#[test]
+fn an_empty_fixture_selection_is_not_termination_proof() {
+    let status = run_termination_fixture(&format!("{CHILD_CASE}::missing"));
+    assert!(
+        status.success(),
+        "empty selection should exit normally: {status}"
+    );
+    assert_ne!(status.code(), Some(TERMINATION_PROVED));
+}
+
+fn run_termination_fixture(case: &str) -> ExitStatus {
     // A regression may kill this disposable caller group, never Cargo or CI.
     let mut child = Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", CHILD_CASE, "--ignored", "--nocapture"])
+        .args(["--exact", case, "--ignored", "--nocapture"])
         .env(CHILD_ENV, "1")
         .process_group(0)
         .stdin(Stdio::null())
@@ -36,9 +56,9 @@ fn skill_timeout_termination_keeps_the_callers_group_alive() {
         .spawn()
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
-    let status = loop {
+    loop {
         if let Some(status) = child.try_wait().unwrap() {
-            break status;
+            return status;
         }
         if Instant::now() >= deadline {
             child.kill().unwrap();
@@ -46,11 +66,7 @@ fn skill_timeout_termination_keeps_the_callers_group_alive() {
             panic!("owned skill termination fixture deadline");
         }
         std::thread::sleep(Duration::from_millis(5));
-    };
-    assert!(
-        status.success(),
-        "owned skill termination fixture failed: {status}"
-    );
+    }
 }
 
 #[tokio::test]
@@ -78,4 +94,6 @@ async fn owned_group_termination_fixture() {
         .expect("owned skill target termination deadline")
         .unwrap();
     assert_eq!(status.signal(), Some(9));
+    // Distinguish a completed target assertion from a zero-selected-test exit0.
+    std::process::exit(TERMINATION_PROVED);
 }
