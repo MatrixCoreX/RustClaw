@@ -1,0 +1,85 @@
+name: SDK Process Diagnostics
+
+"on":
+  workflow_dispatch:
+  push:
+    branches: ['ci/runtime-hardening-*']
+    paths:
+      - .github/workflows/sdk-process-diagnostics.yml
+      - scripts/nl_tests/sdk_process_diagnostics_workflow_tests.py
+
+permissions:
+  contents: read
+
+jobs:
+  sdk-process-diagnostics:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_JOBS: "1"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      APP_REQUIRE_REFERENCE_ADAPTERS: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Setup Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.23.x"
+
+      - name: Prepare diagnostics and native dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/sdk-process-diagnostics"
+          git rev-parse HEAD > "$RUNNER_TEMP/sdk-process-diagnostics/source-sha.txt"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bubblewrap pkg-config make perl clang libclang-dev
+          python3 -m pip install --requirement scripts/nl_tests/requirements.txt
+          python3 scripts/check_github_action_pins.py
+          python3 scripts/nl_tests/sdk_process_diagnostics_workflow_tests.py
+
+      - name: Build the exact SDK test executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p agent-skill-sdk --lib --no-run
+
+      - name: Observe the reference lifecycle with a diagnostic deadline
+        shell: bash
+        run: |
+          set -euo pipefail
+          result=0
+          if timeout --signal=TERM --kill-after=10s 180s cargo test --locked -p agent-skill-sdk --lib reference_conformance_tests::reference_languages_share_protocol_and_atomic_lifecycle -- --exact --nocapture --test-threads=1 > "$RUNNER_TEMP/sdk-process-diagnostics/reference.log" 2>&1; then
+            result=0
+          else
+            result=$?
+          fi
+          printf '%s\n' "$result" > "$RUNNER_TEMP/sdk-process-diagnostics/exit-code.txt"
+          ps -e -o pid,ppid,pgid,sid,stat,comm > "$RUNNER_TEMP/sdk-process-diagnostics/processes.txt"
+          cat "$RUNNER_TEMP/sdk-process-diagnostics/reference.log"
+          exit "$result"
+
+      - name: Upload diagnostic evidence even on failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sdk-process-diagnostics-${{ github.sha }}
+          path: ${{ runner.temp }}/sdk-process-diagnostics
+          if-no-files-found: error
+          retention-days: 7
