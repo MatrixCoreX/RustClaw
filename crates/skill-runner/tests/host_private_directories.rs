@@ -33,9 +33,17 @@ impl InstalledFixture {
             .unwrap();
         let program = format!(
             r#"#!{}
-import json, os, pathlib, sys
+import errno, json, os, pathlib, sys
 r = json.loads(sys.stdin.readline())
-extra = {{'visible': [pathlib.Path(p).exists() for p in r['args'].get('probe_paths', [])],
+def readable(path):
+    try:
+        pathlib.Path(path).read_bytes()
+    except OSError as error:
+        if error.errno in (errno.ENOENT, errno.EACCES, errno.EPERM):
+            return False
+        raise
+    return True
+extra = {{'readable': [readable(p) for p in r['args'].get('probe_paths', [])],
          'received_keys': sorted(r),
          'parent_claims': [os.environ.get(k) for k in ['APP_PARENT_SANDBOX_BACKEND', 'APP_PARENT_PRIVATE_DIRECTORIES_DIGEST']]}}
 print(json.dumps({{'request_id':r['request_id'], 'status':'ok', 'text':'fixture', 'error_text':None, 'extra':extra}}))
@@ -218,7 +226,7 @@ async fn warm_installed_runner_enforces_current_policy_and_keeps_protocol_privat
         .remove("host_private_directories");
     requests.push(missing);
     let responses = fixture.run(&requests, None).await;
-    for (index, visible) in [
+    for (index, readable) in [
         json!([false, true, true]),
         json!([true, false, true]),
         json!([true, true, true]),
@@ -229,7 +237,7 @@ async fn warm_installed_runner_enforces_current_policy_and_keeps_protocol_privat
         let response = &responses[index];
         assert_eq!(response["status"], "ok", "{response}");
         assert_eq!(response["request_id"], requests[index]["request_id"]);
-        assert_eq!(response["extra"]["visible"], visible);
+        assert_eq!(response["extra"]["readable"], readable);
         assert_eq!(
             response["extra"]["received_keys"],
             json!([
@@ -306,6 +314,6 @@ async fn installed_runner_inherits_a_real_parent_boundary_without_exposing_host_
     request["args"] = json!({"probe_paths": [fixture.private[0].join("marker"), fixture.workspace.join("public")]});
     let responses = fixture.exchange(command, &[request]).await;
     assert_eq!(responses[0]["status"], "ok", "{}", responses[0]);
-    assert_eq!(responses[0]["extra"]["visible"], json!([false, true]));
+    assert_eq!(responses[0]["extra"]["readable"], json!([false, true]));
     assert_eq!(responses[0]["extra"]["parent_claims"], json!([null, null]));
 }
