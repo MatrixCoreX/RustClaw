@@ -18,6 +18,13 @@ OBSERVATION_LINES = [
     'ps -e -o pid,ppid,pgid,sid,stat,comm > "$RUNNER_TEMP/sdk-process-diagnostics/processes.txt"',
     'cat "$RUNNER_TEMP/sdk-process-diagnostics/reference.log"', 'exit "$result"',
 ]
+PARALLEL_OBSERVE = 'if timeout --signal=TERM --kill-after=10s 180s cargo test --locked -p agent-skill-sdk -- --nocapture > "$RUNNER_TEMP/sdk-process-diagnostics/parallel.log" 2>&1; then'
+PARALLEL_LINES = [
+    "set -euo pipefail", "result=0", PARALLEL_OBSERVE, "  result=0", "else", "  result=$?", "fi",
+    'printf \'%s\\n\' "$result" > "$RUNNER_TEMP/sdk-process-diagnostics/parallel-exit-code.txt"',
+    'ps -e -o pid,ppid,pgid,sid,stat,comm > "$RUNNER_TEMP/sdk-process-diagnostics/parallel-processes.txt"',
+    'cat "$RUNNER_TEMP/sdk-process-diagnostics/parallel.log"', 'exit "$result"',
+]
 UPLOAD = "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
 
 
@@ -44,6 +51,7 @@ def valid(workflow):
     commands = []
     uploads = []
     observations = []
+    parallel = []
     for step in job["steps"]:
         if "continue-on-error" in step:
             return False
@@ -60,17 +68,20 @@ def valid(workflow):
                 return False
             if OBSERVE in lines:
                 observations.append(lines)
+            if PARALLEL_OBSERVE in lines:
+                parallel.append(lines)
             commands.extend(lines[1:])
-    if observations != [OBSERVATION_LINES]:
+    if observations != [OBSERVATION_LINES] or parallel != [PARALLEL_LINES]:
         return False
     required = [
         'git rev-parse HEAD > "$RUNNER_TEMP/sdk-process-diagnostics/source-sha.txt"',
         "python3 scripts/nl_tests/sdk_process_diagnostics_workflow_tests.py",
-        BUILD, OBSERVE, '  result=$?',
+        BUILD, OBSERVE,
         'printf \'%s\\n\' "$result" > "$RUNNER_TEMP/sdk-process-diagnostics/exit-code.txt"',
         'ps -e -o pid,ppid,pgid,sid,stat,comm > "$RUNNER_TEMP/sdk-process-diagnostics/processes.txt"',
         'cat "$RUNNER_TEMP/sdk-process-diagnostics/reference.log"',
-        'exit "$result"',
+        PARALLEL_OBSERVE,
+        'cat "$RUNNER_TEMP/sdk-process-diagnostics/parallel.log"',
     ]
     if any(commands.count(command) != 1 for command in required):
         return False
@@ -115,6 +126,18 @@ class SdkProcessDiagnosticsWorkflowTests(unittest.TestCase):
             if "run" in step:
                 step["run"] = step["run"].replace('exit "$result"', 'result=0\nexit "$result"')
         self.assertFalse(valid(changed))
+
+    def test_full_sdk_cannot_be_filtered_or_forced_to_run_serially(self):
+        for replacement in (
+            "cargo test --locked -p agent-skill-sdk reference_conformance_tests:: -- --nocapture",
+            "cargo test --locked -p agent-skill-sdk -- --nocapture --test-threads=1",
+        ):
+            changed = deepcopy(self.workflow)
+            for step in changed["jobs"]["sdk-process-diagnostics"]["steps"]:
+                if "run" in step:
+                    step["run"] = step["run"].replace(
+                        "cargo test --locked -p agent-skill-sdk -- --nocapture", replacement)
+            self.assertFalse(valid(changed))
 
     def test_full_arguments_or_environment_must_not_replace_process_names(self):
         changed = deepcopy(self.workflow)
