@@ -1,4 +1,4 @@
-use crate::runtime::host_filesystem::{HostAccessMode, HostFilesystemPolicy};
+use crate::runtime::host_filesystem::{BoundedFileReadError, HostAccessMode, HostFilesystemPolicy};
 use rustix::fs::FileType;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};

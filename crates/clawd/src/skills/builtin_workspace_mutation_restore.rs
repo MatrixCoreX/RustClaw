@@ -1,5 +1,5 @@
 use super::*;
-use crate::runtime::host_filesystem::{BoundedFileReadError, HostDirectory};
+use crate::runtime::host_filesystem::HostDirectory;
 
 struct RestoreFrame {
     directory: HostDirectory,
