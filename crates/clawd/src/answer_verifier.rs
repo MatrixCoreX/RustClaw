@@ -169,6 +169,11 @@ fn terminal_answer_has_no_tool_observations(journal: &crate::task_journal::TaskJ
 fn evidence_policy_requires_observation(route_result: &AnswerContract) -> bool {
     route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
+        || !route_result
+            .output_contract
+            .selection
+            .output_field_labels
+            .is_empty()
         || !crate::evidence_policy::required_evidence_fields_for_output_contract(
             &route_result.output_contract,
         )

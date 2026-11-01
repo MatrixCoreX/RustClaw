@@ -93,6 +93,20 @@ fn semantic_labels_preserve_literal_localized_text_and_dotted_json_keys() {
 }
 
 #[test]
+fn semantic_output_labels_require_verification_even_for_user_supplied_content() {
+    let mut contract = strict("unused");
+    contract.selection.structured_field_selector = None;
+    contract.selection.output_field_labels = vec!["文字".into()];
+    let route = crate::answer_verifier::AnswerContract::new("fixture", contract);
+    let journal = TaskJournal::for_task("fixture", "ask", "fixture");
+    assert!(crate::answer_verifier::should_verify_answer(
+        &route,
+        &journal,
+        r#"{"文字":"sample"}"#
+    ));
+}
+
+#[test]
 fn nested_json_paths_are_present_without_a_dotted_key_literal() {
     let candidate = r#"{"entry":{"path":"sample","size_bytes":0}}"#;
     let checks = host_output_field_checks(&strict("entry.path,entry.size_bytes"), candidate);
