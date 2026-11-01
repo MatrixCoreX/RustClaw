@@ -88,6 +88,7 @@ def validate(workflow):
         "cargo build --locked -p clawd --bin pty-session-runner",
         *[f'APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test --locked -p clawd --bin clawd {case} -- --exact --ignored --test-threads=1 --nocapture'
           for case in OWNER_CASES],
+        "cargo test --locked -p clawd --bin clawd skills::builtin::builtin_list_dir::tests -- --test-threads=1 --nocapture",
         "cargo test --locked -p clawd --bin clawd workspace_ -- --test-threads=1 --nocapture",
         "cargo test --locked -p clawd --bin clawd runtime::host_filesystem::directory::tests -- --test-threads=1 --nocapture",
         "cargo test --locked -p clawd --bin clawd local_process_owner:: -- --test-threads=1 --nocapture",
@@ -146,6 +147,7 @@ class LinuxProcessOwnerWorkflowTests(unittest.TestCase):
             ("cargo build --locked -p clawd --bin clawd", "true"),
             ("local_process_job::tests", "unrelated_zero_test_filter"),
             ("resource_observation", "unrelated_zero_test_filter"),
+            ("skills::builtin::builtin_list_dir::tests", "unrelated_zero_test_filter"),
         ):
             changed = deepcopy(self.workflow)
             for step in changed["jobs"]["process-owner-linux"]["steps"]:

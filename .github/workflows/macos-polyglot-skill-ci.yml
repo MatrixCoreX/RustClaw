@@ -272,6 +272,7 @@ jobs:
           cargo test -p clawd --bin clawd secure_workspace_fs::tests
           cargo test -p clawd --bin clawd runtime::host_filesystem::directory::tests
           cargo test -p clawd --bin clawd skills::builtin::builtin_workspace_mutation::enumeration_tests
+          cargo test -p clawd --bin clawd skills::builtin::builtin_list_dir::tests
           cargo test -p clawd --bin clawd skills::builtin::builtin_workspace_mutation::restore_tests -- --test-threads=1 --nocapture
           cargo test -p clawd --bin clawd skill_output_artifact::evidence_storage::tests
 

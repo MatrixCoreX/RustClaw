@@ -4,6 +4,8 @@ use sha2::{Digest, Sha256};
 use std::io;
 use std::path::Path;
 
+use crate::runtime::host_filesystem::HostDirectoryEntry;
+
 #[derive(Debug)]
 pub(super) enum ListDirError {
     Io(io::Error),
@@ -25,28 +27,11 @@ pub(super) fn list_directory_page(
     max_entries: usize,
 ) -> Result<Value, ListDirError> {
     let directory = host_filesystem.open_directory(workspace_root, path)?;
-    let mut entries = Vec::new();
-    for entry in directory.entries()? {
-        let kind = match entry.file_type {
-            FileType::Symlink => "symlink",
-            FileType::Directory => "directory",
-            FileType::RegularFile => "file",
-            _ => "other",
-        };
-        let name = entry.name.to_string_lossy().into_owned();
-        entries.push(json!({
-            "name": name,
-            "path": path.join(&entry.name).display().to_string(),
-            "kind": kind,
-            "is_symlink": entry.file_type == FileType::Symlink,
-            "size_bytes": entry.size_bytes,
-            "modified_ts": entry.modified_ts,
-        }));
-    }
+    let mut entries = directory.entries()?;
     entries.sort_by(|left, right| {
-        left.get("name")
-            .and_then(Value::as_str)
-            .cmp(&right.get("name").and_then(Value::as_str))
+        left.name
+            .to_string_lossy()
+            .cmp(&right.name.to_string_lossy())
     });
 
     let total = entries.len();
@@ -54,14 +39,17 @@ pub(super) fn list_directory_page(
         return Err(ListDirError::CursorOutOfRange { cursor, total });
     }
     let end = cursor.saturating_add(max_entries).min(total);
-    let page = entries[cursor..end].to_vec();
+    let page = entries[cursor..end]
+        .iter()
+        .map(|entry| public_entry(path, entry))
+        .collect::<Vec<_>>();
     let complete = end >= total;
     let names = page
         .iter()
         .filter_map(|entry| entry.get("name").and_then(Value::as_str))
         .map(str::to_string)
         .collect::<Vec<_>>();
-    let snapshot_hash = directory_snapshot_hash(&entries);
+    let snapshot_hash = directory_snapshot_hash(path, &entries);
     let canonical_path = directory.canonical_path().display().to_string();
     let continuation = (!complete).then(|| {
         json!({
@@ -96,11 +84,33 @@ pub(super) fn list_directory_page(
     }))
 }
 
-fn directory_snapshot_hash(entries: &[Value]) -> String {
+fn public_entry(path: &Path, entry: &HostDirectoryEntry) -> Value {
+    let kind = match entry.file_type {
+        FileType::Symlink => "symlink",
+        FileType::Directory => "directory",
+        FileType::RegularFile => "file",
+        _ => "other",
+    };
+    json!({
+        "name": entry.name.to_string_lossy(),
+        "path": path.join(&entry.name).display().to_string(),
+        "kind": kind,
+        "is_symlink": entry.file_type == FileType::Symlink,
+        "size_bytes": entry.size_bytes,
+        "modified_ts": entry.modified_ts,
+    })
+}
+
+fn directory_snapshot_hash(path: &Path, entries: &[HostDirectoryEntry]) -> String {
     let mut hasher = Sha256::new();
     for entry in entries {
-        hasher.update(entry.to_string().as_bytes());
+        // Hash every ordered row without retaining a full-directory JSON tree.
+        hasher.update(public_entry(path, entry).to_string().as_bytes());
         hasher.update([b'\n']);
     }
     format!("{:x}", hasher.finalize())
 }
+
+#[cfg(test)]
+#[path = "builtin_list_dir_tests.rs"]
+mod tests;

@@ -9,6 +9,7 @@ use crate::private_filesystem_policy::DirectoryExclusions;
 #[path = "host_directory.rs"]
 mod directory;
 use directory::HostDirectory;
+pub(crate) use directory::HostDirectoryEntry;
 #[path = "host_mutation.rs"]
 mod mutation;
 pub(crate) use mutation::BoundedFileReadError;

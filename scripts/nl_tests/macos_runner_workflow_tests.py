@@ -52,6 +52,7 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
         gate = next(index for index, step in enumerate(steps) if "local_process_job::tests" in step.get("run", ""))
         for selection in ("runtime::host_filesystem::directory::tests",
                           "skills::builtin::builtin_workspace_mutation::enumeration_tests",
+                          "skills::builtin::builtin_list_dir::tests",
                           "skills::builtin::builtin_workspace_mutation::restore_tests"):
             command = f"cargo test -p clawd --bin clawd {selection}"
             selected = [index for index, step in enumerate(steps) if command in step.get("run", "")]
