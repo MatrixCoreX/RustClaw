@@ -11,6 +11,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/sdk-process-diagnostics.yml"
 BUILD = "cargo test --locked -p agent-skill-sdk --lib --no-run"
+RUNNER_BUILD = "cargo test --locked -p skill-runner --no-run"
 OBSERVE = 'if timeout --signal=TERM --kill-after=10s 180s cargo test --locked -p agent-skill-sdk --lib reference_conformance_tests::reference_languages_share_protocol_and_atomic_lifecycle -- --exact --nocapture --test-threads=1 > "$RUNNER_TEMP/sdk-process-diagnostics/reference.log" 2>&1; then'
 OBSERVATION_LINES = [
     "set -euo pipefail", "result=0", OBSERVE, "  result=0", "else", "  result=$?", "fi",
@@ -24,6 +25,13 @@ PARALLEL_LINES = [
     'printf \'%s\\n\' "$result" > "$RUNNER_TEMP/sdk-process-diagnostics/parallel-exit-code.txt"',
     'ps -e -o pid,ppid,pgid,sid,stat,comm > "$RUNNER_TEMP/sdk-process-diagnostics/parallel-processes.txt"',
     'cat "$RUNNER_TEMP/sdk-process-diagnostics/parallel.log"', 'exit "$result"',
+]
+RUNNER_OBSERVE = 'if timeout --signal=TERM --kill-after=10s 180s cargo test --locked -p skill-runner -- --nocapture > "$RUNNER_TEMP/sdk-process-diagnostics/runner.log" 2>&1; then'
+RUNNER_LINES = [
+    "set -euo pipefail", "result=0", RUNNER_OBSERVE, "  result=0", "else", "  result=$?", "fi",
+    'printf \'%s\\n\' "$result" > "$RUNNER_TEMP/sdk-process-diagnostics/runner-exit-code.txt"',
+    'ps -e -o pid,ppid,pgid,sid,stat,comm > "$RUNNER_TEMP/sdk-process-diagnostics/runner-processes.txt"',
+    'cat "$RUNNER_TEMP/sdk-process-diagnostics/runner.log"', 'exit "$result"',
 ]
 UPLOAD = "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
 
@@ -48,10 +56,17 @@ def valid(workflow):
             or job.get("env", {}).get("APP_REQUIRE_REFERENCE_ADAPTERS") != "1"
             or "continue-on-error" in job or "if" in job):
         return False
+    for name, value in {"CARGO_BUILD_JOBS": "1", "CARGO_INCREMENTAL": "0",
+                        "CARGO_PROFILE_DEV_DEBUG": "0", "CARGO_PROFILE_TEST_DEBUG": "0",
+                        "CARGO_PROFILE_DEV_CODEGEN_UNITS": "8", "CARGO_PROFILE_TEST_CODEGEN_UNITS": "8",
+                        "CARGO_TARGET_DIR": "target"}.items():
+        if job["env"].get(name) != value:
+            return False
     commands = []
     uploads = []
     observations = []
     parallel = []
+    runner = []
     for step in job["steps"]:
         if "continue-on-error" in step:
             return False
@@ -70,8 +85,10 @@ def valid(workflow):
                 observations.append(lines)
             if PARALLEL_OBSERVE in lines:
                 parallel.append(lines)
+            if RUNNER_OBSERVE in lines:
+                runner.append(lines)
             commands.extend(lines[1:])
-    if observations != [OBSERVATION_LINES] or parallel != [PARALLEL_LINES]:
+    if observations != [OBSERVATION_LINES] or parallel != [PARALLEL_LINES] or runner != [RUNNER_LINES]:
         return False
     required = [
         'git rev-parse HEAD > "$RUNNER_TEMP/sdk-process-diagnostics/source-sha.txt"',
@@ -82,6 +99,8 @@ def valid(workflow):
         'cat "$RUNNER_TEMP/sdk-process-diagnostics/reference.log"',
         PARALLEL_OBSERVE,
         'cat "$RUNNER_TEMP/sdk-process-diagnostics/parallel.log"',
+        RUNNER_BUILD, RUNNER_OBSERVE,
+        'cat "$RUNNER_TEMP/sdk-process-diagnostics/runner.log"',
     ]
     if any(commands.count(command) != 1 for command in required):
         return False
@@ -137,6 +156,26 @@ class SdkProcessDiagnosticsWorkflowTests(unittest.TestCase):
                 if "run" in step:
                     step["run"] = step["run"].replace(
                         "cargo test --locked -p agent-skill-sdk -- --nocapture", replacement)
+            self.assertFalse(valid(changed))
+
+    def test_runner_must_be_prebuilt_then_fully_observed_without_filters(self):
+        for old, new in [
+            (RUNNER_BUILD, "true"),
+            ("cargo test --locked -p skill-runner -- --nocapture",
+             "cargo test --locked -p skill-runner -- --nocapture --test-threads=1"),
+        ]:
+            changed = deepcopy(self.workflow)
+            for step in changed["jobs"]["sdk-process-diagnostics"]["steps"]:
+                if "run" in step:
+                    step["run"] = step["run"].replace(old, new)
+            self.assertFalse(valid(changed))
+
+    def test_main_build_profile_is_not_silently_changed_in_diagnostics(self):
+        for name in ("CARGO_BUILD_JOBS", "CARGO_INCREMENTAL", "CARGO_PROFILE_DEV_DEBUG",
+                     "CARGO_PROFILE_TEST_DEBUG", "CARGO_PROFILE_DEV_CODEGEN_UNITS",
+                     "CARGO_PROFILE_TEST_CODEGEN_UNITS", "CARGO_TARGET_DIR"):
+            changed = deepcopy(self.workflow)
+            changed["jobs"]["sdk-process-diagnostics"]["env"].pop(name)
             self.assertFalse(valid(changed))
 
     def test_full_arguments_or_environment_must_not_replace_process_names(self):
