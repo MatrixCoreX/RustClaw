@@ -29,6 +29,18 @@ def valid_job(job, runner, target):
 
 
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_artifact_assertion_portability_is_tested_without_a_ui_build(self):
+        workflow = load("macos-polyglot-skill-ci.yml")
+        for event in ("push", "pull_request"):
+            self.assertTrue({"scripts/product_identity_tests.sh",
+                             "scripts/tests/test_product_identity_ui_artifacts.py"}
+                            .issubset(workflow["on"][event]["paths"]))
+        command = "python3 -m unittest discover -s scripts/tests -p test_product_identity_ui_artifacts.py -v"
+        runs = [step.get("run", "") for step in workflow["jobs"]["polyglot-skill-macos"]["steps"]]
+        self.assertEqual(sum(command in run for run in runs), 1)
+        self.assertLess(next(index for index, run in enumerate(runs) if command in run),
+                        next(index for index, run in enumerate(runs) if "npm ci --ignore-scripts --prefix UI" in run))
+
     def test_two_brand_ui_identity_contract_is_built_after_dependency_installation(self):
         steps = load("macos-polyglot-skill-ci.yml")["jobs"]["polyglot-skill-macos"]["steps"]
         flattened = "\n".join(step.get("run", "") for step in steps)
