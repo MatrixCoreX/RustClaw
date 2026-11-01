@@ -1,7 +1,6 @@
 use super::*;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -30,14 +29,52 @@ impl Drop for EnvRestore {
     }
 }
 
-fn temp_workspace_root() -> PathBuf {
-    let unique = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock")
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("agent-runtime-model-catalog-{unique}"));
-    std::fs::create_dir_all(root.join("configs")).expect("create configs");
+fn temp_workspace_root() -> tempfile::TempDir {
+    let root = tempfile::Builder::new()
+        .prefix("agent-runtime-model-catalog-")
+        .tempdir()
+        .expect("create exclusive catalog workspace");
+    std::fs::create_dir(root.path().join("configs")).expect("create configs");
     root
+}
+
+#[test]
+fn catalog_workspaces_keep_parallel_configs_isolated() {
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(16));
+    let workers: Vec<_> = (0..16)
+        .map(|index| {
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                let root = temp_workspace_root();
+                let expected = index.to_string();
+                std::fs::write(root.path().join("configs/config.toml"), &expected).unwrap();
+                (root, expected)
+            })
+        })
+        .collect();
+    let roots: Vec<_> = workers
+        .into_iter()
+        .map(|worker| worker.join().unwrap())
+        .collect();
+    let mut paths = std::collections::BTreeSet::new();
+    for (root, expected) in &roots {
+        assert!(paths.insert(root.path().to_path_buf()));
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("configs/config.toml")).unwrap(),
+            *expected
+        );
+    }
+}
+
+#[test]
+fn catalog_workspace_is_removed_after_its_guard_drops() {
+    let path = {
+        let root = temp_workspace_root();
+        assert!(root.path().join("configs").is_dir());
+        root.path().to_path_buf()
+    };
+    assert!(!path.exists());
 }
 
 fn write_fixture(root: &Path) {
@@ -159,7 +196,8 @@ minimax_models = ["music-2.6"]
 
 #[test]
 fn catalog_separates_selected_model_inputs_from_media_skill_support() {
-    let root = temp_workspace_root();
+    let workspace = temp_workspace_root();
+    let root = workspace.path();
     write_fixture(&root);
 
     let catalog = build_model_catalog_from_workspace(&root).expect("catalog");
@@ -198,7 +236,8 @@ fn catalog_separates_selected_model_inputs_from_media_skill_support() {
 
 #[test]
 fn catalog_emits_distinct_entries_for_independent_multimodal_models() {
-    let root = temp_workspace_root();
+    let workspace = temp_workspace_root();
+    let root = workspace.path();
     write_fixture(&root);
 
     let catalog = build_model_catalog_from_workspace(&root).expect("catalog");
@@ -228,7 +267,8 @@ fn catalog_emits_distinct_entries_for_independent_multimodal_models() {
 
 #[test]
 fn catalog_reports_missing_credential_state_without_secret_values() {
-    let root = temp_workspace_root();
+    let workspace = temp_workspace_root();
+    let root = workspace.path();
     write_fixture(&root);
 
     let catalog = build_model_catalog_from_workspace(&root).expect("catalog");
@@ -244,7 +284,8 @@ fn catalog_reports_missing_credential_state_without_secret_values() {
 
 #[test]
 fn catalog_accepts_exact_hosted_relay_device_enrollment() {
-    let root = temp_workspace_root();
+    let workspace = temp_workspace_root();
+    let root = workspace.path();
     std::fs::write(
         root.join("configs/config.toml"),
         r#"
@@ -283,7 +324,8 @@ api_format = "openai_compat"
 
 #[test]
 fn catalog_rejects_mismatched_hosted_relay_credential_projection() {
-    let root = temp_workspace_root();
+    let workspace = temp_workspace_root();
+    let root = workspace.path();
     std::fs::write(
         root.join("configs/config.toml"),
         r#"
@@ -326,7 +368,8 @@ fn catalog_reports_env_credential_state_without_secret_values() {
         std::env::remove_var("XIAOMI_API_KEY");
     }
 
-    let root = temp_workspace_root();
+    let workspace = temp_workspace_root();
+    let root = workspace.path();
     write_fixture(&root);
     let catalog = build_model_catalog_from_workspace(&root).expect("catalog");
     let mimo = catalog
@@ -351,7 +394,8 @@ fn catalog_reports_env_file_credential_state_without_secret_values() {
         std::env::remove_var("XIAOMI_API_KEY");
     }
 
-    let root = temp_workspace_root();
+    let workspace = temp_workspace_root();
+    let root = workspace.path();
     write_fixture(&root);
     let env_file = root.join("runtime_env_filled.sh");
     std::fs::write(
@@ -390,7 +434,8 @@ fn catalog_ignores_missing_env_file_path() {
         );
     }
 
-    let root = temp_workspace_root();
+    let workspace = temp_workspace_root();
+    let root = workspace.path();
     write_fixture(&root);
     let catalog = build_model_catalog_from_workspace(&root).expect("catalog");
 
@@ -402,7 +447,8 @@ fn catalog_ignores_missing_env_file_path() {
 
 #[test]
 fn catalog_output_does_not_serialize_secret_values() {
-    let root = temp_workspace_root();
+    let workspace = temp_workspace_root();
+    let root = workspace.path();
     write_fixture(&root);
 
     let catalog = build_model_catalog_from_workspace(&root).expect("catalog");

@@ -385,12 +385,13 @@ impl From<String> for RunSafeCommandError {
 }
 
 async fn kill_shell_pid(child_pid: Option<u32>) {
-    if let Some(pid) = child_pid {
-        if kill_process_group(pid, "-9").await {
+    if let Some(pid) = child_pid.filter(|pid| *pid > 1 && i32::try_from(*pid).is_ok()) {
+        if crate::skills::terminate_subprocess_group(Some(pid)).await {
             return;
         }
         let _ = Command::new("kill")
             .arg("-9")
+            .arg("--")
             .arg(pid.to_string())
             .status()
             .await;
@@ -404,25 +405,6 @@ fn place_child_in_own_process_group(cmd: &mut Command) {
 
 #[cfg(not(unix))]
 fn place_child_in_own_process_group(_cmd: &mut Command) {}
-
-#[cfg(unix)]
-async fn kill_process_group(pid: u32, signal: &str) -> bool {
-    if pid == 0 {
-        return false;
-    }
-    Command::new("kill")
-        .arg(signal)
-        .arg(format!("-{pid}"))
-        .status()
-        .await
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
-#[cfg(not(unix))]
-async fn kill_process_group(_pid: u32, _signal: &str) -> bool {
-    false
-}
 
 #[cfg(test)]
 pub(crate) async fn run_safe_command(

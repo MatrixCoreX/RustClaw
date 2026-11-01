@@ -1065,6 +1065,7 @@ async fn run_cmd_async_start_uses_dedicated_process_group() {
     assert_eq!(pgid, Some(pid));
     let _ = std::process::Command::new("kill")
         .arg("-TERM")
+        .arg("--")
         .arg(format!("-{pid}"))
         .status();
 }

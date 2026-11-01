@@ -1750,6 +1750,7 @@ fn cancel_task_by_id_terminates_local_process_group() {
     if !exited {
         let _ = Command::new("kill")
             .arg("-KILL")
+            .arg("--")
             .arg(format!("-{pid}"))
             .status();
         let _ = child.wait();

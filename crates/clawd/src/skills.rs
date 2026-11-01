@@ -136,26 +136,27 @@ pub(crate) fn place_subprocess_in_own_process_group(cmd: &mut Command) {
 pub(crate) fn place_subprocess_in_own_process_group(_cmd: &mut Command) {}
 
 #[cfg(unix)]
+fn subprocess_group_target(pid: Option<u32>) -> Option<i32> {
+    i32::try_from(pid?).ok().filter(|pid| *pid > 1).map(|pid| -pid)
+}
+
+#[cfg(unix)]
 pub(crate) async fn terminate_subprocess_group(pid: Option<u32>) -> bool {
-    let Some(pid) = pid.filter(|pid| *pid > 0) else {
+    let Some(group) = subprocess_group_target(pid) else {
         return false;
     };
-    Command::new("kill")
-        .arg("-KILL")
-        .arg(format!("-{pid}"))
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await
-        .map(|status| status.success())
-        .unwrap_or(false)
+    // This is the group created for the retained child, not a kill CLI option.
+    unsafe { libc::kill(group, libc::SIGKILL) == 0 }
 }
 
 #[cfg(not(unix))]
 pub(crate) async fn terminate_subprocess_group(_pid: Option<u32>) -> bool {
     false
 }
+
+#[cfg(all(test, unix))]
+#[path = "skills/process_termination_tests.rs"]
+mod process_termination_tests;
 
 mod async_poll;
 mod builtin;
