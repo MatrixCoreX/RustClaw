@@ -32,7 +32,7 @@ def validate(workflow):
     if events["push"].get("branches") != ["main", "ci/runtime-hardening-*"]:
         return False
     for event in ("push", "pull_request"):
-        if not {"crates/claw-core/**", "crates/skill-sdk/**", "scripts/clean_dev_artifacts.py",
+        if not {"crates/claw-core/**", "crates/skill-sdk/**", "crates/skills/browser_web/**", "scripts/clean_dev_artifacts.py",
                 "scripts/tests/test_clean_dev_artifacts.py", "scripts/check-secrets.sh",
                 "scripts/check_staged_secrets.py", "scripts/tests/test_check_staged_secrets.py"}.issubset(events[event].get("paths", [])):
             return False
@@ -47,6 +47,7 @@ def validate(workflow):
         return False
     commands = []
     python_setups = 0
+    node_setups = 0
     for step in job["steps"]:
         if step.get("continue-on-error") or "if" in step:
             return False
@@ -58,6 +59,10 @@ def validate(workflow):
                 if step.get("with", {}).get("python-version") != "3.11":
                     return False
                 python_setups += 1
+            elif step["uses"] == "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020":
+                if step.get("with", {}).get("node-version") != "22":
+                    return False
+                node_setups += 1
             else:
                 return False
         if "run" in step:
@@ -67,9 +72,11 @@ def validate(workflow):
             if any("||" in line for line in lines):
                 return False
             commands.extend(lines[1:])
-    if python_setups != 1:
+    if python_setups != 1 or node_setups != 1:
         return False
     required = [
+        "npm ci --ignore-scripts --prefix crates/skills/browser_web",
+        "node crates/skills/browser_web/node_modules/playwright/cli.js install --with-deps chromium",
         "python3 scripts/check_github_action_pins.py",
         "python3 scripts/nl_tests/linux_process_owner_workflow_tests.py",
         "python3 -m unittest discover -s scripts/tests -p test_clean_dev_artifacts.py -v",
@@ -78,6 +85,7 @@ def validate(workflow):
         "cargo test --locked -p skill-runner",
         "cargo test --locked -p claw-core",
         "cargo build --locked -p clawd --bin clawd",
+        "cargo build --locked -p clawd --bin pty-session-runner",
         *[f'APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test --locked -p clawd --bin clawd {case} -- --exact --ignored --test-threads=1 --nocapture'
           for case in OWNER_CASES],
         "cargo test --locked -p clawd --bin clawd workspace_ -- --test-threads=1 --nocapture",
@@ -86,6 +94,8 @@ def validate(workflow):
         "cargo test --locked -p clawd --bin clawd skills::runner:: -- --test-threads=1 --nocapture",
         "cargo test --locked -p clawd --bin clawd cancellation_observation -- --test-threads=1 --nocapture",
         "cargo test --locked -p clawd --bin clawd resource_observation -- --test-threads=1 --nocapture",
+        "cargo test --locked -p clawd --bin clawd browser_session_service::tests -- --test-threads=1 --nocapture",
+        "cargo test --locked -p clawd --bin clawd skills::builtin::builtin_pty_session::tests -- --test-threads=1 --nocapture",
         "cargo test --locked -p clawd --bin clawd -- --test-threads=1 --nocapture",
         "cargo test --locked -p clawd --bin clawd local_process_job::tests -- --test-threads=1 --nocapture",
         "cargo test --locked -p clawd --bin clawd worker::async_poll_executor::tests -- --test-threads=1 --nocapture",
@@ -103,6 +113,30 @@ class LinuxProcessOwnerWorkflowTests(unittest.TestCase):
 
     def test_actual_source_binary_and_all_explicit_cases_precede_identity_gate(self):
         self.assertTrue(validate(self.workflow))
+
+    def test_browser_and_terminal_prerequisites_and_actual_tests_are_required(self):
+        for original, replacement in (
+            ("npm ci --ignore-scripts --prefix crates/skills/browser_web", "npm install"),
+            ("install --with-deps chromium", "install chromium"),
+            ("cargo build --locked -p clawd --bin pty-session-runner", "true"),
+            ("browser_session_service::tests", "missing_browser_case"),
+            ("skills::builtin::builtin_pty_session::tests", "missing_terminal_case"),
+        ):
+            changed = deepcopy(self.workflow)
+            for step in changed["jobs"]["process-owner-linux"]["steps"]:
+                if "run" in step:
+                    step["run"] = step["run"].replace(original, replacement)
+            with self.subTest(mutation=original):
+                self.assertFalse(validate(changed))
+        for event in ("push", "pull_request"):
+            changed = deepcopy(self.workflow)
+            changed["on"][event]["paths"].remove("crates/skills/browser_web/**")
+            self.assertFalse(validate(changed))
+        changed = deepcopy(self.workflow)
+        for step in changed["jobs"]["process-owner-linux"]["steps"]:
+            if step.get("name") == "Setup Node.js":
+                step["with"]["node-version"] = "18"
+        self.assertFalse(validate(changed))
 
     def test_skipping_ignored_case_or_using_a_test_binary_is_rejected(self):
         for original, replacement in (

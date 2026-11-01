@@ -29,6 +29,24 @@ def valid_job(job, runner, target):
 
 
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_native_browser_and_terminal_prerequisites_precede_actual_cases(self):
+        workflow = load("macos-polyglot-skill-ci.yml")
+        for event in ("push", "pull_request"):
+            self.assertIn("crates/skills/browser_web/**", workflow["on"][event]["paths"])
+        steps = workflow["jobs"]["polyglot-skill-macos"]["steps"]
+        flattened = "\n".join(step.get("run", "") for step in steps)
+        for prerequisite in (
+            "npm ci --ignore-scripts --prefix crates/skills/browser_web",
+            "node crates/skills/browser_web/node_modules/playwright/cli.js install chromium",
+            "cargo build --locked -p clawd --bin pty-session-runner",
+        ):
+            self.assertEqual(flattened.count(prerequisite), 1)
+            self.assertLess(flattened.index(prerequisite), flattened.index("browser_session_service::tests"))
+        for selection in ("browser_session_service::tests", "skills::builtin::builtin_pty_session::tests"):
+            command = f"cargo test -p clawd --bin clawd {selection} -- --test-threads=1 --nocapture"
+            self.assertEqual(flattened.count(command), 1)
+            self.assertLess(flattened.index(command), flattened.index("local_process_job::tests"))
+
     def test_bounded_snapshot_enumeration_is_selected_before_the_owner_gate(self):
         steps = load("macos-polyglot-skill-ci.yml")["jobs"]["polyglot-skill-macos"]["steps"]
         gate = next(index for index, step in enumerate(steps) if "local_process_job::tests" in step.get("run", ""))

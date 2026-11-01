@@ -19,6 +19,7 @@ name: Polyglot Skill macOS CI
       - "crates/whatsappd/**"
       - "services/wa-web-bridge/**"
       - "crates/clawd/**"
+      - "crates/skills/browser_web/**"
       - "crates/skill-runner/**"
       - "crates/skill-sdk/**"
       - "crates/skills/**"
@@ -77,6 +78,7 @@ name: Polyglot Skill macOS CI
       - "crates/whatsappd/**"
       - "services/wa-web-bridge/**"
       - "crates/clawd/**"
+      - "crates/skills/browser_web/**"
       - "crates/skill-runner/**"
       - "crates/skill-sdk/**"
       - "crates/skills/**"
@@ -216,6 +218,8 @@ jobs:
         run: |
           set -euo pipefail
           npm ci --ignore-scripts --prefix UI
+          npm ci --ignore-scripts --prefix crates/skills/browser_web
+          node crates/skills/browser_web/node_modules/playwright/cli.js install chromium
           npm test --prefix UI
           npm run lint --prefix UI
           node UI/node_modules/playwright/cli.js install chromium
@@ -300,10 +304,13 @@ jobs:
           cargo test -p clawd --bin clawd skills::tests::env_isolation:: -- --test-threads=1 --nocapture
           cargo test -p clawd --bin clawd process_launch:: -- --test-threads=1 --nocapture
           cargo build -p clawd --bin clawd
+          cargo build --locked -p clawd --bin pty-session-runner
           APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test -p clawd --bin clawd local_process_owner::entry::tests::entry_executable_protocol_acceptance -- --exact --ignored --test-threads=1 --nocapture
           cargo test -p clawd --bin clawd local_process_owner:: -- --test-threads=1 --nocapture
           cargo test -p clawd --bin clawd cancellation_observation -- --test-threads=1 --nocapture
           cargo test -p clawd --bin clawd resource_observation -- --test-threads=1 --nocapture
+          cargo test -p clawd --bin clawd browser_session_service::tests -- --test-threads=1 --nocapture
+          cargo test -p clawd --bin clawd skills::builtin::builtin_pty_session::tests -- --test-threads=1 --nocapture
           cargo test -p clawd --bin clawd local_process_job::tests -- --test-threads=1 --nocapture
           cargo test -p clawd --bin clawd worker::async_poll_executor::tests -- --test-threads=1 --nocapture
           cargo test -p clawd --bin clawd resource_scheduler:: -- --test-threads=1 --nocapture

@@ -11,6 +11,7 @@ name: Linux Process Owner Contracts
       - crates/clawd/**
       - crates/skill-sdk/**
       - crates/skill-runner/**
+      - crates/skills/browser_web/**
       - .github/workflows/linux-process-owner-ci.yml
       - scripts/nl_tests/linux_process_owner_workflow_tests.py
       - scripts/clean_dev_artifacts.py
@@ -26,6 +27,7 @@ name: Linux Process Owner Contracts
       - crates/clawd/**
       - crates/skill-sdk/**
       - crates/skill-runner/**
+      - crates/skills/browser_web/**
       - .github/workflows/linux-process-owner-ci.yml
       - scripts/nl_tests/linux_process_owner_workflow_tests.py
       - scripts/clean_dev_artifacts.py
@@ -67,6 +69,18 @@ jobs:
           sudo apt-get install -y -qq pkg-config make perl clang libclang-dev bubblewrap protobuf-compiler
           python3 -m pip install --requirement scripts/nl_tests/requirements.txt
 
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Install native browser test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --prefix crates/skills/browser_web
+          node crates/skills/browser_web/node_modules/playwright/cli.js install --with-deps chromium
+
       - name: Verify workflow contracts
         shell: bash
         run: |
@@ -94,6 +108,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo build --locked -p clawd --bin clawd
+          cargo build --locked -p clawd --bin pty-session-runner
           APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test --locked -p clawd --bin clawd local_process_owner::entry::tests::entry_executable_protocol_acceptance -- --exact --ignored --test-threads=1 --nocapture
           APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test --locked -p clawd --bin clawd local_process_owner::authority_entry::tests::entry_executable_authority_acceptance -- --exact --ignored --test-threads=1 --nocapture
           APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test --locked -p clawd --bin clawd skills::runner::owner_custody_tests::entry_executable_sdk_custody_acceptance -- --exact --ignored --test-threads=1 --nocapture
@@ -107,6 +122,8 @@ jobs:
           cargo test --locked -p clawd --bin clawd skills::runner:: -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd cancellation_observation -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd resource_observation -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd browser_session_service::tests -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd skills::builtin::builtin_pty_session::tests -- --test-threads=1 --nocapture
 
       - name: Test full runtime, process identity and terminal consumers
         shell: bash
