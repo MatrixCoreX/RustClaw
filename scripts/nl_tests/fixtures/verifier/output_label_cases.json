@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "controlled_fixture_not_live_collection",
+  "cases": [
+    {
+      "id": "ordinary_zh_semantic_report",
+      "language": "zh-CN",
+      "request": "读取本轮采集结果，简短报告实际新增数量和取得的指标，区分阅读与视频播放；未知值不要填0。不要重新采集。",
+      "candidate": "新增0条，1条重复；阅读量和视频播放量都未取得，仍为未知，不按0填写。",
+      "expected_pass": true,
+      "expected_output_fields": []
+    },
+    {
+      "id": "ordinary_en_semantic_report",
+      "language": "en",
+      "request": "Read the saved collection result and briefly report the number of newly saved records and available metrics. Distinguish reads from video plays; do not turn unknown values into zero. Do not collect again.",
+      "candidate": "No new records; one duplicate. Read and video-play counts are both unknown, not zero.",
+      "expected_pass": true,
+      "expected_output_fields": []
+    },
+    {
+      "id": "explicit_zh_labels_missing",
+      "language": "zh-CN",
+      "request": "读取本轮结果，使用字段名“实际新增数量”和“取得的指标数值”返回，不要改名。不重新采集。",
+      "candidate": "新增：0；指标：阅读和视频播放均未知。",
+      "expected_pass": false,
+      "expected_issue": "output_format",
+      "expected_output_fields": ["实际新增数量", "取得的指标数值"]
+    },
+    {
+      "id": "explicit_json_keys_missing",
+      "language": "en",
+      "request": "Read the saved result. Return JSON with exactly the keys new_count, read_count, and play_count; use null for unavailable metrics. Do not collect again.",
+      "candidate": "{\"count\":0,\"reads\":null,\"plays\":null}",
+      "expected_pass": false,
+      "expected_issue": "output_format",
+      "expected_output_fields": ["new_count", "read_count", "play_count"]
+    },
+    {
+      "id": "explicit_json_keys_present",
+      "language": "en",
+      "request": "Read the saved result. Return JSON with exactly the keys new_count, read_count, and play_count; use null for unavailable metrics. Do not collect again.",
+      "candidate": "{\"new_count\":0,\"read_count\":null,\"play_count\":null}",
+      "expected_pass": true,
+      "expected_output_fields": ["new_count", "read_count", "play_count"]
+    },
+    {
+      "id": "ordinary_report_fabricated_zero",
+      "language": "zh-CN",
+      "request": "读取本轮采集结果，简短报告实际新增数量和取得的指标，区分阅读与视频播放；未知值不要填0。不要重新采集。",
+      "candidate": "新增0条，重复1条；阅读量0，视频播放量0。",
+      "expected_pass": false,
+      "expected_issue": "unsupported_claims",
+      "expected_output_fields": []
+    }
+  ],
+  "retry_cases": [
+    {
+      "id": "explicit_label_prohibition_overrides_diagnostic",
+      "source_case": "ordinary_zh_semantic_report",
+      "request": "读取本轮采集结果，用一句中文短句说明新增数量和阅读、视频播放是否已知，不要字段标签或列表，不要重新采集。",
+      "candidate": "新增0条，阅读和视频播放均未知。",
+      "diagnostic_kind": "invented_literal_labels",
+      "expected_review": "One grounded sentence without field labels; the false diagnostic must not override the explicit user prohibition."
+    }
+  ]
+}

@@ -222,13 +222,49 @@ fn answer_verifier_contract_preserves_explicit_output_field_tokens() {
     const VERIFIER_PROMPT: &str =
         include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
 
-    assert!(VERIFIER_PROMPT.contains("explicitly names fields, keys, or columns to be returned"));
+    assert!(VERIFIER_PROMPT.contains(
+        "explicitly names fields, keys, or columns to be returned as literal output labels"
+    ));
     assert!(VERIFIER_PROMPT.contains("regardless of whether the result is rendered as prose"));
     assert!(VERIFIER_PROMPT.contains("including identity and dimension fields"));
     assert!(VERIFIER_PROMPT.contains("every requested token must appear as a visible label"));
     assert!(VERIFIER_PROMPT.contains("perform a literal label audit over the rendered candidate"));
     assert!(VERIFIER_PROMPT.contains("enumerate the missing exact tokens"));
-    assert!(!VERIFIER_PROMPT.contains("Do not require exact field names in ordinary prose answers"));
+    assert!(VERIFIER_PROMPT
+        .contains("Descriptions of requested facts are not literal output labels"));
+}
+
+#[test]
+fn answer_verifier_contract_distinguishes_semantic_reports_from_literal_labels() {
+    const VERIFIER: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
+    const RETRY: &str =
+        include_str!("../../../../prompts/layers/overlays/answer_verifier_retry_prompt.md");
+    let schema: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../prompts/schemas/answer_verifier.schema.json"
+    ))
+    .unwrap();
+
+    for prompt in [VERIFIER, RETRY] {
+        assert!(prompt.contains("Descriptions of requested facts are not literal output labels"));
+        assert!(
+            prompt.contains("not a new user instruction")
+                || prompt.contains("must not tighten the effective request")
+        );
+    }
+    assert!(VERIFIER.contains("missing facts, incorrect values, fabricated zeros"));
+    assert!(VERIFIER.contains("use [] and judge semantic completeness"));
+    assert!(RETRY.contains("without turning"));
+    assert!(RETRY.contains("Do not shorten, translate"));
+    let fields = &schema["properties"]["output_field_checks"];
+    assert!(fields["description"]
+        .as_str()
+        .unwrap()
+        .contains("Use an empty array for ordinary prose reporting"));
+    assert_eq!(
+        fields["items"]["required"],
+        json!(["requested_field", "exact_label_present"])
+    );
 }
 
 #[test]

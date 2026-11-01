@@ -1,0 +1,12 @@
+{
+  "fixture_only": true,
+  "run": {
+    "status": "completed_batch",
+    "new_records": 0,
+    "duplicates": 1
+  },
+  "metrics": {
+    "reads": null,
+    "views": null
+  }
+}

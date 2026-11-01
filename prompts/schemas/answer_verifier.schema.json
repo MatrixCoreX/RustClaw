@@ -58,7 +58,7 @@
     "output_field_checks": {
       "type": "array",
       "maxItems": 64,
-      "description": "Complete audit of every output field, key, or column explicitly named by the user. Use an empty array only when the user named no output fields. Preserve requested_field byte-for-byte from the request.",
+      "description": "Audit literal output labels that the effective user request explicitly designates as field labels, object keys, or table columns. Descriptions of requested facts are not literal output labels. Use an empty array for ordinary prose reporting, while checking semantic completeness and accuracy in the verdict. Never invent label obligations from source fields or a prior verifier issue. Preserve genuine requested labels byte-for-byte.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -68,7 +68,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 160,
-            "description": "One exact field/key/column token copied byte-for-byte from the user request."
+            "description": "One literal output field/key/column label explicitly requested for display, copied byte-for-byte from the effective user request; not an inferred heading or a descriptive phrase."
           },
           "exact_label_present": {
             "type": "boolean",
