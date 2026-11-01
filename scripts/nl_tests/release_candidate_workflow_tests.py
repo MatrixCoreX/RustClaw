@@ -58,6 +58,14 @@ def findings(workflow):
 
 
 class ReleaseCandidateWorkflowTests(unittest.TestCase):
+    def test_answer_verifier_and_selector_regressions_run_on_linux_and_macos(self):
+        for name in ("ubuntu-x86_64-release.yml", "macos-polyglot-skill-ci.yml"):
+            workflow = load_workflow(name)
+            commands = "\n".join(step.get("run", "") for job in workflow["jobs"].values()
+                                 for step in job.get("steps", []))
+            for selection in ("answer_verifier", "machine_selector"):
+                self.assertIn(f"cargo test --locked -p clawd --bin clawd {selection} -- --test-threads=1", commands)
+
     def test_release_workflows_offer_artifact_only_mode(self):
         for name in WORKFLOWS:
             with self.subTest(workflow=name):

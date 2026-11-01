@@ -149,7 +149,7 @@ export function kbSearchRows(payload: unknown): KbSearchRow[] {
     return [{
       evidenceId: boundedString(item.evidence_id, 256),
       sourceRef: boundedString(item.source_ref, 2_048),
-      text: boundedString(item.text, 8_000),
+      text: typeof item.text === "string" ? item.text.trim() : "",
       score: typeof score === "number" && Number.isFinite(score) ? score : null,
       location: record(item.location) ?? {},
     }];

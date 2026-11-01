@@ -15,6 +15,7 @@ import {
   type KbSearchRow,
 } from "../lib/kb-maintenance";
 import { formatUiError } from "../lib/ui-error";
+import { KbSearchExcerpt } from "./KbSearchExcerpt";
 import type { ApiResponse, SubmitTaskResponse, TaskQueryResponse } from "../types/api";
 
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
@@ -316,7 +317,7 @@ export function KbMaintenancePanel({ t, apiFetch, identity }: KbMaintenancePanel
           {hits.map((item, index) => (
             <article key={item.evidenceId || `${item.sourceRef}:${index}`} className="rounded-xl border border-white/10 bg-[#12151f] p-4">
               <p className="break-all text-xs font-medium text-sky-200">{item.sourceRef || t("知识库证据", "Knowledge-base evidence")}</p>
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-white/75">{item.text}</p>
+              <KbSearchExcerpt text={item.text} t={t} />
               <details className="mt-2 text-[11px] text-white/40"><summary className="cursor-pointer">{t("检索详情", "Retrieval details")}</summary><pre className="mt-2 overflow-auto whitespace-pre-wrap">{boundedJson({ evidence_id: item.evidenceId, score: item.score, location: item.location })}</pre></details>
             </article>
           ))}
