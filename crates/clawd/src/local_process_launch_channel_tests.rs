@@ -657,6 +657,7 @@ pub(crate) fn spawn_fixture(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .env(super::super::owner_scope::tests::CONTROL_ENV, "1")
         .env("APP_OWNER_REFERENCE_TEST_ROOT", root)
         .env("APP_OWNER_REFERENCE_TEST_JOB", job_id.to_string());
     if let Some(authority) = authority {

@@ -5,7 +5,14 @@ use super::*;
 mod fixtures;
 
 #[cfg(target_os = "linux")]
+#[path = "local_process_owner_fixture_bootstrap_tests.rs"]
+mod fixture_bootstrap;
+
+#[cfg(target_os = "linux")]
 pub(crate) const FIXTURE_ENV: &str = "APP_PROCESS_SCOPE_TEST_CASE";
+
+#[cfg(target_os = "linux")]
+pub(crate) const CONTROL_ENV: &str = "APP_OWNER_FIXTURE_CONTROL_EXPECTED";
 
 #[cfg(target_os = "linux")]
 pub(crate) fn fixture_command(case: &str, foreign_group: Option<u32>) -> Command {
@@ -20,7 +27,8 @@ pub(crate) fn fixture_command(case: &str, foreign_group: Option<u32>) -> Command
             "--nocapture",
             "--test-threads=1",
         ])
-        .env(FIXTURE_ENV, case);
+        .env(FIXTURE_ENV, case)
+        .env_remove(CONTROL_ENV);
     if let Some(group) = foreign_group {
         command.env("APP_PROCESS_SCOPE_TEST_FOREIGN_GROUP", group.to_string());
     }
@@ -46,6 +54,9 @@ pub(crate) fn run_isolated(case: &str, foreign_group: Option<u32>) {
 #[ignore = "Parent tests execute this exact fixture in an isolated owner process"]
 fn owner_scope_isolated_fixture() {
     let case = std::env::var(FIXTURE_ENV).expect("isolated fixture case required");
+    // This is the fresh disposable helper, not the parent test runner. Match
+    // the real entry's closed descriptor boundary before private fixture input.
+    fixture_bootstrap::seal();
     if !matches!(case.as_str(), "privacy_probe" | "privacy_scope_unprotected") {
         // This exact fixture is a fresh one-job helper. Enter before its
         // private test key/control inputs; never change the parent runner.

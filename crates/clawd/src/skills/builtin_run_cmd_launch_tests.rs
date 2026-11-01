@@ -69,6 +69,20 @@ async fn async_launch_uses_admitted_directory_after_its_path_is_replaced() {
 #[tokio::test]
 async fn async_launch_preserves_raw_script_argument_without_shell_interpolation() {
     let root = Fixture::new();
+    let script = root.0.join("script \n ' $(touch injected).sh");
+    fs::write(&script, b"printf exact-argument > observed").unwrap();
+    run(root.launch(&root.0, &script)).await;
+    assert_eq!(
+        fs::read(root.0.join("observed")).unwrap(),
+        b"exact-argument"
+    );
+    assert!(!root.0.join("injected").exists());
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn async_launch_executes_a_non_utf8_script_when_the_filesystem_supports_it() {
+    let root = Fixture::new();
     let script = root.0.join(std::ffi::OsString::from_vec(
         b"script \xff ' $(touch injected).sh".to_vec(),
     ));
@@ -78,6 +92,44 @@ async fn async_launch_preserves_raw_script_argument_without_shell_interpolation(
         fs::read(root.0.join("observed")).unwrap(),
         b"exact-argument"
     );
+    assert!(!root.0.join("injected").exists());
+}
+
+#[test]
+fn async_launch_preserves_non_utf8_script_bytes_without_creating_an_invalid_path() {
+    let root = Fixture::new();
+    let script = root.0.join(std::ffi::OsString::from_vec(
+        b"script \xff ' $(touch injected).sh".to_vec(),
+    ));
+    let (invocation, _, _, _) = root.launch(&root.0, &script).into_parts();
+    let (program, arguments) = invocation.into_parts();
+    assert_eq!(program, std::ffi::OsStr::new("bash"));
+    assert_eq!(arguments, vec![script.into_os_string()]);
+}
+
+#[tokio::test]
+async fn launch_exec_preserves_non_utf8_data_arguments_on_unix() {
+    let root = Fixture::new();
+    let raw = b"data \xff ' $(touch injected)";
+    let mut invocation = crate::process_invocation::ProcessInvocation::new("/bin/sh");
+    invocation
+        .arg("-c")
+        .arg("printf '%s' \"$1\" > observed")
+        .arg("fixture")
+        .arg(std::ffi::OsString::from_vec(raw.to_vec()));
+    let launch = ProcessLaunch::new(
+        invocation,
+        root.0.clone(),
+        vec![],
+        PayloadIo {
+            stdin: None,
+            stdout: None,
+            stderr: None,
+        },
+    )
+    .unwrap();
+    run(launch).await;
+    assert_eq!(fs::read(root.0.join("observed")).unwrap(), raw);
     assert!(!root.0.join("injected").exists());
 }
 
