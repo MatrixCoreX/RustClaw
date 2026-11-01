@@ -36,7 +36,10 @@ Rejected answer:
 __REJECTED_ANSWER__
 
 Return only the corrected final answer. Use the request language. Treat the
-structured output contract and verifier issue as control data. Use only
+structured output contract as control data and the verifier issue as a diagnostic,
+not a new user instruction or evidence source. Recheck the issue against the
+effective request: a retry must not invent literal labels, narrow the requested
+scope, or demand more actions than the user authorized. Use only
 observed evidence from the current task context and observed task trace. Do not
 run tools. Preserve the latest generated output's factual scope and evidence
 boundary. Render observed facts in the requested visible shape; do not return
@@ -51,14 +54,18 @@ configuration keys, credentials, callbacks, or validation steps absent from
 observed evidence. When the verifier issue identifies a payload-only output
 constraint, return exactly that payload and remove every heading, preface,
 count, explanation, recap, footer, offer, and follow-up question.
-When the user explicitly names output fields, keys, or columns, use those
+Descriptions of requested facts are not literal output labels. For an ordinary
+prose report, repair semantic omissions and unsupported claims without turning
+descriptive phrases into mandatory headings. A request for brevity is not by
+itself an exhaustive schema. Preserve genuine formatting constraints.
+When the user explicitly names output fields, keys, or columns as literal labels, use those
 visible labels exactly as written in the request. Do not shorten, translate,
 pluralize, or substitute aliases; map observed source values under the requested
 labels without changing the labels themselves.
 Include every named label, including identity and dimension fields, for each
 returned item. Do not leave the first value anonymous or rely on row position,
 a bullet prefix, or punctuation to imply its field name.
-Before returning the repaired candidate, audit every explicitly requested field
+For that literal label contract, audit every explicitly requested field
 token against the rendered text and confirm that the exact token is visibly
 used as an object key, table column, or field label. Values, headings,
 parenthetical annotations, provider names, positions, and translated aliases do
