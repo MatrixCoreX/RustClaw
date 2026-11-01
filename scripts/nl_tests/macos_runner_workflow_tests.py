@@ -29,6 +29,15 @@ def valid_job(job, runner, target):
 
 
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_two_brand_ui_identity_contract_is_built_after_dependency_installation(self):
+        steps = load("macos-polyglot-skill-ci.yml")["jobs"]["polyglot-skill-macos"]["steps"]
+        flattened = "\n".join(step.get("run", "") for step in steps)
+        for command in ("python3 scripts/check_product_identity_coupling.py --self-test",
+                        "python3 scripts/check_product_identity_coupling.py\n",
+                        "bash scripts/product_identity_tests.sh --with-ui"):
+            self.assertEqual(flattened.count(command), 1)
+            self.assertLess(flattened.index("npm ci --ignore-scripts --prefix UI"), flattened.index(command))
+
     def test_native_browser_and_terminal_prerequisites_precede_actual_cases(self):
         workflow = load("macos-polyglot-skill-ci.yml")
         for event in ("push", "pull_request"):
@@ -51,6 +60,8 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
         steps = load("macos-polyglot-skill-ci.yml")["jobs"]["polyglot-skill-macos"]["steps"]
         gate = next(index for index, step in enumerate(steps) if "local_process_job::tests" in step.get("run", ""))
         for selection in ("runtime::host_filesystem::directory::tests",
+                          "runtime::host_filesystem::access_mode::tests",
+                          "runtime::host_filesystem::restore::tests",
                           "skills::builtin::builtin_workspace_mutation::enumeration_tests",
                           "skills::builtin::builtin_list_dir::tests",
                           "skills::builtin::builtin_workspace_mutation::restore_tests"):

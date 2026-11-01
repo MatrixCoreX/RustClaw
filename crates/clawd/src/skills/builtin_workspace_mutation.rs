@@ -1,4 +1,4 @@
-use crate::runtime::host_filesystem::{BoundedFileReadError, HostFilesystemPolicy};
+use crate::runtime::host_filesystem::{HostAccessMode, HostFilesystemPolicy};
 use rustix::fs::FileType;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -12,7 +12,7 @@ use super::builtin_workspace_patch::{
     canonical_workspace_root, create_checkpoint_dir, resolve_checkpoint_dir, validate_checkpoint_id,
 };
 
-const CHECKPOINT_SCHEMA_VERSION: u32 = 1;
+const CHECKPOINT_SCHEMA_VERSION: u32 = 2;
 const CHECKPOINT_KIND: &str = "structured_mutation";
 const MAX_SNAPSHOT_ENTRIES: usize = 4096;
 const MAX_SNAPSHOT_BYTES: u64 = 64 * 1024 * 1024;
@@ -38,6 +38,8 @@ impl MutationAfterShape {
             sha256,
             size_bytes,
             backup_file: None,
+            unix_mode: (!matches!(self, Self::Missing))
+                .then(|| HostAccessMode::try_from(0o777).expect("ordinary projected mode")),
         }
     }
 
@@ -50,13 +52,22 @@ impl MutationAfterShape {
         }
         match self {
             Self::RegularFile => {
-                entry.kind == "file" && entry.sha256.is_some() && entry.size_bytes.is_some()
+                entry.kind == "file"
+                    && entry.sha256.is_some()
+                    && entry.size_bytes.is_some()
+                    && entry.unix_mode.is_some()
             }
             Self::Directory => {
-                entry.kind == "directory" && entry.sha256.is_none() && entry.size_bytes.is_none()
+                entry.kind == "directory"
+                    && entry.sha256.is_none()
+                    && entry.size_bytes.is_none()
+                    && entry.unix_mode.is_some()
             }
             Self::Missing => {
-                entry.kind == "missing" && entry.sha256.is_none() && entry.size_bytes.is_none()
+                entry.kind == "missing"
+                    && entry.sha256.is_none()
+                    && entry.size_bytes.is_none()
+                    && entry.unix_mode.is_none()
             }
         }
     }
@@ -69,6 +80,8 @@ struct SnapshotEntry {
     sha256: Option<String>,
     size_bytes: Option<u64>,
     backup_file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unix_mode: Option<HostAccessMode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -282,7 +295,7 @@ pub(super) fn rewind_structured_mutation_with_policy(
         ));
     }
     let current = capture_snapshot(&root, &manifest.target_path, None, filesystem)?;
-    if current != manifest.after {
+    if !snapshot_matches_recorded_state(&manifest.after, &current, manifest.schema_version == 1) {
         return Err(mutation_error(
             "rewind_precondition_failed",
             "workspace.mutation.rewind_precondition_failed",
@@ -312,6 +325,7 @@ pub(super) fn rewind_structured_mutation_with_policy(
         "isolation_root": "workspace://current",
         "reversible": false,
         "restored_files": snapshot_file_paths(&manifest.before),
+        "unix_mode_restoration": mode_restoration_coverage(&manifest.before),
         "artifact_refs": [
             {"kind": "workspace_checkpoint", "ref": format!("workspace_checkpoint:{checkpoint_id}")},
         ],
@@ -446,7 +460,8 @@ impl<'a> StructuredMutationCheckpoint<'a> {
             None,
             self.filesystem,
         )?;
-        Ok(snapshot_states_equal(&self.manifest.before, &current))
+        Ok(snapshot_states_equal(&self.manifest.before, &current)
+            && missing_parents_absent(&self.root, &self.manifest, self.filesystem)?)
     }
 
     fn unconfirmed(&self, phase: &str, cause: String) -> String {
@@ -537,6 +552,7 @@ fn capture_path(
                     sha256: None,
                     size_bytes: None,
                     backup_file: None,
+                    unix_mode: None,
                 });
                 continue;
             }
@@ -556,6 +572,12 @@ fn capture_path(
             let (file, _) = filesystem
                 .open_file(Some(root), &path)
                 .map_err(|error| io_error("snapshot_read_failed", error))?;
+            let unix_mode = HostAccessMode::capture(
+                &file
+                    .metadata()
+                    .map_err(|error| io_error("snapshot_inspection_failed", error))?,
+            )
+            .map_err(|error| io_error("snapshot_permissions_unsupported", error))?;
             let mut bytes = Vec::new();
             file.take(MAX_SNAPSHOT_BYTES.saturating_sub(budget.bytes) + 1)
                 .read_to_end(&mut bytes)
@@ -580,6 +602,7 @@ fn capture_path(
                 sha256: Some(sha256_label(&bytes)),
                 size_bytes: Some(bytes.len() as u64),
                 backup_file,
+                unix_mode: Some(unix_mode),
             });
             continue;
         }
@@ -590,16 +613,20 @@ fn capture_path(
                 json!({"path": relative}),
             ));
         }
+        let directory = filesystem
+            .open_directory(Some(root), &path)
+            .map_err(|error| io_error("snapshot_read_dir_failed", error))?;
+        let unix_mode = directory
+            .access_mode()
+            .map_err(|error| io_error("snapshot_permissions_unsupported", error))?;
         entries.push(SnapshotEntry {
             path: relative,
             kind: "directory".to_string(),
             sha256: None,
             size_bytes: None,
             backup_file: None,
+            unix_mode: Some(unix_mode),
         });
-        let directory = filesystem
-            .open_directory(Some(root), &path)
-            .map_err(|error| io_error("snapshot_read_dir_failed", error))?;
         let remaining = budget
             .max_entries
             .saturating_sub(budget.entries)
@@ -646,7 +673,7 @@ struct RestoreFile<'a> {
 struct RestorePlan<'a> {
     target: PathBuf,
     files: Vec<RestoreFile<'a>>,
-    directories: Vec<PathBuf>,
+    directories: Vec<(PathBuf, &'a SnapshotEntry)>,
     missing_parents: Vec<PathBuf>,
 }
 
@@ -728,6 +755,15 @@ fn plan_restore<'a>(
     let mut directories = Vec::new();
     let mut total_bytes = 0_u64;
     for (path, entry) in &entries {
+        if entry.kind == "missing" && entry.unix_mode.is_some() {
+            return Err(restore_manifest_error("missing_entry_mode", &entry.path));
+        }
+        if manifest.schema_version == CHECKPOINT_SCHEMA_VERSION
+            && matches!(entry.kind.as_str(), "file" | "directory")
+            && entry.unix_mode.is_none()
+        {
+            return Err(restore_manifest_error("native_mode_missing", &entry.path));
+        }
         if path != &target {
             let parent_is_directory = path
                 .parent()
@@ -791,7 +827,7 @@ fn plan_restore<'a>(
                     ));
                 }
                 if entry.kind == "directory" {
-                    directories.push(path.clone());
+                    directories.push((path.clone(), *entry));
                 }
             }
             _ => return Err(restore_manifest_error("unknown_entry_kind", &entry.path)),
@@ -813,7 +849,7 @@ fn plan_restore<'a>(
             return Err(restore_manifest_error("duplicate_parent", relative));
         }
     }
-    directories.sort_by_key(|path| path.components().count());
+    directories.sort_by_key(|(path, _)| path.components().count());
     let mut missing_parents = parents.into_iter().collect::<Vec<_>>();
     missing_parents.sort_by_key(|path| std::cmp::Reverse(path.components().count()));
     Ok(RestorePlan {
@@ -824,71 +860,9 @@ fn plan_restore<'a>(
     })
 }
 
-fn restore_snapshot(
-    root: &Path,
-    checkpoint_dir: &Path,
-    manifest: &MutationCheckpointManifest,
-    filesystem: &HostFilesystemPolicy,
-) -> Result<(), String> {
-    // Destination paths are lexical until the target is reconstructed. Each
-    // actual IO still crosses HostFilesystemPolicy; this is not a host grant.
-    let plan = plan_restore(root, checkpoint_dir, manifest)?;
-    let mut restored_files = Vec::with_capacity(plan.files.len());
-    for file in plan.files {
-        let bytes = filesystem
-            .read_file_bounded(Some(checkpoint_dir), &file.backup, file.expected_bytes)
-            .map_err(|error| match error {
-                BoundedFileReadError::Io(error) => io_error("restore_read_failed", error),
-                BoundedFileReadError::LimitExceeded {
-                    observed_bytes_at_least,
-                    ..
-                } => backup_validation_error(
-                    &file.entry.path,
-                    "size_mismatch",
-                    json!({"expected_size_bytes":file.expected_bytes,
-                            "observed_bytes_at_least":observed_bytes_at_least}),
-                ),
-            })?;
-        if bytes.len() != file.expected_bytes {
-            return Err(backup_validation_error(
-                &file.entry.path,
-                "size_mismatch",
-                json!({"expected_size_bytes":file.expected_bytes,"observed_bytes":bytes.len()}),
-            ));
-        }
-        if file.entry.sha256.as_deref() != Some(sha256_label(&bytes).as_str()) {
-            return Err(backup_validation_error(
-                &file.entry.path,
-                "hash_mismatch",
-                Value::Null,
-            ));
-        }
-        restored_files.push((file.target, bytes));
-    }
-    remove_existing_target(root, &plan.target, filesystem)?;
-    for path in plan.directories {
-        filesystem
-            .create_directory(Some(root), &path, true)
-            .map_err(|error| io_error("restore_create_failed", error))?;
-    }
-    for (path, bytes) in restored_files {
-        filesystem
-            .atomic_write_file_with_options(Some(root), &path, &bytes, true)
-            .map_err(|error| io_error("restore_write_failed", error))?;
-    }
-    for path in plan.missing_parents {
-        match filesystem.remove_path(Some(root), &path, false) {
-            Ok(()) => {}
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
-                ) => {}
-            Err(error) => return Err(io_error("restore_parent_cleanup_failed", error)),
-        }
-    }
-    Ok(())
-}
+#[path = "builtin_workspace_mutation_restore.rs"]
+mod restore;
+use restore::restore_snapshot;
 
 fn remove_existing_target(
     root: &Path,
@@ -938,6 +912,22 @@ fn missing_parent_paths(root: &Path, target_path: &str) -> Result<Vec<String>, S
     }
     paths.reverse();
     Ok(paths)
+}
+
+fn missing_parents_absent(
+    root: &Path,
+    manifest: &MutationCheckpointManifest,
+    filesystem: &HostFilesystemPolicy,
+) -> Result<bool, String> {
+    for relative in &manifest.missing_parent_paths {
+        let path = safe_target_from_relative(root, relative)?;
+        match filesystem.metadata(Some(root), &path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Ok(_) => return Ok(false),
+            Err(error) => return Err(io_error("restore_parent_inspection_failed", error)),
+        }
+    }
+    Ok(true)
 }
 
 fn safe_relative_target(
@@ -1019,19 +1009,41 @@ fn public_snapshot_entries(entries: &[SnapshotEntry]) -> Vec<Value> {
                 "kind": entry.kind,
                 "sha256": entry.sha256,
                 "size_bytes": entry.size_bytes,
+                "unix_mode": entry.unix_mode.map(u32::from),
             })
         })
         .collect()
 }
 
 fn snapshot_states_equal(left: &[SnapshotEntry], right: &[SnapshotEntry]) -> bool {
+    snapshot_matches_recorded_state(left, right, false)
+}
+
+fn snapshot_matches_recorded_state(
+    left: &[SnapshotEntry],
+    right: &[SnapshotEntry],
+    allow_unrecorded_modes: bool,
+) -> bool {
     left.len() == right.len()
         && left.iter().zip(right).all(|(left, right)| {
             left.path == right.path
                 && left.kind == right.kind
                 && left.sha256 == right.sha256
                 && left.size_bytes == right.size_bytes
+                && (left.unix_mode == right.unix_mode
+                    || (allow_unrecorded_modes && left.unix_mode.is_none()))
         })
+}
+
+fn mode_restoration_coverage(entries: &[SnapshotEntry]) -> &'static str {
+    if entries
+        .iter()
+        .any(|entry| entry.kind != "missing" && entry.unix_mode.is_none())
+    {
+        "not_recorded"
+    } else {
+        "complete"
+    }
 }
 
 fn mutation_id(manifest: &MutationCheckpointManifest) -> String {
@@ -1137,7 +1149,7 @@ fn read_manifest(
             json!({"error_code": format!("{:?}", error.classify())}),
         )
     })?;
-    if manifest.schema_version != CHECKPOINT_SCHEMA_VERSION
+    if !matches!(manifest.schema_version, 1 | CHECKPOINT_SCHEMA_VERSION)
         || manifest.checkpoint_kind != CHECKPOINT_KIND
         || checkpoint_dir
             .file_name()

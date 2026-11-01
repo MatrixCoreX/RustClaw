@@ -203,6 +203,22 @@ full-budget listing. Empty/exact-boundary trees and depth-first backup ordinals 
 This bounds entry-metadata accumulation and capture stack growth, not arbitrary filesystem latency,
 concurrent content changes or power-loss durability.
 
+Structured checkpoint schema 2 records ordinary Unix access modes from the admitted content and
+directory descriptors. Content and mode changes both participate in no-effect and rewind checks;
+privileged or malformed modes are rejected rather than restored from mutable metadata. File modes
+are applied to the temporary file before atomic publication. Directory reconstruction uses a
+depth-first stack of admitted handles, applies each final mode after its descendants, and reuses
+handles across siblings. A descriptor-headroom check precedes deletion; it is not a process-wide
+reservation against concurrent descriptor allocation. Restoration verifies the resulting content,
+modes and cleanup of previously missing parents before reporting success. An unrelated new file
+prevents empty-parent cleanup and is preserved without claiming no effect.
+
+Schema-1 content checkpoints remain readable and rewindable, but absent original modes stay
+explicitly unknown (`unix_mode_restoration=not_recorded`). New files use private creation modes;
+the runtime does not infer original permissions from a replacement path. ACLs, ownership, extended
+attributes, adversarial concurrent writers, extreme umask behavior, cancellation and power-loss
+atomicity remain separate boundaries; ordinary access-mode recovery is not full attribute fidelity.
+
 Structured mutation path records preserve native UTF-8 spelling on Linux/macOS, including literal
 backslashes in filenames. Target, descendant and missing-parent serialization do not rewrite them
 into directory separators. A name that cannot be represented in the JSON path contract is refused

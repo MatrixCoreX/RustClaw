@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use rustix::fs::{statat, AtFlags, Dir, FileType, Mode, OFlags};
 
 pub(crate) struct HostDirectory {
-    file: File,
+    pub(super) file: File,
     canonical_path: PathBuf,
 }
 
@@ -37,6 +37,18 @@ impl HostDirectory {
 
     pub(crate) fn canonical_path(&self) -> &Path {
         &self.canonical_path
+    }
+
+    pub(crate) fn access_mode(&self) -> io::Result<super::HostAccessMode> {
+        super::HostAccessMode::capture(&self.file.metadata()?)
+    }
+
+    pub(crate) fn verify_descriptor_headroom(&self, count: usize) -> io::Result<()> {
+        let mut probes = Vec::with_capacity(count);
+        for _ in 0..count {
+            probes.push(self.file.try_clone()?);
+        }
+        Ok(())
     }
 
     pub(crate) fn entries(&self) -> io::Result<Vec<HostDirectoryEntry>> {

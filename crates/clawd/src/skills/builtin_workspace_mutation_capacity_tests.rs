@@ -38,6 +38,7 @@ impl Fixture {
                 sha256: Some(sha256_label(b"before\n")),
                 size_bytes: Some(7),
                 backup_file: Some("before/0000.bin".into()),
+                unix_mode: Some(HostAccessMode::try_from(0o600).unwrap()),
             }],
             after: Vec::new(),
             mutation_id: None,
@@ -117,6 +118,7 @@ fn projected_file(manifest: &MutationCheckpointManifest) -> MutationCheckpointMa
         sha256: Some(sha256_label(&[])),
         size_bytes: Some(u64::MAX),
         backup_file: None,
+        unix_mode: Some(HostAccessMode::try_from(0o777).unwrap()),
     }];
     projected.mutation_id = Some(sha256_label(&[]));
     projected

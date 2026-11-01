@@ -173,6 +173,224 @@ fn restore_operation_failure_does_not_leave_permission_changes_under_no_effect()
     fixture.assert_current();
 }
 
+#[test]
+fn restore_operation_failure_cleans_full_and_partial_missing_parent_chains() {
+    for partial in [false, true] {
+        let fixture = Fixture::file(b"seed\n");
+        let target = fixture.root.join("new-parent/nested/missing.txt");
+        let error = run_checkpointed_workspace_mutation_with_policy(
+            &fixture.root,
+            TASK,
+            "write_text",
+            &target,
+            MutationAfterShape::RegularFile,
+            &fixture.filesystem,
+            || {
+                let created = if partial {
+                    target.parent().unwrap().parent().unwrap()
+                } else {
+                    target.parent().unwrap()
+                };
+                fs::create_dir_all(created)
+                    .map_err(|error| io_error("owned_create_failed", error))?;
+                Err(mutation_error(
+                    "owned_callback_failed",
+                    "workspace.test.callback_failed",
+                    Value::Null,
+                ))
+            },
+        )
+        .err()
+        .expect("operation intentionally fails after creating parents");
+        assert!(!fixture.root.join("new-parent").exists());
+        assert_eq!(
+            crate::skills::parse_structured_skill_error(&error)
+                .unwrap()
+                .extra
+                .unwrap()["side_effect_applied"],
+            false
+        );
+        fixture.assert_current();
+    }
+}
+
+#[test]
+fn restore_operation_failure_preserves_unrelated_parent_content_without_claiming_no_effect() {
+    let fixture = Fixture::file(b"seed\n");
+    let target = fixture.root.join("new-parent/missing.txt");
+    let sibling = fixture.root.join("new-parent/keep.txt");
+    let error = run_checkpointed_workspace_mutation_with_policy(
+        &fixture.root,
+        TASK,
+        "write_text",
+        &target,
+        MutationAfterShape::RegularFile,
+        &fixture.filesystem,
+        || {
+            fs::create_dir_all(target.parent().unwrap()).unwrap();
+            fs::write(&sibling, b"keep-unrelated").unwrap();
+            Err(mutation_error(
+                "owned_callback_failed",
+                "workspace.test.callback_failed",
+                Value::Null,
+            ))
+        },
+    )
+    .err()
+    .expect("the full original parent state cannot be restored");
+    let parsed = crate::skills::parse_structured_skill_error(&error).unwrap();
+    assert_eq!(parsed.error_code, "mutation_and_restore_failed");
+    assert_ne!(parsed.extra.unwrap()["side_effect_applied"], false);
+    assert_eq!(fs::read(sibling).unwrap(), b"keep-unrelated");
+    fixture.assert_current();
+}
+
+#[test]
+fn restore_legacy_content_checkpoint_keeps_mode_coverage_explicitly_unknown() {
+    let fixture = Fixture::file(b"legacy-before\n");
+    let mut manifest = fixture.manifest();
+    manifest.schema_version = 1;
+    for entry in manifest.before.iter_mut().chain(&mut manifest.after) {
+        entry.unix_mode = None;
+    }
+    fixture.publish(&manifest);
+    let result: Value = serde_json::from_str(&fixture.rewind().unwrap()).unwrap();
+    assert_eq!(result["unix_mode_restoration"], "not_recorded");
+    assert_eq!(
+        fs::read(fixture.root.join("a.txt")).unwrap(),
+        b"legacy-before\n"
+    );
+}
+
+#[test]
+fn restore_new_checkpoints_require_recorded_modes_before_target_deletion() {
+    let fixture = Fixture::file(b"before\n");
+    let mut manifest = fixture.manifest();
+    manifest.before[0].unix_mode = None;
+    fixture.publish(&manifest);
+    assert_eq!(error_code(fixture.rewind()), "checkpoint_restore_invalid");
+    fixture.assert_current();
+}
+
+#[test]
+fn restore_invalid_or_privileged_json_modes_are_rejected_before_target_deletion() {
+    for mode in [
+        json!(-1),
+        json!(0o1000),
+        json!(0o4755),
+        json!(0o2755),
+        json!(u64::MAX),
+        json!("700"),
+    ] {
+        let fixture = Fixture::file(b"before\n");
+        let mut manifest = serde_json::to_value(fixture.manifest()).unwrap();
+        manifest["before"][0]["unix_mode"] = mode;
+        let bytes = serde_json::to_vec(&manifest).unwrap();
+        fixture
+            .filesystem
+            .atomic_write_file(
+                &fixture.root,
+                &fixture.checkpoint.join("manifest.json"),
+                &bytes,
+            )
+            .unwrap();
+        assert_eq!(error_code(fixture.rewind()), "checkpoint_invalid");
+        assert_eq!(fs::read(fixture.root.join("a.txt")).unwrap(), b"after\n");
+        assert_eq!(
+            fs::read(fixture.checkpoint.join("manifest.json")).unwrap(),
+            bytes
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn restore_read_only_directory_modes_are_applied_after_descendant_content() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut fixture = Fixture::file(b"seed\n");
+    let tree = fixture.root.join("tree");
+    let nested = tree.join("nested");
+    let script = nested.join("script");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(&script, b"read-only-before").unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o400)).unwrap();
+    for path in [&tree, &nested] {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o500)).unwrap();
+    }
+    let output = run_checkpointed_workspace_mutation_with_policy(
+        &fixture.root,
+        TASK,
+        "remove_path",
+        &tree,
+        MutationAfterShape::Missing,
+        &fixture.filesystem,
+        || {
+            for path in [&tree, &nested] {
+                fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+            }
+            fs::remove_dir_all(&tree).map_err(|error| io_error("owned_remove_failed", error))
+        },
+    )
+    .unwrap();
+    let value: Value = serde_json::from_str(&output).unwrap();
+    fixture.checkpoint = resolve_checkpoint_dir(
+        &fixture.root,
+        value["checkpoint_id"].as_str().unwrap(),
+        &fixture.filesystem,
+    )
+    .unwrap();
+    let result: Value = serde_json::from_str(&fixture.rewind().unwrap()).unwrap();
+    assert_eq!(result["unix_mode_restoration"], "complete");
+    assert_eq!(fs::read(&script).unwrap(), b"read-only-before");
+    assert_eq!(
+        fs::metadata(&script).unwrap().permissions().mode() & 0o777,
+        0o400
+    );
+    for path in [&tree, &nested] {
+        assert_eq!(
+            fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o500
+        );
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+}
+
+#[test]
+fn restore_wide_trees_reuse_handles_across_sibling_directories() {
+    let mut fixture = Fixture::file(b"seed\n");
+    let tree = fixture.root.join("tree");
+    fs::create_dir(&tree).unwrap();
+    for index in 0..300 {
+        let directory = tree.join(format!("d{index:03}"));
+        fs::create_dir(&directory).unwrap();
+        fs::write(directory.join("value"), index.to_string()).unwrap();
+    }
+    let output = run_checkpointed_workspace_mutation_with_policy(
+        &fixture.root,
+        TASK,
+        "remove_path",
+        &tree,
+        MutationAfterShape::Missing,
+        &fixture.filesystem,
+        || fs::remove_dir_all(&tree).map_err(|error| io_error("owned_remove_failed", error)),
+    )
+    .unwrap();
+    let value: Value = serde_json::from_str(&output).unwrap();
+    fixture.checkpoint = resolve_checkpoint_dir(
+        &fixture.root,
+        value["checkpoint_id"].as_str().unwrap(),
+        &fixture.filesystem,
+    )
+    .unwrap();
+    fixture.rewind().unwrap();
+    for index in 0..300 {
+        assert_eq!(
+            fs::read_to_string(tree.join(format!("d{index:03}/value"))).unwrap(),
+            index.to_string()
+        );
+    }
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn restore_rewind_preserves_native_file_and_directory_permissions() {
@@ -548,6 +766,7 @@ fn restore_preflight_entry_count_limit_precedes_directory_creation() {
             sha256: None,
             size_bytes: None,
             backup_file: None,
+            unix_mode: Some(HostAccessMode::try_from(0o700).unwrap()),
         });
     }
     assert_eq!(manifest.before.len(), MAX_SNAPSHOT_ENTRIES + 1);

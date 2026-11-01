@@ -273,6 +273,7 @@ pub(crate) fn open_workspace_file(workspace_root: &Path, target: &Path) -> io::R
 enum Publication {
     Replace,
     CreateNew,
+    Restore { mode: u32 },
 }
 
 #[cfg(unix)]
@@ -464,6 +465,10 @@ fn atomic_publish_in_directory(
         Err(error) if error.kind() == io::ErrorKind::NotFound => None,
         Err(error) => return Err(error),
     };
+    let existing_mode = match publication {
+        Publication::Restore { mode } => Some(mode),
+        _ => existing_mode,
+    };
     // SAFETY: parent and temporary_name are valid. O_EXCL and O_NOFOLLOW bind
     // creation to this exact directory descriptor without following links.
     let fd = unsafe {
@@ -493,7 +498,7 @@ fn atomic_publish_in_directory(
             Publication::CreateNew => {
                 rename_without_replacement(&parent, &temporary_name, &filename)
             }
-            Publication::Replace => {
+            Publication::Replace | Publication::Restore { .. } => {
                 // SAFETY: both names are relative to the same open directory;
                 // renameat replaces the link entry without following it.
                 if unsafe {
@@ -527,6 +532,35 @@ fn atomic_publish_in_directory(
         }
     }
     result
+}
+
+#[cfg(unix)]
+pub(crate) fn atomic_restore_file_in_directory(
+    parent: OwnedFd,
+    filename: CString,
+    bytes: &[u8],
+    mode: Option<u32>,
+) -> io::Result<()> {
+    if filename.as_bytes().is_empty()
+        || filename.as_bytes().contains(&b'/')
+        || matches!(filename.as_bytes(), b"." | b"..")
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "workspace_restore_name_invalid",
+        ));
+    }
+    let publication = match mode {
+        Some(mode) if mode & !0o777 == 0 => Publication::Restore { mode },
+        Some(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "workspace_restore_mode_invalid",
+            ))
+        }
+        None => Publication::Restore { mode: 0o600 },
+    };
+    atomic_publish_in_directory(parent, filename, bytes, publication)
 }
 
 #[cfg(not(unix))]

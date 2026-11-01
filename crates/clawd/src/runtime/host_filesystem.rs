@@ -8,10 +8,15 @@ use crate::private_filesystem_policy::DirectoryExclusions;
 
 #[path = "host_directory.rs"]
 mod directory;
-use directory::HostDirectory;
+pub(crate) use directory::HostDirectory;
 pub(crate) use directory::HostDirectoryEntry;
+#[path = "host_access_mode.rs"]
+mod access_mode;
+pub(crate) use access_mode::HostAccessMode;
 #[path = "host_mutation.rs"]
 mod mutation;
+#[path = "host_restore.rs"]
+mod restore;
 pub(crate) use mutation::BoundedFileReadError;
 #[path = "host_operation_lock.rs"]
 mod operation_lock;

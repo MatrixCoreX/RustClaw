@@ -222,6 +222,9 @@ jobs:
           node crates/skills/browser_web/node_modules/playwright/cli.js install chromium
           npm test --prefix UI
           npm run lint --prefix UI
+          python3 scripts/check_product_identity_coupling.py --self-test
+          python3 scripts/check_product_identity_coupling.py
+          bash scripts/product_identity_tests.sh --with-ui
           node UI/node_modules/playwright/cli.js install chromium
           node UI/test/runtime-api-transport.browser.mjs
           node UI/test/authentication-ownership.browser.mjs
@@ -271,6 +274,8 @@ jobs:
           set -euo pipefail
           cargo test -p clawd --bin clawd secure_workspace_fs::tests
           cargo test -p clawd --bin clawd runtime::host_filesystem::directory::tests
+          cargo test -p clawd --bin clawd runtime::host_filesystem::access_mode::tests
+          cargo test -p clawd --bin clawd runtime::host_filesystem::restore::tests
           cargo test -p clawd --bin clawd skills::builtin::builtin_workspace_mutation::enumeration_tests
           cargo test -p clawd --bin clawd skills::builtin::builtin_list_dir::tests
           cargo test -p clawd --bin clawd skills::builtin::builtin_workspace_mutation::restore_tests -- --test-threads=1 --nocapture
