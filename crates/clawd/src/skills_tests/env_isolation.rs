@@ -206,13 +206,34 @@ fn strict_environment_accepts_non_utf8_parent_values_without_panicking() {
 #[tokio::test]
 #[ignore = "isolated raw-environment subprocess, selected by its parent test"]
 async fn raw_parent_environment_child() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
     let mut command = tokio::process::Command::new("/usr/bin/env");
+    let source: Vec<_> = std::env::vars_os().collect();
+    assert!(source.len() >= 5, "all injected inputs must be present");
+    for pair in [
+        (OsString::from("LC_ALL"), OsString::new()),
+        (
+            OsString::from("APP_TEST_PARENT_SECRET"),
+            OsString::from("must-not-reach-child"),
+        ),
+        (
+            OsString::from_vec(b"UNDECLARED_\xfe".to_vec()),
+            OsString::from("private"),
+        ),
+    ] {
+        assert!(
+            source.contains(&pair),
+            "injected exclusion input is missing"
+        );
+    }
     let report = super::super::apply_skill_runner_env_isolation(&mut command).unwrap();
     assert_eq!(report.preserved, ["HOME", "PATH"]);
-    assert_eq!(report.stripped_count, 3);
+    assert_eq!(report.stripped_count, source.len() - 2);
     let declared = collect_declared_skill_env_pairs(
         &["HOME".into(), "APP_TEST_PARENT_SECRET".into()],
-        std::env::vars_os(),
+        source.clone(),
     );
     assert_eq!(declared.len(), 1);
     assert_eq!(declared[0].0, "HOME");
@@ -233,4 +254,8 @@ async fn raw_parent_environment_child() {
     .into_iter()
     .collect();
     assert_eq!(actual, expected);
+    println!(
+        "STRICT_ENV_ACCEPTANCE source_entries={} preserved=2 stripped={} raw_home=true exact_child_environment=true",
+        source.len(), report.stripped_count
+    );
 }

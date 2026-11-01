@@ -197,7 +197,13 @@ fn snapshot_enumeration_deep_tree_completes_on_an_owned_small_stack() {
         .lines()
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
         .find(|value| value["snapshot_stack_complete"] == true)
-        .expect("actual traversal completion report");
+        .unwrap_or_else(|| {
+            panic!(
+                "actual traversal completion report missing; stdout:\n{}\nstderr:\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+        });
     assert_eq!(report["entries"], 258);
     assert_eq!(report["sha256"], sha256_label(b"owned-deep-tree"));
     assert_eq!(fs::read(path.join("value")).unwrap(), b"owned-deep-tree");
@@ -205,6 +211,10 @@ fn snapshot_enumeration_deep_tree_completes_on_an_owned_small_stack() {
     assert!(absent.status.success());
     assert_ne!(absent.status.code(), Some(42));
     assert!(!String::from_utf8_lossy(&absent.stdout).contains("snapshot_stack_complete"));
+    println!(
+        "SNAPSHOT_STACK_ACCEPTANCE entries=258 child_exit=42 missing_selector_exit=0 digest={}",
+        report["sha256"]
+    );
 }
 
 fn run_stack_fixture(root: &Path, case: &str) -> std::process::Output {
@@ -281,7 +291,7 @@ fn snapshot_stack_isolated_fixture() {
         .join()
         .unwrap();
     println!(
-        "{}",
+        "\n{}",
         json!({"snapshot_stack_complete": true, "entries": count, "sha256": digest})
     );
     std::process::exit(42);
