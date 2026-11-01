@@ -134,6 +134,77 @@ fn removal_task() -> crate::ClaimedTask {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn restore_operation_failure_does_not_leave_permission_changes_under_no_effect() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::file(b"seed\n");
+    let target = fixture.root.join("script.sh");
+    fs::write(&target, b"owned-script\n").unwrap();
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o755)).unwrap();
+    let error = run_checkpointed_workspace_mutation_with_policy(
+        &fixture.root,
+        TASK,
+        "write_text",
+        &target,
+        MutationAfterShape::RegularFile,
+        &fixture.filesystem,
+        || {
+            fs::set_permissions(&target, fs::Permissions::from_mode(0o600))
+                .map_err(|error| io_error("owned_chmod_failed", error))?;
+            Err(mutation_error(
+                "owned_callback_failed",
+                "workspace.test.callback_failed",
+                Value::Null,
+            ))
+        },
+    )
+    .err()
+    .expect("operation intentionally fails after changing only its mode");
+    assert_eq!(
+        fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+        0o755,
+        "a no-effect result must not leave a permission change"
+    );
+    assert_eq!(fs::read(&target).unwrap(), b"owned-script\n");
+    let parsed = crate::skills::parse_structured_skill_error(&error).unwrap();
+    assert_eq!(parsed.error_code, "owned_callback_failed");
+    assert_eq!(parsed.extra.unwrap()["side_effect_applied"], false);
+    fixture.assert_current();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn restore_rewind_preserves_native_file_and_directory_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut fixture = Fixture::file(b"seed\n");
+    let tree = fixture.root.join("tree");
+    let nested = tree.join("nested");
+    fs::create_dir_all(&nested).unwrap();
+    let script = nested.join("script.sh");
+    fs::write(&script, b"owned-script\n").unwrap();
+    for (path, mode) in [(&tree, 0o700), (&nested, 0o711), (&script, 0o751)] {
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+    }
+    fixture
+        .apply_builtin(
+            "remove_file",
+            json!({
+                "path": "tree", "target_kind": "directory", "recursive": true,
+            }),
+        )
+        .await;
+    assert!(!tree.exists());
+    fixture.rewind().unwrap();
+    for (path, mode) in [(&tree, 0o700), (&nested, 0o711), (&script, 0o751)] {
+        assert_eq!(
+            fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            mode
+        );
+    }
+    assert_eq!(fs::read(script).unwrap(), b"owned-script\n");
+}
+
 async fn assert_reserved_descendant_is_not_removed(name: &str) {
     let fixture = Fixture::file(b"before\n");
     let target = fixture.root.join("tree");
