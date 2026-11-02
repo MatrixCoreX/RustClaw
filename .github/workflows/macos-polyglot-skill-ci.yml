@@ -117,6 +117,10 @@ permissions:
   contents: read
 
 jobs:
+  media-session-portability:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.verification_scope != 'ui' }}
+    uses: ./.github/workflows/media-session-portability-ci.yml
+
   ui-browser-reliability:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.verification_scope == 'ui' }}
     uses: ./.github/workflows/ui-browser-reliability-ci.yml
