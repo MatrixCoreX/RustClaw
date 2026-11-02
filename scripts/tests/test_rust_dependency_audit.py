@@ -3,6 +3,7 @@ from contextlib import redirect_stdout
 import importlib.util
 import io
 import json
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -86,7 +87,11 @@ class AuditReportTest(unittest.TestCase):
         self.assertNotIn("checks: write", text)
         self.assertNotIn("secrets.GITHUB_TOKEN", text)
         self.assertNotIn("rustsec/audit-check@", text)
-        self.assertNotIn("--ignore", text)
+        ignore_flag = r"--ignore(?:[=\s]|$)"
+        self.assertNotRegex(text, ignore_flag)
+        self.assertIsNone(re.search(ignore_flag, "npm ci --ignore-scripts"))
+        for arguments in ("cargo audit --ignore RUSTSEC-2026-0001", "cargo audit --ignore=RUSTSEC-2026-0001"):
+            self.assertIsNotNone(re.search(ignore_flag, arguments))
         parent = (ROOT / ".github/workflows/macos-polyglot-skill-ci.yml").read_text()
         for name in (".github/workflows/security-audit.yml", "scripts/report_rust_dependency_audit.py",
                      "scripts/tests/test_rust_dependency_audit.py"):
