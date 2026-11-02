@@ -187,14 +187,14 @@ jobs:
 
       - name: Execute SDK tests (diagnostic only)
         timeout-minutes: 15
-        run: cargo test --locked -p agent-skill-sdk -- --nocapture
+        run: setsid --wait cargo test --locked -p agent-skill-sdk -- --nocapture
 
       - name: Compile runner tests (diagnostic only)
         run: cargo test --locked -p skill-runner --no-run
 
       - name: Execute runner tests (diagnostic only)
         timeout-minutes: 15
-        run: cargo test --locked -p skill-runner -- --nocapture
+        run: setsid --wait cargo test --locked -p skill-runner -- --nocapture
 
       - name: Compile host tests (diagnostic only)
         run: cargo test --locked -p clawd --bin clawd --no-run
@@ -204,8 +204,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo test --locked -p clawd --bin clawd aipp -- --test-threads=1
-          cargo test --locked -p clawd --bin clawd run_skill -- --test-threads=1
+          setsid --wait cargo test --locked -p clawd --bin clawd aipp -- --test-threads=1
+          setsid --wait cargo test --locked -p clawd --bin clawd run_skill -- --test-threads=1
 
       - name: Test account control branding neutrality
         shell: bash
