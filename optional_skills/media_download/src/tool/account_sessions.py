@@ -170,6 +170,11 @@ def logout(root: Path, platform: str, *, authentication=None) -> dict:
             stack.enter_context(authentication.lease(wait=False))
         changed = False
         try:
+            # Invalidate identity before touching credentials so a partial
+            # cleanup cannot leave the old verified name in the current view.
+            write_snapshot(root, {"platform": platform, "status": "unknown",
+                                  "checked_at": int(time.time()), "session_present": None})
+            changed = True
             for profile in profiles:
                 for child in profile.iterdir():
                     if child.name in {".agent-profile.lock", "browser-environment.json"}:

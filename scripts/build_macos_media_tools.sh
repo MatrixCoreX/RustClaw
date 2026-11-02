@@ -67,6 +67,8 @@ tar -xzf "$lame_archive" -C "$work/lame" --strip-components=1
   make -j "$jobs"
   make install
 )
+codesign --force --sign - "$prefix/bin/ffmpeg"
+codesign --force --sign - "$prefix/bin/ffprobe"
 for component in ffmpeg x264 dav1d lame; do
   mkdir -p "$prefix/share/licenses/$component"
   find "$work/$component" -maxdepth 1 -type f \( -name 'COPYING*' -o -name 'LICENSE*' \) \

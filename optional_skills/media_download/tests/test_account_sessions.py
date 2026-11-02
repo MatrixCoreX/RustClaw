@@ -131,11 +131,15 @@ class AccountSessionTest(unittest.TestCase):
 
     def test_partial_cleanup_is_not_reported_as_no_side_effect(self):
         self.profile()
+        write_snapshot(self.root, {"platform": "douyin", "status": "verified", "display_name": "Historical self"})
         with mock.patch("account_sessions.shutil.rmtree", side_effect=PermissionError("fixture")):
             with self.assertRaises(AccountSessionError) as error:
                 logout(self.root, "douyin")
         self.assertTrue(error.exception.side_effect_applied)
         self.assertEqual(error.exception.error_code, "account_operation_failed")
+        row = account_status(self.root, ["douyin"])[0]
+        self.assertEqual(row["status"], "saved_session")
+        self.assertIsNone(row["display_name"], "a failed logout must not retain the old verified identity")
 
     def test_public_snapshots_and_task_records_are_allowlisted(self):
         row = public_snapshot({"status": "verified", "display_name": "name\nforged", "cookie": "fixture-private", "checked_at": True}, "weibo")
