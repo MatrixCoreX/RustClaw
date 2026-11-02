@@ -33,10 +33,7 @@ try {
       const scope = async detail => {
         const before = JSON.stringify((await state()).scope);
         await event("fixture-scope", detail);
-        await wait(async () => {
-          const current = await state(), key = JSON.stringify(current.scope);
-          return key !== before && current.settledScope === key;
-        });
+        await wait(async () => JSON.stringify((await state()).scope) !== before);
       };
       const read = () => page.locator("[data-read]").click();
       const start = async () => {
@@ -77,9 +74,20 @@ try {
           await release(0, qr("obsolete-a"));
           assert.equal((await state()).status.qrcode_url, qr("device-b.example.test").qrcode_url);
         } else if (scenario === "scope-clear") {
-          await start(); await scope("device");
+          await start();
+          await page.evaluate(() => {
+            window.scopeSnapshots = [];
+            new MutationObserver(() => {
+              window.scopeSnapshots.push(JSON.parse(document.querySelector("#state").textContent));
+            }).observe(document.querySelector("#state"), { childList: true, characterData: true, subtree: true });
+          });
+          await scope("device");
           assert.equal((await state()).status, null);
           assert.equal((await state()).preview, false);
+          const snapshots = await page.evaluate(() => window.scopeSnapshots);
+          assert.ok(snapshots.some(row => row.scope[0] === origins[1]));
+          assert.ok(snapshots.every(row => row.scope[0] !== origins[1] || (row.status === null && row.preview === false)),
+            "A new device must not expose the old QR even in the first committed snapshot");
         } else if (scenario === "duplicate-start") {
           hold = "start"; await start(); await wait(() => held.length === 1);
           await page.locator('[data-start="force"]').click();

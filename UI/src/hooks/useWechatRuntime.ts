@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 
 import type {
   ApiResponse,
@@ -88,7 +88,8 @@ export function useWechatRuntime({
   const [wechatSessionKey, setWechatSessionKey] = useState<string | null>(null);
   const [wechatQrStarting, setWechatQrStarting] = useState(false);
   const [wechatQrPreviewRequested, setWechatQrPreviewRequested] = useState(false);
-  useEffect(() => {
+  // A new device/account must never paint the previous owner's QR snapshot.
+  useLayoutEffect(() => {
     setWechatLoginLoading(false);
     setWechatLoginError(null);
     setWechatLoginStatus(null);

@@ -13,11 +13,6 @@ function Fixture() {
   const runtime = useWechatRuntime({ apiFetch: (path, init) => fetch(`${base}${path}`, init), apiBase: base,
     requestScope: ready ? JSON.stringify([base, admin, epoch]) : "", uiAuthReady: ready,
     enabled: true, serviceHealthy: true, statusPollingEnabled: true, t: (_zh, en) => en });
-  const scopeKey = JSON.stringify([base, ready, admin, epoch]);
-  const [settledScope, setSettledScope] = useState("");
-  // The hook resets scope-owned state in a passive effect. A changed scope in
-  // the first render alone does not acknowledge that reset's following commit.
-  useEffect(() => { setSettledScope(scopeKey); }, [scopeKey]);
   useEffect(() => {
     const change = (event: Event) => {
       switch ((event as CustomEvent).detail) {
@@ -36,7 +31,7 @@ function Fixture() {
     window.addEventListener("fixture-visibility", show);
     return () => { window.removeEventListener("fixture-scope", change); window.removeEventListener("fixture-visibility", show); };
   }, []);
-  const state = { scope: [base, ready, admin, epoch], settledScope, status: runtime.wechatLoginStatus,
+  const state = { scope: [base, ready, admin, epoch], status: runtime.wechatLoginStatus,
     loading: runtime.wechatLoginLoading, error: runtime.wechatLoginError,
     starting: runtime.wechatQrStarting, preview: runtime.wechatQrPreviewRequested };
   return <main className="theme-shell min-h-screen space-y-3 p-4">

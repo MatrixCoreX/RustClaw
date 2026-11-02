@@ -11,7 +11,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 CHROME = Path("/Applications/Google Chrome.app")
-DETRITUS = frozenset({"com.apple.FinderInfo", "com.apple.ResourceFork"})
+DETRITUS = ("com.apple.FinderInfo", "com.apple.ResourceFork")
 
 
 def remove_detritus(app: Path) -> None:
@@ -19,13 +19,15 @@ def remove_detritus(app: Path) -> None:
         raise RuntimeError("ci_browser_bundle_symlink_rejected")
     if not app.is_dir():
         return
-    for directory, _, files in os.walk(app, followlinks=False):
-        for entry in [Path(directory), *(Path(directory) / name for name in files)]:
-            if entry.is_symlink():
-                continue
-            for attribute in os.listxattr(entry, follow_symlinks=False):
-                if attribute in DETRITUS:
-                    os.removexattr(entry, attribute, follow_symlinks=False)
+    for attribute in DETRITUS:
+        # CPython's os.*xattr interfaces are Linux-only. The native CLI's -s
+        # operates on links themselves, never their external targets. Missing
+        # attributes may return nonzero; strict signature validation decides
+        # whether preparation actually succeeded.
+        subprocess.run(
+            ["/usr/bin/xattr", "-r", "-s", "-d", attribute, str(app)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        )
 
 
 def browser_available() -> bool:

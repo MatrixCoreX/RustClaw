@@ -43,8 +43,19 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: UI/package-lock.json
+      - name: Install Linux validation tools
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ripgrep
       - name: Check browser preparation boundaries
         run: python3 -m unittest discover -s scripts/tests -p test_prepare_macos_ci_browser.py
+      - name: Install macOS validation tools
+        if: ${{ runner.os == 'macOS' }}
+        run: |
+          if ! command -v rg >/dev/null; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install ripgrep
+          fi
       - name: Prepare and verify native signed browser
         if: ${{ runner.os == 'macOS' }}
         run: |
@@ -59,6 +70,7 @@ jobs:
           npm test --prefix UI
           npm run lint --prefix UI
           npm run build --prefix UI
+          bash scripts/product_identity_tests.sh --with-ui
       - name: Stress conversation scope without hiding failures
         shell: bash
         run: |

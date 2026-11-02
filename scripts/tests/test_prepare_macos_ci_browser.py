@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -13,7 +14,7 @@ SPEC.loader.exec_module(browser)
 
 
 class PrepareMacOSBrowserTests(unittest.TestCase):
-    def test_only_forbidden_metadata_is_removed_without_following_links(self):
+    def test_native_commands_remove_only_explicit_metadata_and_do_not_follow_links(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             app = root / "browser.app"
@@ -24,26 +25,45 @@ class PrepareMacOSBrowserTests(unittest.TestCase):
             outside.mkdir()
             (app / "outside-link").symlink_to(outside, target_is_directory=True)
             (app / "file-link").symlink_to(file)
-            removed, visited = [], []
-
-            def attributes(path, **kwargs):
-                visited.append(Path(path))
-                self.assertEqual(kwargs, {"follow_symlinks": False})
-                return ["com.apple.FinderInfo", "com.apple.ResourceFork", "com.apple.quarantine", "custom"]
-
-            with patch.object(browser.os, "listxattr", side_effect=attributes), patch.object(
-                browser.os, "removexattr", side_effect=lambda path, name, **kwargs: removed.append((Path(path), name, kwargs))
-            ):
+            with patch.object(browser.subprocess, "run", return_value=Mock(returncode=0)) as run:
                 browser.remove_detritus(app)
-            self.assertEqual(set(visited), {app, file})
-            self.assertEqual({name for _, name, _ in removed}, browser.DETRITUS)
-            self.assertEqual(len(removed), 4)
-            self.assertTrue(all(kwargs == {"follow_symlinks": False} for _, _, kwargs in removed))
+            self.assertEqual([call.args[0] for call in run.call_args_list], [
+                ["/usr/bin/xattr", "-r", "-s", "-d", attribute, str(app)]
+                for attribute in browser.DETRITUS
+            ])
             self.assertEqual(file.read_bytes(), b"unchanged-signed-content")
             link = root / "bundle-link"
             link.symlink_to(app, target_is_directory=True)
             with self.assertRaisesRegex(RuntimeError, "symlink_rejected"):
                 browser.remove_detritus(link)
+
+    @unittest.skipUnless(sys.platform == "darwin", "Checks actual macOS filesystem attributes")
+    def test_native_metadata_repair_preserves_quarantine_content_and_external_targets(self):
+        def xattr(*args, check=True):
+            return subprocess.run(["/usr/bin/xattr", *map(str, args)], capture_output=True, check=check)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            app, outside = root / "browser.app", root / "outside"
+            app.mkdir()
+            outside.mkdir()
+            inside_file, outside_file = app / "signed-binary", outside / "private-file"
+            inside_file.write_bytes(b"unchanged-signed-content")
+            outside_file.write_bytes(b"external-content")
+            (app / "directory-link").symlink_to(outside, target_is_directory=True)
+            (app / "file-link").symlink_to(outside_file)
+            for file in (inside_file, outside_file):
+                xattr("-wx", "com.apple.FinderInfo", "01" * 32, file)
+            xattr("-w", "com.apple.ResourceFork", "fixture-fork", inside_file)
+            xattr("-w", "com.apple.quarantine", "fixture-quarantine", inside_file)
+            quarantine = xattr("-p", "com.apple.quarantine", inside_file).stdout
+            browser.remove_detritus(app)
+            for attribute in browser.DETRITUS:
+                self.assertNotEqual(xattr("-p", attribute, inside_file, check=False).returncode, 0)
+            self.assertEqual(xattr("-p", "com.apple.quarantine", inside_file).stdout, quarantine)
+            self.assertEqual(xattr("-p", "com.apple.FinderInfo", outside_file).returncode, 0)
+            self.assertEqual(inside_file.read_bytes(), b"unchanged-signed-content")
+            self.assertEqual(outside_file.read_bytes(), b"external-content")
 
     def test_local_and_non_macos_invocations_do_not_run_or_mutate_anything(self):
         for platform, actions in [("linux", "true"), ("darwin", "false"), ("darwin", "")]:
