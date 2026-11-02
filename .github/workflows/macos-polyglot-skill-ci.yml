@@ -170,6 +170,13 @@ jobs:
           python3 -m unittest discover -s scripts/tests -p 'test_release_native_libraries.py'
           python3 -m unittest discover -s scripts/tests -p 'test_release_managed_files.py'
 
+      - name: Test AiAPP private session fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${pythonLocation:?setup-python root missing}/bin/python3" -m unittest discover -s optional_skills/media_download/tests
+          node --test optional_skills/media_discovery/test/account_sessions.test.mjs
+
       - name: Test retained-task acceptance without resubmission
         shell: bash
         run: |
@@ -201,8 +208,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          "${pythonLocation:?setup-python root missing}/bin/python3" -m unittest discover -s optional_skills/media_download/tests
-          node --test optional_skills/media_discovery/test/account_sessions.test.mjs
           cargo test --locked -p clawd --bin clawd aipp -- --test-threads=1
 
       - name: Test browser API authentication boundaries
