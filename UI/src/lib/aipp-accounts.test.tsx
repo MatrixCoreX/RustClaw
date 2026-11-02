@@ -43,7 +43,7 @@ test("busy failure is a machine code and does not get mislabeled successful", as
   await assert.rejects(invokeAccountControl(async url => url.endsWith("account-control")
     ? response({ task_id: "fixture-task" })
     : response({ status: "failed", result_json: { task_journal: { trace: { capability_results: [{
-      data: { extra: { error_code: "account_session_busy" } },
+      error: { code: "account_session_busy", details: {} },
     }] } } } }), "fixture", "logout", new AbortController().signal, "weibo"), /account_session_busy/u);
 });
 

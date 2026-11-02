@@ -49,7 +49,7 @@ export async function invokeAccountControl(apiFetch: ApiFetch, skill: string, op
       const result = record(taskBody.data.result_json);
       const trace = record(record(result?.task_journal)?.trace);
       const results = Array.isArray(trace?.capability_results) ? trace.capability_results : [];
-      const codes = [record(result?.extra)?.error_code, ...results.flatMap(item => [record(item)?.error_code, record(record(record(item)?.data)?.extra)?.error_code])];
+      const codes = [record(result?.extra)?.error_code, ...results.flatMap(item => [record(item)?.error_code, record(record(item)?.error)?.code, record(record(record(item)?.data)?.extra)?.error_code])];
       throw new Error(codes.includes("account_session_busy") ? "account_session_busy" : "aipp_account_operation_failed");
     }
     await new Promise<void>((resolve, reject) => {

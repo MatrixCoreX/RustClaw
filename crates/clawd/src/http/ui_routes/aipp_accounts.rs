@@ -34,6 +34,37 @@ fn selected_capability<'a>(
     }
 }
 
+fn unique_control_action<'a>(
+    mappings: &'a [claw_core::skill_registry::PlannerCapabilityMapping],
+    capability: &str,
+    effect: claw_core::skill_registry::PlannerCapabilityEffect,
+) -> Option<&'a str> {
+    let selected = mappings
+        .iter()
+        .find(|item| item.name == capability && item.effect == Some(effect))?;
+    let action = selected.action.as_deref()?;
+    (mappings
+        .iter()
+        .filter(|item| item.action.as_deref() == Some(action))
+        .count()
+        == 1)
+        .then_some(action)
+}
+
+fn account_task(
+    skill: &str,
+    capability: &str,
+    args: Value,
+) -> Result<claw_core::types::SubmitTaskRequest, serde_json::Error> {
+    // Reuse the verified direct-skill worker: no model planning/synthesis is
+    // needed for a button, and grants, receipts and mutation handling remain
+    // enforced by verify_direct_run_skill + the normal runner path.
+    serde_json::from_value(json!({
+        "channel":"ui", "kind":"run_skill", "idempotency_key":format!("aipp-account-{}", uuid::Uuid::new_v4()),
+        "payload":{"skill_name":skill,"args":args,"_aipp_capability_ref":capability,"_task_source":"aipp_account_control"}
+    }))
+}
+
 pub(super) async fn control_aipp_account(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -64,18 +95,15 @@ pub(super) async fn control_aipp_account(
     } else {
         claw_core::skill_registry::PlannerCapabilityEffect::Mutate
     };
-    let policy_matches = registry
+    let action = registry
         .as_ref()
         .and_then(|registry| registry.get(&skill_name))
-        .is_some_and(|entry| {
-            entry
-                .planner_capabilities
-                .iter()
-                .any(|item| item.name == capability && item.effect == Some(expected_effect))
+        .and_then(|entry| {
+            unique_control_action(&entry.planner_capabilities, capability, expected_effect)
         });
-    if !policy_matches {
+    let Some(action) = action else {
         return aipp_api_error(StatusCode::CONFLICT, "aipp_account_policy_changed").into_response();
-    }
+    };
     let mut args = serde_json::Map::new();
     if let Some(platform) = request.platform {
         args.insert("platform".into(), json!(platform));
@@ -83,10 +111,24 @@ pub(super) async fn control_aipp_account(
     if request.operation == "logout" {
         args.insert("confirm".into(), json!(true));
     }
-    let task: claw_core::types::SubmitTaskRequest = match serde_json::from_value(json!({
-        "channel":"ui", "kind":"ask", "idempotency_key":format!("aipp-account-{}", uuid::Uuid::new_v4()),
-        "payload":{"entrypoint":"run_capability", "capability":capability, "args":args, "_task_source":"aipp_account_control"}
-    })) {
+    let resolved = crate::capability_resolver::resolve_capability_action_for_state(
+        &state,
+        capability,
+        Value::Object(args),
+    );
+    let args = match resolved {
+        Some(crate::AgentAction::CallSkill { skill, args })
+            if skill == skill_name
+                && args.get("action").and_then(Value::as_str) == Some(action) =>
+        {
+            args
+        }
+        _ => {
+            return aipp_api_error(StatusCode::CONFLICT, "aipp_account_policy_changed")
+                .into_response()
+        }
+    };
+    let task = match account_task(&skill_name, capability, args) {
         Ok(task) => task,
         Err(_) => {
             return aipp_api_error(StatusCode::BAD_REQUEST, "aipp_account_control_invalid")
@@ -151,6 +193,9 @@ pub(super) fn task_account_use(result: &Value) -> Vec<Value> {
     {
         for item in results {
             rows.extend(public_account_use(item.pointer("/data/extra/account_use")));
+            rows.extend(public_account_use(
+                item.pointer("/error/details/structured_error/extra/account_use"),
+            ));
         }
     }
     rows

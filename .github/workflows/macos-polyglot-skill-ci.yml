@@ -209,6 +209,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p clawd --bin clawd aipp -- --test-threads=1
+          cargo test --locked -p clawd --bin clawd run_skill -- --test-threads=1
 
       - name: Test browser API authentication boundaries
         shell: bash

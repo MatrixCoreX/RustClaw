@@ -36,6 +36,52 @@ fn aipp_account_control_uses_manifest_refs_and_requires_platform_confirmation() 
     .is_err());
 }
 
+#[test]
+fn aipp_account_buttons_use_verified_machine_tasks_without_model_synthesis() {
+    let task = account_task(
+        "fixture",
+        "fixture.account_status",
+        json!({"action":"account_status"}),
+    )
+    .unwrap();
+    assert!(matches!(task.kind, claw_core::types::TaskKind::RunSkill));
+    assert_eq!(task.payload["skill_name"], "fixture");
+    assert_eq!(task.payload["args"]["action"], "account_status");
+    assert!(task.payload.get("entrypoint").is_none());
+    assert!(task.payload.get("schedule_triggered").is_none());
+}
+
+#[test]
+fn aipp_account_buttons_reject_changed_or_ambiguous_registry_actions() {
+    use claw_core::skill_registry::{PlannerCapabilityEffect, PlannerCapabilityMapping};
+    let mut mappings: Vec<PlannerCapabilityMapping> = serde_json::from_value(json!([
+        {"name":"fixture.account_status","action":"status","effect":"observe"},
+        {"name":"fixture.account_logout","action":"logout","effect":"mutate"}
+    ]))
+    .unwrap();
+    assert_eq!(
+        unique_control_action(
+            &mappings,
+            "fixture.account_status",
+            PlannerCapabilityEffect::Observe
+        ),
+        Some("status")
+    );
+    assert!(unique_control_action(
+        &mappings,
+        "fixture.account_status",
+        PlannerCapabilityEffect::Mutate
+    )
+    .is_none());
+    mappings.push(mappings[0].clone());
+    assert!(unique_control_action(
+        &mappings,
+        "fixture.account_status",
+        PlannerCapabilityEffect::Observe
+    )
+    .is_none());
+}
+
 #[tokio::test]
 async fn aipp_account_control_rejects_non_admin_before_reading_profiles() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
@@ -89,7 +135,10 @@ fn aipp_account_use_has_a_public_allowlist_and_no_prose_inference() {
     assert!(!serde_json::to_string(&rows)
         .unwrap()
         .contains("private-fixture"));
-    let result = json!({"text":"logged in as an author", "task_journal":{"trace":{"capability_results":[{"data":{"extra":{"account_use":[row]}}}]}}});
-    assert_eq!(task_account_use(&result).len(), 1);
+    let result = json!({"text":"logged in as an author", "task_journal":{"trace":{"capability_results":[
+        {"data":{"extra":{"account_use":[row.clone()]}}},
+        {"error":{"code":"media_not_found","details":{"structured_error":{"extra":{"account_use":[row]}}}}}
+    ]}}});
+    assert_eq!(task_account_use(&result).len(), 2);
     assert!(task_account_use(&json!({"text":"logged in as an author"})).is_empty());
 }
