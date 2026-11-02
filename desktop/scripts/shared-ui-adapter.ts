@@ -36,8 +36,11 @@ export function sharedUiAdapter(root: string): Plugin {
         text = once(text, 'const BancorPage = lazy(() => import("./components/BancorPage").then((module) => ({ default: module.BancorPage })));', '', id);
         text = `import { AssetsPage, BancorPage } from ${JSON.stringify(walletPages)};\n` + text;
         text = once(text, 'onRefresh={() => Promise.allSettled([\n                assetOverviewRuntime.fetchMarket(),', 'onRefreshMarket={() => assetOverviewRuntime.fetchMarket()}\n              onRefresh={() => Promise.allSettled([\n                assetOverviewRuntime.fetchMarket(),', id);
-        if ((text.match(/\bfetch\(/g) ?? []).length !== 7) throw new Error('Shared UI fetch inventory changed');
-        imports.add('desktopFetch as fetch'); imports.add('desktopOrigin'); imports.add('desktopIdentity'); imports.add('desktopLogout');
+        if ((text.match(/\bruntimeApiFetch\(/g) ?? []).length !== 7 || /\bfetch\(/.test(text)) {
+          throw new Error('Shared UI fetch inventory changed');
+        }
+        text = once(text, 'import { runtimeApiFetch } from "./lib/runtime-api-transport";', '', id);
+        imports.add('desktopFetch as runtimeApiFetch'); imports.add('desktopOrigin'); imports.add('desktopIdentity'); imports.add('desktopLogout');
         text = once(text, 'preferredBrowserApiBaseUrl(saved, window.location)', 'desktopOrigin', id);
         text = once(text, 'preferredWebdBaseUrl(saved, window.location)', 'desktopOrigin', id);
         text = once(text, 'useState<"key" | "webd" | null>(readPersistedAuthMode)', 'useState<"key" | "webd" | null>(desktopIdentity ? "webd" : null)', id);

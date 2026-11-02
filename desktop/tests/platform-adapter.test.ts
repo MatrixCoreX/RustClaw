@@ -13,13 +13,24 @@ test('shared UI adaptation is active for native and Vite-normalized Windows path
   const source = fs.readFileSync(filename, 'utf8');
   for (const id of [filename, filename.replaceAll('\\', '/')]) {
     const output = transform(source.replaceAll(/\r?\n/g, '\r\n'), id)?.code;
-    assert.ok(output?.includes('desktopFetch as fetch'));
-    assert.equal((source.match(/\bfetch\(/g) ?? []).length, 7);
+    assert.ok(output?.includes('desktopFetch as runtimeApiFetch'));
+    assert.ok(!output?.includes('from "./lib/runtime-api-transport"'));
+    assert.equal((source.match(/\bruntimeApiFetch\(/g) ?? []).length, 7);
+    assert.equal((output?.match(/\bfetch\(/g) ?? []).length, 0);
     assert.ok(output?.includes('desktopLogout(); return;'));
     assert.ok(output?.includes('/frontend/wallet/pages.tsx'));
     assert.ok(!output?.includes('import("./components/AssetsPage")'));
     assert.ok(!output?.includes('import("./components/BancorPage")'));
     assert.ok(!output?.includes('window.localStorage'));
+  }
+});
+
+test('shared UI adaptation rejects a new raw fetch or an unreviewed transport call', () => {
+  const transform = sharedUiAdapter(root).transform as (source: string, id: string) => {code: string} | undefined;
+  const filename = path.resolve(root, '../UI/src/App.tsx');
+  const source = fs.readFileSync(filename, 'utf8');
+  for (const suffix of ['\nfetch("/v1/unreviewed");', '\nruntimeApiFetch("/v1/unreviewed");']) {
+    assert.throws(() => transform(source + suffix, filename), /Shared UI fetch inventory changed/);
   }
 });
 

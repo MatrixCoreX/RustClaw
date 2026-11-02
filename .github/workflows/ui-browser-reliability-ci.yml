@@ -6,6 +6,7 @@ name: UI and signed browser reliability
   pull_request:
     paths:
       - "UI/**"
+      - "desktop/**"
       - "scripts/prepare_macos_ci_browser.py"
       - "scripts/tests/test_prepare_macos_ci_browser.py"
       - "scripts/macos-system-browser.sh"
@@ -16,6 +17,7 @@ name: UI and signed browser reliability
     branches: [main]
     paths:
       - "UI/**"
+      - "desktop/**"
       - "scripts/prepare_macos_ci_browser.py"
       - "scripts/tests/test_prepare_macos_ci_browser.py"
       - "scripts/macos-system-browser.sh"
@@ -81,6 +83,14 @@ jobs:
           npm run lint --prefix UI
           npm run build --prefix UI
           bash scripts/product_identity_tests.sh --with-ui
+      - name: Verify shared desktop UI transport and build
+        run: |
+          npm ci --ignore-scripts --prefix desktop
+          npm run lint --prefix desktop
+          npm test --prefix desktop
+          npm run build:ui --prefix desktop
+          python3 scripts/check_product_identity_coupling.py --self-test
+          python3 scripts/check_product_identity_coupling.py
       - name: Stress conversation scope without hiding failures
         shell: bash
         run: |
