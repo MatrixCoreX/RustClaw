@@ -391,14 +391,12 @@ class XiaohongshuAccessTest(unittest.TestCase):
             "companion_browser_args",
             return_value=["--start-minimized"],
         ):
-            self.assertEqual(
-                self.access._access_browser_args(environment, visible=True),
-                [
-                    "--password-store=basic",
-                    "--ozone-platform=wayland",
-                    "--start-minimized",
-                ],
-            )
+            for platform, expected in (
+                ("linux", ["--password-store=basic", "--ozone-platform=wayland", "--start-minimized"]),
+                ("darwin", ["--start-minimized"]),
+            ):
+                with self.subTest(platform=platform), mock.patch.object(self.access.sys, "platform", platform):
+                    self.assertEqual(self.access._access_browser_args(environment, visible=True), expected)
 
 
 if __name__ == "__main__":

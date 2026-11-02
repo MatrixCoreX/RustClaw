@@ -1180,7 +1180,7 @@ class AdapterTest(unittest.TestCase):
             response["extra"]["diagnostic_files"],
             [
                 {
-                    "path": str(artifacts / "public-video.json"),
+                    "path": str((artifacts / "public-video.json").resolve()),
                     "filename": "public-video.json",
                     "mime_type": "application/json",
                     "size_bytes": 30,
@@ -1461,7 +1461,7 @@ class AdapterTest(unittest.TestCase):
                 "user_id": 1,
                 "chat_id": 1,
             }
-            with mock.patch.object(
+            with mock.patch.object(self.skill, "select_macos_browser", return_value=None), mock.patch.object(
                 self.skill.subprocess,
                 "run",
                 side_effect=fake_run,

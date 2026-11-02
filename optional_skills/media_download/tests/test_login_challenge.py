@@ -133,7 +133,7 @@ class LoginChallengeTest(unittest.TestCase):
             )
 
     def test_companion_capture_expands_small_virtual_viewport(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(self.challenge.sys, "platform", "linux"):
             root = Path(directory)
             runtime = root / "runtime"
             state_dir = runtime / "agent-runtime"
@@ -191,7 +191,7 @@ class LoginChallengeTest(unittest.TestCase):
             self.assertEqual(resize_calls[0][2]["height"], 720)
 
     def test_companion_does_not_publish_an_unidentified_page_image(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(self.challenge.sys, "platform", "linux"):
             root = Path(directory)
             runtime = root / "runtime"
             state_dir = runtime / "agent-runtime"
@@ -234,7 +234,7 @@ class LoginChallengeTest(unittest.TestCase):
             self.assertFalse(state_path.exists())
 
     def test_companion_scan_timeout_and_expired_prompt_are_pi_only(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(self.challenge.sys, "platform", "linux"):
             runtime = Path(directory)
             state_dir = runtime / "agent-runtime"
             state_dir.mkdir()
