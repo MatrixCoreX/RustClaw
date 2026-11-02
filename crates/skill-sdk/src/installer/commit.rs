@@ -119,7 +119,11 @@ pub(super) fn finish_install(
         reused,
         phases,
     };
-    emit_phase(control, "activate")?;
+    if control.is_some_and(InstallControl::is_cancelled) {
+        return Err(
+            SkillSdkError::new("process_cancelled", "cancellation requested").phase("activate"),
+        );
+    }
     store.activate(&outcome.install_root, &receipt)?;
     if let Some(guard) = published_guard.as_mut() {
         guard.disarm();

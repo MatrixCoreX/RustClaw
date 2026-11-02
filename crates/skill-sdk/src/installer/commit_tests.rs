@@ -227,6 +227,68 @@ fn broken_current_pointer_does_not_destroy_existing_rollback() {
 }
 
 #[test]
+fn mismatched_current_version_or_digest_does_not_become_rollback() {
+    for damage in ["version", "digest"] {
+        let temp = tempdir().unwrap();
+        let store = InstallReceiptStore::new(temp.path());
+        let first = commit(&store, b"first");
+        commit(&store, b"second");
+        let root = store.skill_root(SKILL).unwrap();
+        let rollback = fs::read(root.join("previous.json")).unwrap();
+        let mut current = store.current_pointer(SKILL).unwrap();
+        if damage == "version" {
+            current.version = "wrong-version".into();
+        } else {
+            current.receipt_digest = "0".repeat(64);
+        }
+        fs::write(
+            root.join("current.json"),
+            serde_json::to_vec(&current).unwrap(),
+        )
+        .unwrap();
+        assert!(store.verified_current_metadata(SKILL).is_err());
+        commit(&store, b"second");
+        assert_eq!(fs::read(root.join("previous.json")).unwrap(), rollback);
+        assert_eq!(
+            store.rollback(SKILL).unwrap().receipt_digest,
+            first.receipt_digest
+        );
+    }
+}
+
+#[test]
+fn failed_activation_keeps_the_old_pointer_and_removes_unreferenced_output() {
+    let temp = tempdir().unwrap();
+    let store = InstallReceiptStore::new(temp.path());
+    commit(&store, b"first");
+    let root = store.skill_root(SKILL).unwrap();
+    let pointer = fs::read(root.join("current.json")).unwrap();
+    fs::rename(root.join("current.json"), root.join("saved-pointer.json")).unwrap();
+    fs::create_dir(root.join("current.json")).unwrap();
+    let (staging, receipt) = staged(&store, b"second");
+    let destination = store
+        .version_dir(
+            SKILL,
+            &receipt.version,
+            &receipt_install_identity(&receipt).unwrap(),
+        )
+        .unwrap();
+    let result = finish_install(
+        &store,
+        &staging,
+        &mut StagingGuard::new(staging.clone()),
+        receipt,
+        vec![],
+        InstallOrigin::BuiltArtifact,
+        None,
+    );
+    assert!(result.is_err());
+    assert!(root.join("current.json").is_dir());
+    assert_eq!(fs::read(root.join("saved-pointer.json")).unwrap(), pointer);
+    assert!(!destination.exists());
+}
+
+#[test]
 fn multiple_healthy_identical_receipts_stay_ambiguous() {
     let temp = tempdir().unwrap();
     let store = InstallReceiptStore::new(temp.path());

@@ -769,7 +769,10 @@ impl InstallReceiptStore {
             install_root.join("install-receipt.json"),
         )?))?;
         receipt.validate()?;
-        if receipt.skill_name != skill_name || receipt.digest()? != pointer.receipt_digest {
+        if receipt.skill_name != skill_name
+            || receipt.version != pointer.version
+            || receipt.digest()? != pointer.receipt_digest
+        {
             return Err(SkillSdkError::new(
                 "rollback_receipt_mismatch",
                 format!("skill={skill_name} install_dir={}", pointer.install_dir),
