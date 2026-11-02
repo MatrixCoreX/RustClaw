@@ -8,7 +8,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::adapter::{
@@ -26,6 +25,9 @@ use crate::receipt::{
 };
 use crate::sandbox::{prepare_sandboxed_command, SandboxNetwork};
 use crate::{HostPlatform, SkillSdkError, SkillSdkResult};
+
+mod commit;
+use commit::finish_install;
 
 #[derive(Clone)]
 pub struct InstallRequest {
@@ -256,8 +258,6 @@ impl SkillInstaller {
             &staging,
             &mut guard,
             receipt,
-            &manifest_digest,
-            &source_digest,
             phases,
             InstallOrigin::SourceBuild,
             request.control.as_ref(),
@@ -404,8 +404,6 @@ impl SkillInstaller {
             &staging,
             &mut guard,
             receipt,
-            &manifest_digest,
-            &source_digest,
             vec![
                 "artifact".to_string(),
                 "protocol_smoke".to_string(),
@@ -456,48 +454,25 @@ impl SkillInstaller {
         manifest.validate_for_platform(&platform)?;
         let package_root = prepare_package_root(&manifest, &request.package_root)?;
         let source_store = InstallReceiptStore::new(&request.precompiled_root);
-        let pointer = source_store
-            .current_pointer(&manifest.package.name)
+        let bundled = source_store
+            .verified_current_metadata(&manifest.package.name)
             .map_err(|error| {
+                let code = match error.code.as_str() {
+                    "rollback_receipt_mismatch" => "precompiled_receipt_digest_mismatch",
+                    "receipt_pointer_path_invalid" => "precompiled_install_root_escape",
+                    _ => "precompiled_package_unavailable",
+                };
                 SkillSdkError::new(
-                    "precompiled_package_unavailable",
+                    code,
                     format!("skill={} detail={}", manifest.package.name, error.detail),
                 )
                 .phase("preflight")
             })?;
-        let source_versions = source_store
-            .skill_root(&manifest.package.name)?
-            .join("versions");
-        let canonical_versions = fs::canonicalize(&source_versions).map_err(|error| {
-            SkillSdkError::new(
-                "precompiled_package_unavailable",
-                format!("path={} error={error}", source_versions.display()),
-            )
-            .phase("preflight")
-        })?;
-        let source_install = fs::canonicalize(source_versions.join(&pointer.install_dir))?;
-        if !source_install.starts_with(&canonical_versions) {
-            return Err(SkillSdkError::new(
-                "precompiled_install_root_escape",
-                source_install.display().to_string(),
-            )
-            .phase("precompiled_verify"));
-        }
-        let bundled_manifest = PackageManifest::load(&source_install.join("skill.toml"))?;
-        let mut receipt: InstallReceipt =
-            serde_json::from_slice(&fs::read(source_install.join("install-receipt.json"))?)?;
-        receipt.validate()?;
+        let source_install = bundled.install_dir;
+        let mut receipt = bundled.receipt;
         if receipt.schema_version == INSTALL_RECEIPT_SCHEMA_VERSION {
             manifest = manifest.into_current()?;
         }
-        if receipt.digest()? != pointer.receipt_digest {
-            return Err(SkillSdkError::new(
-                "precompiled_receipt_digest_mismatch",
-                format!("skill={}", manifest.package.name),
-            )
-            .phase("precompiled_verify"));
-        }
-        receipt.verifies_manifest(&bundled_manifest)?;
         receipt.verifies_manifest(&manifest).map_err(|error| {
             SkillSdkError::new("precompiled_manifest_mismatch", error.detail)
                 .phase("precompiled_verify")
@@ -543,15 +518,11 @@ impl SkillInstaller {
         fs::create_dir_all(staging.join(&receipt.launch.working_directory))?;
         rebind_precompiled_runtime(&manifest, &staging, &mut receipt)?;
         emit_phase(request.control.as_ref(), "precompiled_copy")?;
-        let manifest_digest = manifest.digest()?;
-        let source_digest = receipt.source_digest.clone();
         finish_install(
             &destination_store,
             &staging,
             &mut guard,
             receipt,
-            &manifest_digest,
-            &source_digest,
             vec![
                 "precompiled_verify".to_string(),
                 "precompiled_copy".to_string(),
@@ -977,82 +948,6 @@ fn validate_aipp_bundle_extension(path: &Path) -> SkillSdkResult<()> {
         format!("path={}", path.display()),
     )
     .phase("aipp_bundle"))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn finish_install(
-    store: &InstallReceiptStore,
-    staging: &Path,
-    guard: &mut StagingGuard,
-    receipt: InstallReceipt,
-    manifest_digest: &str,
-    source_digest: &str,
-    phases: Vec<String>,
-    origin: InstallOrigin,
-    control: Option<&InstallControl>,
-) -> SkillSdkResult<InstallOutcome> {
-    emit_phase(control, "activate")?;
-    store.write_receipt(staging, &receipt)?;
-    let install_identity = receipt_install_identity(&receipt)?;
-    let destination =
-        store.version_dir(&receipt.skill_name, &receipt.version, &install_identity)?;
-    fs::create_dir_all(destination.parent().ok_or_else(|| {
-        SkillSdkError::new("install_parent_missing", destination.display().to_string())
-    })?)?;
-    let (receipt, reused) = if destination.exists() {
-        let existing: InstallReceipt =
-            serde_json::from_slice(&fs::read(destination.join("install-receipt.json"))?)?;
-        existing.validate()?;
-        if existing.manifest_digest != manifest_digest || existing.source_digest != source_digest {
-            return Err(SkillSdkError::new(
-                "install_identity_collision",
-                destination.display().to_string(),
-            )
-            .phase("activate"));
-        }
-        (existing, true)
-    } else {
-        fs::rename(staging, &destination).map_err(|error| {
-            SkillSdkError::new(
-                "install_stage_commit_failed",
-                format!(
-                    "source={} destination={} error={error}",
-                    staging.display(),
-                    destination.display()
-                ),
-            )
-            .phase("activate")
-        })?;
-        guard.disarm();
-        (receipt, false)
-    };
-    store.activate(&destination, &receipt)?;
-    Ok(InstallOutcome {
-        skill_name: receipt.skill_name.clone(),
-        version: receipt.version.clone(),
-        install_root: fs::canonicalize(destination)?,
-        receipt_digest: receipt.digest()?,
-        adapter: receipt.adapter,
-        origin,
-        reused,
-        phases,
-    })
-}
-
-fn receipt_install_identity(receipt: &InstallReceipt) -> SkillSdkResult<String> {
-    let identity = serde_json::json!({
-        "manifest_digest": receipt.manifest_digest,
-        "source_digest": receipt.source_digest,
-        "lockfile_digests": receipt.lockfile_digests,
-        "adapter": receipt.adapter,
-        "adapter_version": receipt.adapter_version,
-        "platform": receipt.platform,
-        "artifacts": receipt.artifacts,
-        "launch": receipt.launch,
-        "sandbox_profile": receipt.sandbox_profile,
-        "runtime_network": receipt.runtime_network,
-    });
-    Ok(hex::encode(Sha256::digest(serde_json::to_vec(&identity)?)))
 }
 
 fn install_process_slot() -> &'static Mutex<()> {

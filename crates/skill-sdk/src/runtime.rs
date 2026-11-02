@@ -293,8 +293,17 @@ impl SkillRuntimeResolver {
             if !receipt_path.is_file() {
                 continue;
             }
-            let receipt: InstallReceipt = serde_json::from_slice(&fs::read(receipt_path)?)?;
-            receipt.validate()?;
+            // An unrelated damaged package must not poison exact resolution of
+            // another immutable version. Full validation still gates execution.
+            let Ok(raw) = fs::read(receipt_path) else {
+                continue;
+            };
+            let Ok(receipt) = serde_json::from_slice::<InstallReceipt>(&raw) else {
+                continue;
+            };
+            if receipt.validate().is_err() {
+                continue;
+            }
             if receipt.skill_name == skill_name
                 && receipt.version == expected_version
                 && receipt.manifest_digest == expected_manifest_digest
@@ -302,6 +311,12 @@ impl SkillRuntimeResolver {
             {
                 matches.push(entry.file_name().to_string_lossy().to_string());
             }
+        }
+        if matches.len() > 1 {
+            // A repaired precompiled package can have the identical receipt as
+            // the damaged original. Only disambiguate by complete verification;
+            // multiple healthy matches remain an error, never a current lookup.
+            matches.retain(|name| self.verified_install(skill_name, name).is_ok());
         }
         match matches.as_slice() {
             [install_dir] => Ok(install_dir.clone()),
@@ -354,61 +369,28 @@ impl SkillRuntimeResolver {
         expected_receipt_digest: Option<&str>,
         expected_manifest_digest: Option<&str>,
     ) -> SkillSdkResult<SkillLaunchSpec> {
-        let (canonical_install, manifest, receipt, receipt_digest) = self
-            .verified_receipt_metadata(
-                skill_name,
-                install_dir,
-                expected_version,
-                expected_receipt_digest,
-                expected_manifest_digest,
-            )?;
-        verify_artifacts(&canonical_install, &receipt)?;
-        let program = match receipt.launch.program_scope {
-            LaunchProgramScope::Package => {
-                confined_existing_path(&canonical_install, &receipt.launch.program, true)?
-            }
-            LaunchProgramScope::TrustedRuntime => {
-                let program = fs::canonicalize(&receipt.launch.program)?;
-                let actual = digest_file(&program)?;
-                let expected = receipt
-                    .launch
-                    .trusted_runtime_sha256
-                    .as_deref()
-                    .unwrap_or_default();
-                if actual != expected {
-                    return Err(SkillSdkError::new(
-                        "launch_runtime_digest_mismatch",
-                        format!("program={}", program.display()),
-                    ));
-                }
-                program
-            }
-        };
-        let working_directory =
-            confined_existing_path(&canonical_install, &receipt.launch.working_directory, false)?;
-        let launch = SkillLaunchSpec {
-            schema_version: SKILL_LAUNCH_SCHEMA_VERSION,
-            skill_name: receipt.skill_name,
-            version: receipt.version,
-            adapter: receipt.adapter,
-            launcher: receipt.launch.launcher,
-            program,
-            args: receipt.launch.args,
-            working_directory,
-            environment: receipt.launch.environment,
-            environment_allowlist: receipt.launch.environment_allowlist,
-            remote_endpoint: receipt.launch.remote_endpoint,
-            timeout_seconds: manifest.run.timeout_seconds,
-            progress_frames: manifest.run.progress_frames,
-            execution_profile: manifest.run.execution_profile,
-            sandbox_profile: receipt.sandbox_profile,
-            runtime_network: receipt.runtime_network,
-            install_root: canonical_install,
-            manifest_digest: receipt.manifest_digest,
-            receipt_digest,
-        };
-        launch.validate()?;
-        Ok(launch)
+        verify_install_content(self.verified_receipt_metadata(
+            skill_name,
+            install_dir,
+            expected_version,
+            expected_receipt_digest,
+            expected_manifest_digest,
+        )?)
+        .map(|(_, launch)| launch)
+    }
+
+    pub(crate) fn verified_install(
+        &self,
+        skill_name: &str,
+        install_dir: &str,
+    ) -> SkillSdkResult<(InstallReceipt, SkillLaunchSpec)> {
+        verify_install_content(self.verified_receipt_metadata(
+            skill_name,
+            install_dir,
+            None,
+            None,
+            None,
+        )?)
     }
 
     fn verified_receipt_metadata(
@@ -473,6 +455,59 @@ impl SkillRuntimeResolver {
         }
         Ok((canonical_install, manifest, receipt, receipt_digest))
     }
+}
+
+fn verify_install_content(
+    metadata: (PathBuf, PackageManifest, InstallReceipt, String),
+) -> SkillSdkResult<(InstallReceipt, SkillLaunchSpec)> {
+    let (canonical_install, manifest, receipt, receipt_digest) = metadata;
+    verify_artifacts(&canonical_install, &receipt)?;
+    let program = match receipt.launch.program_scope {
+        LaunchProgramScope::Package => {
+            confined_existing_path(&canonical_install, &receipt.launch.program, true)?
+        }
+        LaunchProgramScope::TrustedRuntime => {
+            let program = fs::canonicalize(&receipt.launch.program)?;
+            let actual = digest_file(&program)?;
+            let expected = receipt
+                .launch
+                .trusted_runtime_sha256
+                .as_deref()
+                .unwrap_or_default();
+            if actual != expected {
+                return Err(SkillSdkError::new(
+                    "launch_runtime_digest_mismatch",
+                    format!("program={}", program.display()),
+                ));
+            }
+            program
+        }
+    };
+    let working_directory =
+        confined_existing_path(&canonical_install, &receipt.launch.working_directory, false)?;
+    let launch = SkillLaunchSpec {
+        schema_version: SKILL_LAUNCH_SCHEMA_VERSION,
+        skill_name: receipt.skill_name.clone(),
+        version: receipt.version.clone(),
+        adapter: receipt.adapter,
+        launcher: receipt.launch.launcher,
+        program,
+        args: receipt.launch.args.clone(),
+        working_directory,
+        environment: receipt.launch.environment.clone(),
+        environment_allowlist: receipt.launch.environment_allowlist.clone(),
+        remote_endpoint: receipt.launch.remote_endpoint.clone(),
+        timeout_seconds: manifest.run.timeout_seconds,
+        progress_frames: manifest.run.progress_frames,
+        execution_profile: manifest.run.execution_profile,
+        sandbox_profile: receipt.sandbox_profile,
+        runtime_network: receipt.runtime_network,
+        install_root: canonical_install,
+        manifest_digest: receipt.manifest_digest.clone(),
+        receipt_digest,
+    };
+    launch.validate()?;
+    Ok((receipt, launch))
 }
 
 fn verify_artifacts(install_root: &Path, receipt: &InstallReceipt) -> SkillSdkResult<()> {

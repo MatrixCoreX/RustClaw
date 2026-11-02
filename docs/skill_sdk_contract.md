@@ -70,6 +70,21 @@ values. Activation atomically updates `current.json`, preserving
 `previous.json` for bounded rollback. Business data is never stored in the
 package receipt tree.
 
+Reinstallation reuses a directory only after the same runtime verifier checks
+its manifest, receipt, every artifact and trusted launcher. A missing or damaged
+package is repaired into a fresh immutable sibling directory, never overwritten
+in place; existing version leases and background-job references are untouched.
+Repeating a healthy install preserves the prior rollback pointer, and repairing
+a damaged current package cannot replace a valid rollback with that package.
+A per-skill non-blocking commit lock serializes publication across host/CLI
+processes (`install_commit_busy` is retryable when another commit holds it).
+Cancellation or verification failure before activation leaves current unchanged.
+Exact receipt resolution ignores unrelated invalid receipts; when an identical
+precompiled receipt exists in a damaged original and its repair, only the fully
+verified copy is eligible. Multiple healthy exact matches still fail closed as
+ambiguous. Installation does not grant permissions, enable a skill, or change
+private business data.
+
 At execution time `SkillRuntimeResolver` verifies the current pointer,
 receipt, manifest and every artifact, then produces `SkillLaunchSpec`. Planner
 arguments cannot change the program, entrypoint, working directory,

@@ -447,18 +447,30 @@ impl InstallReceiptStore {
             })?;
         let current_path = self.active_install_path(&receipt.skill_name)?;
         let previous_path = skill_root.join("previous.json");
-        if current_path.is_file() {
-            let current = fs::read(&current_path)?;
-            atomic_write(&previous_path, &current)?;
-            let pointer: CurrentInstallPointer = serde_json::from_slice(&current)?;
-            validate_pointer(&pointer)?;
-        }
         let pointer = CurrentInstallPointer {
             schema_version: CURRENT_INSTALL_POINTER_SCHEMA_VERSION,
             version: receipt.version.clone(),
             install_dir: install_dir_name.to_string(),
             receipt_digest: receipt.digest()?,
         };
+        match fs::read(&current_path) {
+            Ok(current) => {
+                if let Ok(old) = serde_json::from_slice::<CurrentInstallPointer>(&current) {
+                    if validate_pointer(&old).is_ok()
+                        && old != pointer
+                        && self
+                            .verify_pointer_install(&receipt.skill_name, &old)
+                            .is_ok()
+                    {
+                        // A repair must not replace a valid rollback with the
+                        // damaged current package; reinstalling is a no-op here.
+                        atomic_write(&previous_path, &current)?;
+                    }
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
         atomic_write_json(&current_path, &pointer)?;
         Ok(())
     }

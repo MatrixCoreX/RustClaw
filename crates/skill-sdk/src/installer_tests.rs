@@ -324,23 +324,33 @@ printf '{"request_id":"%s","status":"ok","text":"adopted","error_text":null,"but
         fs::set_permissions(&binary, permissions).expect("permissions");
     }
     let package_root = temp.path().join("packages");
-    let outcome = SkillInstaller
-        .adopt_built(&AdoptBuiltRequest {
-            manifest_path: source.join("skill.toml"),
-            workspace_root: workspace,
-            package_root: package_root.clone(),
-            binary_path: binary,
-            target: None,
-            control: None,
-        })
-        .expect("adopt");
+    let request = AdoptBuiltRequest {
+        manifest_path: source.join("skill.toml"),
+        workspace_root: workspace,
+        package_root: package_root.clone(),
+        binary_path: binary,
+        target: None,
+        control: None,
+    };
+    let outcome = SkillInstaller.adopt_built(&request).expect("adopt");
     assert_eq!(outcome.adapter, crate::BuildAdapter::Cargo);
     assert_eq!(outcome.origin, InstallOrigin::BuiltArtifact);
     assert!(outcome.phases.contains(&"protocol_smoke".to_string()));
-    let launch = SkillRuntimeResolver::new(package_root)
+    let launch = SkillRuntimeResolver::new(package_root.clone())
         .resolve("cargo_fixture")
         .expect("resolve");
     assert!(launch.program.ends_with("runtime/bin/cargo-fixture"));
+    fs::remove_file(&launch.program).unwrap();
+    let repaired = SkillInstaller
+        .adopt_built(&request)
+        .expect("repair missing binary");
+    assert!(!repaired.reused);
+    assert_ne!(outcome.install_root, repaired.install_root);
+    assert!(SkillRuntimeResolver::new(package_root)
+        .resolve("cargo_fixture")
+        .unwrap()
+        .program
+        .is_file());
 }
 
 #[test]
@@ -402,15 +412,16 @@ printf '{"request_id":"%s","status":"ok","text":"precompiled","error_text":null,
     fs::remove_file(source.join("helper.js")).unwrap();
 
     let installed_root = temp.path().join("installed");
+    let request = PrecompiledInstallRequest {
+        manifest_path: manifest_path.clone(),
+        workspace_root: workspace.clone(),
+        package_root: installed_root.clone(),
+        precompiled_root: precompiled_root.clone(),
+        target: None,
+        control: None,
+    };
     let outcome = SkillInstaller
-        .install_precompiled(&PrecompiledInstallRequest {
-            manifest_path: manifest_path.clone(),
-            workspace_root: workspace.clone(),
-            package_root: installed_root.clone(),
-            precompiled_root: precompiled_root.clone(),
-            target: None,
-            control: None,
-        })
+        .install_precompiled(&request)
         .expect("install precompiled");
 
     assert_eq!(outcome.origin, InstallOrigin::PlatformPrecompiled);
@@ -418,7 +429,7 @@ printf '{"request_id":"%s","status":"ok","text":"precompiled","error_text":null,
         outcome.phases,
         ["precompiled_verify", "precompiled_copy", "activate"]
     );
-    let launch = SkillRuntimeResolver::new(installed_root)
+    let launch = SkillRuntimeResolver::new(installed_root.clone())
         .resolve("cargo_fixture")
         .expect("resolve imported package");
     assert!(launch.program.ends_with("runtime/bin/cargo-fixture"));
@@ -433,6 +444,22 @@ printf '{"request_id":"%s","status":"ok","text":"precompiled","error_text":null,
         fs::read_to_string(asset_path).unwrap(),
         "module.exports = 42;\n"
     );
+
+    fs::remove_file(&launch.program).unwrap();
+    let repaired = SkillInstaller
+        .install_precompiled(&request)
+        .expect("repair from release");
+    assert!(!repaired.reused);
+    assert_eq!(repaired.receipt_digest, outcome.receipt_digest);
+    let exact = SkillRuntimeResolver::new(installed_root)
+        .resolve_pinned(
+            "cargo_fixture",
+            &launch.version,
+            &launch.manifest_digest,
+            &outcome.receipt_digest,
+        )
+        .expect("identical release receipt resolves to complete repaired copy");
+    assert!(exact.program.is_file());
 
     let bundled_launch = SkillRuntimeResolver::new(precompiled_root.clone())
         .resolve("cargo_fixture")
