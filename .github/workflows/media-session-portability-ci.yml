@@ -8,6 +8,16 @@ permissions:
   contents: read
 
 jobs:
+  cache-seed:
+    if: ${{ github.event_name != 'pull_request' }}
+    uses: ./.github/workflows/rust-cache-profile-ci.yml
+
+  cache-reuse:
+    needs: cache-seed
+    uses: ./.github/workflows/rust-cache-profile-ci.yml
+    with:
+      require_cache_hit: true
+
   sessions:
     strategy:
       fail-fast: false

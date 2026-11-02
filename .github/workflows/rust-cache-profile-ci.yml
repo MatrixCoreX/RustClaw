@@ -1,0 +1,53 @@
+name: Cargo cache profile boundary verification
+
+"on":
+  workflow_call:
+    inputs:
+      require_cache_hit:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  cache-profile:
+    runs-on: macos-15
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - name: Prepare the native protocol compiler
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          if ! command -v protoc >/dev/null; then brew install protobuf; fi
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        id: cargo-cache
+        with:
+          prefix-key: v1-rust-cargo-profiles
+          shared-key: compiler-profile-smoke
+          cache-targets: "false"
+          cache-directories: |
+            target/debug
+            target/release
+          cache-bin: "false"
+          cache-on-failure: "false"
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - name: Require compiler reuse without restoring package state
+        env:
+          REQUIRE_CACHE_HIT: ${{ inputs.require_cache_hit }}
+          CACHE_HIT: ${{ steps.cargo-cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          if [[ "$REQUIRE_CACHE_HIT" == true ]]; then [[ "$CACHE_HIT" == true ]]; fi
+          [[ ! -e target/prebuilt-skill-packages && ! -L target/prebuilt-skill-packages ]]
+          [[ ! -e target/skill-packages && ! -L target/skill-packages ]]
+          [[ ! -e target/prebuilt-skill-storage && ! -L target/prebuilt-skill-storage ]]
+          python3 -m unittest discover -s scripts/tests -p test_release_build_cache.py
+      - name: Rebuild and verify every native Skill Store receipt
+        run: bash scripts/precompile_skill_store.sh host

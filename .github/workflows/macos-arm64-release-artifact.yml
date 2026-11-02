@@ -141,11 +141,21 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: release-${{ env.RUST_TARGET }}
+          prefix-key: v1-rust-cargo-profiles
           workspaces: |
             . -> target
             desktop -> target
-            desktop/scripts/identity -> target
+            desktop/scripts/identity -> ../../target/identity
           env-vars: "CARGO CC CFLAGS CXX CMAKE RUST MACOSX_DEPLOYMENT_TARGET SDKROOT"
+          cache-targets: "false"
+          cache-directories: |
+            target/debug
+            target/release
+            desktop/target/debug
+            desktop/target/release
+            desktop/target/${{ env.RUST_TARGET }}/debug
+            desktop/target/${{ env.RUST_TARGET }}/release
+            desktop/target/identity/debug
           cache-bin: "false"
           cache-on-failure: "false"
           save-if: ${{ github.event_name != 'pull_request' }}

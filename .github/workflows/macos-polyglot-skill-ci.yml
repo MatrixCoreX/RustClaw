@@ -9,6 +9,7 @@ name: Polyglot Skill macOS CI
       - ".github/workflows/macos-arm64-release-artifact.yml"
       - ".github/workflows/desktop-native.yml"
       - ".github/workflows/media-session-portability-ci.yml"
+      - ".github/workflows/rust-cache-profile-ci.yml"
       - "scripts/build_macos_media_tools.sh"
       - "scripts/bundle_macos_skill_dependencies.py"
       - "scripts/tests/test_release_macos_media_tools.py"
@@ -69,6 +70,7 @@ name: Polyglot Skill macOS CI
       - ".github/workflows/macos-arm64-release-artifact.yml"
       - ".github/workflows/desktop-native.yml"
       - ".github/workflows/media-session-portability-ci.yml"
+      - ".github/workflows/rust-cache-profile-ci.yml"
       - "scripts/build_macos_media_tools.sh"
       - "scripts/bundle_macos_skill_dependencies.py"
       - "scripts/tests/test_release_macos_media_tools.py"
@@ -182,7 +184,12 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: macos-runtime-tests
+          prefix-key: v1-rust-cargo-profiles
           env-vars: "CARGO CC CFLAGS CXX CMAKE RUST MACOSX_DEPLOYMENT_TARGET SDKROOT"
+          cache-targets: "false"
+          cache-directories: |
+            target/debug
+            target/release
           cache-bin: "false"
           cache-on-failure: "false"
           save-if: ${{ github.event_name != 'pull_request' }}

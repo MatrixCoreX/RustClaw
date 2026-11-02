@@ -64,10 +64,18 @@ jobs:
         id: cargo-cache
         with:
           key: desktop-${{ env.DESKTOP_NATIVE_TARGET }}
+          prefix-key: v1-rust-cargo-profiles
           workspaces: |
             desktop -> target
-            desktop/scripts/identity -> target
+            desktop/scripts/identity -> ../../target/identity
           env-vars: "CARGO CC CFLAGS CXX CMAKE RUST MACOSX_DEPLOYMENT_TARGET SDKROOT"
+          cache-targets: "false"
+          cache-directories: |
+            desktop/target/debug
+            desktop/target/release
+            desktop/target/${{ env.DESKTOP_NATIVE_TARGET }}/debug
+            desktop/target/${{ env.DESKTOP_NATIVE_TARGET }}/release
+            desktop/target/identity/debug
           cache-bin: "false"
           cache-on-failure: "false"
           save-if: ${{ github.event_name != 'pull_request' }}
