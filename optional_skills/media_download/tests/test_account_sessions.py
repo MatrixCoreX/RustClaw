@@ -6,6 +6,7 @@ import sqlite3
 import sys
 import tempfile
 import time
+import tomllib
 import unittest
 from unittest import mock
 
@@ -22,6 +23,23 @@ class AccountSessionTest(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="account-session-fixture-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+
+    def test_account_controls_do_not_inherit_browser_or_network_slots(self):
+        repository = SKILL.parents[1]
+        for relative in ("configs/skills_registry.toml", "docker/config/skills_registry.toml"):
+            registry = tomllib.loads((repository / relative).read_text())
+            for skill in registry["skills"]:
+                if skill["name"] not in {"media_download", "media_discovery"}:
+                    continue
+                controls = [cap for cap in skill["planner_capabilities"] if cap["action"] in {"account_status", "account_logout"}]
+                self.assertEqual(len(controls), 2)
+                for control in controls:
+                    self.assertEqual(control["resource_request"]["class"], "general")
+                    self.assertEqual(control["resource_request"]["browser_slots"], 0)
+                    self.assertEqual(control["resource_request"]["network_slots"], 0)
+                logout = next(cap for cap in controls if cap["action"] == "account_logout")
+                self.assertEqual(logout["async_adapter_kind"], "local_process_poll")
+                self.assertGreater(logout["timeout_seconds"], 30)
 
     def profile(self, name="browser-profile/douyin", cookie=True, expired=False):
         profile = self.root / name
