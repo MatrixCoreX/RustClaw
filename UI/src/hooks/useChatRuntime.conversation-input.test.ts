@@ -58,6 +58,7 @@ async function setup(options: {
   loseFirstConversationInputResponse?: boolean;
   terminalRaceOnExpectedTarget?: boolean;
   holdConversationInputResponses?: boolean;
+  holdHistoryResponse?: boolean;
 } = {}) {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const requests: Array<{ payload: { text: string; conversation_id: string; agent_id: string; attachments?: Array<{ name: string; base64: string }> }; idempotency_key: string }> = [];
@@ -87,9 +88,14 @@ async function setup(options: {
   const conversationInputResponseGate = new Promise<void>((resolve) => {
     releaseConversationInputResponses = resolve;
   });
+  let releaseHistoryResponse = () => undefined;
+  const historyResponseGate = new Promise<void>((resolve) => { releaseHistoryResponse = resolve; });
   const params: UseChatRuntimeParams = {
     apiFetch: async (path, init) => {
-      if (path.startsWith("/v1/tasks/conversation-history")) return response({ schema_version: 1, status: "ok", turns: [], truncated: false, content_sha256: createHash("sha256").update("[]").digest("hex") });
+      if (path.startsWith("/v1/tasks/conversation-history")) {
+        if (options.holdHistoryResponse) await historyResponseGate;
+        return response({ schema_version: 1, status: "ok", turns: [], truncated: false, content_sha256: createHash("sha256").update("[]").digest("hex") });
+      }
       if (path === "/v1/ui/attachment-constraints") return response(DEFAULT_CHAT_ATTACHMENT_CONSTRAINTS);
       if (path === "/v1/conversation-inputs/cancel-current" && init?.method === "POST") {
         const request = JSON.parse(String(init.body)) as Record<string, unknown>;
@@ -279,6 +285,12 @@ async function setup(options: {
     runtime: () => runtime, requests, clientTasks, conversationInputs, activatedInputs,
     withdrawnInputs, cancelRequests, params,
     releaseConversationInputResponses,
+    releaseHistoryResponse,
+    waitForHistoryRestore: async () => {
+      const deadline = Date.now() + 3000;
+      while (runtime.chatHistoryLoading && Date.now() < deadline) await act(flush);
+      assert.equal(runtime.chatHistoryLoading, false, "history restore must finish");
+    },
     conversationInputRecoveryQueries: () => conversationInputRecoveryQueries,
     send: async (text: string) => {
       await act(async () => { runtime.setChatInput(text); await runtime.sendChatMessage(); await flush(); });
@@ -421,6 +433,22 @@ test("a follow-up sent across a terminal boundary starts and observes a new task
   } finally {
     await app.unmount();
   }
+});
+
+test("a delayed initial history restore preserves a newly selected empty conversation", async () => {
+  const app = await setup({ holdHistoryResponse: true });
+  try {
+    await act(async () => app.runtime().createNewChatThread());
+    const selected = app.runtime().activeChatThreadId;
+    app.releaseHistoryResponse();
+    await app.waitForHistoryRestore();
+    assert.equal(app.runtime().activeChatThreadId, selected);
+    await app.send("new conversation input");
+    assert.equal(app.conversationInputs[0].scope.conversation_id, selected);
+    await app.complete("task-1");
+    assert.deepEqual(app.runtime().chatMessages.filter(item => item.role !== "system").map(item => item.text),
+      ["new conversation input", "task-1 reply"]);
+  } finally { app.releaseHistoryResponse(); await app.unmount(); }
 });
 
 test("conversation changes keep active-task inputs scoped and do not block a new conversation", async () => {

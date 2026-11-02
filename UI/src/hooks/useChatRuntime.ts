@@ -226,6 +226,7 @@ export function useChatRuntime({
   const activeChatThreadRef = useRef(activeChatThread);
   const apiFetchRef = useRef(apiFetch);
   const conversationHistoryScopeRef = useRef("");
+  const explicitlyCreatedThreadIdsRef = useRef<Set<string>>(new Set());
   const chatHistoryLoadingRef = useRef(false);
   const teachingTraceAutoLoadKeysRef = useRef<Set<string>>(new Set());
   const teachingRequestRef = useRef(0);
@@ -290,6 +291,7 @@ export function useChatRuntime({
     compactionAbortRef.current?.abort();
     liveChatTaskIdsRef.current.clear();
     conversationInputTaskIdsRef.current.clear();
+    explicitlyCreatedThreadIdsRef.current.clear();
   }, [conversationHistoryScope, activeUserKey, requestEpoch]);
 
   useEffect(
@@ -362,7 +364,7 @@ export function useChatRuntime({
         const restored = projectConversationHistory([page], t);
         setChatThreadState((current) =>
           mergeServerConversationHistory(
-            retainLocalDraftsForPagedRestore(current),
+            retainLocalDraftsForPagedRestore(current, explicitlyCreatedThreadIdsRef.current),
             restored,
             t,
             defaultAgentId,
@@ -572,6 +574,8 @@ export function useChatRuntime({
     if (!isCurrent()) return;
     teachingRequestRef.current += 1;
     const nextThread = createChatThread(t, defaultAgentId);
+    // A late initial restore must not discard a conversation the user just created.
+    explicitlyCreatedThreadIdsRef.current.add(nextThread.id);
     setChatThreadState((prev) => ({
       activeThreadId: nextThread.id,
       threads: [nextThread, ...prev.threads],
@@ -647,6 +651,7 @@ export function useChatRuntime({
       await archiveChatThreadOnServer(thread);
       if (!isCurrent()) return false;
       const replacement = createChatThread(t, defaultAgentId);
+      explicitlyCreatedThreadIdsRef.current.add(replacement.id);
       for (const [runId, submission] of submissionAbortControllersRef.current) {
         if (submission.threadId !== thread.id) continue;
         submission.controller.abort();

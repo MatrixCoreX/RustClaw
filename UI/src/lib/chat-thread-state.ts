@@ -178,10 +178,12 @@ export function mergeServerConversationHistory(
 
 export function retainLocalDraftsForPagedRestore(
   current: ChatThreadState,
+  preservePristineThreadIds: ReadonlySet<string> = new Set(),
 ): ChatThreadState {
   const threads = current.threads.filter(
     (thread) =>
       threadHasPendingTask(thread) ||
+      (preservePristineThreadIds.has(thread.id) && threadIsPristineWelcome(thread)) ||
       (!threadHasServerHistory(thread) && !threadIsPristineWelcome(thread)),
   );
   return {
