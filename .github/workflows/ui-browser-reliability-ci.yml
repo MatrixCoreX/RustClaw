@@ -35,6 +35,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Require unchanged runtime sources for manual UI-only verification
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin main
+          if ! git diff --quiet origin/main HEAD -- Cargo.toml Cargo.lock .cargo crates optional_skills external_skills configs docker prompts pi_app services; then
+            echo '::error::Runtime sources changed; select full verification instead of UI-only mode.'
+            exit 1
+          fi
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.13"

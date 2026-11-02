@@ -64,6 +64,11 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
         self.assertEqual(focused["if"],
                          "${{ github.event_name == 'workflow_dispatch' && inputs.verification_scope == 'ui' }}")
         self.assertEqual(focused["uses"], "./.github/workflows/ui-browser-reliability-ci.yml")
+        lightweight = load("ui-browser-reliability-ci.yml")["jobs"]["ui-and-browser"]["steps"]
+        guard = next(step for step in lightweight if step.get("name") == "Require unchanged runtime sources for manual UI-only verification")
+        self.assertEqual(guard["if"], "${{ github.event_name == 'workflow_dispatch' }}")
+        self.assertIn("git diff --quiet origin/main HEAD -- Cargo.toml Cargo.lock .cargo crates optional_skills external_skills configs docker prompts pi_app services", guard["run"])
+        self.assertIn("exit 1", guard["run"])
 
     def test_browser_preparation_is_followed_by_the_runtime_signature_selector(self):
         steps = load("macos-arm64-release-artifact.yml")["jobs"]["build-macos"]["steps"]
