@@ -93,6 +93,7 @@ jobs:
             clang \
             libclang-dev \
             bubblewrap \
+            ripgrep \
             protobuf-compiler
 
       - name: Setup Node.js
