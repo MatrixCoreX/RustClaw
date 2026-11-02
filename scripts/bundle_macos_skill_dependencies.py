@@ -51,6 +51,35 @@ def linked_libraries(path: Path) -> list[str]:
     return [line.strip().split(" (", 1)[0] for line in lines if line.strip()]
 
 
+def media_deployment_versions(output: str) -> list[tuple[int, ...]]:
+    versions = []
+    field = None
+    for line in output.splitlines():
+        value = line.strip()
+        if value.startswith("Load command"):
+            field = None
+        elif value == "cmd LC_BUILD_VERSION":
+            field = "minos"
+        elif value == "cmd LC_VERSION_MIN_MACOSX":
+            field = "version"
+        elif field and (match := re.fullmatch(rf"{field}\s+(\d+(?:\.\d+){{1,2}})", value)):
+            parts = tuple(int(part) for part in match.group(1).split("."))
+            versions.append(parts + (0,) * (3 - len(parts)))
+    return versions
+
+
+def verify_media_tool_portability(path: Path, minimum: str) -> None:
+    if not re.fullmatch(r"\d+\.\d+(?:\.\d+)?", minimum):
+        raise ValueError("macos_media_tool_deployment_target_invalid")
+    expected = tuple(int(value) for value in minimum.split("."))
+    expected += (0,) * (3 - len(expected))
+    versions = media_deployment_versions(run("otool", "-l", str(path)))
+    if not versions or any(version > expected for version in versions):
+        raise ValueError(f"macos_media_tool_deployment_target_invalid:{path.name}")
+    if any(not dependency.startswith(SYSTEM_PREFIXES) for dependency in linked_libraries(path)):
+        raise ValueError(f"macos_media_tool_external_dependency:{path.name}")
+
+
 def load_rpaths(path: Path) -> list[str]:
     lines = run("otool", "-l", str(path)).splitlines()
     values: list[str] = []
@@ -164,6 +193,7 @@ def main() -> None:
     parser.add_argument("--git-prefix", type=Path, required=True)
     parser.add_argument("--ffmpeg", type=Path, required=True)
     parser.add_argument("--ffprobe", type=Path, required=True)
+    parser.add_argument("--minimum-macos-version", required=True)
     parser.add_argument("--tesseract", type=Path, required=True)
     parser.add_argument("--tessdata", type=Path, required=True)
     parser.add_argument("--chi-sim", type=Path, required=True)
@@ -177,6 +207,8 @@ def main() -> None:
     git_binary = require_file(git_prefix / "bin/git", "git", executable=True)
     ffmpeg = require_file(args.ffmpeg, "ffmpeg", executable=True)
     ffprobe = require_file(args.ffprobe, "ffprobe", executable=True)
+    for media_tool in (ffmpeg, ffprobe):
+        verify_media_tool_portability(media_tool, args.minimum_macos_version)
     tesseract = require_file(args.tesseract, "tesseract", executable=True)
     whisper_cli = require_file(args.whisper_cli, "whisper-cli", executable=True)
     chi_sim = require_file(args.chi_sim, "tesseract-chi-sim")
@@ -193,6 +225,10 @@ def main() -> None:
         root = Path(temporary) / "host"
         (root / "bin").mkdir(parents=True)
         origins: dict[Path, Path] = {}
+        source_build = ffmpeg.parent.parent / "source-build.json"
+        if source_build.is_file():
+            shutil.copy2(source_build, root / "media-source-build.json")
+            copy_tree_without_links(ffmpeg.parent.parent / "share/licenses", root / "share/licenses")
 
         copy_tree_without_links(git_prefix, root / "git")
         for output in (root / "git").rglob("*"):

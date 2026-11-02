@@ -1,0 +1,87 @@
+name: Media session and native portability verification
+
+"on":
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "optional_skills/media_discovery/**"
+      - "scripts/build_macos_media_tools.sh"
+      - "scripts/bundle_macos_skill_dependencies.py"
+      - "scripts/tests/test_release_macos_media_tools.py"
+      - "scripts/tests/test_release_build_cache.py"
+      - ".github/workflows/media-session-portability-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  sessions:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-15]
+        node: ["20", "22"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - name: Test actual skill code with private disposable profiles
+        run: |
+          npm ci --ignore-scripts --prefix optional_skills/media_discovery
+          node --test optional_skills/media_discovery/test/*.test.mjs
+          python3 -m unittest discover -s scripts/tests -p test_release_build_cache.py
+          python3 -m unittest discover -s scripts/tests -p test_release_macos_media_tools.py
+          python3 -m unittest discover -s optional_skills/media_download/tests
+          python3 scripts/check_skill_prompts.py
+          python3 scripts/check_skill_storage_ownership.py --self-test
+          python3 scripts/check_skill_storage_ownership.py
+          python3 scripts/check_skill_hotplug_coupling_inventory.py --self-test
+          python3 scripts/check_skill_hotplug_coupling_inventory.py
+          python3 scripts/check_product_identity_coupling.py --self-test
+          python3 scripts/check_product_identity_coupling.py
+          python3 scripts/check_on_demand_skill_builds.py
+          python3 scripts/check_cross_platform_contracts.py
+      - name: Verify both configured product identities without local builds
+        if: ${{ matrix.node == '22' }}
+        run: |
+          npm ci --ignore-scripts --prefix UI
+          bash scripts/product_identity_tests.sh --with-ui
+
+  portable-media:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-15
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - name: Build and validate the native media dependency boundary
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          brew install nasm pkgconf meson ninja
+          bash scripts/build_macos_media_tools.sh "$RUNNER_TEMP/portable-media"
+          mkdir -p dist
+          archive="portable-media-${{ matrix.target }}-${GITHUB_SHA}.tar.gz"
+          tar -czf "dist/$archive" -C "$RUNNER_TEMP/portable-media" bin share/licenses source-build.json
+          (cd dist && shasum -a 256 "$archive" > "$archive.sha256")
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: portable-media-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14

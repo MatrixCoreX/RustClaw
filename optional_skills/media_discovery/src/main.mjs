@@ -51,6 +51,7 @@ const DEFAULT_BROWSER_PACING = Object.freeze({
   tiktok: Object.freeze({ interaction_min_ms: 2200, interaction_max_ms: 5800, rest_min_seconds: 300, rest_max_seconds: 600 }),
 });
 const ERROR_CODES = new Set([
+  "account_operation_failed",
   "account_session_busy",
   "account_storage_invalid",
   "action_unsupported",
@@ -324,6 +325,8 @@ function errorResponse(action, error) {
     "collection_capacity_busy",
   ]).has(errorCode);
   const preDispatch = new Set([
+    "account_session_busy",
+    "account_storage_invalid",
     "action_unsupported",
     "browser_mode_invalid",
     "collection_already_enabled",

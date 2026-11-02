@@ -137,15 +137,18 @@ jobs:
         with:
           go-version: "1.23.x"
 
-      - name: Cache Cargo registry and git
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - name: Reuse successful Rust dependency builds
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            cargo-${{ runner.os }}-${{ runner.arch }}-
+          key: release-${{ env.RUST_TARGET }}
+          workspaces: |
+            . -> target
+            desktop -> target
+            desktop/scripts/identity -> target
+          env-vars: "CARGO CC CFLAGS CXX CMAKE RUST MACOSX_DEPLOYMENT_TARGET SDKROOT"
+          cache-bin: "false"
+          cache-on-failure: "false"
+          save-if: ${{ github.event_name != 'pull_request' }}
 
       - name: Build and test UI
         shell: bash
@@ -242,7 +245,7 @@ jobs:
         run: |
           set -euo pipefail
           export HOMEBREW_NO_AUTO_UPDATE=1
-          brew install cmake ffmpeg tesseract git
+          brew install cmake nasm pkgconf meson ninja tesseract git
           if ! bash scripts/macos-system-browser.sh --resolve-executable; then
             brew install --cask google-chrome
           fi
@@ -284,11 +287,15 @@ jobs:
             https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
           echo "${WHISPER_MODEL_SHA256}  ${dependency_downloads}/ggml-base.bin" | shasum -a 256 -c -
 
+          portable_media="${RUNNER_TEMP}/portable-media-tools-${RUST_TARGET}"
+          bash scripts/build_macos_media_tools.sh "$portable_media"
+
           python3 scripts/bundle_macos_skill_dependencies.py \
             --destination "target/release-host-tools/${RUST_TARGET}" \
             --git-prefix "$(brew --prefix git)" \
-            --ffmpeg "$(brew --prefix ffmpeg)/bin/ffmpeg" \
-            --ffprobe "$(brew --prefix ffmpeg)/bin/ffprobe" \
+            --ffmpeg "$portable_media/bin/ffmpeg" \
+            --ffprobe "$portable_media/bin/ffprobe" \
+            --minimum-macos-version "$MACOSX_DEPLOYMENT_TARGET" \
             --tesseract "$(brew --prefix tesseract)/bin/tesseract" \
             --tessdata "$(brew --prefix tesseract)/share/tessdata" \
             --chi-sim "${dependency_downloads}/chi_sim.traineddata" \

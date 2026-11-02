@@ -7,6 +7,9 @@ import test from "node:test";
 import { accountStatus, logoutAccount, writeAccount } from "../src/account_sessions.mjs";
 import { observeAccount, selfAccountName } from "../src/account_observation.mjs";
 import { beginRun, commitPageRecords, readRecords } from "../src/storage.mjs";
+import { cookieStateFromRows } from "../src/account_cookie_state.mjs";
+
+const { DatabaseSync } = await import("node:sqlite").catch(() => ({}));
 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "discovery-account-fixture-"));
@@ -19,10 +22,96 @@ test("unknown and saved sessions do not fabricate a signed-in account", async t 
   assert.equal((await accountStatus(root, ["weibo"]))[0].status, "unknown");
   await writeAccount(root, { platform: "weibo", status: "saved_session", display_name: "not verified", cookie: "fixture-private" });
   const rows = await accountStatus(root, ["weibo"]);
-  assert.equal(rows[0].status, "saved_session");
+  assert.equal(rows[0].status, "unknown", "a saved snapshot without a readable profile is not current evidence");
   assert.equal(rows[0].display_name, null);
   assert.ok(!JSON.stringify(rows).includes("fixture-private"));
   assert.ok(!JSON.stringify(rows).includes(root));
+});
+
+test("removed profiles invalidate old verified names instead of keeping stale login claims", async t => {
+  const root = await fixture(t);
+  await writeAccount(root, { platform: "weibo", status: "verified", display_name: "Historical self", checked_at: 1, session_present: true });
+  const row = (await accountStatus(root, ["weibo"]))[0];
+  assert.equal(row.status, "unknown");
+  assert.equal(row.display_name, null);
+  assert.equal(row.session_present, null);
+});
+
+test("cookie evidence uses exact domains, credential presence and lossless Chrome timestamps", () => {
+  const now = Date.now();
+  const current = BigInt(now) * 1000n + 11644473600000000n;
+  const row = { host_key: ".weibo.com", name: "SUB", expires_utc: String(current + 3600000000n), plain_length: 0, encrypted_length: 32 };
+  assert.equal(cookieStateFromRows("weibo", [row], now), "saved_session");
+  assert.equal(cookieStateFromRows("weibo", [{ ...row, expires_utc: String(current - 1n) }], now), "expired");
+  assert.equal(cookieStateFromRows("weibo", [{ ...row, expires_utc: "0" }], now), "saved_session");
+  assert.equal(cookieStateFromRows("weibo", [{ ...row, host_key: "notweibo.com" }], now), "unknown");
+  assert.equal(cookieStateFromRows("weibo", [{ ...row, plain_length: 0, encrypted_length: 0 }], now), "unknown");
+});
+
+test("read-only SQLite refresh detects expiry, preserves cookie bytes, and supports Mac profile variants", async t => {
+  const root = await fixture(t);
+  const directory = path.join(root, "browser-profile", "macos-fixture", "weibo", "Default", "Network");
+  await fs.mkdir(directory, { recursive: true });
+  const file = path.join(directory, "Cookies");
+  if (DatabaseSync) {
+    const database = new DatabaseSync(file);
+    database.exec("CREATE TABLE cookies(host_key TEXT,name TEXT,expires_utc INTEGER,value TEXT,encrypted_value BLOB)");
+    database.prepare("INSERT INTO cookies VALUES (?,?,?,?,?)").run(".weibo.com", "SUB", 1, "fixture-private", Buffer.alloc(0));
+    database.close();
+  } else {
+    // A supported older Node cannot inspect SQLite: it must fail conservatively.
+    await fs.writeFile(file, "fixture-unreadable-store");
+  }
+  const before = await fs.readFile(file);
+  await writeAccount(root, { platform: "weibo", status: "verified", display_name: "Historical self", session_present: true });
+  const row = (await accountStatus(root, ["weibo"]))[0];
+  assert.equal(row.status, DatabaseSync ? "expired" : "unknown");
+  assert.equal(row.display_name, null);
+  assert.deepEqual(await fs.readFile(file), before);
+  assert.ok(!JSON.stringify(row).includes("fixture-private"));
+});
+
+test("a corrupt optional account snapshot does not hide other platform rows", async t => {
+  const root = await fixture(t);
+  await fs.mkdir(path.join(root, "accounts"));
+  await fs.writeFile(path.join(root, "accounts", "weibo.json"), "not-json");
+  const rows = await accountStatus(root, ["weibo", "douyin"]);
+  assert.deepEqual(rows.map(row => row.status), ["unknown", "unknown"]);
+});
+
+test("partial logout returns stable mutation evidence and never resurrects the old verified identity", async t => {
+  const root = await fixture(t);
+  const profile = path.join(root, "browser-profile", "weibo");
+  await fs.mkdir(path.join(profile, "Default"), { recursive: true });
+  await fs.writeFile(path.join(profile, "Default", "Cookies"), "fixture-private");
+  await fs.writeFile(path.join(profile, "other-session-state"), "fixture-private");
+  await writeAccount(root, { platform: "weibo", status: "verified", display_name: "Historical self", session_present: true });
+  const original = fs.rm;
+  let removed = 0;
+  const mock = t.mock.method(fs, "rm", async (file, options) => {
+    if (file.startsWith(profile + path.sep)) {
+      if (removed === 1) throw Object.assign(new Error("fixture-permission-failure"), { code: "EACCES" });
+      await original(file, options);
+      removed += 1;
+      return;
+    }
+    return original(file, options);
+  });
+  try {
+    const { handleRequest } = await import("../src/main.mjs");
+    const result = await handleRequest({ request_id: "partial-logout-fixture", user_id: 1, chat_id: 1,
+      args: { action: "account_logout", platform: "weibo", confirm: true },
+      context: { skill_storage: { storage_kind: "directory", directory_path: root } } });
+    assert.equal(removed, 1);
+    assert.equal(result.status, "error");
+    assert.equal(result.extra.error_code, "account_operation_failed");
+    assert.equal(result.extra.side_effect_applied, true);
+    assert.equal(result.extra.failure_phase, "post_dispatch");
+    assert.equal(result.extra.retryable, false);
+    const row = (await accountStatus(root, ["weibo"]))[0];
+    assert.equal(row.status, "unknown");
+    assert.equal(row.display_name, null);
+  } finally { mock.mock.restore(); }
 });
 
 test("logout clears only selected platform profiles and preserves media/history/environment", async t => {

@@ -1,15 +1,5 @@
 import { writeAccount } from "./account_sessions.mjs";
-
-const AUTH = {
-  douyin: ["douyin.com", ["sessionid", "sessionid_ss", "sid_guard"]],
-  xiaohongshu: ["xiaohongshu.com", ["web_session"]],
-  kuaishou: ["kuaishou.com", ["kuaishou.server.web_st", "kuaishou.server.webday7_st"]],
-  toutiao: ["toutiao.com", ["sessionid", "sid_guard"]],
-  weibo: ["weibo.com", ["SUB"]],
-  tiktok: ["tiktok.com", ["sessionid", "sessionid_ss", "sid_tt"]],
-  youtube: ["youtube.com", ["SID", "SAPISID", "__Secure-3PSID"]],
-  bilibili: ["bilibili.com", ["SESSDATA"]],
-};
+import { ACCOUNT_COOKIES as AUTH } from "./account_cookie_state.mjs";
 
 export function selfAccountName(platform, url, value) {
   let parsed;
