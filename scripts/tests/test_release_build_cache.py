@@ -29,6 +29,16 @@ class BuildCacheTest(unittest.TestCase):
                 self.assertLess(text.index("npm ci --ignore-scripts --prefix optional_skills/media_discovery"),
                                 text.index("node --test optional_skills/media_discovery/test/account_sessions.test.mjs"))
 
+    def test_media_validation_has_one_automatic_entrypoint_and_covers_build_only_changes(self):
+        child = (ROOT / ".github/workflows/media-session-portability-ci.yml").read_text()
+        self.assertNotIn("\n  pull_request:", child)
+        self.assertIn("workflow_call:", child)
+        parent = (ROOT / ".github/workflows/macos-polyglot-skill-ci.yml").read_text()
+        for name in ("scripts/build_macos_media_tools.sh", "scripts/bundle_macos_skill_dependencies.py",
+                     "scripts/tests/test_release_macos_media_tools.py", "scripts/tests/test_release_build_cache.py",
+                     ".github/workflows/media-session-portability-ci.yml"):
+            self.assertEqual(parent.count(f'"{name}"'), 2, "both push and PR must retain the validation")
+
 
 if __name__ == "__main__":
     unittest.main()
