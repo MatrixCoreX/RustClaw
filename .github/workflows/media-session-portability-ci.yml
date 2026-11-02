@@ -31,6 +31,18 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.13"
+      - name: Prepare native tools required by the product identity tests
+        if: ${{ matrix.node == '22' }}
+        shell: bash
+        run: |
+          if ! command -v rg >/dev/null; then
+            if [[ "$RUNNER_OS" == Linux ]]; then
+              sudo apt-get update -qq
+              sudo apt-get install -y -qq ripgrep
+            else
+              HOMEBREW_NO_AUTO_UPDATE=1 brew install ripgrep
+            fi
+          fi
       - name: Test actual skill code with private disposable profiles
         run: |
           npm ci --ignore-scripts --prefix optional_skills/media_discovery
@@ -76,6 +88,8 @@ jobs:
         run: |
           brew install nasm pkgconf meson ninja
           bash scripts/build_macos_media_tools.sh "$RUNNER_TEMP/portable-media"
+          python3 scripts/verify_release_binary.py "$RUNNER_TEMP/portable-media/bin/ffmpeg" "${{ matrix.target }}"
+          python3 scripts/verify_release_binary.py "$RUNNER_TEMP/portable-media/bin/ffprobe" "${{ matrix.target }}"
           mkdir -p dist
           archive="portable-media-${{ matrix.target }}-${GITHUB_SHA}.tar.gz"
           tar -czf "dist/$archive" -C "$RUNNER_TEMP/portable-media" bin share/licenses source-build.json
