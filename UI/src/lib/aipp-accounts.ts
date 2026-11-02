@@ -27,6 +27,7 @@ export function accountsFromTask(result: unknown): AippAccountSnapshot[] {
 }
 
 export async function invokeAccountControl(apiFetch: ApiFetch, skill: string, operation: "status" | "logout", signal: AbortSignal, platform?: string): Promise<AippAccountSnapshot[]> {
+  signal.throwIfAborted();
   const response = await apiFetch(`/v1/aipps/${encodeURIComponent(skill)}/account-control`, {
     method: "POST", signal, headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ operation, ...(platform ? { platform } : {}), confirm: operation === "logout" }),

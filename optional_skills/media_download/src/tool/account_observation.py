@@ -72,10 +72,14 @@ class AccountObserver:
             endpoint = urlsplit(url).path.rstrip("/")
             if endpoint in {"/aweme/v1/web/user/profile/self", "/api/sns/web/v1/user/selfinfo", "/ajax/config", "/passport/web/account/info", "/x/web-interface/nav"}:
                 self.self_responses.append((params.get("requestId"), url))
+        elif event.get("method") in {"Network.loadingFinished", "Network.loadingFailed"}:
+            self.requests.pop(params.get("requestId"), None)
+            self.pending_credentials.pop(params.get("requestId"), None)
 
     def observe_credentials(self, platform, cookies):
         self.observed_requests.add(platform)
         if any(not row.get("blockedReasons") and row.get("cookie", {}).get("name") in DOMAINS[platform][1]
+               and bool(row.get("cookie", {}).get("value"))
                for row in cookies if isinstance(row, dict)):
             self.credential_requests.add(platform)
 

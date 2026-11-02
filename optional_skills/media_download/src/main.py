@@ -2056,7 +2056,9 @@ def respond(
                 code = getattr(error, "error_code", "account_operation_failed")
                 if code == "browser_profile_busy":
                     code = "account_session_busy"
-                raise SkillFailure(code, error_code=code, message_key=f"media_download.error.{code}", retryable=code == "account_session_busy") from error
+                partial = bool(getattr(error, "side_effect_applied", False))
+                raise SkillFailure(code, error_code=code, message_key=f"media_download.error.{code}", retryable=code == "account_session_busy",
+                                   details={"side_effect_applied": partial, "failure_phase": "execution_partial" if partial else "pre_dispatch"}) from error
 
         output_dir = _artifact_output_directory(request)
         # Downloads may legitimately take a long time. Keep per-request network

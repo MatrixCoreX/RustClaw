@@ -5,7 +5,7 @@ const AUTH = {
   xiaohongshu: ["xiaohongshu.com", ["web_session"]],
   kuaishou: ["kuaishou.com", ["kuaishou.server.web_st", "kuaishou.server.webday7_st"]],
   toutiao: ["toutiao.com", ["sessionid", "sid_guard"]],
-  weibo: ["weibo.com", ["SUB", "SSOLoginState"]],
+  weibo: ["weibo.com", ["SUB"]],
   tiktok: ["tiktok.com", ["sessionid", "sessionid_ss", "sid_tt"]],
   youtube: ["youtube.com", ["SID", "SAPISID", "__Secure-3PSID"]],
   bilibili: ["bilibili.com", ["SESSDATA"]],
@@ -27,6 +27,14 @@ export function selfAccountName(platform, url, value) {
   return typeof name === "string" && name.trim() && name.length <= 256 && !/[\u0000-\u001f\u007f]/u.test(name) ? name.trim() : null;
 }
 
+async function optionalMetadata(promise, fallback) {
+  let timer;
+  try {
+    return await Promise.race([promise.catch(() => fallback),
+      new Promise(resolve => { timer = setTimeout(() => resolve(fallback), 750); })]);
+  } finally { clearTimeout(timer); }
+}
+
 export function observeAccount(root, platform, context) {
   const [domain, authNames] = AUTH[platform];
   let attached = false;
@@ -40,7 +48,10 @@ export function observeAccount(root, platform, context) {
   const request = value => {
     if (!ownedUrl(value.url())) return;
     track(value.allHeaders().then(headers => {
-      const names = new Set((headers.cookie || "").split(";").map(item => item.trim().split("=", 1)[0]));
+      const names = new Set((headers.cookie || "").split(";").flatMap(item => {
+        const separator = item.indexOf("=");
+        return separator > 0 && item.slice(separator + 1).trim() ? [item.slice(0, separator).trim()] : [];
+      }));
       if (authNames.some(name => names.has(name))) attached = true;
     }).catch(() => {}));
   };
@@ -60,13 +71,11 @@ export function observeAccount(root, platform, context) {
     async capture() {
       // Account metadata is optional; a stalled telemetry response must not hold
       // a media result or browser shutdown open. This is not a task deadline.
-      let timer;
-      await Promise.race([Promise.allSettled([...pending]), new Promise(resolve => { timer = setTimeout(resolve, 750); })]);
-      clearTimeout(timer);
+      await optionalMetadata(Promise.allSettled([...pending]), []);
       let saved = false;
       try {
         const now = Date.now() / 1000;
-        saved = (await context.cookies()).some(cookie => authNames.includes(cookie.name) && cookie.value
+        saved = (await optionalMetadata(context.cookies(), [])).some(cookie => authNames.includes(cookie.name) && cookie.value
           && (cookie.expires <= 0 || cookie.expires > now)
           && (cookie.domain.replace(/^\./u, "") === domain || cookie.domain.endsWith(`.${domain}`)));
       } catch { /* An inaccessible cookie store is unknown, not signed out. */ }

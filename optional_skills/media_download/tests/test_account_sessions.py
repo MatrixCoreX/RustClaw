@@ -97,6 +97,14 @@ class AccountSessionTest(unittest.TestCase):
             logout(self.root, "douyin")
         self.assertTrue((other / "browser-environment.json").exists())
 
+    def test_partial_cleanup_is_not_reported_as_no_side_effect(self):
+        self.profile()
+        with mock.patch("account_sessions.shutil.rmtree", side_effect=PermissionError("fixture")):
+            with self.assertRaises(AccountSessionError) as error:
+                logout(self.root, "douyin")
+        self.assertTrue(error.exception.side_effect_applied)
+        self.assertEqual(error.exception.error_code, "account_operation_failed")
+
     def test_public_snapshots_and_task_records_are_allowlisted(self):
         row = public_snapshot({"status": "verified", "display_name": "name\nforged", "cookie": "fixture-private", "checked_at": True}, "weibo")
         self.assertIsNone(row["display_name"])

@@ -92,3 +92,26 @@ test("task use requires actual request cookies; saved cookies alone are insuffic
   assert.equal(context.listenerCount("request"), 0);
   assert.equal(context.listenerCount("response"), 0);
 });
+
+test("a stalled optional account probe cannot hold a media result open", async t => {
+  const root = await fixture(t);
+  const context = new EventEmitter();
+  context.cookies = () => new Promise(() => {});
+  const observer = observeAccount(root, "weibo", context);
+  const result = await observer.capture();
+  assert.equal(result.mode, "unknown");
+  assert.equal(result.account.status, "unknown");
+  observer.close();
+});
+
+test("a login timestamp alone is not proof of attached credentials", async t => {
+  const root = await fixture(t);
+  const context = new EventEmitter();
+  context.cookies = async () => [];
+  const observer = observeAccount(root, "weibo", context);
+  context.emit("request", { url: () => "https://weibo.com/", allHeaders: async () => ({ cookie: "SSOLoginState=fixture-timestamp" }) });
+  assert.equal((await observer.capture()).mode, "unknown");
+  context.emit("request", { url: () => "https://weibo.com/", allHeaders: async () => ({ cookie: "SUB=" }) });
+  assert.equal((await observer.capture()).mode, "unknown");
+  observer.close();
+});

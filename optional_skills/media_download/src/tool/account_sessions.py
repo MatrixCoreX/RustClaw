@@ -15,18 +15,19 @@ DOMAINS = {
     "xiaohongshu": ("xiaohongshu.com", {"web_session"}),
     "kuaishou": ("kuaishou.com", {"kuaishou.server.web_st", "kuaishou.server.webday7_st"}),
     "toutiao": ("toutiao.com", {"sessionid", "sid_guard"}),
-    "weibo": ("weibo.com", {"SUB", "SSOLoginState"}),
+    "weibo": ("weibo.com", {"SUB"}),
     "tiktok": ("tiktok.com", {"sessionid", "sessionid_ss", "sid_tt"}),
     "youtube": ("youtube.com", {"SID", "SAPISID", "__Secure-3PSID"}),
     "bilibili": ("bilibili.com", {"SESSDATA"}),
-    "wechat_channels": ("yuanbao.tencent.com", {"hy_user", "hy_token", "access_token"}),
+    "wechat_channels": ("yuanbao.tencent.com", {"hy_token", "access_token"}),
 }
 
 
 class AccountSessionError(RuntimeError):
-    def __init__(self, error_code):
+    def __init__(self, error_code, *, side_effect_applied=False):
         super().__init__(error_code)
         self.error_code = error_code
+        self.side_effect_applied = side_effect_applied
 
 
 def profile_directories(root: Path, platform: str) -> list[Path]:
@@ -142,19 +143,25 @@ def logout(root: Path, platform: str, *, authentication=None) -> dict:
                 raise AccountSessionError("account_session_busy")
         if authentication is not None:
             stack.enter_context(authentication.lease(wait=False))
-        for profile in profiles:
-            for child in profile.iterdir():
-                if child.name in {".agent-profile.lock", "browser-environment.json"}:
-                    continue
-                if child.is_dir() and not child.is_symlink():
-                    shutil.rmtree(child)
-                else:
-                    child.unlink()
-        if authentication is not None:
-            authentication.require_login()
-        snapshot = {"schema_version": 1, "platform": platform, "status": "signed_out",
-                    "display_name": None, "checked_at": int(time.time()), "session_present": False}
-        write_snapshot(root, snapshot)
+        changed = False
+        try:
+            for profile in profiles:
+                for child in profile.iterdir():
+                    if child.name in {".agent-profile.lock", "browser-environment.json"}:
+                        continue
+                    changed = True  # A failed removal can already have cleared some state.
+                    if child.is_dir() and not child.is_symlink():
+                        shutil.rmtree(child)
+                    else:
+                        child.unlink()
+            if authentication is not None:
+                changed = True
+                authentication.require_login()
+            snapshot = {"schema_version": 1, "platform": platform, "status": "signed_out",
+                        "display_name": None, "checked_at": int(time.time()), "session_present": False}
+            write_snapshot(root, snapshot)
+        except (OSError, RuntimeError) as error:
+            raise AccountSessionError("account_operation_failed", side_effect_applied=changed) from error
     return snapshot
 
 
