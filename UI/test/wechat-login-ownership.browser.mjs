@@ -33,7 +33,10 @@ try {
       const scope = async detail => {
         const before = JSON.stringify((await state()).scope);
         await event("fixture-scope", detail);
-        await wait(async () => JSON.stringify((await state()).scope) !== before);
+        await wait(async () => {
+          const current = await state(), key = JSON.stringify(current.scope);
+          return key !== before && current.settledScope === key;
+        });
       };
       const read = () => page.locator("[data-read]").click();
       const start = async () => {

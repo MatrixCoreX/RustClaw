@@ -53,6 +53,24 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
         command = "python3 scripts/nl_tests/macos_runner_workflow_tests.py"
         self.assertEqual(sum(command in step.get("run", "") for step in steps), 1)
 
+    def test_focused_ui_mode_cannot_disable_automatic_full_runtime_checks(self):
+        workflow = load("macos-polyglot-skill-ci.yml")
+        option = workflow["on"]["workflow_dispatch"]["inputs"]["verification_scope"]
+        self.assertEqual(option["default"], "all")
+        self.assertEqual(option["options"], ["all", "ui"])
+        self.assertEqual(workflow["jobs"]["polyglot-skill-macos"]["if"],
+                         "${{ github.event_name != 'workflow_dispatch' || inputs.verification_scope != 'ui' }}")
+        focused = workflow["jobs"]["ui-browser-reliability"]
+        self.assertEqual(focused["if"],
+                         "${{ github.event_name == 'workflow_dispatch' && inputs.verification_scope == 'ui' }}")
+        self.assertEqual(focused["uses"], "./.github/workflows/ui-browser-reliability-ci.yml")
+
+    def test_browser_preparation_is_followed_by_the_runtime_signature_selector(self):
+        steps = load("macos-arm64-release-artifact.yml")["jobs"]["build-macos"]["steps"]
+        script = next(step["run"] for step in steps if step.get("name") == "Test signed system browser and isolated skill profiles")
+        prepare = script.index("python3 scripts/prepare_macos_ci_browser.py")
+        self.assertLess(prepare, script.index('executable="$(bash scripts/macos-system-browser.sh --resolve-executable)"'))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,99 @@
+name: UI and signed browser reliability
+
+"on":
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "UI/**"
+      - "scripts/prepare_macos_ci_browser.py"
+      - "scripts/tests/test_prepare_macos_ci_browser.py"
+      - "scripts/macos-system-browser.sh"
+      - "scripts/tests/test_macos_system_browser.py"
+      - ".github/workflows/ui-browser-reliability-ci.yml"
+      - ".github/workflows/macos-arm64-release-artifact.yml"
+  push:
+    branches: [main]
+    paths:
+      - "UI/**"
+      - "scripts/prepare_macos_ci_browser.py"
+      - "scripts/tests/test_prepare_macos_ci_browser.py"
+      - "scripts/macos-system-browser.sh"
+      - "scripts/tests/test_macos_system_browser.py"
+      - ".github/workflows/ui-browser-reliability-ci.yml"
+      - ".github/workflows/macos-arm64-release-artifact.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  ui-and-browser:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: UI/package-lock.json
+      - name: Check browser preparation boundaries
+        run: python3 -m unittest discover -s scripts/tests -p test_prepare_macos_ci_browser.py
+      - name: Prepare and verify native signed browser
+        if: ${{ runner.os == 'macOS' }}
+        run: |
+          python3 scripts/prepare_macos_ci_browser.py
+          bash scripts/macos-system-browser.sh --resolve-executable
+          bash scripts/macos-system-browser.sh --version
+          python3 -m unittest discover -s scripts/tests -p test_macos_system_browser.py
+      - name: Install locked UI dependencies
+        run: npm ci --ignore-scripts --prefix UI
+      - name: Test, typecheck and build UI
+        run: |
+          npm test --prefix UI
+          npm run lint --prefix UI
+          npm run build --prefix UI
+      - name: Stress conversation scope without hiding failures
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
+          mkdir -p "$RUNNER_TEMP/ui-reliability"
+          for attempt in 1 2 3 4 5; do
+            if ! (cd UI && node --import tsx --import ./test/product-identity-setup.ts --test src/hooks/useChatRuntime.conversation-input.test.ts) >"$RUNNER_TEMP/ui-reliability/conversation-$attempt.log" 2>&1; then
+              failed=1
+            fi
+          done
+          exit "$failed"
+      - name: Install browser test runtime
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            node UI/node_modules/playwright/cli.js install --with-deps chromium
+          else
+            node UI/node_modules/playwright/cli.js install chromium
+          fi
+      - name: Stress QR scope commits without provider calls
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
+          for attempt in 1 2 3; do
+            if ! UI_BROWSER_ARTIFACTS="$RUNNER_TEMP/ui-reliability/qr-$attempt" node UI/test/wechat-login-ownership.browser.mjs; then
+              failed=1
+            fi
+          done
+          exit "$failed"
+      - name: Retain every stress result
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ui-reliability-${{ matrix.os }}
+          path: ${{ runner.temp }}/ui-reliability
+          if-no-files-found: ignore

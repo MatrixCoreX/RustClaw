@@ -106,12 +106,23 @@ name: Polyglot Skill macOS CI
       - "scripts/nl_tests/video_speech_acceptance_tests.py"
       - "scripts/nl_tests/cases/nl_cases_video_speech_positive_20261030.txt"
   workflow_dispatch:
+    inputs:
+      verification_scope:
+        description: "all retains the full runtime gate; ui runs focused UI/native-browser checks without rebuilding unchanged Rust."
+        type: choice
+        default: all
+        options: [all, ui]
 
 permissions:
   contents: read
 
 jobs:
+  ui-browser-reliability:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.verification_scope == 'ui' }}
+    uses: ./.github/workflows/ui-browser-reliability-ci.yml
+
   polyglot-skill-macos:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.verification_scope != 'ui' }}
     name: Resolver, installer, and process supervision
     runs-on: macos-15
     env:
