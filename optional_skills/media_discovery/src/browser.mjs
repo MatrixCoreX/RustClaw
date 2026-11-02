@@ -27,6 +27,7 @@ import {
 } from "./browser_kuaishou_search.mjs";
 import { collectDouyinSearchResults } from "./browser_douyin_search.mjs";
 import { createLoginCompanionHandoff, showBrowserWindow } from "./login_companion.mjs";
+import { observeAccount } from "./account_observation.mjs";
 import { imageSourceIdentity, identityDigest } from "./media_identity.mjs";
 import { collectOrderedPages, optionalLimit, pageProgress, publishCollectionPage } from "./collection_progress.mjs";
 
@@ -2082,6 +2083,12 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
     headless: browserMode === "silent" });
   const stopObserving = observePlatformBackpressure(context, platform);
   const stopEngagement = observeEngagementResponses(context, platform);
+  const accountObservation = observeAccount(root, platform, context);
+  const publishOriginalPage = onPage;
+  onPage = async result => {
+    const use = await accountObservation.capture();
+    return publishOriginalPage({ ...result, records: result.records?.map(record => ({ ...record, account_use: [use] })) });
+  };
   let filtered = 0;
   const publishPage = async result => {
     const disposition = await publishCollectionPage(onPage, result);
@@ -2315,6 +2322,8 @@ export async function collectPlatform({ root, runId, platform, config, limit, sh
   } finally {
     stopEngagement();
     stopObserving();
+    await accountObservation.capture();
+    accountObservation.close();
     await closePlatformBrowser({ context, root, platform });
   }
 }

@@ -22,6 +22,7 @@ import { recordFilterDiagnostics, requestedMetricSupport } from "./engagement_av
 import { supportedEngagementMetrics } from "./browser_engagement.mjs";
 import { capturedRunResults, getRunResults, resultOwner } from "./results.mjs";
 import { parseSkillRequest } from "./request.mjs";
+import { accountStatus, logoutAccount } from "./account_sessions.mjs";
 import {
   beginBackgroundWorker,
   backgroundWorkerIsFresh,
@@ -50,6 +51,8 @@ const DEFAULT_BROWSER_PACING = Object.freeze({
   tiktok: Object.freeze({ interaction_min_ms: 2200, interaction_max_ms: 5800, rest_min_seconds: 300, rest_max_seconds: 600 }),
 });
 const ERROR_CODES = new Set([
+  "account_session_busy",
+  "account_storage_invalid",
   "action_unsupported",
   "browser_missing",
   "browser_close_failed",
@@ -108,6 +111,8 @@ const ERROR_CODES = new Set([
   "engagement_filter_unavailable",
 ]);
 const ACTIONS = new Set([
+  "account_status",
+  "account_logout",
   "capabilities",
   "preview_enable",
   "enable",
@@ -1020,6 +1025,15 @@ export async function handleRequest(request, runtime = {}) {
       });
     }
     if (action === "preview_enable") return await preview(args, runtime);
+    if (action === "account_status") {
+      return success(action, { accounts: await accountStatus(storageRoot(request), requestedPlatforms(args, true).length ? requestedPlatforms(args, true) : SUPPORTED_PLATFORMS), side_effect_applied: false });
+    }
+    if (action === "account_logout") {
+      if (args.confirm !== true) throw new Error("confirmation_required");
+      const platforms = requestedPlatforms(args);
+      if (platforms.length !== 1) throw new Error("platform_required");
+      return success(action, { accounts: [await logoutAccount(storageRoot(request), platforms[0])], side_effect_applied: true });
+    }
     if (action === "enable") return await enable(request, args, runtime);
     if (["disable", "pause", "resume"].includes(action)) return await control(request, args, action);
     if (action === "run_once") return await runOnce(request, args, runtime);

@@ -65,7 +65,7 @@ class ReleaseCandidateWorkflowTests(unittest.TestCase):
                                  for step in job.get("steps", []))
             for selection in ("answer_verifier", "machine_selector", "planning_output_contract", "prepare_round", "task_contract", "pipeline_types", "task_journal"):
                 self.assertIn(f"cargo test --locked -p clawd --bin clawd {selection} -- --test-threads=1", commands)
-            self.assertIn("python3 scripts/nl_tests/output_contract_schema_tests.py", commands)
+            self.assertIn('"${pythonLocation:?setup-python root missing}/bin/python3" scripts/nl_tests/output_contract_schema_tests.py', commands)
 
     def test_release_workflows_offer_artifact_only_mode(self):
         for name in WORKFLOWS:

@@ -51,6 +51,7 @@ import {
 import { fetchAippImage } from "../lib/aipp-image-download";
 import { fetchTaskArtifactBlob, saveTaskArtifactBlob } from "../lib/task-artifact-content";
 import { AippUsageGuide } from "./AippUsageGuide";
+import { AippAccountsPanel, AippAccountUse } from "./AippAccountsPanel";
 import type {
   AippCatalogItem,
   AippCatalogResponse,
@@ -510,6 +511,7 @@ export function AippTaskActivityCard({
   apiFetch,
   t,
   lang,
+  showAccountUse = false,
   selected = false,
   deleting = false,
   onToggleSelected,
@@ -519,6 +521,7 @@ export function AippTaskActivityCard({
   apiFetch: ApiFetch;
   t: Translate;
   lang: "zh" | "en";
+  showAccountUse?: boolean;
   selected?: boolean;
   deleting?: boolean;
   onToggleSelected?: (taskId: string) => void;
@@ -603,6 +606,7 @@ export function AippTaskActivityCard({
   ) : null;
   return (
     <article className="theme-panel min-w-0 overflow-hidden">
+      {showAccountUse ? <div className="px-3"><AippAccountUse uses={item.account_use} t={t} /></div> : null}
       <div className={hasVisualMedia
         ? "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(104px,24%)_minmax(0,1fr)_auto]"
         : "flex min-w-0"}>
@@ -877,6 +881,7 @@ export function AippMediaItemCard({
   apiFetch,
   t,
   lang,
+  showAccountUse = false,
   selected = false,
   deleting = false,
   onToggleSelected,
@@ -888,6 +893,7 @@ export function AippMediaItemCard({
   apiFetch: ApiFetch;
   t: Translate;
   lang: "zh" | "en";
+  showAccountUse?: boolean;
   selected?: boolean;
   deleting?: boolean;
   onToggleSelected?: (sequences: number[]) => void;
@@ -956,6 +962,7 @@ export function AippMediaItemCard({
   });
   return (
     <article className="theme-panel min-w-0 overflow-hidden">
+      {showAccountUse ? <div className="px-3"><AippAccountUse uses={item.account_use} t={t} /></div> : null}
       <div className={hasPreview
         ? (hasControls
           ? "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(104px,24%)_minmax(0,1fr)_auto]"
@@ -1541,6 +1548,10 @@ export function AippPage({ lang, t, apiFetch, requestScope, onOpenAgent, onOpenS
         <SandboxedAipp app={selectedApp} lang={lang} apiFetch={apiFetch} requestScope={requestScope} />
       ) : null}
 
+      {selectedApp.account_controls?.schema_version === 1 ? <AippAccountsPanel
+        key={`${selectedSkill}:${requestScope}`} skill={selectedSkill} controls={selectedApp.account_controls}
+        apiFetch={apiFetch} requestScope={requestScope} t={t} /> : null}
+
       {selectedApp.renderer === "task_activity_v1" ? <>
         <section className="theme-panel-soft p-3 sm:p-4">
           <div className="grid gap-2 sm:grid-cols-3 sm:gap-3">
@@ -1634,6 +1645,7 @@ export function AippPage({ lang, t, apiFetch, requestScope, onOpenAgent, onOpenS
           {activityItems.map((item) => (
             <AippTaskActivityCard
               key={item.task_id}
+              showAccountUse={selectedApp?.account_controls?.schema_version === 1}
               item={item}
               apiFetch={apiFetch}
               t={t}
@@ -1746,6 +1758,7 @@ export function AippPage({ lang, t, apiFetch, requestScope, onOpenAgent, onOpenS
         {collectionGroups.map((images) => (
           <AippMediaItemCard
             key={collectionGroupKey(images[0])}
+            showAccountUse={selectedApp?.account_controls?.schema_version === 1}
             item={images[0]}
             images={images}
             skillName={selectedSkill}

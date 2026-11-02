@@ -199,6 +199,8 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 
 ## Actions (from interface)
 - `capabilities`: report GUI, Chromium, capture mode, and supported platforms.
+- `account_status`: return public account snapshots for optional `platform`; omitted selects all supported platforms. It only reads private metadata and never opens a browser.
+- `account_logout`: require one explicit `platform` and `confirm=true`; clear only that platform's skill-owned browser sessions, including macOS variants. Preserve browser-environment settings, collected records, previews, exports, configuration, and other platforms. An active run, enabled background worker using the platform, or open browser returns `account_session_busy`; do not cancel or kill it. This is local sign-out, not global provider-session revocation.
 - `preview_enable`: validate settings without changing state.
 - `enable`: persist per-platform enabled state and return the exact durable
   background companion capability.

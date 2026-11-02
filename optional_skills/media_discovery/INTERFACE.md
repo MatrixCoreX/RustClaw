@@ -212,6 +212,8 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
 ## Actions
 
 - `capabilities`: report GUI, Chromium, capture mode, and supported platforms.
+- `account_status`: return public account snapshots for optional `platform`; omitted selects all supported platforms. It only reads private metadata and never opens a browser.
+- `account_logout`: require one explicit `platform` and `confirm=true`; clear only that platform's skill-owned browser sessions, including macOS variants. Preserve browser-environment settings, collected records, previews, exports, configuration, and other platforms. An active run, enabled background worker using the platform, or open browser returns `account_session_busy`; do not cancel or kill it. This is local sign-out, not global provider-session revocation.
 - `preview_enable`: validate settings without changing state.
 - `enable`: persist per-platform enabled state and return the exact durable
   background companion capability.
@@ -245,6 +247,10 @@ Examples of equivalent intent (documentation examples, not runtime matchers):
   browser profile/login state.
 
 ## Output Contract
+
+The optional manifest `aipp.account_controls` exposes account status/sign-out through the admin host's normal capability resolver and task path. `extra.accounts[]` uses schema version 1: `platform`, `status`, nullable `display_name`, `checked_at` (Unix seconds), and nullable `session_present`. Status is `verified` (recent first-party self identity), `saved_session` (credentials saved but account unverified), `expired`, `signed_out`, or `unknown`. The reader never equates saved state with a currently valid login, nor uses a post author as the signed-in user. Older profiles remain unverified until new browser evidence is available; the UI shows the last check time.
+
+Each new collected record stores `account_use[]` with `mode=authenticated_browser` only if a first-party request actually attached known login credentials; otherwise `unknown`. A verified account name requires a first-party self-account response as well. Unsupported/unobserved account identities stay unknown. Logout updates the current snapshot, not historical result snapshots. Public metadata excludes cookies, tokens, private account identifiers and profile paths. Examples: `{"action":"account_status","platform":"weibo"}` and, after user approval, `{"action":"account_logout","platform":"weibo","confirm":true}`. New failures retain the normal structured envelope with `account_session_busy` or `account_storage_invalid`.
 
 Every response has an empty `text` and structured
 `extra.{schema_version,source_skill,status,action}` so the main model can answer

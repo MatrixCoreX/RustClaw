@@ -53,7 +53,7 @@ async function readJson(filePath, fallback) {
   }
 }
 
-async function withLock(root, operation) {
+export async function withLock(root, operation) {
   await ensureLayout(root);
   const lock = await acquireStateLock(root);
   try {

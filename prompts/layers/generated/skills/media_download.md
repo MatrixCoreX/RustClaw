@@ -62,6 +62,14 @@ remain technician overrides. Linux/Pi browser discovery is unchanged.
 
 Return supported actions, platforms, security defaults, and optional dependencies. No network or filesystem access is needed.
 
+### `account_status`
+
+Read this skill's public platform-account snapshots without opening a browser. Optional `platform`; omission/`auto` selects all supported platforms. Saved credentials are not proof of a currently valid login. Return `extra.accounts` with optional verified self-account names, never post-author names or credentials.
+
+### `account_logout`
+
+After explicit user approval, require one `platform` and `confirm=true`. Clear only that platform's skill-owned login state; preserve files, history, configuration and other platforms. An active browser/profile lease returns `account_session_busy` without stopping it. The AiAPP exposes a one-click per-platform control using the same capability and normal policy checks.
+
 ### `download`
 
 Extract the supported URL from `share` and download public media. `share` may be a URL by itself or complete copied App share text from any supported platform. App short links and full website share URLs are equally valid, and the complete input must be preserved across UI and communication-channel entry points. Xiaohongshu accepts both App share text containing `xhslink.cn`/`xhslink.com` and website share URLs under `xiaohongshu.com`. Preserve the short-link `note_id` and `xsec_token` and open the note page, not the login bounce. Video streams may appear under `video.media.stream.EF4`/`EF5` (or older `h264`) `masterUrl` keys. WeChat Channels accepts only validated HTTPS `weixin.qq.com/sph/<short-code>` links, obtains a short-lived preview grant from the skill-owned Yuanbao browser session, then reads the official Channels feed and downloads the returned media immediately. Toutiao accepts exact public article/video/micro-post routes plus first-party group, mobile video-group, and thread share routes; it normalizes them to the requested item ID and returns the first-party body together with every available image or video component. Weibo accepts public desktop, mobile-status, and first-party video routes; it normalizes desktop base62 and numeric mobile IDs to one identity, then returns the primary post body together with available original-size images or video while excluding avatars, posters, and recommendation articles. Do not require the user to clean the copied message or resend only the URL. When an authorized site needs login, use this skill's private browser profile; do not ask the user for a cookie. A Douyin or Xiaohongshu profile URL can download multiple recent works with `profile_limit`; use `"all"` only when the user explicitly requests every accessible item.

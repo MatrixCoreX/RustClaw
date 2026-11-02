@@ -42,7 +42,7 @@ pub use installer::{
     InstallRequest, PrecompiledInstallRequest, SkillInstaller,
 };
 pub use manifest::{
-    validate_safe_name, AippSpec, ArchiveFormat, BuildAdapter, BuildNetworkPolicy,
+    validate_safe_name, AippAccountControls, AippSpec, ArchiveFormat, BuildAdapter, BuildNetworkPolicy,
     ExecutionProfile, InstallResourceRequirements, InstallSpec, LauncherKind, PackageManifest,
     SandboxProfile, AGENT_JSONL_PROTOCOL, AIPP_SCHEMA_VERSION,
     LEGACY_SKILL_MANIFEST_SCHEMA_VERSION, SKILL_MANIFEST_SCHEMA_VERSION,
@@ -88,6 +88,9 @@ mod tests;
 #[cfg(test)]
 #[path = "capability_request_tests.rs"]
 mod capability_request_tests;
+
+#[cfg(test)]
+mod manifest_account_tests;
 
 #[cfg(test)]
 #[path = "admission_tests.rs"]

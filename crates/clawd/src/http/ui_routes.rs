@@ -233,6 +233,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             get(get_aipp_bundle_asset),
         )
         .route("/aipps/:skill_name/items", get(get_aipp_items))
+        .route("/aipps/:skill_name/account-control", post(control_aipp_account))
         .route("/aipps/:skill_name/items/clear", post(clear_aipp_items))
         .route("/aipps/:skill_name/items/remove", post(remove_aipp_items))
         .route(
@@ -554,6 +555,9 @@ include!("ui_routes/skill_store_installation.rs");
 include!("ui_routes/skill_store.rs");
 include!("ui_routes/skill_store_operations.rs");
 include!("ui_routes/aipp.rs");
+#[path = "ui_routes/aipp_accounts.rs"]
+mod aipp_accounts;
+use aipp_accounts::{control_aipp_account, public_account_use, task_account_use};
 include!("ui_routes/llm_skill_config.rs");
 include!("ui_routes/messaging_login.rs");
 

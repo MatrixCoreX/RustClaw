@@ -160,7 +160,16 @@
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/capabilityName" }
         },
-        "task_channel_scope": { "enum": ["all", "communication"] }
+        "task_channel_scope": { "enum": ["all", "communication"] },
+        "account_controls": {
+          "type": "object", "additionalProperties": false,
+          "required": ["schema_version", "status_capability", "logout_capability"],
+          "properties": {
+            "schema_version": { "const": 1 },
+            "status_capability": { "$ref": "#/$defs/capabilityName" },
+            "logout_capability": { "$ref": "#/$defs/capabilityName" }
+          }
+        }
       },
       "oneOf": [
         {

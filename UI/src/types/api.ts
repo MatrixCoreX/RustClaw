@@ -2217,6 +2217,7 @@ export interface AippCatalogItem {
   entrypoint: string | null;
   bridge_capabilities: string[];
   task_channel_scope: "all" | "communication" | null;
+  account_controls?: AippAccountControls | null;
 }
 
 export interface AippCatalogResponse {
@@ -2224,7 +2225,30 @@ export interface AippCatalogResponse {
   apps: AippCatalogItem[];
 }
 
+export interface AippAccountControls {
+  schema_version: number;
+  status_capability: string;
+  logout_capability: string;
+}
+
+export interface AippAccountSnapshot {
+  schema_version: number;
+  platform: string;
+  status: "verified" | "saved_session" | "expired" | "signed_out" | "unknown";
+  display_name: string | null;
+  checked_at: number | null;
+  session_present: boolean | null;
+}
+
+export interface AippAccountUse {
+  schema_version: number;
+  platform: string;
+  mode: "authenticated_browser" | "unknown";
+  account?: AippAccountSnapshot;
+}
+
 export interface AippMediaItem {
+  account_use?: AippAccountUse[];
   schema_version: number;
   global_sequence: number;
   sequence: number | null;
@@ -2284,6 +2308,7 @@ export interface AippTaskActivityArtifact {
 }
 
 export interface AippTaskActivityItem {
+  account_use?: AippAccountUse[];
   schema_version: number;
   sequence: number;
   task_id: string;

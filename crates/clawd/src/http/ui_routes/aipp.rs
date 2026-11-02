@@ -20,6 +20,8 @@ const AIPP_TASK_ACTIVITY_MATCH_SQL: &str = r#"
                AND COALESCE(tasks.idempotency_key, '') NOT LIKE 'nni-capability:%'
                AND COALESCE(CASE WHEN json_valid(tasks.payload_json)
                    THEN json_extract(tasks.payload_json, '$._task_source') END, '') != 'distributed_work'
+               AND COALESCE(CASE WHEN json_valid(tasks.payload_json)
+                   THEN json_extract(tasks.payload_json, '$._task_source') END, '') != 'aipp_account_control'
                AND (
                     :communication_only = 0
                     OR tasks.channel IN ('telegram', 'whatsapp', 'feishu', 'lark', 'wechat')
@@ -105,6 +107,7 @@ struct AippCatalogItem {
     entrypoint: Option<String>,
     bridge_capabilities: Vec<String>,
     task_channel_scope: Option<String>,
+    account_controls: Option<skill_sdk::AippAccountControls>,
 }
 
 struct ActiveAippPackage {
@@ -241,6 +244,7 @@ async fn get_aipp_catalog(
                     installed,
                     entrypoint: aipp.entrypoint,
                     bridge_capabilities: aipp.bridge_capabilities,
+                    account_controls: aipp.account_controls,
                     task_channel_scope: aipp.task_channel_scope,
                 })
             }
@@ -364,6 +368,7 @@ fn aipp_media_item(record: &Value) -> Option<Value> {
         "published_at": bounded_aipp_optional_text(record.get("published_at"), 64),
         "publication_text": bounded_aipp_optional_text(record.get("publication_text"), 128),
         "engagement": aipp_engagement(record),
+        "account_use": public_account_use(record.get("account_use")),
     }))
 }
 
@@ -526,6 +531,7 @@ fn task_activity_item(
         "error_text": projected_error,
         "source_urls": task_activity_urls(&input_text),
         "artifacts": task_activity_artifacts(task_id, &result),
+        "account_use": task_account_use(&result),
         "created_at": created_at,
         "updated_at": updated_at,
         "event_at_ms": event_at_ms,

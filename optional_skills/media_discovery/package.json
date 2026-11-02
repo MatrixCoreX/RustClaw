@@ -1,6 +1,6 @@
 {
   "name": "media-discovery-skill",
-  "version": "0.1.120",
+  "version": "0.1.125",
   "private": true,
   "type": "module",
   "scripts": {

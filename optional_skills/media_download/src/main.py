@@ -27,6 +27,7 @@ from macos_browser_selection import select_macos_browser
 from download_failure import ERROR_PREFIX, read_error
 from download_output import validate_output_mode, select_download_output, OutputSelectionError
 from browser_authentication import DIRECTORY_ENV, SCOPE_ENV
+from account_sessions import account_status, logout as logout_account, read_task_use, AccountSessionError
 
 AUTHENTICATION_METADATA_PREFIX = "__MEDIA_BROWSER_AUTHENTICATION__:"
 
@@ -41,6 +42,8 @@ os.environ["PATH"] = os.pathsep.join(
 ).rstrip(os.pathsep)
 SUPPORTED_ACTIONS = (
     "capabilities",
+    "account_status",
+    "account_logout",
     "download",
     "resolve",
     "ocr",
@@ -1630,6 +1633,7 @@ def _run_tool(
     storage_directory: Path | None = None,
     progress_callback: Callable[[str, int, int, dict[str, Any] | None], None] | None = None,
     browser_authentication: dict[str, str] | None = None,
+    account_request_id: str | None = None,
 ) -> tuple[str, str, list[dict[str, Any]]]:
     before = _snapshot(output_dir)
     checkpoint_before = _profile_checkpoint_pointers(storage_directory)
@@ -1637,6 +1641,11 @@ def _run_tool(
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
     environment.pop(DIRECTORY_ENV, None)
     environment.pop(SCOPE_ENV, None)
+    environment.pop("APP_MEDIA_ACCOUNT_ROOT", None)
+    environment.pop("APP_MEDIA_ACCOUNT_REQUEST", None)
+    if action == "download" and storage_directory is not None and account_request_id:
+        environment["APP_MEDIA_ACCOUNT_ROOT"] = str(storage_directory)
+        environment["APP_MEDIA_ACCOUNT_REQUEST"] = account_request_id
     if browser_authentication is not None:
         environment[DIRECTORY_ENV] = browser_authentication["directory_path"]
         environment[SCOPE_ENV] = browser_authentication["scope_id"]
@@ -2022,6 +2031,33 @@ def respond(
                 _capabilities_extra(),
             )
 
+        if action in {"account_status", "account_logout"}:
+            storage_directory = _skill_storage_directory(request)
+            if storage_directory is None:
+                raise SkillFailure("skill_storage_required", error_code="skill_storage_required", message_key="media_download.error.skill_storage_required")
+            platform = args.get("platform", "auto")
+            if platform not in SUPPORTED_PLATFORMS:
+                raise SkillFailure("platform_unsupported", error_code="platform_unsupported", message_key="media_download.error.platform_unsupported")
+            try:
+                if action == "account_status":
+                    rows = account_status(storage_directory, [p for p in SUPPORTED_PLATFORMS if p != "auto"] if platform == "auto" else [platform])
+                else:
+                    if args.get("confirm") is not True or platform == "auto":
+                        raise AccountSessionError("account_logout_confirmation_required")
+                    authentication = None
+                    granted = _browser_authentication_context(request)
+                    if platform == "wechat_channels" and granted is not None:
+                        from browser_authentication import AuthenticationStore
+                        authentication = AuthenticationStore(Path(granted["directory_path"]), granted["scope_id"], "https://yuanbao.tencent.com", platform)
+                    rows = [logout_account(storage_directory, platform, authentication=authentication)]
+                return _success(request_id, action, json.dumps({"accounts": rows}, ensure_ascii=False),
+                                {"accounts": rows, "side_effect_applied": action == "account_logout"})
+            except (AccountSessionError, OSError, TimeoutError, RuntimeError) as error:
+                code = getattr(error, "error_code", "account_operation_failed")
+                if code == "browser_profile_busy":
+                    code = "account_session_busy"
+                raise SkillFailure(code, error_code=code, message_key=f"media_download.error.{code}", retryable=code == "account_session_busy") from error
+
         output_dir = _artifact_output_directory(request)
         # Downloads may legitimately take a long time. Keep per-request network
         # timeouts, cancellation, and durable background polling without adding
@@ -2068,15 +2104,18 @@ def respond(
             total=1,
         )
 
-    stdout, stderr, artifacts = _run_tool(
-        action,
-        command,
-        output_dir,
-        operation_timeout,
-        storage_directory,
-        progress.forward_child if progress is not None else None,
-        **({"browser_authentication": authentication} if authentication is not None else {}),
-    )
+    try:
+        stdout, stderr, artifacts = _run_tool(
+            action, command, output_dir, operation_timeout, storage_directory,
+            progress.forward_child if progress is not None else None,
+            **({"browser_authentication": authentication} if authentication is not None else {}),
+            **({"account_request_id": request_id} if action == "download" and storage_directory is not None else {}),
+        )
+    except SkillFailure as failure:
+        if action == "download" and storage_directory is not None:
+            failure.details["account_use"] = read_task_use(storage_directory, request_id, consume=True)
+        raise
+    account_use = read_task_use(storage_directory, request_id, consume=True) if action == "download" and storage_directory is not None else []
     source_media = _child_result_metadata(stderr) if action == "download" else None
     if progress is not None:
         progress.emit(
@@ -2177,6 +2216,7 @@ def respond(
     if resolve_metadata is not None:
         extra["resolve_metadata"] = resolve_metadata
     if action == "download":
+        extra["account_use"] = account_use
         if (authentication_metadata := _authentication_metadata(stderr)) is not None:
             extra["browser_authentication"] = authentication_metadata
         if source_media is not None:

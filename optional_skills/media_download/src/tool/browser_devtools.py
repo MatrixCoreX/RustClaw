@@ -41,8 +41,13 @@ class DevToolsConnection:
         self._buffer = bytearray()
         self._next_id = 0
         self._closed = False
+        self._account_observer = None
         try:
             self._handshake(parsed, timeout)
+            from account_observation import AccountObserver
+            self._account_observer = AccountObserver.from_environment()
+            if self._account_observer is not None:
+                self.send("Network.enable", {})
         except Exception:
             raw_socket.close()
             raise
@@ -137,6 +142,11 @@ class DevToolsConnection:
                 raise DevToolsError(f"Chrome returned an invalid DevTools message: {exc}") from exc
             if not isinstance(value, dict):
                 raise DevToolsError("Chrome returned a non-object DevTools message.")
+            if self._account_observer is not None:
+                try:
+                    self._account_observer.observe(value)
+                except Exception:
+                    pass
             return value
 
     def _send_frame(self, opcode: int, payload: bytes) -> None:
@@ -189,6 +199,12 @@ class DevToolsConnection:
         return result
 
     def close(self) -> None:
+        observer, self._account_observer = self._account_observer, None
+        if observer is not None and not self._closed:
+            try:
+                observer.flush(self)
+            except Exception:
+                pass
         if not self._closed:
             try:
                 self._send_frame(0x8, struct.pack("!H", 1000))

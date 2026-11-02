@@ -23,6 +23,10 @@ class AuthenticationStoreError(RuntimeError):
     error_code = "browser_authentication_unavailable"
 
 
+class AuthenticationStoreBusy(AuthenticationStoreError):
+    error_code = "account_session_busy"
+
+
 class AuthenticationStore:
     def __init__(self, directory: Path, scope_id: str, origin: str, platform: str):
         if not directory.is_absolute() or not re.fullmatch(r"[a-f0-9]{64}", scope_id):
@@ -44,7 +48,7 @@ class AuthenticationStore:
         return cls(Path(directory), scope, origin, platform)
 
     @contextlib.contextmanager
-    def lease(self, cancellation_check: Callable[[], None] | None = None) -> Iterator[AuthenticationStore]:
+    def lease(self, cancellation_check: Callable[[], None] | None = None, *, wait: bool = True) -> Iterator[AuthenticationStore]:
         descriptor = os.open(self.directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         lock = None
         try:
@@ -62,6 +66,8 @@ class AuthenticationStore:
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     break
                 except BlockingIOError:
+                    if not wait:
+                        raise AuthenticationStoreBusy("account_session_busy") from None
                     time.sleep(0.1)
             self._descriptor = descriptor
             yield self

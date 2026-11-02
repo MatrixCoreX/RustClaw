@@ -144,6 +144,16 @@ pub struct AippSpec {
     pub bridge_capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_channel_scope: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_controls: Option<AippAccountControls>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AippAccountControls {
+    pub schema_version: u32,
+    pub status_capability: String,
+    pub logout_capability: String,
 }
 
 /// Host-owned installation prerequisites. Package authors may declare what is
@@ -709,6 +719,54 @@ impl PackageManifest {
         }
         if let Some(aipp) = &self.aipp {
             aipp.validate()?;
+            if let Some(controls) = &aipp.account_controls {
+                let requested = self
+                    .capability_request
+                    .as_ref()
+                    .map(|request| {
+                        request
+                            .capabilities
+                            .iter()
+                            .map(|capability| capability.name.as_str())
+                            .collect::<BTreeSet<_>>()
+                    })
+                    .unwrap_or_default();
+                let prefix = format!("{}.", self.package.name);
+                if controls.schema_version != 1
+                    || controls.status_capability == controls.logout_capability
+                    || [&controls.status_capability, &controls.logout_capability]
+                        .iter()
+                        .any(|name| {
+                            !valid_aipp_capability_name(name)
+                                || !name.starts_with(&prefix)
+                                || !requested.contains(name.as_str())
+                        })
+                {
+                    return Err(SkillSdkError::new(
+                        "manifest_aipp_account_controls_invalid",
+                        "account controls require distinct owned declared capabilities",
+                    ));
+                }
+                let actions = &self
+                    .capability_request
+                    .as_ref()
+                    .expect("validated requested controls")
+                    .capabilities;
+                if !actions.iter().any(|action| {
+                    action.name == controls.status_capability
+                        && action.effect == RequestedEffect::Observe
+                }) || !actions.iter().any(|action| {
+                    action.name == controls.logout_capability
+                        && action.effect == RequestedEffect::Mutate
+                        && action.required.iter().any(|field| field == "confirm")
+                        && action.required.iter().any(|field| field == "platform")
+                }) {
+                    return Err(SkillSdkError::new(
+                        "manifest_aipp_account_controls_invalid",
+                        "status must observe; logout must mutate and require platform/confirm",
+                    ));
+                }
+            }
             if aipp.renderer == "sandbox_bundle_v1" {
                 let requested = self
                     .capability_request
