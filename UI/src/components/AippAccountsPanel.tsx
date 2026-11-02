@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { LoaderCircle, LogOut, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { ChevronDown, LoaderCircle, LogOut, RefreshCw } from "lucide-react";
 import { useRequestOwner } from "../hooks/useRequestOwner";
 import { accountRows, invokeAccountControl, type AccountUse } from "../lib/aipp-accounts";
 import type { AippAccountControls, AippAccountSnapshot } from "../types/api";
@@ -38,6 +38,8 @@ export function AippAccountUse({ uses, t }: { uses?: AccountUse[]; t: Translate 
 export function AippAccountsPanel({ skill, controls, apiFetch, requestScope, t }: {
   skill: string; controls: AippAccountControls; apiFetch: ApiFetch; requestScope: string; t: Translate;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const contentId = useId();
   const isCurrent = useRequestOwner(requestScope);
   const api = useRef(apiFetch); api.current = apiFetch;
   const [rows, setRows] = useState<AippAccountSnapshot[]>([]);
@@ -65,25 +67,34 @@ export function AippAccountsPanel({ skill, controls, apiFetch, requestScope, t }
     void perform("status");
     return () => { active.current?.abort(); active.current = null; };
   }, [perform, controls.status_capability, controls.logout_capability]);
-  return <section className="theme-panel-soft space-y-3 p-3 sm:p-4">
-    <div className="flex items-center justify-between gap-3">
-      <h2 className="text-sm font-medium text-white/85">{t("平台账号", "Platform accounts")}</h2>
-      <button type="button" className="theme-secondary-btn px-3 py-1.5 text-xs" disabled={busy !== null} onClick={() => void perform("status")}>
-        {busy === "status" ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}{t("刷新", "Refresh")}
+  return <section className="theme-panel-soft p-3 sm:p-4">
+    <h2>
+      <button type="button" aria-expanded={expanded} aria-controls={contentId}
+        className="flex w-full items-center justify-between gap-3 rounded text-left text-sm font-medium text-white/85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/40"
+        onClick={() => setExpanded(value => !value)}>
+        {t("平台账号", "Platform accounts")}
+        <ChevronDown aria-hidden="true" className={`h-4 w-4 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} />
       </button>
-    </div>
-    <p className="text-xs leading-5 text-white/50">{t("这里只显示本应用保存的账号状态；任务是否使用账号，以每条结果的记录为准。退出保留文件和历史记录。", "These are this app's saved account states. Check each result for actual session use. Signing out keeps files and history.")}</p>
-    {error ? <p role="alert" className="text-xs text-amber-200">{error === "account_session_busy" ? t("应用仍在使用登录会话，请先结束相关媒体任务或关闭浏览器，再退出。", "A login session is in use. Finish the related media tasks or close the browser before signing out.") : t("账号操作未完成，请刷新后重试。", "The account operation did not complete. Refresh and retry.")}</p> : null}
-    {notice ? <p role="status" className="text-xs text-white/65">{platformLabel(notice, t)} · {t("已退出，后续需要时请重新登录。", "Signed out. Sign in again when needed.")}</p> : null}
-    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{rows.map(row => <div key={row.platform} className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-white/15 p-3">
-      <div className="min-w-0"><p className="text-sm font-medium text-white/80">{platformLabel(row.platform, t)}</p>
-        <p className="mt-1 truncate text-xs text-white/60">{row.display_name || accountStatusLabel(row.status, t)}</p>
-        {row.display_name ? <p className="mt-1 text-xs text-white/45">{accountStatusLabel(row.status, t)}</p> : null}
-        {row.checked_at ? <p className="mt-1 text-xs text-white/40">{t("最近检查", "Last checked")} · {new Date(row.checked_at * 1000).toLocaleString()}</p> : null}
+    </h2>
+    <div id={contentId} hidden={!expanded} className="mt-3 space-y-3">
+      <div className="flex justify-end">
+        <button type="button" className="theme-secondary-btn px-3 py-1.5 text-xs" disabled={busy !== null} onClick={() => void perform("status")}>
+          {busy === "status" ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}{t("刷新", "Refresh")}
+        </button>
       </div>
-      {row.status !== "signed_out" ? <button type="button" className="theme-secondary-btn shrink-0 px-2 py-1.5 text-xs" disabled={busy !== null} onClick={() => void perform("logout", row.platform)}>
-        {busy === row.platform ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <LogOut className="h-3.5 w-3.5" />}{t("退出登录", "Sign out")}
-      </button> : null}
-    </div>)}</div>
+      <p className="text-xs leading-5 text-white/50">{t("这里只显示本应用保存的账号状态；任务是否使用账号，以每条结果的记录为准。退出保留文件和历史记录。", "These are this app's saved account states. Check each result for actual session use. Signing out keeps files and history.")}</p>
+      {error ? <p role="alert" className="text-xs text-amber-200">{error === "account_session_busy" ? t("应用仍在使用登录会话，请先结束相关媒体任务或关闭浏览器，再退出。", "A login session is in use. Finish the related media tasks or close the browser before signing out.") : t("账号操作未完成，请刷新后重试。", "The account operation did not complete. Refresh and retry.")}</p> : null}
+      {notice ? <p role="status" className="text-xs text-white/65">{platformLabel(notice, t)} · {t("已退出，后续需要时请重新登录。", "Signed out. Sign in again when needed.")}</p> : null}
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{rows.map(row => <div key={row.platform} className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-white/15 p-3">
+        <div className="min-w-0"><p className="text-sm font-medium text-white/80">{platformLabel(row.platform, t)}</p>
+          <p className="mt-1 truncate text-xs text-white/60">{row.display_name || accountStatusLabel(row.status, t)}</p>
+          {row.display_name ? <p className="mt-1 text-xs text-white/45">{accountStatusLabel(row.status, t)}</p> : null}
+          {row.checked_at ? <p className="mt-1 text-xs text-white/40">{t("最近检查", "Last checked")} · {new Date(row.checked_at * 1000).toLocaleString()}</p> : null}
+        </div>
+        {row.status !== "signed_out" ? <button type="button" className="theme-secondary-btn shrink-0 px-2 py-1.5 text-xs" disabled={busy !== null} onClick={() => void perform("logout", row.platform)}>
+          {busy === row.platform ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <LogOut className="h-3.5 w-3.5" />}{t("退出登录", "Sign out")}
+        </button> : null}
+      </div>)}</div>
+    </div>
   </section>;
 }

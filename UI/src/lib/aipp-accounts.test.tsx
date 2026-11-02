@@ -61,7 +61,7 @@ test("scope abort stops polling without cancelling server-side media tasks", asy
   assert.ok(paths.every(url => !url.includes("cancel")));
 });
 
-test("account panel displays saved vs verified and single-click logout feedback", async () => {
+test("account panel defaults collapsed and preserves status/logout feedback when toggled", async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   let root: ReactTestRenderer | undefined;
   let signedOut = false;
@@ -75,12 +75,59 @@ test("account panel displays saved vs verified and single-click logout feedback"
   };
   try {
     await act(async () => { root = create(<AippAccountsPanel skill="fixture" controls={controls} requestScope="fixture" t={t} apiFetch={apiFetch} />); });
+    const toggle = root!.root.findByProps({ "aria-expanded": false });
+    assert.ok(toggle.children.includes("Platform accounts"));
+    const content = () => root!.root.findByProps({ id: toggle.props["aria-controls"] });
+    assert.equal(content().props.hidden, true);
+    await act(async () => { toggle.props.onClick(); });
+    assert.equal(toggle.props["aria-expanded"], true);
+    assert.equal(content().props.hidden, false);
     assert.match(JSON.stringify(root!.toJSON()), /Saved session; account unverified/u);
     const logout = root!.root.findAllByType("button").find(node => node.children.includes("Sign out"));
     assert.ok(logout);
     await act(async () => { logout!.props.onClick(); });
     assert.match(JSON.stringify(root!.toJSON()), /Signed out\. Sign in again/u);
     assert.equal(root!.root.findAllByType("button").filter(node => node.children.includes("Sign out")).length, 0);
+    await act(async () => { toggle.props.onClick(); });
+    assert.equal(content().props.hidden, true);
+    await act(async () => { toggle.props.onClick(); });
+    assert.equal(content().props.hidden, false);
+    assert.match(JSON.stringify(root!.toJSON()), /Signed out\. Sign in again/u);
+  } finally { await act(async () => root?.unmount()); }
+});
+
+test("account panels expand independently without restarting or aborting pending status checks", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  let root: ReactTestRenderer | undefined;
+  const requests: Array<{ url: string; signal?: AbortSignal | null }> = [];
+  const pending: Array<(value: Response) => void> = [];
+  const controls = { schema_version: 1, status_capability: "fixture.account_status", logout_capability: "fixture.account_logout" };
+  const apiFetch = async (url: string, init?: RequestInit) => {
+    requests.push({ url, signal: init?.signal });
+    if (url.endsWith("account-control")) return response({ task_id: `fixture-${requests.length}` });
+    return new Promise<Response>(resolve => { pending.push(resolve); });
+  };
+  try {
+    await act(async () => { root = create(<>
+      <AippAccountsPanel key="first" skill="first" controls={controls} requestScope="first" t={t} apiFetch={apiFetch} />
+      <AippAccountsPanel key="second" skill="second" controls={controls} requestScope="second" t={t} apiFetch={apiFetch} />
+    </>); });
+    const panels = root!.root.findAllByType(AippAccountsPanel);
+    const toggles = panels.map(panel => panel.findByProps({ "aria-expanded": false }));
+    assert.notEqual(toggles[0].props["aria-controls"], toggles[1].props["aria-controls"]);
+    assert.equal(pending.length, 2);
+    const count = requests.length;
+    await act(async () => { toggles[0].props.onClick(); });
+    assert.equal(toggles[0].props["aria-expanded"], true);
+    assert.equal(toggles[1].props["aria-expanded"], false);
+    await act(async () => { toggles[0].props.onClick(); });
+    assert.equal(toggles[0].props["aria-expanded"], false);
+    assert.equal(requests.length, count);
+    assert.ok(requests.every(request => request.signal && !request.signal.aborted));
+    await act(async () => { for (const resolve of pending) resolve(task("succeeded")); });
+    await act(async () => { toggles[1].props.onClick(); });
+    assert.ok(panels[1].findAllByType("p").some(node => node.children.includes("Saved session; account unverified")));
+    assert.equal(requests.length, count);
   } finally { await act(async () => root?.unmount()); }
 });
 
