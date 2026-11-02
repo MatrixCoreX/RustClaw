@@ -1,5 +1,5 @@
 """Public account snapshots and explicit logout of this skill's private profiles."""
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, closing, contextmanager
 import fcntl
 import hashlib
 import json
@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+import stat
 import time
 import uuid
 
@@ -75,25 +76,31 @@ def profile_directories(root: Path, platform: str) -> list[Path]:
 
 def cookie_state(profile: Path, platform: str) -> str:
     domain, names = DOMAINS[platform]
+    expired = False
     for file in (profile / "Default/Network/Cookies", profile / "Default/Cookies"):
-        if not file.is_file() or file.is_symlink():
-            continue
         try:
-            with sqlite3.connect(file.as_uri() + "?mode=ro", uri=True, timeout=0.2) as database:
-                rows = database.execute("SELECT host_key,name,expires_utc,length(value),length(encrypted_value) FROM cookies").fetchall()
-            now = int((time.time() + 11644473600) * 1000000)
-            found = False
+            for part in (profile / "Default", file.parent, file):
+                if stat.S_ISLNK(part.lstat().st_mode):
+                    raise AccountSessionError("account_storage_invalid")
+            if not file.is_file():
+                continue
+            with closing(sqlite3.connect(file.as_uri() + "?mode=ro", uri=True, timeout=0.2)) as database:
+                database.execute("PRAGMA query_only=ON")
+                rows = database.execute(
+                    "SELECT host_key,name,expires_utc,length(value),length(encrypted_value) "
+                    f"FROM cookies WHERE name IN ({','.join('?' for _ in names)})", tuple(sorted(names)),
+                ).fetchall()
+            now = time.time_ns() // 1000 + 11644473600000000
             for host, name, expires, plain, encrypted in rows:
                 host = str(host).lstrip(".")
                 if not (host == domain or host.endswith("." + domain)) or name not in names or not (plain or encrypted):
                     continue
-                found = True
                 if not expires or expires > now:
                     return "saved_session"
-            return "expired" if found else "unknown"
+                expired = True
         except (sqlite3.Error, OSError, ValueError, TypeError):
-            return "unknown"
-    return "unknown"
+            continue
+    return "expired" if expired else "unknown"
 
 
 def write_snapshot(root: Path, snapshot: dict) -> None:
@@ -148,7 +155,7 @@ def account_status(root: Path, platforms) -> list[dict]:
             snapshot["session_present"] = True
         elif "expired" in states:
             snapshot.update(status="expired", display_name=None, session_present=False)
-        elif snapshot["status"] == "verified":
+        elif snapshot["status"] in {"verified", "saved_session"}:
             snapshot.update(status="unknown", display_name=None, session_present=None)
         result.append(snapshot)
     return result

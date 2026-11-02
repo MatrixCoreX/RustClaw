@@ -10,6 +10,8 @@ name: Security Audit
       - UI/package.json
       - UI/package-lock.json
       - .github/workflows/security-audit.yml
+      - scripts/report_rust_dependency_audit.py
+      - scripts/tests/test_rust_dependency_audit.py
   push:
     branches:
       - main
@@ -21,6 +23,8 @@ name: Security Audit
       - UI/package.json
       - UI/package-lock.json
       - .github/workflows/security-audit.yml
+      - scripts/report_rust_dependency_audit.py
+      - scripts/tests/test_rust_dependency_audit.py
   schedule:
     - cron: "23 3 * * 1"
   workflow_dispatch:
@@ -32,18 +36,47 @@ jobs:
   rustsec:
     name: Rust dependency audit
     runs-on: ubuntu-22.04
-    permissions:
-      contents: read
-      checks: write
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Verify immutable GitHub Action references
-        run: python3 scripts/check_github_action_pins.py
-      - name: Audit Cargo.lock
-        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - name: Verify immutable GitHub Action references
+        run: |
+          python3 scripts/check_github_action_pins.py
+          python3 -m unittest discover -s scripts/tests -p test_rust_dependency_audit.py
+      - name: Install the pinned official audit CLI outside the source workspace
+        working-directory: ${{ runner.temp }}
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-audit-target
+        run: cargo install cargo-audit --version 0.22.2 --locked --root "$RUNNER_TEMP/cargo-audit-tool"
+      - name: Audit Cargo.lock
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          test -s "$GITHUB_WORKSPACE/Cargo.lock"
+          mkdir -p "$RUNNER_TEMP/rustsec-audit"
+          export PATH="$RUNNER_TEMP/cargo-audit-tool/bin:$PATH"
+          set +e
+          cargo audit --json --file "$GITHUB_WORKSPACE/Cargo.lock" \
+            > "$RUNNER_TEMP/rustsec-audit/audit.json" \
+            2> "$RUNNER_TEMP/rustsec-audit/stderr.log"
+          audit_exit=$?
+          set -e
+          python3 "$GITHUB_WORKSPACE/scripts/report_rust_dependency_audit.py" \
+            "$RUNNER_TEMP/rustsec-audit/audit.json" --audit-exit-code "$audit_exit" \
+            --summary "$GITHUB_STEP_SUMMARY"
+      - name: Retain the unfiltered audit result even on failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rust-dependency-audit
+          path: ${{ runner.temp }}/rustsec-audit
+          if-no-files-found: warn
 
   npm:
     name: UI dependency audit

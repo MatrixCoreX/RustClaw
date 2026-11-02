@@ -1,4 +1,5 @@
 """Account controls use disposable skill roots only, never real login sessions."""
+from contextlib import closing
 import importlib.util
 import json
 from pathlib import Path
@@ -12,7 +13,7 @@ from unittest import mock
 
 SKILL = Path(__file__).parents[1]
 sys.path.insert(0, str(SKILL / "src/tool"))
-from account_sessions import (AccountSessionError, account_status, logout, public_snapshot,
+from account_sessions import (AccountSessionError, account_status, cookie_state, logout, public_snapshot,
                               read_task_use, session_lease, task_use_file, write_snapshot)
 from account_observation import AccountObserver, self_account_identity
 from browser_profile_lock import BrowserProfileBusy
@@ -69,6 +70,76 @@ class AccountSessionTest(unittest.TestCase):
         row = account_status(self.root, ["douyin"])[0]
         self.assertEqual(row["status"], "expired")
         self.assertIsNone(row["display_name"])
+
+    def cookie_store(self, file, rows=()):
+        file.parent.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(file)) as database:
+            database.execute("CREATE TABLE cookies(host_key,name,expires_utc,value,encrypted_value)")
+            database.executemany("INSERT INTO cookies VALUES (?,?,?,?,?)", rows)
+            database.commit()
+
+    def test_removed_profiles_invalidate_both_saved_and_verified_snapshots(self):
+        for status in ("saved_session", "verified"):
+            with self.subTest(status=status):
+                write_snapshot(self.root, {"platform": "douyin", "status": status,
+                                          "display_name": "Historical self", "session_present": True})
+                row = account_status(self.root, ["douyin"])[0]
+                self.assertEqual(row["status"], "unknown")
+                self.assertIsNone(row["session_present"])
+                self.assertIsNone(row["display_name"])
+
+    def test_valid_secondary_cookie_store_survives_empty_corrupt_or_expired_primary(self):
+        for state in ("empty", "corrupt", "expired"):
+            with self.subTest(primary=state):
+                profile = self.root / state
+                primary = profile / "Default/Network/Cookies"
+                if state == "corrupt":
+                    primary.parent.mkdir(parents=True)
+                    primary.write_bytes(b"fixture-corrupt-store")
+                else:
+                    rows = [(".douyin.com", "sessionid", 1, "fixture-private", b"")] if state == "expired" else []
+                    self.cookie_store(primary, rows)
+                secondary = profile / "Default/Cookies"
+                self.cookie_store(secondary, [(".douyin.com", "sessionid", 0, "fixture-private", b"")])
+                before = {p: p.read_bytes() for p in (primary, secondary)}
+                self.assertEqual(cookie_state(profile, "douyin"), "saved_session")
+                self.assertEqual({p: p.read_bytes() for p in before}, before, "status reads never modify cookie stores")
+
+    def test_expiry_is_preserved_when_no_store_has_a_live_session(self):
+        profile = self.root / "expired"
+        self.cookie_store(profile / "Default/Network/Cookies", [(".douyin.com", "sessionid", 1, "fixture-private", b"")])
+        self.cookie_store(profile / "Default/Cookies")
+        self.assertEqual(cookie_state(profile, "douyin"), "expired")
+
+    def test_unknown_domains_and_empty_credentials_are_not_session_evidence(self):
+        profile = self.root / "not-authenticated"
+        self.cookie_store(profile / "Default/Network/Cookies", [
+            (".douyin.com.foreign.test", "sessionid", 0, "fixture-private", b""),
+            (".douyin.com", "sessionid", 0, "", b""),
+        ])
+        self.assertEqual(cookie_state(profile, "douyin"), "unknown")
+
+    def test_linked_cookie_file_or_parent_is_rejected_without_reading_the_target(self):
+        for component in ("Default", "Network", "Cookies"):
+            with self.subTest(component=component):
+                root = self.root / component
+                profile, outside = root / "profile", root / "outside"
+                self.cookie_store(outside / "Network/Cookies", [(".douyin.com", "sessionid", 0, "fixture-private", b"")])
+                if component == "Default":
+                    profile.mkdir()
+                    (profile / "Default").symlink_to(outside, target_is_directory=True)
+                elif component == "Network":
+                    (profile / "Default").mkdir(parents=True)
+                    (profile / "Default/Network").symlink_to(outside / "Network", target_is_directory=True)
+                else:
+                    (profile / "Default/Network").mkdir(parents=True)
+                    (profile / "Default/Network/Cookies").symlink_to(outside / "Network/Cookies")
+                with mock.patch("account_sessions.sqlite3.connect") as connect:
+                    with self.assertRaises(AccountSessionError) as invalid:
+                        cookie_state(profile, "douyin")
+                    self.assertEqual(invalid.exception.error_code, "account_storage_invalid")
+                    connect.assert_not_called()
+                self.assertTrue((outside / "Network/Cookies").is_file())
 
     def test_logout_is_platform_scoped_covers_macos_and_preserves_results(self):
         profiles = [self.profile(), self.profile("public-browser-profile/douyin"),

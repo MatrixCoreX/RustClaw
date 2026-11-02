@@ -50,6 +50,7 @@ jobs:
           npm ci --ignore-scripts --prefix optional_skills/media_discovery
           node --test optional_skills/media_discovery/test/*.test.mjs
           python3 -m unittest discover -s scripts/tests -p test_release_build_cache.py
+          python3 -m unittest discover -s scripts/tests -p test_rust_dependency_audit.py
           python3 -m unittest discover -s scripts/tests -p test_release_macos_media_tools.py
           python3 -m unittest discover -s optional_skills/media_download/tests
           python3 scripts/check_skill_prompts.py
