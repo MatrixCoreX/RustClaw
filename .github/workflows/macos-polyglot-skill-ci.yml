@@ -188,6 +188,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          npm ci --ignore-scripts --prefix optional_skills/media_discovery
           "${pythonLocation:?setup-python root missing}/bin/python3" -m unittest discover -s optional_skills/media_download/tests
           node --test optional_skills/media_discovery/test/account_sessions.test.mjs
 

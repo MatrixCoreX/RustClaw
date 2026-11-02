@@ -22,6 +22,13 @@ class BuildCacheTest(unittest.TestCase):
         for value in (". -> target", "desktop -> target", "desktop/scripts/identity -> target", "MACOSX_DEPLOYMENT_TARGET SDKROOT"):
             self.assertIn(value, text)
 
+    def test_protocol_account_tests_install_the_skills_locked_node_dependencies_first(self):
+        for name in ("macos-polyglot-skill-ci.yml", "ubuntu-x86_64-release.yml"):
+            with self.subTest(workflow=name):
+                text = (ROOT / ".github/workflows" / name).read_text()
+                self.assertLess(text.index("npm ci --ignore-scripts --prefix optional_skills/media_discovery"),
+                                text.index("node --test optional_skills/media_discovery/test/account_sessions.test.mjs"))
+
 
 if __name__ == "__main__":
     unittest.main()

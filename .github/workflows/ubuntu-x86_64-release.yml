@@ -172,7 +172,9 @@ jobs:
           python3 scripts/check_rag_contracts.py
 
       - name: Prepare locked browser skill runtime assets
-        run: npm ci --ignore-scripts --prefix crates/skills/browser_web
+        run: |
+          npm ci --ignore-scripts --prefix crates/skills/browser_web
+          npm ci --ignore-scripts --prefix optional_skills/media_discovery
 
       - name: Test AiAPP account controls and private session isolation
         shell: bash

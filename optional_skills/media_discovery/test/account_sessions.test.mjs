@@ -106,7 +106,7 @@ test("partial logout returns stable mutation evidence and never resurrects the o
     assert.equal(result.status, "error");
     assert.equal(result.extra.error_code, "account_operation_failed");
     assert.equal(result.extra.side_effect_applied, true);
-    assert.equal(result.extra.failure_phase, "post_dispatch");
+    assert.equal(result.extra.failure_phase, "execution_partial");
     assert.equal(result.extra.retryable, false);
     const row = (await accountStatus(root, ["weibo"]))[0];
     assert.equal(row.status, "unknown");

@@ -62,6 +62,7 @@ tar -xzf "$lame_archive" -C "$work/lame" --strip-components=1
     --enable-libx264 --enable-libmp3lame --enable-libdav1d --enable-zlib \
     --enable-bzlib --enable-iconv --enable-securetransport \
     --enable-videotoolbox --enable-audiotoolbox --pkg-config-flags=--static \
+    --extra-libs=-liconv \
     --extra-cflags="-I$prefix/include -mmacosx-version-min=$minimum" \
     --extra-ldflags="-L$prefix/lib -mmacosx-version-min=$minimum"
   make -j "$jobs"

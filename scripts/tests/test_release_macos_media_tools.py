@@ -55,6 +55,7 @@ class MediaPortabilityTest(unittest.TestCase):
         self.assertIn("--enable-libdav1d", builder)
         self.assertIn("--enable-libmp3lame", builder)
         self.assertIn("--enable-securetransport", builder)
+        self.assertIn("--extra-libs=-liconv", builder)
         self.assertIn("--disable-autodetect", builder)
 
 

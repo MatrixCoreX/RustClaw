@@ -119,7 +119,7 @@ export async function logoutAccount(root, platform) {
       return snapshot;
     } catch (cause) {
       const error = new Error("account_operation_failed", { cause });
-      error.extra = { side_effect_applied: changed, failure_phase: changed ? "post_dispatch" : "pre_dispatch" };
+      error.extra = { side_effect_applied: changed, failure_phase: changed ? "execution_partial" : "pre_dispatch" };
       throw error;
     }
   });
