@@ -2051,7 +2051,7 @@ def respond(
                         from browser_authentication import AuthenticationStore
                         authentication = AuthenticationStore(Path(granted["directory_path"]), granted["scope_id"], "https://yuanbao.tencent.com", platform)
                     rows = [logout_account(storage_directory, platform, authentication=authentication)]
-                return _success(request_id, action, json.dumps({"accounts": rows}, ensure_ascii=False),
+                return _success(request_id, action, "",
                                 {"accounts": rows, "side_effect_applied": action == "account_logout"})
             except (AccountSessionError, OSError, TimeoutError, RuntimeError) as error:
                 code = getattr(error, "error_code", "account_operation_failed")

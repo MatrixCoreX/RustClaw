@@ -196,6 +196,11 @@ class AccountSessionTest(unittest.TestCase):
         request["args"]["confirm"] = True
         response = module.respond(request)
         self.assertEqual(response["extra"]["accounts"][0]["status"], "signed_out")
+        self.assertEqual(response["text"], "", "machine account controls must not become chat-memory text")
+        request["args"] = {"action": "account_status", "platform": "douyin"}
+        response = module.respond(request)
+        self.assertEqual(response["text"], "")
+        self.assertEqual(response["extra"]["accounts"][0]["status"], "signed_out")
 
     def test_media_failure_preserves_account_use_evidence_and_original_error(self):
         spec = importlib.util.spec_from_file_location("account_failure_fixture", SKILL / "src/main.py")
