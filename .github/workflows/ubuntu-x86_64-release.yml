@@ -175,9 +175,6 @@ jobs:
       - name: Prepare locked browser skill runtime assets
         run: npm ci --ignore-scripts --prefix crates/skills/browser_web
 
-      - name: Test host dependency contracts
-        run: cargo test -p clawd host_dependencies -- --nocapture
-
       - name: Test AiAPP account controls and private session isolation
         shell: bash
         run: |
@@ -190,6 +187,9 @@ jobs:
           python3 scripts/check_product_identity_coupling.py --self-test
           python3 scripts/check_product_identity_coupling.py
           bash scripts/product_identity_tests.sh --with-ui
+
+      - name: Test host dependency contracts
+        run: cargo test -p clawd host_dependencies -- --nocapture
 
       - name: Test answer verification and structured selectors
         shell: bash

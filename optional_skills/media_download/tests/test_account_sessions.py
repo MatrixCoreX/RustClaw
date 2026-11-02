@@ -12,7 +12,7 @@ from unittest import mock
 SKILL = Path(__file__).parents[1]
 sys.path.insert(0, str(SKILL / "src/tool"))
 from account_sessions import (AccountSessionError, account_status, logout, public_snapshot,
-                              read_task_use, task_use_file, write_snapshot)
+                              read_task_use, session_lease, task_use_file, write_snapshot)
 from account_observation import AccountObserver, self_account_identity
 from browser_profile_lock import BrowserProfileBusy
 
@@ -88,6 +88,20 @@ class AccountSessionTest(unittest.TestCase):
             with self.assertRaises(BrowserProfileBusy):
                 logout(self.root, "douyin")
         self.assertTrue((profile / "Default/Network/Cookies").exists())
+
+    def test_nonbrowser_download_use_blocks_logout_but_downloads_remain_parallel(self):
+        profile = self.profile()
+        with session_lease(self.root, shared=True):
+            with session_lease(self.root, shared=True):
+                with self.assertRaises(AccountSessionError) as busy:
+                    logout(self.root, "douyin")
+                self.assertEqual(busy.exception.error_code, "account_session_busy")
+        self.assertTrue((profile / "Default/Network/Cookies").exists())
+        self.assertEqual(logout(self.root, "douyin")["status"], "signed_out")
+        with session_lease(self.root):
+            with self.assertRaises(AccountSessionError):
+                with session_lease(self.root, shared=True):
+                    self.fail("download must not start during explicit logout")
 
     def test_symlinked_platform_is_rejected_without_touching_other_data(self):
         other = self.profile("outside-fixture", cookie=False)

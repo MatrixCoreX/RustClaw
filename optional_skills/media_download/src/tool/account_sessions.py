@@ -1,7 +1,9 @@
 """Public account snapshots and explicit logout of this skill's private profiles."""
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
+import fcntl
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import sqlite3
@@ -28,6 +30,28 @@ class AccountSessionError(RuntimeError):
         super().__init__(error_code)
         self.error_code = error_code
         self.side_effect_applied = side_effect_applied
+
+
+@contextmanager
+def session_lease(root: Path, *, shared=False):
+    """Downloads remain parallel; sign-out must wait for an idle skill session.
+
+    Also covers cookie reuse by a non-browser downloader, before Chrome's own
+    profile lock exists. It never serializes downloads against one another.
+    """
+    directory = root / "accounts"
+    if directory.is_symlink():
+        raise AccountSessionError("account_storage_invalid")
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor = os.open(directory / ".session-use.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        try:
+            fcntl.flock(descriptor, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise AccountSessionError("account_session_busy") from None
+        yield
+    finally:
+        os.close(descriptor)
 
 
 def profile_directories(root: Path, platform: str) -> list[Path]:
@@ -133,8 +157,9 @@ def account_status(root: Path, platforms) -> list[dict]:
 def logout(root: Path, platform: str, *, authentication=None) -> dict:
     if (root / "accounts").is_symlink():
         raise AccountSessionError("account_storage_invalid")
-    profiles = profile_directories(root, platform)
     with ExitStack() as stack:
+        stack.enter_context(session_lease(root))
+        profiles = profile_directories(root, platform)
         for profile in profiles:
             if (profile / "SingletonLock").exists() or (profile / "SingletonLock").is_symlink():
                 raise AccountSessionError("account_session_busy")

@@ -73,7 +73,7 @@ export function AippAccountsPanel({ skill, controls, apiFetch, requestScope, t }
       </button>
     </div>
     <p className="text-xs leading-5 text-white/50">{t("这里只显示本应用保存的账号状态；任务是否使用账号，以每条结果的记录为准。退出保留文件和历史记录。", "These are this app's saved account states. Check each result for actual session use. Signing out keeps files and history.")}</p>
-    {error ? <p role="alert" className="text-xs text-amber-200">{error === "account_session_busy" ? t("该平台仍在使用中，请先结束对应任务再退出。", "This platform is in use. Finish its tasks before signing out.") : t("账号操作未完成，请刷新后重试。", "The account operation did not complete. Refresh and retry.")}</p> : null}
+    {error ? <p role="alert" className="text-xs text-amber-200">{error === "account_session_busy" ? t("应用仍在使用登录会话，请先结束相关媒体任务或关闭浏览器，再退出。", "A login session is in use. Finish the related media tasks or close the browser before signing out.") : t("账号操作未完成，请刷新后重试。", "The account operation did not complete. Refresh and retry.")}</p> : null}
     {notice ? <p role="status" className="text-xs text-white/65">{platformLabel(notice, t)} · {t("已退出，后续需要时请重新登录。", "Signed out. Sign in again when needed.")}</p> : null}
     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{rows.map(row => <div key={row.platform} className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-white/15 p-3">
       <div className="min-w-0"><p className="text-sm font-medium text-white/80">{platformLabel(row.platform, t)}</p>

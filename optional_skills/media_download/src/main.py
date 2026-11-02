@@ -14,6 +14,7 @@ import urllib.error
 import urllib.request
 import zipfile
 from collections.abc import MutableMapping
+from contextlib import nullcontext
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
@@ -27,7 +28,7 @@ from macos_browser_selection import select_macos_browser
 from download_failure import ERROR_PREFIX, read_error
 from download_output import validate_output_mode, select_download_output, OutputSelectionError
 from browser_authentication import DIRECTORY_ENV, SCOPE_ENV
-from account_sessions import account_status, logout as logout_account, read_task_use, AccountSessionError
+from account_sessions import account_status, logout as logout_account, read_task_use, session_lease, AccountSessionError
 
 AUTHENTICATION_METADATA_PREFIX = "__MEDIA_BROWSER_AUTHENTICATION__:"
 
@@ -2107,12 +2108,17 @@ def respond(
         )
 
     try:
-        stdout, stderr, artifacts = _run_tool(
-            action, command, output_dir, operation_timeout, storage_directory,
-            progress.forward_child if progress is not None else None,
-            **({"browser_authentication": authentication} if authentication is not None else {}),
-            **({"account_request_id": request_id} if action == "download" and storage_directory is not None else {}),
-        )
+        lease = session_lease(storage_directory, shared=True) if action == "download" and storage_directory is not None else nullcontext()
+        with lease:
+            stdout, stderr, artifacts = _run_tool(
+                action, command, output_dir, operation_timeout, storage_directory,
+                progress.forward_child if progress is not None else None,
+                **({"browser_authentication": authentication} if authentication is not None else {}),
+                **({"account_request_id": request_id} if action == "download" and storage_directory is not None else {}),
+            )
+    except AccountSessionError as error:
+        raise _mark_not_applied(SkillFailure(error.error_code, error_code=error.error_code,
+            message_key=f"media_download.error.{error.error_code}", retryable=error.error_code == "account_session_busy"), "pre_dispatch") from error
     except SkillFailure as failure:
         if action == "download" and storage_directory is not None:
             failure.details["account_use"] = read_task_use(storage_directory, request_id, consume=True)
