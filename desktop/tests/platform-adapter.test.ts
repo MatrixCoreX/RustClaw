@@ -61,6 +61,8 @@ test('AiAPP downloads keep native delivery while previews keep the shared endpoi
   const filename = path.resolve(root, '../UI/src/components/AippPage.tsx');
   const source = fs.readFileSync(filename, 'utf8');
   const output = transform(source, filename)?.code ?? '';
+  assert.ok(output.includes('<DesktopAipp key={`${selectedApp.skill_name}:${requestScope}`}'));
+  assert.throws(() => transform(source.replace('apiFetch={apiFetch} requestScope={requestScope} />', 'apiFetch={apiFetch} />'), filename), /Shared UI contract changed/);
   assert.ok(output.includes('if (!open) { await desktopDownload(artifact.download_url, artifact.filename); return; }'));
   assert.ok(output.includes('open && artifact.preview_url ? artifact.preview_url : artifact.download_url'));
 

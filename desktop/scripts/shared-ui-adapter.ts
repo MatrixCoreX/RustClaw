@@ -71,7 +71,7 @@ export function sharedUiAdapter(root: string): Plugin {
         text = once(text, 'data-nav-active={active ? "true" : undefined}', 'data-desktop-page={item.id} data-nav-active={active ? "true" : undefined}', id);
       }
       if (id === uiRoot + 'components/AippPage.tsx') {
-        text = once(text, '<SandboxedAipp app={selectedApp} lang={lang} apiFetch={apiFetch} />', '<DesktopAipp app={selectedApp} lang={lang} />', id);
+        text = once(text, '<SandboxedAipp app={selectedApp} lang={lang} apiFetch={apiFetch} requestScope={requestScope} />', '<DesktopAipp key={`${selectedApp.skill_name}:${requestScope}`} app={selectedApp} lang={lang} />', id);
         text = `import { DesktopAipp } from ${JSON.stringify(components)};\n` + text;
         imports.add('desktopDownload');
         text = once(text, 'const blob = await fetchTaskArtifactBlob(apiFetch, open && artifact.preview_url ? artifact.preview_url : artifact.download_url);', 'if (!open) { await desktopDownload(artifact.download_url, artifact.filename); return; }\n      const blob = await fetchTaskArtifactBlob(apiFetch, open && artifact.preview_url ? artifact.preview_url : artifact.download_url);', id);
