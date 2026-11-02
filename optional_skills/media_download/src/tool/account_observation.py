@@ -8,33 +8,6 @@ from urllib.parse import urlsplit
 
 from account_sessions import DOMAINS, public_snapshot, task_use_file, write_snapshot
 
-# Restrict identity extraction to account-navigation surfaces, never post authors.
-IDENTITY_SCRIPT = r"""(() => {
- const host=location.hostname;
- const rules=[
- ['douyin','douyin.com',['header [data-e2e="user-avatar"]','header [data-e2e="user-profile"]']],
- ['xiaohongshu','xiaohongshu.com',['.user.side-bar-component a[href*="/user/profile/"]']],
- ['kuaishou','kuaishou.com',['header .user-info','header .user-avatar']],
- ['toutiao','toutiao.com',['header .user-info','header .user-avatar']],
- ['weibo','weibo.com',['header a[aria-label="个人主页"]','[class*="Nav_main"] a[href^="/u/"]']],
- ['tiktok','tiktok.com',['[data-e2e="profile-icon"]','[data-e2e="nav-profile"]']],
- ['youtube','youtube.com',['ytd-topbar-menu-button-renderer #avatar-btn']],
- ['bilibili','bilibili.com',['.header-entry-mini .bili-avatar','a.header-entry-mini']],
- ['wechat_channels','yuanbao.tencent.com',['[data-testid="user-avatar"]','.user-info .avatar']]
- ];
- for(const [platform,domain,selectors] of rules) {
-  if(host!==domain&&!host.endsWith('.'+domain))continue;
-  for(const selector of selectors){const node=document.querySelector(selector);
-   if(!node||!node.getClientRects().length)continue;
-   const name=(node.getAttribute('data-nickname')||'').trim();
-   if(name && !['avatar','Avatar','用户头像','头像','profile','Profile'].includes(name))return {platform,display_name:name};
-  }
-  return {platform,display_name:null};
- }
- return null;
-})()"""
-
-
 class AccountObserver:
     def __init__(self, root: Path, request_id: str):
         self.root, self.request_id = root, request_id
@@ -104,17 +77,6 @@ class AccountObserver:
                     break
             except Exception:
                 pass
-        try:
-            command = connection.send("Runtime.evaluate", {"expression": IDENTITY_SCRIPT, "returnByValue": True})
-            while time.monotonic() < deadline:
-                message = connection.recv(timeout=max(0.01, deadline - time.monotonic()))
-                if message is None:
-                    break
-                if message.get("id") == command:
-                    identity = identity or message.get("result", {}).get("result", {}).get("value")
-                    break
-        except Exception:
-            pass  # Observation must not turn a successful media request into a failure.
         platforms = set(self.observed_requests)
         if isinstance(identity, dict) and identity.get("platform") in DOMAINS:
             platforms.add(identity["platform"])

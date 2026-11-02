@@ -154,6 +154,21 @@ class AccountSessionTest(unittest.TestCase):
         self.assertIsNone(self_account_identity("https://weibo.com/ajax/config", []))
         self.assertEqual(self_account_identity("https://weibo.com/ajax/config", {"data": {"user": {"screen_name": "Self account"}}})["display_name"], "Self account")
 
+    def test_browser_identity_comes_only_from_a_self_response_not_page_elements(self):
+        observer = AccountObserver(self.root, "self-response")
+        observer.observed_requests.add("weibo")
+        observer.credential_requests.add("weibo")
+        connection = mock.Mock()
+        observer.flush(connection)
+        connection.send.assert_not_called()
+        self.assertEqual(read_task_use(self.root, "self-response")[0]["account"]["status"], "saved_session")
+        observer.self_responses.append(("self", "https://weibo.com/ajax/config"))
+        connection.send.return_value = 1
+        connection.recv.return_value = {"id": 1, "result": {"body": json.dumps({"data": {"user": {"screen_name": "Self account"}}})}}
+        observer.flush(connection)
+        connection.send.assert_called_once_with("Network.getResponseBody", {"requestId": "self"})
+        self.assertEqual(read_task_use(self.root, "self-response")[0]["account"]["display_name"], "Self account")
+
     def test_cdp_cookie_evidence_supports_out_of_order_events_and_blocked_cookies(self):
         observer = AccountObserver(self.root, "request")
         observer.observe({"method": "Network.requestWillBeSentExtraInfo", "params": {
