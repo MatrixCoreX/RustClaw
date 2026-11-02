@@ -1251,6 +1251,9 @@ async fn run_child_skill_streaming(
             }
             Err(_) => {
                 terminate_child_process_group(child_pid).await;
+                // The owned child must still be reaped if the group utility is
+                // unavailable or the platform has no process-group support.
+                let _ = child.start_kill();
                 let _ = child.wait().await;
                 stdout_reader.abort();
                 stderr_reader.abort();
@@ -1666,11 +1669,13 @@ fn exit_signal(_status: &std::process::ExitStatus) -> Option<i32> {
 
 #[cfg(unix)]
 async fn terminate_child_process_group(pid: Option<u32>) {
-    let Some(pid) = pid else {
+    let Some(pid) = pid.filter(|pid| *pid > 1) else {
         return;
     };
     let _ = Command::new("kill")
         .arg("-KILL")
+        // A negative operand is a process group, never another option/signal.
+        .arg("--")
         .arg(format!("-{pid}"))
         .status()
         .await;

@@ -323,6 +323,34 @@ async fn durable_child_has_no_inherited_or_runner_runtime_deadline() {
 
 #[tokio::test]
 async fn run_child_skill_times_out_and_kills_child() {
+    #[cfg(unix)]
+    if std::env::var_os("APP_RUNNER_TIMEOUT_TEST_CHILD").is_none() {
+        // Keep this regression isolated even if group termination accidentally
+        // targets its caller. A broken implementation must fail the test, not
+        // kill the CI runner or unrelated concurrently executing tests.
+        let mut probe = Command::new(std::env::current_exe().expect("test executable"));
+        probe
+            .args([
+                "--exact",
+                "tests::run_child_skill_times_out_and_kills_child",
+                "--nocapture",
+            ])
+            .env("APP_RUNNER_TIMEOUT_TEST_CHILD", "1")
+            .process_group(0)
+            .kill_on_drop(true);
+        let output = tokio::time::timeout(Duration::from_secs(10), probe.output())
+            .await
+            .expect("isolated timeout cleanup must finish")
+            .expect("launch isolated timeout test");
+        assert!(
+            output.status.success(),
+            "timeout cleanup killed or failed its caller: status={:?}, stdout={}, stderr={}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
     let Some(child) = ["/bin/sh", "/usr/bin/sh"]
         .into_iter()
         .find(|path| Path::new(path).exists())
