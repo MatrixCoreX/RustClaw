@@ -21,6 +21,9 @@ test("a failed page keeps navigation available, hides raw errors and supports re
     assert.match(failed, /navigation/);
     assert.match(failed, /Try again/);
     assert.doesNotMatch(failed, /fixture-private-provider-payload/);
+    assert.match(renderer!.root.findByProps({ role: "alert" }).props.className, /theme-panel-soft/);
+    assert.equal(renderer!.root.findByType("h2").props.style.color, "var(--theme-text-strong)");
+    assert.equal(renderer!.root.findAllByType("p")[0].props.style.color, "var(--theme-text-muted)");
     fail = false;
     await act(async () => { renderer!.root.findByType("button").props.onClick(); });
     assert.match(JSON.stringify(renderer!.toJSON()), /recovered-page/);
