@@ -99,6 +99,13 @@ export function HostSystemSummaryPanel({
 }: HostSystemSummaryPanelProps) {
   const stale = hostSummaryIsStale(summary);
   const partial = hostSummaryIsPartial(summary);
+  const dataStorageLow = summary ? hostStorageNeedsAttention(summary.storage) : false;
+  const systemStorageLow = summary?.system_storage ? hostStorageNeedsAttention(summary.system_storage) : false;
+  const storageWarning = dataStorageLow && systemStorageLow
+    ? t("数据和系统分区空间紧张。", "Data and system volumes are nearly full.")
+    : systemStorageLow
+      ? t("系统分区空间紧张。", "The system volume is nearly full.")
+      : dataStorageLow ? t("数据分区空间紧张。", "The data volume is nearly full.") : null;
   const deploymentLabel =
     summary?.deployment === "container"
       ? t("容器", "Container")
@@ -110,7 +117,7 @@ export function HostSystemSummaryPanel({
   const resourceStateLabel = (() => {
     switch (summary?.runtime_resources.pressure_state) {
       case "normal":
-        return t("运行空间充足", "Resources available");
+        return t("内存状态正常", "Memory available");
       case "compact":
         return t("正在节省内存", "Memory-saving mode");
       case "constrained":
@@ -202,9 +209,13 @@ export function HostSystemSummaryPanel({
           />
           <ResourceProgress
             t={t}
-            label={t("系统存储", "System storage")}
+            label={t("数据存储", "Data storage")}
             capacity={summary.storage}
             icon={<HardDrive className="h-4 w-4" />}
+            detail={summary.system_storage
+              ? t(`系统分区可用 ${formatBytes(summary.system_storage.available_bytes)}`,
+                `System volume: ${formatBytes(summary.system_storage.available_bytes)} available`)
+              : null}
           />
 
           <div className="min-w-0 py-3">
@@ -222,9 +233,9 @@ export function HostSystemSummaryPanel({
         </div>
       ) : null}
 
-      {summary && hostStorageNeedsAttention(summary.storage) ? (
+      {storageWarning ? (
         <p role="status" className="mt-3 rounded-lg border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">
-          {t("存储空间紧张，下载和更新可能失败。请先检查可清理缓存；对话、附件和模型不会自动删除。", "Storage is nearly full; downloads and updates may fail. Review disposable caches first. Conversations, attachments and models are not deleted automatically.")}
+          {storageWarning} {t("下载和更新可能失败。请先检查可清理缓存；对话、附件和模型不会自动删除。", "Downloads and updates may fail. Review disposable caches first. Conversations, attachments and models are not deleted automatically.")}
         </p>
       ) : null}
 

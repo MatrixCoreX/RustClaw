@@ -2095,6 +2095,8 @@ export interface HostSystemSummary {
   deployment: string | null;
   memory: HostCapacitySummary;
   storage: HostCapacitySummary;
+  /** OS-root capacity; absent on older servers. `storage` remains the data volume. */
+  system_storage?: HostCapacitySummary;
   uptime_seconds: number | null;
   runtime_resources: {
     pressure_state: "normal" | "compact" | "constrained" | "critical" | null;

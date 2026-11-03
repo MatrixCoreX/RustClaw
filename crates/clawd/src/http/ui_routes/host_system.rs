@@ -10,7 +10,9 @@ struct HostSystemSummary {
     architecture: String,
     deployment: Option<String>,
     memory: HostCapacity,
+    // Data/workspace and OS-root capacities can belong to different filesystems.
     storage: HostCapacity,
+    system_storage: HostCapacity,
     uptime_seconds: Option<u64>,
     runtime_resources: HostRuntimeResources,
     unavailable_fields: Vec<HostUnavailableField>,
@@ -164,6 +166,8 @@ impl HostSystemSummary {
             "memory.available_bytes",
             "storage.total_bytes",
             "storage.available_bytes",
+            "system_storage.total_bytes",
+            "system_storage.available_bytes",
             "uptime_seconds",
         ]
         .into_iter()
@@ -185,6 +189,7 @@ impl HostSystemSummary {
             deployment: None,
             memory: HostCapacity::new(None, None),
             storage: HostCapacity::new(None, None),
+            system_storage: HostCapacity::new(None, None),
             uptime_seconds: None,
             runtime_resources: HostRuntimeResources {
                 pressure_state: None,
@@ -226,6 +231,8 @@ fn collect_host_system_summary(
         .as_deref()
         .and_then(storage_capacity_bytes)
         .unwrap_or((None, None));
+    let (system_storage_total_bytes, system_storage_available_bytes) =
+        storage_capacity_bytes(Path::new("/")).unwrap_or((None, None));
     let mut unavailable_fields = Vec::new();
 
     record_unavailable(
@@ -278,6 +285,18 @@ fn collect_host_system_summary(
     );
     record_unavailable(
         &mut unavailable_fields,
+        "system_storage.total_bytes",
+        &system_storage_total_bytes,
+        "system_storage_total_unavailable",
+    );
+    record_unavailable(
+        &mut unavailable_fields,
+        "system_storage.available_bytes",
+        &system_storage_available_bytes,
+        "system_storage_available_unavailable",
+    );
+    record_unavailable(
+        &mut unavailable_fields,
         "uptime_seconds",
         &platform.uptime_seconds,
         "uptime_unavailable",
@@ -302,6 +321,10 @@ fn collect_host_system_summary(
         deployment: platform.deployment,
         memory: HostCapacity::new(platform.memory_total_bytes, platform.memory_available_bytes),
         storage: HostCapacity::new(storage_total_bytes, storage_available_bytes),
+        system_storage: HostCapacity::new(
+            system_storage_total_bytes,
+            system_storage_available_bytes,
+        ),
         uptime_seconds: platform.uptime_seconds,
         runtime_resources: HostRuntimeResources {
             pressure_state: Some(resource_status.pressure_state),

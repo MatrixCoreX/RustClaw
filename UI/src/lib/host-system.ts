@@ -24,8 +24,9 @@ export function hostCapacityUsedPercent(capacity: HostCapacitySummary): number |
 
 /** Informational only: never cancel, reject or expire a task from this UI hint. */
 export function hostStorageNeedsAttention(capacity: HostCapacitySummary): boolean {
-  const used = hostCapacityUsedPercent(capacity);
-  return used !== null && used >= 95;
+  const { total_bytes: total, available_bytes: available } = capacity;
+  if (total == null || available == null || hostCapacityUsedPercent(capacity) === null) return false;
+  return available / total <= 0.05;
 }
 
 export function hostSummaryIsStale(

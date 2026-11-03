@@ -110,6 +110,32 @@ class CleanupTests(unittest.TestCase):
                     cleanup.require_idle([path])
         self.assertTrue(path.exists())
 
+    def test_only_known_unrelated_desktop_mount_warnings_can_be_ignored(self):
+        path = self.file("target/debug/incremental/unit/object.o")
+        known = "lsof: WARNING: can't stat() fuse.portal file system /run/user/1000/doc\n      Output information may be incomplete.\n"
+        gvfs = known.replace("fuse.portal", "fuse.gvfsd-fuse").replace("/doc", "/gvfs")
+        cases = [
+            (known, path, True), (known + gvfs, path, True),
+            (known.replace("/run/user/1000/doc", str(path.parent)), path, False),
+            (known.replace("fuse.portal", "fuse.unknown"), path, False),
+            (known.replace("/run/user/1000/doc", "/mnt/unaudited"), path, False),
+            ("      Output information may be incomplete.\n", path, False),
+            (known, Path("/run/user/1000/doc/cache"), False),
+        ]
+        for warning, target, allowed in cases:
+            with self.subTest(warning=warning, target=target), patch.object(cleanup.sys, "platform", "linux"), \
+                    patch.object(cleanup.shutil, "which", return_value="/usr/bin/lsof"), \
+                    patch.object(cleanup.subprocess, "run", side_effect=[
+                        subprocess.CompletedProcess([], 0, "runtime\n", ""),
+                        subprocess.CompletedProcess([], 1, "", warning),
+                    ]):
+                if allowed:
+                    cleanup.require_idle([target])
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "cleanup_reference_audit_failed"):
+                        cleanup.require_idle([target])
+        self.assertTrue(path.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

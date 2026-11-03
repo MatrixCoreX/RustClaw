@@ -196,7 +196,9 @@ jobs:
           bash scripts/product_identity_tests.sh --with-ui
 
       - name: Test host dependency contracts
-        run: cargo test -p clawd host_dependencies -- --nocapture
+        run: |
+          cargo test -p clawd host_dependencies -- --nocapture
+          cargo test -p clawd --bin clawd host_system_ -- --nocapture --test-threads=1
 
       - name: Test answer verification and structured selectors
         shell: bash

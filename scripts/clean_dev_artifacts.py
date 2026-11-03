@@ -53,6 +53,26 @@ def verified_files(path: Path) -> list[Path]:
     return files
 
 
+def require_complete_reference_audit(stderr: str, target: Path) -> None:
+    previous_warning = False
+    for line in stderr.splitlines():
+        if not line.strip():
+            continue
+        warning = re.fullmatch(
+            r"lsof: WARNING: can't stat\(\) (fuse\.portal|fuse\.gvfsd-fuse) file system (/run/user/[0-9]+/(doc|gvfs))",
+            line,
+        )
+        if warning and (warning[1], warning[3]) in {("fuse.portal", "doc"), ("fuse.gvfsd-fuse", "gvfs")}:
+            mount = Path(warning[2])
+            if target.is_relative_to(mount) or mount.is_relative_to(target):
+                raise RuntimeError("cleanup_reference_audit_failed")
+            previous_warning = True
+        elif previous_warning and line.strip() == "Output information may be incomplete.":
+            previous_warning = False
+        else:
+            raise RuntimeError("cleanup_reference_audit_failed")
+
+
 def require_idle(targets: list[Path]) -> None:
     if sys.platform not in {"linux", "darwin"}:
         raise RuntimeError("cleanup_unsupported_platform")
@@ -70,10 +90,7 @@ def require_idle(targets: list[Path]) -> None:
         result = subprocess.run(args, text=True, capture_output=True)
         # Only unrelated desktop FUSE mount warnings are allowed. Never log
         # raw process arguments. Failed or incomplete target audits block apply.
-        if any(line and not (line.startswith("lsof: WARNING: can't stat() fuse.") or
-                             line.strip() == "Output information may be incomplete.")
-               for line in result.stderr.splitlines()):
-            raise RuntimeError("cleanup_reference_audit_failed")
+        require_complete_reference_audit(result.stderr, target)
         if result.returncode != 1 or result.stdout.strip():
             raise RuntimeError("cleanup_cache_in_use")
 

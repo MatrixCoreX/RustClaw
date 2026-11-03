@@ -5,7 +5,8 @@ use tower::ServiceExt;
 
 use super::{
     build_ui_router, host_task_waiting_summary, parse_linux_os_release, parse_linux_uptime,
-    parse_macos_boot_time, parse_macos_system_version, HostCapacity,
+    parse_macos_boot_time, parse_macos_system_version, storage_capacity_bytes, HostCapacity,
+    HostSystemSummary,
 };
 use crate::AppState;
 
@@ -48,6 +49,26 @@ fn partial_capacity_is_serialized_without_inventing_values() {
     assert_eq!(value["total_bytes"], 1024);
     assert!(value["available_bytes"].is_null());
     assert!(value["available_ratio"].is_null());
+}
+
+#[test]
+fn host_storage_fields_are_independent_and_collection_failures_stay_unknown() {
+    let mut summary = HostSystemSummary::collection_failed();
+    let value = serde_json::to_value(&summary).unwrap();
+    for prefix in ["storage", "system_storage"] {
+        assert!(value[prefix]["total_bytes"].is_null());
+        assert!(value[prefix]["available_bytes"].is_null());
+        assert!(value["unavailable_fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| { field["field"] == format!("{prefix}.available_bytes") }));
+    }
+    summary.storage = HostCapacity::new(Some(100), Some(60));
+    summary.system_storage = HostCapacity::new(Some(200), Some(1));
+    let value = serde_json::to_value(summary).unwrap();
+    assert_eq!(value["storage"]["available_bytes"], 60);
+    assert_eq!(value["system_storage"]["available_bytes"], 1);
 }
 
 #[test]
@@ -162,6 +183,14 @@ async fn authenticated_host_summary_is_versioned_bounded_and_secret_free() {
     assert!(value["data"]["os"]["family"].is_string());
     assert!(value["data"]["memory"]["total_bytes"].is_number());
     assert!(value["data"]["storage"]["total_bytes"].is_number());
+    assert_eq!(
+        value["data"]["system_storage"]["total_bytes"],
+        storage_capacity_bytes(std::path::Path::new("/"))
+            .unwrap()
+            .0
+            .unwrap()
+    );
+    assert!(value["data"]["system_storage"]["available_bytes"].is_number());
     assert!(value["data"]["runtime_resources"]["pressure_state"].is_string());
     assert!(value["data"]["runtime_resources"]["active_leases"].is_number());
     assert!(value["data"]["runtime_resources"]["waiting_tasks"].is_number());
