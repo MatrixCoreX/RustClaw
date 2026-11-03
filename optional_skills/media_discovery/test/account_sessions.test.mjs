@@ -79,6 +79,38 @@ test("a corrupt optional account snapshot does not hide other platform rows", as
   assert.deepEqual(rows.map(row => row.status), ["unknown", "unknown"]);
 });
 
+test("verified identity is bound to current credentials, not merely cookie presence", async t => {
+  const root = await fixture(t);
+  const directory = path.join(root, "browser-profile", "weibo", "Default", "Network");
+  await fs.mkdir(directory, { recursive: true });
+  const file = path.join(directory, "Cookies");
+  if (!DatabaseSync) {
+    await writeAccount(root, { platform: "weibo", status: "verified", display_name: "Fixture identity" });
+    assert.equal((await accountStatus(root, ["weibo"]))[0].status, "unknown");
+    return;
+  }
+  const database = new DatabaseSync(file);
+  t.after(() => database.close());
+  database.exec("CREATE TABLE cookies(host_key TEXT,name TEXT,expires_utc INTEGER,value TEXT,encrypted_value BLOB)");
+  database.prepare("INSERT INTO cookies VALUES (?,?,?,?,?)").run(".weibo.com", "SUB", 0, "fixture-value-1", Buffer.alloc(0));
+  await writeAccount(root, { platform: "weibo", status: "verified", display_name: "Fixture identity", checked_at: 1 });
+  const metadata = await fs.readFile(path.join(root, "accounts/weibo.json"), "utf8");
+  const unchanged = (await accountStatus(root, ["weibo"]))[0];
+  assert.equal(unchanged.status, "verified");
+  assert.equal(unchanged.checked_at, 1);
+  assert.ok(!JSON.stringify(unchanged).includes("credential_binding"));
+  assert.ok(!metadata.includes("fixture-value-1"));
+  assert.equal(await fs.readFile(path.join(root, "accounts/weibo.json"), "utf8"), metadata);
+  database.prepare("UPDATE cookies SET value=?").run("fixture-value-2");
+  const replaced = (await accountStatus(root, ["weibo"]))[0];
+  assert.equal(replaced.status, "saved_session");
+  assert.equal(replaced.display_name, null);
+  assert.equal(replaced.session_present, true);
+  assert.ok(!JSON.stringify(replaced).includes("credential_binding"));
+  await fs.writeFile(path.join(root, "accounts/weibo.json"), JSON.stringify({ status: "verified", display_name: "Unbound legacy identity" }));
+  assert.equal((await accountStatus(root, ["weibo"]))[0].display_name, null);
+});
+
 test("partial logout returns stable mutation evidence and never resurrects the old verified identity", async t => {
   const root = await fixture(t);
   const profile = path.join(root, "browser-profile", "weibo");

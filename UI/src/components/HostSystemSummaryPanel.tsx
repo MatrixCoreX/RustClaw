@@ -15,6 +15,7 @@ import {
   hostSummaryIsPartial,
   hostSummaryIsStale,
   hostSystemTitle,
+  hostStorageNeedsAttention,
 } from "../lib/host-system";
 import type { HostCapacitySummary, HostSystemSummary } from "../types/api";
 
@@ -219,6 +220,12 @@ export function HostSystemSummaryPanel({
             </p>
           </div>
         </div>
+      ) : null}
+
+      {summary && hostStorageNeedsAttention(summary.storage) ? (
+        <p role="status" className="mt-3 rounded-lg border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">
+          {t("存储空间紧张，下载和更新可能失败。请先检查可清理缓存；对话、附件和模型不会自动删除。", "Storage is nearly full; downloads and updates may fail. Review disposable caches first. Conversations, attachments and models are not deleted automatically.")}
+        </p>
       ) : null}
 
       {errorCode && summary ? (

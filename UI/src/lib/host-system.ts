@@ -13,12 +13,19 @@ export function hostCapacityUsedPercent(capacity: HostCapacitySummary): number |
   if (
     capacity.total_bytes == null ||
     capacity.available_bytes == null ||
-    capacity.total_bytes <= 0
+    capacity.total_bytes <= 0 || !Number.isFinite(capacity.total_bytes)
+    || !Number.isFinite(capacity.available_bytes)
   ) {
     return null;
   }
   const used = 100 - (capacity.available_bytes / capacity.total_bytes) * 100;
   return Math.min(100, Math.max(0, Math.round(used)));
+}
+
+/** Informational only: never cancel, reject or expire a task from this UI hint. */
+export function hostStorageNeedsAttention(capacity: HostCapacitySummary): boolean {
+  const used = hostCapacityUsedPercent(capacity);
+  return used !== null && used >= 95;
 }
 
 export function hostSummaryIsStale(

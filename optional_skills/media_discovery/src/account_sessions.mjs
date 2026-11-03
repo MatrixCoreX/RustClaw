@@ -1,10 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { SUPPORTED_PLATFORMS } from "./platforms.mjs";
 import { readStatusState, withLock } from "./storage.mjs";
 import { activeRuns } from "./run_leases.mjs";
-import { cookieState } from "./account_cookie_state.mjs";
+import { cookieEvidence } from "./account_cookie_state.mjs";
 
 export function publicAccount(value, platform) {
   const status = ["verified", "saved_session", "expired", "signed_out", "unknown"].includes(value?.status) ? value.status : "unknown";
@@ -50,11 +50,24 @@ export async function writeAccount(root, value) {
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   const temporary = path.join(directory, `.account-${randomUUID()}`);
   try {
-    await fs.writeFile(temporary, JSON.stringify(publicAccount(value, value.platform)), { flag: "wx", mode: 0o600 });
+    const stored = publicAccount(value, value.platform);
+    if (stored.status === "verified") {
+      const { binding } = await credentialEvidence(root, value.platform);
+      if (binding) stored.credential_binding = binding;
+    }
+    await fs.writeFile(temporary, JSON.stringify(stored), { flag: "wx", mode: 0o600 });
     await fs.rename(temporary, path.join(directory, `${value.platform}.json`));
   } finally {
     await fs.unlink(temporary).catch(error => { if (error.code !== "ENOENT") throw error; });
   }
+}
+
+async function credentialEvidence(root, platform) {
+  const rows = await Promise.all((await profileDirectories(root, platform)).map(async profile =>
+    [path.relative(root, profile), await cookieEvidence(profile, platform)]));
+  const bindings = rows.filter(([, evidence]) => evidence.binding).map(([profile, evidence]) => [profile, evidence.binding]).sort();
+  return { states: rows.map(([, evidence]) => evidence.state),
+    binding: bindings.length ? createHash("sha256").update(JSON.stringify(bindings)).digest("hex") : null };
 }
 
 export async function accountStatus(root, platforms = SUPPORTED_PLATFORMS) {
@@ -71,9 +84,9 @@ export async function accountStatus(root, platforms = SUPPORTED_PLATFORMS) {
       if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
     }
     const snapshot = publicAccount(value, platform);
-    const states = await Promise.all((await profileDirectories(root, platform)).map(profile => cookieState(profile, platform)));
+    const { states, binding } = await credentialEvidence(root, platform);
     if (states.includes("saved_session")) {
-      snapshot.status = snapshot.status === "verified" ? "verified" : "saved_session";
+      snapshot.status = snapshot.status === "verified" && binding && value?.credential_binding === binding ? "verified" : "saved_session";
       snapshot.session_present = true;
     } else if (states.includes("expired")) {
       snapshot.status = "expired";

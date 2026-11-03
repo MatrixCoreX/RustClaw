@@ -18,6 +18,8 @@ import {
   type MultimodalKey,
 } from "../lib/model-config";
 import { formatUiError } from "../lib/ui-error";
+import { readLlmConfig } from "../lib/llm-config-response";
+import { readJsonApiResponse } from "../lib/api-response";
 import type {
   ApiResponse,
   LlmConfigResponse,
@@ -128,18 +130,19 @@ export function useModelConfigRuntime({
     setLlmConfigError(null);
     try {
       const res = await apiFetch(`/v1/llm/config`);
-      const body = (await res.json()) as ApiResponse<LlmConfigResponse>;
-      if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `llm_config_fetch_http_${res.status}`);
+      const body = await readJsonApiResponse<ApiResponse<unknown> | null>(res);
+      if (!res.ok || !body?.ok || !body.data) {
+        throw new Error(typeof body?.error === "string" ? body.error : `llm_config_fetch_http_${res.status}`);
       }
-      setLlmConfigData(body.data);
+      const config = readLlmConfig(body.data);
       const draft = initialLlmDraft({
-        selectedVendor: body.data.selected_vendor || "",
-        selectedModel: body.data.selected_model || "",
-        vendors: body.data.vendors,
-        hostedRelay: body.data.hosted_relay,
-        runtime: body.data.runtime,
+        selectedVendor: config.selected_vendor,
+        selectedModel: config.selected_model,
+        vendors: config.vendors,
+        hostedRelay: config.hosted_relay,
+        runtime: config.runtime,
       });
+      setLlmConfigData(config);
       setLlmDraftVendor(draft.vendor);
       setLlmDraftModel(draft.model);
       setLlmDraftBaseUrl(draft.baseUrl);

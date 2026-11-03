@@ -52,3 +52,36 @@ test("all direct vendors send draft keys for testing and saving, never reuse a k
     } finally { await act(async () => { renderer.unmount(); }); }
   }
 });
+
+test("malformed successful model responses never replace valid state or break rendering", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const valid: LlmConfigResponse = { config_path: "configs/config.toml", selected_vendor: "custom",
+    selected_model: "fixture-model", vendors: [{ name: "custom", default_model: "fixture-model",
+      models: ["fixture-model"], base_url: "https://provider.example/v1", api_key_configured: true }], restart_required: false };
+  let payload: unknown = {};
+  let runtime: ReturnType<typeof useModelConfigRuntime>;
+  const apiFetch = async () => new Response(JSON.stringify({ ok: true, data: payload }));
+  function Probe() { runtime = useModelConfigRuntime({ apiFetch, t }); return null; }
+  let renderer: ReactTestRenderer;
+  await act(async () => { renderer = create(React.createElement(Probe)); });
+  try {
+    await act(async () => { await runtime.fetchLlmConfig(); });
+    assert.equal(runtime!.llmConfigData, null);
+    assert.ok(runtime!.llmConfigError);
+    payload = valid;
+    await act(async () => { await runtime.fetchLlmConfig(); });
+    const accepted = runtime!.llmConfigData;
+    await act(async () => { runtime.setLlmDraftModel("unsaved-user-draft"); });
+    for (payload of [{}, null, [], { ...valid, vendors: null }, { ...valid, vendors: [null] },
+      { ...valid, vendors: [{ ...valid.vendors[0], models: {} }] }, { ...valid, hosted_relay: {} }, { ...valid, runtime: 1 }]) {
+      await act(async () => { await runtime.fetchLlmConfig(); });
+      assert.equal(runtime!.llmConfigData, accepted);
+      assert.equal(runtime!.llmDraftModel, "unsaved-user-draft");
+      assert.ok(runtime!.llmConfigError);
+      assert.equal(runtime!.llmConfigLoading, false);
+    }
+    payload = valid;
+    await act(async () => { await runtime.fetchLlmConfig(); });
+    assert.equal(runtime!.llmConfigError, null);
+  } finally { await act(async () => { renderer.unmount(); }); }
+});

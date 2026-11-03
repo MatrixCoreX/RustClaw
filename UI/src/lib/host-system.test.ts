@@ -6,6 +6,7 @@ import {
   hostSummaryIsPartial,
   hostSummaryIsStale,
   hostSystemTitle,
+  hostStorageNeedsAttention,
 } from "./host-system.ts";
 import type { HostSystemSummary } from "../types/api.ts";
 
@@ -92,4 +93,12 @@ test("detects stale and partial summaries", () => {
     }),
     true,
   );
+});
+
+test("low storage is a display hint, and invalid measurements are not usable percentages", () => {
+  assert.equal(hostStorageNeedsAttention({ total_bytes: 100_000, available_bytes: 1_000, available_ratio: 0.01 }), true);
+  assert.equal(hostStorageNeedsAttention(summary.storage), false);
+  assert.equal(hostStorageNeedsAttention({ total_bytes: null, available_bytes: null, available_ratio: null }), false);
+  assert.equal(hostCapacityUsedPercent({ total_bytes: Number.NaN, available_bytes: 1, available_ratio: null }), null);
+  assert.equal(hostCapacityUsedPercent({ total_bytes: 100, available_bytes: Number.NaN, available_ratio: null }), null);
 });

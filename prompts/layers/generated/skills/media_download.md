@@ -64,7 +64,7 @@ Return supported actions, platforms, security defaults, and optional dependencie
 
 ### `account_status`
 
-Read this skill's public platform-account snapshots without opening a browser. Optional `platform`; omission/`auto` selects all supported platforms. Saved credentials are not proof of a currently valid login. Return `extra.accounts` with optional verified self-account names, never post-author names or credentials.
+Read public snapshots without opening a browser. Optional `platform`; omission/`auto` selects all platforms. Saved credentials do not prove server-side login validity. Changed or unbound credentials invalidate old names; unchanged credentials retain the original check time. Return only public `extra.accounts`, never post-author identities, credentials or private binding digests.
 
 ### `account_logout`
 

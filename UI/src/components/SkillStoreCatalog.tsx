@@ -141,11 +141,14 @@ export function DependencyList({
       {values.map((dependency) => {
         const status = statuses.get(dependency);
         const installed = status?.installed === true;
+        const notApplicable = status?.applicable === false && status.status_code === "not_applicable";
         const unknown = Boolean(check?.data) && (!status || status.status_code === "unknown");
         const statusLabel = check?.loading
           ? t("检查中", "Checking")
           : check?.error || unknown
             ? t("无法确认", "Unknown")
+            : notApplicable
+              ? t("此平台无需安装", "Not needed on this platform")
             : installed
               ? t("已正确安装", "Installed correctly")
               : check?.data
@@ -159,7 +162,7 @@ export function DependencyList({
           >
             {check?.loading ? (
               <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-cyan-200" aria-hidden="true" />
-            ) : installed ? (
+            ) : installed || notApplicable ? (
               <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-300" aria-hidden="true" />
             ) : (
               <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" aria-hidden="true" />
@@ -168,7 +171,7 @@ export function DependencyList({
               {installDependencyLabel(dependency, labels, t)}
               {status?.version ? <span className="ml-1 text-white/40">· {status.version}</span> : null}
             </span>
-            <span className={installed ? "shrink-0 text-emerald-200/80" : "shrink-0 text-amber-200/80"}>
+            <span className={installed || notApplicable ? "shrink-0 text-emerald-200/80" : "shrink-0 text-amber-200/80"}>
               {statusLabel}
             </span>
           </li>
@@ -292,6 +295,9 @@ export function SkillStoreCatalog({
     const runtimeIssue = skillRuntimeIssue(item.skill, lang);
     const actionRunning = actionName === item.name;
     const repairRequired = skillStoreInstallState(item) === "repair_required";
+    const resourceCheck = dependencyChecks[item.name];
+    const missingResources = resourceCheck?.data?.dependencies.some(dependency =>
+      dependency.kind === "runtime_asset" && dependency.applicable && !dependency.installed && dependency.status_code === "missing");
     return (
       <article key={item.name} className="flex min-h-56 flex-col border border-white/10 bg-[#12151f] p-4 shadow-sm rounded-lg">
         <div className="flex items-start justify-between gap-3">
@@ -402,6 +408,32 @@ export function SkillStoreCatalog({
             <p className="mt-2 text-amber-200/80">{dependencyChecks[item.name].error}</p>
           ) : null}
         </details>
+        {item.installed && Boolean(item.runtime_assets?.length) ? (
+          <div className="mt-3 rounded border border-white/10 bg-white/[0.03] p-3 text-xs">
+            <p className="leading-5 text-white/60">
+              {t("本地模型可以按需准备，打开页面不会自动下载。", "Local models can be prepared when needed. Opening this page does not download them.")}
+            </p>
+            <button type="button" onClick={() => void checkDependencies(item.name)}
+              disabled={mutationRunning || resourceCheck?.loading}
+              className="mt-2 rounded border border-white/20 px-3 py-2 text-white/80 disabled:opacity-50">
+              {resourceCheck?.loading ? t("正在检查…", "Checking…") : t("检查本地资源", "Check local resources")}
+            </button>
+            {missingResources ? (
+              <>
+                <p className="mt-2 leading-5 text-amber-200/85">
+                  {t("部分本地模型缺失。修复会保留配置、补齐资源并启用技能；联网前仍需你确认，不会切换转写服务商。", "Some local models are missing. Repair keeps configuration, prepares resources and enables the skill. Network access still requires confirmation; the transcription provider is not changed.")}
+                </p>
+                <button type="button" onClick={() => void onInstall(item.name)} disabled={mutationRunning}
+                  className="theme-accent-btn mt-2 px-3 py-2 disabled:opacity-50">
+                  {t("修复安装并准备资源", "Repair and prepare resources")}
+                </button>
+              </>
+            ) : resourceCheck?.data && !resourceCheck.error && resourceCheck.data.all_installed ? (
+              <p className="mt-2 text-emerald-200/80">{t("本地资源已就绪。", "Local resources are ready.")}</p>
+            ) : null}
+            {resourceCheck?.error ? <p role="alert" className="mt-2 text-amber-200/85">{resourceCheck.error}</p> : null}
+          </div>
+        ) : null}
         {!item.installed && item.build_network_policy === "approval_required" ? (
           <p className="mt-3 text-xs leading-5 text-amber-200/85">
             {t(

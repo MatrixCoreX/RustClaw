@@ -49,10 +49,11 @@ class AccountSessionTest(unittest.TestCase):
         if cookie:
             file = profile / "Default/Network/Cookies"
             file.parent.mkdir(parents=True)
-            with sqlite3.connect(file) as database:
+            with closing(sqlite3.connect(file)) as database:
                 database.execute("CREATE TABLE cookies(host_key,name,expires_utc,value,encrypted_value)")
                 expiry = int((time.time() + 11644473600 + (-3600 if expired else 3600)) * 1e6)
                 database.execute("INSERT INTO cookies VALUES (?,?,?,?,?)", (".douyin.com", "sessionid", expiry, "fixture-cookie-value", b""))
+                database.commit()
         return profile
 
     def test_saved_session_is_not_verified_identity_and_secrets_never_escape(self):

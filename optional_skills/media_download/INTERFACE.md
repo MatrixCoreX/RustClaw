@@ -26,7 +26,7 @@ remain technician overrides. Linux/Pi browser discovery is unchanged.
 
 ## Platform Accounts
 
-- `account_status` accepts optional `platform` (omitted/`auto`: all supported platforms). It reads only this skill's private account metadata and profiles; it never opens a browser or prompts for login.
+- `account_status` accepts optional `platform` (omitted/`auto`: all supported platforms). It reads private local evidence without opening a browser. Verified names are bound to current credentials; changed or unbound credentials become `saved_session` without the old name. Refresh never renews `checked_at` or exposes private credential digests, and does not prove the server still accepts a session.
 - `account_logout` requires one explicit `platform` and `confirm=true`. It clears that platform's skill-owned browser session, including ordinary/public and macOS profile variants, and any authentication vault explicitly granted in the current context. Other platforms, other skills, browser-environment settings, media files and task history are preserved. This signs out locally; it does not revoke sessions on other devices.
 - Manifest `aipp.account_controls` uses the admin-authenticated resolver/verifier/policy/task path; queued is not complete. Active downloads, profile leases or browsers return `account_session_busy`, never cancellation or termination. Shared download leases remain parallel; logout's exclusive lease also covers non-browser cookie reuse and browser startup.
 - `extra.accounts[]` contains only versioned public snapshots: `platform`, `status`, `display_name`, `checked_at` (Unix seconds), `session_present`. Status is `verified` (recent first-party self identity), `saved_session` (credentials saved; identity not verified), `expired`, `signed_out`, or `unknown`. Never infer the logged-in account from a post author, a cookie file's existence or natural-language output.
@@ -86,7 +86,7 @@ Return supported actions, platforms, security defaults, and optional dependencie
 
 ### `account_status`
 
-Read this skill's public platform-account snapshots without opening a browser. Optional `platform`; omission/`auto` selects all supported platforms. Saved credentials are not proof of a currently valid login. Return `extra.accounts` with optional verified self-account names, never post-author names or credentials.
+Read public snapshots without opening a browser. Optional `platform`; omission/`auto` selects all platforms. Saved credentials do not prove server-side login validity. Changed or unbound credentials invalidate old names; unchanged credentials retain the original check time. Return only public `extra.accounts`, never post-author identities, credentials or private binding digests.
 
 ### `account_logout`
 

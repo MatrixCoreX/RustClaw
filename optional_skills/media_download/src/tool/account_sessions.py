@@ -74,9 +74,11 @@ def profile_directories(root: Path, platform: str) -> list[Path]:
     return result
 
 
-def cookie_state(profile: Path, platform: str) -> str:
+def cookie_evidence(profile: Path, platform: str) -> tuple[str, str | None]:
+    """Private credential evidence. Digests never enter a public snapshot."""
     domain, names = DOMAINS[platform]
     expired = False
+    credentials = []
     for file in (profile / "Default/Network/Cookies", profile / "Default/Cookies"):
         try:
             for part in (profile / "Default", file.parent, file):
@@ -87,7 +89,9 @@ def cookie_state(profile: Path, platform: str) -> str:
             with closing(sqlite3.connect(file.as_uri() + "?mode=ro", uri=True, timeout=0.2)) as database:
                 database.execute("PRAGMA query_only=ON")
                 rows = database.execute(
-                    "SELECT host_key,name,expires_utc,length(value),length(encrypted_value) "
+                    "SELECT host_key,name,expires_utc,"
+                    "CASE WHEN length(value)<=16384 THEN value ELSE NULL END,"
+                    "CASE WHEN length(encrypted_value)<=16384 THEN encrypted_value ELSE NULL END "
                     f"FROM cookies WHERE name IN ({','.join('?' for _ in names)})", tuple(sorted(names)),
                 ).fetchall()
             now = time.time_ns() // 1000 + 11644473600000000
@@ -95,12 +99,32 @@ def cookie_state(profile: Path, platform: str) -> str:
                 host = str(host).lstrip(".")
                 if not (host == domain or host.endswith("." + domain)) or name not in names or not (plain or encrypted):
                     continue
-                if not expires or expires > now:
-                    return "saved_session"
-                expired = True
+                if expires and expires <= now:
+                    expired = True
+                    continue
+                evidence = hashlib.sha256()
+                evidence.update(json.dumps([str(file.relative_to(profile)), host, name, str(expires), plain],
+                                           ensure_ascii=False).encode())
+                evidence.update(bytes(encrypted or b""))
+                credentials.append(evidence.hexdigest())
         except (sqlite3.Error, OSError, ValueError, TypeError):
             continue
-    return "expired" if expired else "unknown"
+    if credentials:
+        binding = hashlib.sha256(json.dumps(sorted(credentials)).encode()).hexdigest()
+        return "saved_session", binding
+    return ("expired" if expired else "unknown"), None
+
+
+def cookie_state(profile: Path, platform: str) -> str:
+    return cookie_evidence(profile, platform)[0]
+
+
+def credential_evidence(root: Path, platform: str) -> tuple[list[str], str | None]:
+    rows = [(str(profile.relative_to(root)), *cookie_evidence(profile, platform))
+            for profile in profile_directories(root, platform)]
+    bindings = sorted((profile, binding) for profile, _, binding in rows if binding)
+    digest = hashlib.sha256(json.dumps(bindings).encode()).hexdigest() if bindings else None
+    return [state for _, state, _ in rows], digest
 
 
 def write_snapshot(root: Path, snapshot: dict) -> None:
@@ -113,8 +137,14 @@ def write_snapshot(root: Path, snapshot: dict) -> None:
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     temporary = directory / (".account-" + uuid.uuid4().hex)
     try:
-        with temporary.open("x", encoding="utf-8") as stream:
-            json.dump(public_snapshot(snapshot, platform), stream, ensure_ascii=False)
+        stored = public_snapshot(snapshot, platform)
+        if stored["status"] == "verified":
+            _, binding = credential_evidence(root, platform)
+            if binding:
+                stored["credential_binding"] = binding
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(stored, stream, ensure_ascii=False)
         temporary.chmod(0o600)
         temporary.replace(directory / (platform + ".json"))
     finally:
@@ -147,11 +177,12 @@ def account_status(root: Path, platforms) -> list[dict]:
             pass
         except (OSError, ValueError):
             value = {}
-        snapshot = public_snapshot(value if isinstance(value, dict) else {}, platform)
-        states = [cookie_state(profile, platform) for profile in profile_directories(root, platform)]
+        value = value if isinstance(value, dict) else {}
+        snapshot = public_snapshot(value, platform)
+        states, binding = credential_evidence(root, platform)
         if "saved_session" in states:
-            if snapshot["status"] != "verified":
-                snapshot["status"] = "saved_session"
+            if not binding or value.get("credential_binding") != binding or snapshot["status"] != "verified":
+                snapshot.update(status="saved_session", display_name=None)
             snapshot["session_present"] = True
         elif "expired" in states:
             snapshot.update(status="expired", display_name=None, session_present=False)

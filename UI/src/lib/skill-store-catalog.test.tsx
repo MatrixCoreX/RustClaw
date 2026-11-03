@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import React from "react";
+import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { DependencyList, SkillStoreCatalog } from "../components/SkillStoreCatalog";
@@ -67,6 +69,44 @@ test("makes the absence of extra dependencies explicit", () => {
 
   assert.match(markup, /无需额外安装/);
   assert.match(markup, /无需额外下载/);
+});
+
+test("installed model resources are checked and repaired only after explicit user actions", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const item = storeItem({ installed: true, name: "fixture-local-recognition" });
+  let checks = 0;
+  let installs = 0;
+  let renderer: ReactTestRenderer;
+  await act(async () => { renderer = create(<SkillStoreCatalog lang="zh" t={zh => zh}
+    data={{ items: [item], uninstalled_skill_names: [] }} loading={false} error={null}
+    message={null} actionName={null} onRefresh={() => undefined}
+    onCheckDependencies={async name => {
+      checks += 1;
+      return { schema_version: 1, skill_name: name, checked_at_unix: 1, all_installed: false,
+        dependencies: [{ id: "modelscope_sensevoice_small", kind: "runtime_asset", applicable: true, installed: false, status_code: "missing" }] };
+    }} onInstall={() => { installs += 1; }} onRemove={() => undefined} onCancel={() => undefined} />); });
+  try {
+    assert.equal(checks, 0, "opening the store never opens browsers or prepares models");
+    assert.equal(installs, 0);
+    assert.doesNotMatch(JSON.stringify(renderer!.toJSON()), /修复安装并准备资源/);
+    const check = renderer!.root.findAllByType("button").find(node => node.children.includes("检查本地资源"));
+    await act(async () => { check!.props.onClick(); });
+    assert.equal(checks, 1);
+    assert.equal(installs, 0, "a missing model is not download permission");
+    const repair = renderer!.root.findAllByType("button").find(node => node.children.includes("修复安装并准备资源"));
+    assert.ok(repair);
+    await act(async () => { repair!.props.onClick(); });
+    assert.equal(installs, 1, "reuse the existing host installation/consent/progress transaction");
+  } finally { await act(async () => { renderer!.unmount(); }); }
+});
+
+test("unsupported target resources are not mislabeled as missing models", () => {
+  const markup = renderToStaticMarkup(<DependencyList values={["fixture-model"]} kind="runtime_asset"
+    labels={{}} emptyLabel="none" t={zh => zh} check={{ loading: false, error: null,
+      data: { schema_version: 1, skill_name: "fixture", checked_at_unix: 1, all_installed: true,
+        dependencies: [{ id: "fixture-model", kind: "runtime_asset", applicable: false, installed: false, status_code: "not_applicable" }] } }} />);
+  assert.match(markup, /此平台无需安装/);
+  assert.doesNotMatch(markup, />未安装</);
 });
 
 test("renders server-owned catalog pagination without materializing every card", () => {

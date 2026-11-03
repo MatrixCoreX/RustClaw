@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConsoleLayout } from "./components/ConsoleLayout";
+import { RenderErrorBoundary } from "./components/RenderErrorBoundary";
 import { FactoryResetModal } from "./components/FactoryResetModal";
 import { SignInPage } from "./components/SignInPage";
 import { BANCOR_CANDLE_AUTO_REFRESH_SECONDS } from "./lib/bancor-refresh";
@@ -1992,6 +1993,7 @@ export default function App() {
       onLogout={logout}
       onOpenFactoryReset={openFactoryResetDialog}
     >
+      <RenderErrorBoundary key={currentPage} t={t}>
       <Suspense
         fallback={
           <div className="flex min-h-48 items-center justify-center text-sm text-white/65">
@@ -2800,6 +2802,7 @@ export default function App() {
             />
           ) : null}
       </Suspense>
+      </RenderErrorBoundary>
     </ConsoleLayout>
   );
 }

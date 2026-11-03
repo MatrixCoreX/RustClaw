@@ -568,12 +568,14 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       const hostDependencies = item?.host_dependencies ?? [];
       const runtimeAssets = item?.runtime_assets ?? [];
       const confirmed = await showConfirm({
-        title: t("允许安装完整依赖", "Allow complete dependency installation"),
+        title: item?.installed
+          ? t("修复技能与本地资源", "Repair skill and local resources")
+          : t("允许安装完整依赖", "Allow complete dependency installation"),
         message: t(
           `${skillName} 的清单声明安装阶段需要联网。{product_name} 会安装经过宿主白名单确认的系统依赖${hostDependencies.length ? `（${hostDependencies.join("、")}）` : ""}、技能私有依赖${runtimeAssets.length ? `和 ${runtimeAssets.length} 个本地模型资源` : ""}；系统工具在卸载技能后仍会保留，私有资源默认随技能数据保留，运行时联网权限仍单独受控。是否继续？`,
           `${skillName} declares that installation needs network access. {product_name} will install host-approved system dependencies${hostDependencies.length ? ` (${hostDependencies.join(", ")})` : ""}, private skill dependencies${runtimeAssets.length ? `, and ${runtimeAssets.length} local model resource${runtimeAssets.length === 1 ? "" : "s"}` : ""}. Shared system tools remain after skill removal, private resources follow the skill-data retention choice, and runtime network access stays separately controlled. Continue?`,
         ),
-        confirmLabel: t("允许并安装", "Allow and install"),
+        confirmLabel: item?.installed ? t("允许修复并启用", "Allow repair and enable") : t("允许并安装", "Allow and install"),
       });
       if (!confirmed) return;
     }

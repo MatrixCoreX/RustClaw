@@ -259,6 +259,7 @@ jobs:
           python3 scripts/check_on_demand_skill_builds.py
           python3 scripts/check_cross_platform_contracts.py
           python3 -m unittest discover -s scripts/tests -p 'test_release_native_libraries.py'
+          python3 -m unittest discover -s scripts/tests -p 'test_clean_dev_artifacts.py'
           python3 -m unittest discover -s scripts/tests -p 'test_release_managed_files.py'
 
       - name: Test AiAPP private session fixtures
