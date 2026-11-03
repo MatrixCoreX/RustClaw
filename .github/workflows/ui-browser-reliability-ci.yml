@@ -61,7 +61,9 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq ripgrep
       - name: Check browser preparation boundaries
-        run: python3 -m unittest discover -s scripts/tests -p test_prepare_macos_ci_browser.py
+        run: |
+          python3 -m unittest discover -s scripts/tests -p test_prepare_macos_ci_browser.py
+          python3 scripts/nl_tests/macos_runner_workflow_tests.py
       - name: Install macOS validation tools
         if: ${{ runner.os == 'macOS' }}
         run: |
@@ -83,6 +85,18 @@ jobs:
           npm run lint --prefix UI
           npm run build --prefix UI
           bash scripts/product_identity_tests.sh --with-ui
+      - name: Stage the production web UI artifact
+        if: ${{ runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_root="$RUNNER_TEMP/web-ui-artifact"
+          archive_name="web-ui-${GITHUB_SHA}.tar.gz"
+          mkdir -p "$artifact_root"
+          node UI/build-fingerprint.mjs UI configs/product_identity.toml > UI/dist/.agent-ui-build-fingerprint
+          printf '%s\n' "$GITHUB_SHA" > UI/dist/.agent-ui-source-commit
+          tar -czf "$artifact_root/$archive_name" -C UI dist
+          (cd "$artifact_root" && sha256sum "$archive_name" > "$archive_name.sha256")
       - name: Verify shared desktop UI transport and build
         run: |
           npm ci --ignore-scripts --prefix desktop
@@ -122,6 +136,14 @@ jobs:
             fi
           done
           exit "$failed"
+      - name: Upload the verified production web UI
+        if: ${{ runner.os == 'Linux' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verified-web-ui-${{ github.sha }}
+          path: ${{ runner.temp }}/web-ui-artifact/*
+          if-no-files-found: error
+          retention-days: 7
       - name: Retain every stress result
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

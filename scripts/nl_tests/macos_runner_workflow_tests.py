@@ -76,6 +76,25 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
         prepare = script.index("python3 scripts/prepare_macos_ci_browser.py")
         self.assertLess(prepare, script.index('executable="$(bash scripts/macos-system-browser.sh --resolve-executable)"'))
 
+    def test_deployable_ui_is_captured_before_desktop_build_and_uploaded_only_after_checks(self):
+        steps = load("ui-browser-reliability-ci.yml")["jobs"]["ui-and-browser"]["steps"]
+        named = {step.get("name"): step for step in steps}
+        stage = named["Stage the production web UI artifact"]
+        upload = named["Upload the verified production web UI"]
+        self.assertLess(steps.index(named["Test, typecheck and build UI"]), steps.index(stage))
+        self.assertLess(steps.index(stage), steps.index(named["Verify shared desktop UI transport and build"]))
+        self.assertLess(steps.index(named["Stress QR scope commits without provider calls"]), steps.index(upload))
+        self.assertEqual(stage["if"], "${{ runner.os == 'Linux' }}")
+        self.assertEqual(upload["if"], stage["if"])
+        self.assertIn("node UI/build-fingerprint.mjs UI configs/product_identity.toml", stage["run"])
+        self.assertIn('"$GITHUB_SHA" > UI/dist/.agent-ui-source-commit', stage["run"])
+        self.assertIn('-C UI dist', stage["run"])
+        self.assertIn('sha256sum "$archive_name"', stage["run"])
+        self.assertEqual(upload["with"]["name"], "verified-web-ui-${{ github.sha }}")
+        self.assertEqual(upload["with"]["if-no-files-found"], "error")
+        self.assertIn("python3 scripts/nl_tests/macos_runner_workflow_tests.py",
+                      named["Check browser preparation boundaries"]["run"])
+
 
 if __name__ == "__main__":
     unittest.main()
