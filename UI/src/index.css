@@ -1252,26 +1252,51 @@
   }
 
   :root[data-theme="light"] .theme-shell .text-emerald-100,
+  :root[data-theme="light"] .theme-shell .text-emerald-100\/70,
+  :root[data-theme="light"] .theme-shell .text-emerald-100\/75,
+  :root[data-theme="light"] .theme-shell .text-emerald-100\/80,
+  :root[data-theme="light"] .theme-shell .text-emerald-100\/85,
   :root[data-theme="light"] .theme-shell .text-emerald-200,
-  :root[data-theme="light"] .theme-shell .text-emerald-300 {
-    color: #177a53 !important;
+  :root[data-theme="light"] .theme-shell .text-emerald-200\/80,
+  :root[data-theme="light"] .theme-shell .text-emerald-300,
+  :root[data-theme="light"] .theme-shell .text-emerald-300\/70,
+  :root[data-theme="light"] .setup-status-done {
+    color: #115c3f !important;
   }
 
   :root[data-theme="light"] .theme-shell .text-amber-100,
+  :root[data-theme="light"] .theme-shell .text-amber-100\/65,
+  :root[data-theme="light"] .theme-shell .text-amber-100\/70,
+  :root[data-theme="light"] .theme-shell .text-amber-100\/85,
   :root[data-theme="light"] .theme-shell .text-amber-200,
-  :root[data-theme="light"] .theme-shell .text-amber-300 {
-    color: #9a5b08 !important;
+  :root[data-theme="light"] .theme-shell .text-amber-200\/75,
+  :root[data-theme="light"] .theme-shell .text-amber-200\/80,
+  :root[data-theme="light"] .theme-shell .text-amber-200\/85,
+  :root[data-theme="light"] .theme-shell .text-amber-200\/90,
+  :root[data-theme="light"] .theme-shell .text-amber-300,
+  :root[data-theme="light"] .setup-status-attention {
+    color: #804a06 !important;
   }
 
   :root[data-theme="light"] .theme-shell .text-red-100,
+  :root[data-theme="light"] .theme-shell .text-red-100\/75,
   :root[data-theme="light"] .theme-shell .text-red-200,
+  :root[data-theme="light"] .theme-shell .text-red-200\/70,
+  :root[data-theme="light"] .theme-shell .text-red-200\/80,
   :root[data-theme="light"] .theme-shell .text-red-300 {
-    color: #b04a45 !important;
+    color: #913832 !important;
   }
 
   :root[data-theme="light"] .theme-shell .text-sky-100,
-  :root[data-theme="light"] .theme-shell .text-sky-200 {
-    color: #256d9b !important;
+  :root[data-theme="light"] .theme-shell .text-sky-100\/70,
+  :root[data-theme="light"] .theme-shell .text-sky-100\/75,
+  :root[data-theme="light"] .theme-shell .text-sky-100\/80,
+  :root[data-theme="light"] .theme-shell .text-sky-100\/85,
+  :root[data-theme="light"] .theme-shell .text-sky-200,
+  :root[data-theme="light"] .theme-shell .text-sky-200\/80,
+  :root[data-theme="light"] .theme-shell .text-sky-300,
+  :root[data-theme="light"] .theme-shell .text-sky-300\/75 {
+    color: #1c557b !important;
   }
 
   :root[data-theme="light"] .theme-shell .border-emerald-500\/20,

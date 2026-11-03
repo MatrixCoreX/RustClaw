@@ -137,6 +137,10 @@ jobs:
             fi
           done
           exit "$failed"
+      - name: Verify built status contrast without changing the dark theme
+        shell: bash
+        run: |
+          UI_BROWSER_ARTIFACTS="$RUNNER_TEMP/ui-reliability/status-contrast" node UI/test/status-contrast.browser.mjs
       - name: Upload the verified production web UI
         if: ${{ runner.os == 'Linux' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
