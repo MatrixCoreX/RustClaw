@@ -94,6 +94,8 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
         self.assertEqual(upload["with"]["if-no-files-found"], "error")
         self.assertIn("python3 scripts/nl_tests/macos_runner_workflow_tests.py",
                       named["Check browser preparation boundaries"]["run"])
+        self.assertIn("--only-binary=:all: --requirement scripts/nl_tests/requirements.txt",
+                      named["Check browser preparation boundaries"]["run"])
 
 
 if __name__ == "__main__":
