@@ -328,6 +328,17 @@ test("paged restore drops completed cache copies but preserves drafts and pendin
   assert.equal(retained.activeThreadId, completed.id);
 });
 
+test("paged restore retains current-session completed turns but drops untouched cached copies", () => {
+  const completed = thread("completed-now", "succeeded");
+  const cached = thread("completed-before-refresh", "succeeded");
+  const retained = retainLocalDraftsForPagedRestore({
+    activeThreadId: completed.id,
+    threads: [completed, cached],
+  }, new Set([completed.id]));
+  assert.deepEqual(retained.threads.map((item) => item.id), [completed.id]);
+  assert.equal(retained.activeThreadId, completed.id);
+});
+
 test("refresh restore selects newest server history instead of an empty welcome thread", () => {
   const pristineWelcome: ChatThreadRecord = {
     id: "empty-refresh-thread",

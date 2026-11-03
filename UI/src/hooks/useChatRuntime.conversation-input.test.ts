@@ -451,6 +451,28 @@ test("a delayed initial history restore preserves a newly selected empty convers
   } finally { app.releaseHistoryResponse(); await app.unmount(); }
 });
 
+test("a delayed history snapshot cannot discard turns completed since the request started", async () => {
+  const app = await setup({ holdHistoryResponse: true });
+  try {
+    const firstThread = app.runtime().activeChatThreadId;
+    await app.send("A1");
+    await app.complete("task-1");
+    await act(async () => app.runtime().createNewChatThread());
+    const otherThread = app.runtime().activeChatThreadId;
+    await app.send("B1");
+    await app.complete("task-2");
+    app.releaseHistoryResponse();
+    await app.waitForHistoryRestore();
+    assert.equal(app.runtime().activeChatThreadId, otherThread);
+    assert.deepEqual(app.runtime().chatMessages.filter(item => item.role !== "system").map(item => item.text),
+      ["B1", "task-2 reply"]);
+    await act(async () => app.runtime().selectChatThread(firstThread));
+    assert.equal(app.runtime().activeChatThreadId, firstThread);
+    assert.deepEqual(app.runtime().chatMessages.filter(item => item.role !== "system").map(item => item.text),
+      ["A1", "task-1 reply"]);
+  } finally { app.releaseHistoryResponse(); await app.unmount(); }
+});
+
 test("conversation changes keep active-task inputs scoped and do not block a new conversation", async () => {
   const app = await setup();
   try {
