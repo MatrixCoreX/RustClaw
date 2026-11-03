@@ -297,7 +297,7 @@ export function SkillStoreCatalog({
     const repairRequired = skillStoreInstallState(item) === "repair_required";
     const resourceCheck = dependencyChecks[item.name];
     const missingResources = resourceCheck?.data?.dependencies.some(dependency =>
-      dependency.kind === "runtime_asset" && dependency.applicable && !dependency.installed && dependency.status_code === "missing");
+      dependency.kind === "runtime_asset" && dependency.applicable !== false && !dependency.installed && dependency.status_code === "missing");
     return (
       <article key={item.name} className="flex min-h-56 flex-col border border-white/10 bg-[#12151f] p-4 shadow-sm rounded-lg">
         <div className="flex items-start justify-between gap-3">

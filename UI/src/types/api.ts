@@ -804,6 +804,7 @@ export interface SkillStoreResponse {
 }
 
 export interface SkillStoreDependencyStatus {
+  applicable?: boolean;
   id: string;
   kind: "host" | "runtime_asset";
   installed: boolean;
