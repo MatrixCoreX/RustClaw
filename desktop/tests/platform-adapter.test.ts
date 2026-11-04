@@ -72,3 +72,22 @@ test('AiAPP downloads keep native delivery while previews keep the shared endpoi
   assert.ok(viewerOutput.includes('if (mode === "single") { await desktopDownload(image.downloadUrl, image.filename); setDownloadState("idle"); return; }'));
   assert.ok(viewerOutput.includes('await downloadAippGallery(gallery, apiFetchRef.current, controller.signal, setCompleted)'));
 });
+
+test('chat media keeps the native authenticated bridge ahead of browser-session streaming', () => {
+  const transform = sharedUiAdapter(root).transform as (source: string, id: string) => {code: string} | undefined;
+  const filename = path.resolve(root, '../UI/src/components/ChatPage.tsx');
+  const source = fs.readFileSync(filename, 'utf8');
+  for (const id of [filename, filename.replaceAll('\\', '/')]) for (const newline of ['\n', '\r\n']) {
+    const output = transform(source.replaceAll(/\r?\n/g, newline), id)?.code ?? '';
+    assert.ok(output.includes('await desktopDownload(artifact.download_url, artifact.filename);'));
+    const native = output.indexOf('if (previewKind === "video" || previewKind === "audio")');
+    const browser = output.indexOf('const source = previewKind === "video"');
+    assert.ok(native >= 0 && browser > native);
+    const branch = output.slice(native, browser);
+    assert.ok(branch.includes('desktopMediaUrl(mediaPreviewUrl)'));
+    assert.ok(branch.includes('if (controller.signal.aborted) { void desktopCloseMedia(url); return; }'));
+    assert.ok(branch.includes('return () => { controller.abort(); if (mediaUrl) void desktopCloseMedia(mediaUrl); };'));
+    assert.ok(output.includes('preload="metadata"'));
+  }
+  assert.throws(() => transform(source.replace('const source = previewKind === "video"', 'const changed = previewKind === "video"'), filename), /Shared UI contract changed/);
+});
