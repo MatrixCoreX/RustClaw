@@ -145,6 +145,8 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: read
+      id-token: write
+      attestations: write
     env:
       CARGO_BUILD_JOBS: "2"
       APP_REQUIRE_REFERENCE_ADAPTERS: "1"
@@ -211,6 +213,11 @@ jobs:
           (cd "$artifact_root/runtime-read" && sha256sum clawd source-commit verified-gates > SHA256SUMS)
           tar -czf "$artifact_root/runtime-read-${GITHUB_SHA}.tar.gz" -C "$artifact_root" runtime-read
           (cd "$artifact_root" && sha256sum "runtime-read-${GITHUB_SHA}.tar.gz" > "runtime-read-${GITHUB_SHA}.tar.gz.sha256")
+      - name: Attest the exact Linux core provenance
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-path: ${{ runner.temp }}/runtime-read-artifact/runtime-read-${{ github.sha }}.tar.gz
       - name: Preserve the exact verified Linux core artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
