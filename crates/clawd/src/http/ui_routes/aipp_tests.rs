@@ -9,6 +9,9 @@ mod activity_pages;
 #[path = "aipp_items_state_tests.rs"]
 mod items_state;
 
+#[path = "aipp_shared_query_tests.rs"]
+mod shared_query;
+
 #[tokio::test]
 async fn aipp_catalog_rejects_non_admin_users_before_reading_skill_storage() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();

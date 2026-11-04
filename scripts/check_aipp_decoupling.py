@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SKILL_ROOTS = ("crates/skills", "optional_skills", "external_skills")
 HOST_FILES = (
     "crates/clawd/src/http/ui_routes/aipp.rs",
+    "crates/clawd/src/http/ui_routes/aipp_activity_query.rs",
     "UI/src/components/AippPage.tsx",
 )
 SUPPORTED_HOST_PAIRS = {
@@ -111,6 +112,7 @@ def inspect(root: Path) -> tuple[list[str], int, int]:
 
 
 def self_test() -> int:
+    assert "crates/clawd/src/http/ui_routes/aipp_activity_query.rs" in HOST_FILES
     assert safe_skill_name("sample_app") == "sample_app"
     assert safe_skill_name("../escape") is None
     source = 'if (selectedSkill === "sample_app") return customView;'

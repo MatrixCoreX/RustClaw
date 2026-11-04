@@ -677,11 +677,6 @@ fn read_aipp_task_activity_page(
         ],
     )?;
     let sort_order = aipp_media_sort_order(query)?;
-    let (cursor_operator, order) = if sort_order == "oldest" {
-        (">", "ASC")
-    } else {
-        ("<", "DESC")
-    };
     let limit = query
         .limit
         .unwrap_or(AIPP_PAGE_SIZE)
@@ -696,83 +691,8 @@ fn read_aipp_task_activity_page(
     }
     let hidden_json = serde_json::to_string(hidden_task_ids)
         .map_err(|_| "aipp_task_activity_query_failed".to_string())?;
-    let total_item_count: u64 = db
-        .query_row(
-            &format!("SELECT COUNT(*) FROM tasks {AIPP_TASK_ACTIVITY_MATCH_SQL}"),
-            rusqlite::named_params! {
-                ":skill_name": skill_name,
-                ":cleared_through_event_ms": cleared_through_event_ms as i64,
-                ":communication_only": i64::from(communication_only),
-                ":channel": query.channel.as_deref(),
-                ":status": query.status.as_deref(),
-                ":needle": needle,
-                ":hidden_json": hidden_json.as_str(),
-            },
-            |row| row.get(0),
-        )
-        .map_err(|_| "aipp_task_activity_query_failed".to_string())?;
-    // Sort and materialize only page identities; large JSON values must not be
-    // copied into the temporary ordering table before the page limit is known.
-    let sql = format!(
-        r#"
-        WITH filtered AS MATERIALIZED (
-            SELECT tasks.rowid AS activity_sequence,
-                   tasks.task_id
-              FROM tasks
-            {AIPP_TASK_ACTIVITY_MATCH_SQL}
-               AND (:cursor IS NULL OR tasks.rowid {cursor_operator} :cursor)
-             ORDER BY tasks.rowid {order}
-             LIMIT :limit
-        ), skill_events AS (
-            SELECT task_event_stream.task_id,
-                   task_event_stream.created_at_ms,
-                   json_extract(task_event_stream.event_json, '$.payload.requested_action_ref') AS action_ref
-              FROM task_event_stream
-              JOIN filtered ON filtered.task_id = task_event_stream.task_id
-             WHERE json_extract(task_event_stream.event_json, '$.event_kind') = 'tool_finished'
-               AND json_extract(task_event_stream.event_json, '$.payload.skill') = :skill_name
-               AND COALESCE(
-                   json_extract(task_event_stream.event_json, '$.payload.requested_action_ref'),
-                   ''
-               ) != (json_extract(task_event_stream.event_json, '$.payload.skill') || '.capabilities')
-               AND task_event_stream.created_at_ms > :cleared_through_event_ms
-            UNION ALL
-            SELECT task_event_archive.task_id,
-                   task_event_archive.created_at_ms,
-                   json_extract(task_event_archive.event_json, '$.payload.requested_action_ref') AS action_ref
-              FROM task_event_archive
-              JOIN filtered ON filtered.task_id = task_event_archive.task_id
-             WHERE json_extract(task_event_archive.event_json, '$.event_kind') = 'tool_finished'
-               AND json_extract(task_event_archive.event_json, '$.payload.skill') = :skill_name
-               AND COALESCE(
-                   json_extract(task_event_archive.event_json, '$.payload.requested_action_ref'),
-                   ''
-               ) != (json_extract(task_event_archive.event_json, '$.payload.skill') || '.capabilities')
-               AND task_event_archive.created_at_ms > :cleared_through_event_ms
-        ), activity AS (
-            SELECT task_id,
-                   MAX(created_at_ms) AS event_at_ms,
-                   GROUP_CONCAT(DISTINCT action_ref) AS action_refs
-              FROM skill_events
-             GROUP BY task_id
-        )
-        SELECT filtered.activity_sequence,
-               filtered.task_id,
-               page_tasks.channel,
-               page_tasks.status,
-               page_tasks.payload_json,
-               page_tasks.result_json,
-               page_tasks.error_text,
-               page_tasks.created_at,
-               page_tasks.updated_at,
-               activity.event_at_ms,
-               activity.action_refs
-          FROM filtered
-          JOIN tasks AS page_tasks ON page_tasks.rowid = filtered.activity_sequence
-          JOIN activity ON activity.task_id = filtered.task_id
-         ORDER BY activity_sequence {order}
-        "#
-    );
+    // Share narrow identities between the total and page in one database snapshot.
+    let sql = aipp_task_activity_page_sql(sort_order == "oldest");
     let mut statement = db
         .prepare(&sql)
         .map_err(|_| "aipp_task_activity_query_failed".to_string())?;
@@ -790,11 +710,19 @@ fn read_aipp_task_activity_page(
             ":limit": requested,
         })
         .map_err(|_| "aipp_task_activity_query_failed".to_string())?;
+    let mut total_item_count = 0_u64;
     let mut items = Vec::with_capacity(limit + 1);
     while let Some(row) = rows
         .next()
         .map_err(|_| "aipp_task_activity_query_failed".to_string())?
     {
+        total_item_count = row
+            .get("total_item_count")
+            .map_err(|_| "aipp_task_activity_query_failed".to_string())?;
+        // A left-joined metadata row preserves the total even for an empty page.
+        if matches!(row.get_ref(0), Ok(rusqlite::types::ValueRef::Null)) {
+            continue;
+        }
         items.push(task_activity_item(
             row.get::<_, u64>(0).unwrap_or_default(),
             &row.get::<_, String>(1).unwrap_or_default(),

@@ -90,6 +90,8 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
             self.assertIn(f"cargo test --locked -p clawd --bin clawd {selector}", gate["run"])
         self.assertNotIn("--bin clawd task_event_archive", gate["run"])
         self.assertIn("ripgrep", named["Prepare native build and sandbox dependencies"]["run"])
+        self.assertIn("python3 scripts/check_aipp_decoupling.py --self-test", gate["run"])
+        self.assertIn("python3 scripts/check_aipp_decoupling.py\n", gate["run"])
         build = named["Build the exact verified Linux core without publishing a release"]
         attest = named["Attest the exact Linux core provenance"]
         upload = named["Preserve the exact verified Linux core artifact"]
@@ -100,6 +102,7 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
         self.assertIn("cargo build --locked --release -p clawd --bin clawd", build["run"])
         self.assertIn("$GITHUB_SHA", build["run"])
         self.assertIn("source-commit", build["run"])
+        self.assertIn("aipp_decoupling", build["run"])
         self.assertIn("attest-build-provenance@", attest["uses"])
         self.assertIn("${{ github.sha }}", upload["with"]["name"])
         self.assertEqual(runtime["permissions"]["id-token"], "write")

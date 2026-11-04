@@ -240,6 +240,8 @@ jobs:
           python3 scripts/check_product_identity_coupling.py
           python3 scripts/check_skill_storage_ownership.py --self-test
           python3 scripts/check_skill_storage_ownership.py
+          python3 scripts/check_aipp_decoupling.py --self-test
+          python3 scripts/check_aipp_decoupling.py
           python3 scripts/check_historical_hardcoded_language.py --fail-on-runtime --fail-on-ui-visible
           python3 scripts/check_task_lifecycle_contracts.py
           cargo test --locked -p clawd --bin clawd task_event_transport -- --test-threads=1
@@ -257,7 +259,7 @@ jobs:
           mkdir -p "$artifact_root/runtime-read"
           install -m 755 target/release/clawd "$artifact_root/runtime-read/clawd"
           printf '%s\n' "$GITHUB_SHA" > "$artifact_root/runtime-read/source-commit"
-          printf '%s\n' 'task_event_transport_and_archive aipp run_skill product_identity storage_ownership cross_platform task_lifecycle' > "$artifact_root/runtime-read/verified-gates"
+          printf '%s\n' 'task_event_transport_and_archive aipp run_skill product_identity storage_ownership aipp_decoupling cross_platform task_lifecycle' > "$artifact_root/runtime-read/verified-gates"
           (cd "$artifact_root/runtime-read" && sha256sum clawd source-commit verified-gates > SHA256SUMS)
           tar -czf "$artifact_root/runtime-read-${GITHUB_SHA}.tar.gz" -C "$artifact_root" runtime-read
           (cd "$artifact_root" && sha256sum "runtime-read-${GITHUB_SHA}.tar.gz" > "runtime-read-${GITHUB_SHA}.tar.gz.sha256")

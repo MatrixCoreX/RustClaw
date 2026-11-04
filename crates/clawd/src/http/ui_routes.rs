@@ -554,6 +554,7 @@ include!("ui_routes/skill_import_config.rs");
 include!("ui_routes/skill_store_installation.rs");
 include!("ui_routes/skill_store.rs");
 include!("ui_routes/skill_store_operations.rs");
+include!("ui_routes/aipp_activity_query.rs");
 include!("ui_routes/aipp.rs");
 #[path = "ui_routes/aipp_accounts.rs"]
 mod aipp_accounts;
