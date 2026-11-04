@@ -184,6 +184,7 @@ export default function App() {
   const [authMeLoading, setAuthMeLoading] = useState(false);
   const [authMeError, setAuthMeError] = useState<string | null>(null);
   const authFlowEpochRef = useRef(0);
+  const webdRestoreAttemptRef = useRef<string | null>(null);
   const logoutPendingRef = useRef(false);
   const sharedApiReadsRef = useRef(new Map<string, Promise<Response>>());
   const [pollingSeconds, setPollingSeconds] = useState(() => {
@@ -1113,20 +1114,20 @@ export default function App() {
       window.localStorage.setItem(STORAGE_KEYS.authMode, "webd");
       setUiAuthReady(true);
       setAuthMeError(null);
+      webdRestoreAttemptRef.current = JSON.stringify([webdBase, authEpoch]);
       const meUrl = `${webdBase}/v1/auth/me`;
       failingUrl = meUrl;
       const meRes = await runtimeApiFetch(meUrl, { credentials: "include" });
+      const identityExpired = await responseIndicatesExpiredAuthentication(meRes);
       if (authEpoch !== authFlowEpochRef.current) return;
       const meBody = (await meRes.json()) as ApiResponse<AuthIdentityResponse>;
       if (authEpoch !== authFlowEpochRef.current) return;
       if (!meRes.ok || !meBody.ok || !meBody.data) {
-        setUiAuthReady(false);
-        setAuthMode(null);
-        window.localStorage.removeItem(STORAGE_KEYS.authMode);
-        setUiAuthError(
-          t("登录成功但无法获取身份信息", "Signed in but failed to load profile"),
-        );
-        return;
+        if (identityExpired) {
+          setAuthMode(null);
+          window.localStorage.removeItem(STORAGE_KEYS.authMode);
+        }
+        throw new Error(formatAuthenticationError(meBody.error, meRes.ok ? 502 : meRes.status, t));
       }
       applyIdentity(meBody.data);
     } catch (err) {
@@ -1508,14 +1509,20 @@ export default function App() {
       if (uiAuthLoading) return;
       if (uiAuthReady && authIdentity) return;
       const authEpoch = authFlowEpochRef.current;
+      const restoreAttempt = JSON.stringify([apiBase, authEpoch]);
+      if (webdRestoreAttemptRef.current === restoreAttempt) return;
+      webdRestoreAttemptRef.current = restoreAttempt;
       void (async () => {
         setUiAuthLoading(true);
         setUiAuthError(null);
+        let expired = false;
+        let failingUrl = `${apiBase.replace(/\/$/, "")}/webd/session`;
         try {
-          const sessionUrl = `${apiBase.replace(/\/$/, "")}/webd/session`;
-          const sessionRes = await runtimeApiFetch(sessionUrl, { credentials: "include" });
+          const sessionRes = await runtimeApiFetch(failingUrl, { credentials: "include" });
+          const sessionExpired = await responseIndicatesExpiredAuthentication(sessionRes);
           const sessionBody = (await sessionRes.json()) as {
             ok?: boolean;
+            error?: string;
             data?: {
               logged_in?: boolean;
               csrf_token?: string | null;
@@ -1525,30 +1532,30 @@ export default function App() {
           if (authEpoch !== authFlowEpochRef.current) return;
           const csrfToken = normalizeWebdCsrfToken(sessionBody.data?.csrf_token);
           if (!sessionRes.ok || !sessionBody.ok || !sessionBody.data?.logged_in || !csrfToken) {
-            throw new Error("webd_session_invalid");
+            if (sessionExpired || (sessionRes.ok && sessionBody.ok && sessionBody.data?.logged_in === false)) {
+              expired = true;
+              throw new Error(t("Web 会话已失效，请重新登录", "Web session expired; please sign in again."));
+            }
+            throw new Error(formatAuthenticationError(sessionBody.error, sessionRes.ok ? 502 : sessionRes.status, t));
           }
           setWebdCsrfToken(csrfToken);
           if (typeof sessionBody.data?.nni_navigation_visible === "boolean") {
             setNniNavigationVisible(sessionBody.data.nni_navigation_visible);
           }
           const targetUrl = `${apiBase.replace(/\/$/, "")}/v1/auth/me`;
+          failingUrl = targetUrl;
           const res = await runtimeApiFetch(targetUrl, { credentials: "include" });
+          const identityExpired = await responseIndicatesExpiredAuthentication(res);
           if (authEpoch !== authFlowEpochRef.current) return;
           const body = (await res.json()) as ApiResponse<AuthIdentityResponse>;
           if (authEpoch !== authFlowEpochRef.current) return;
           if (!res.ok || !body.ok || !body.data) {
-            setUiAuthReady(false);
-            setAuthIdentity(null);
-            setInteractionUserId(null);
-            setInteractionChatId(null);
-            setInteractionRole("-");
-            setAuthMode(null);
-            setWebdCsrfToken("");
-            window.localStorage.removeItem(STORAGE_KEYS.authMode);
-            setUiAuthError(
-              t("Web 会话已失效，请重新登录", "Web session expired; please sign in again."),
+            expired = identityExpired;
+            throw new Error(
+              identityExpired
+                ? t("Web 会话已失效，请重新登录", "Web session expired; please sign in again.")
+                : formatAuthenticationError(body.error, res.ok ? 502 : res.status, t),
             );
-            return;
           }
           applyIdentity(body.data);
           setUiAuthReady(true);
@@ -1556,11 +1563,19 @@ export default function App() {
         } catch (err) {
           if (authEpoch !== authFlowEpochRef.current) return;
           setUiAuthReady(false);
-          setAuthMode(null);
+          setAuthIdentity(null);
+          setInteractionUserId(null);
+          setInteractionChatId(null);
+          setInteractionRole("-");
+          if (expired) {
+            setAuthMode(null);
+            window.localStorage.removeItem(STORAGE_KEYS.authMode);
+          }
           setWebdCsrfToken("");
-          window.localStorage.removeItem(STORAGE_KEYS.authMode);
+          // Keep the cookie-session preference after transport or server failures.
+          // Stop this attempt; a refresh can restore it without another password login.
           const message =
-            err instanceof Error ? normalizeFetchError(err, `${apiBase.replace(/\/$/, "")}/v1/auth/me`) : t("未知错误", "Unknown error");
+            err instanceof Error ? normalizeFetchError(err, failingUrl) : t("未知错误", "Unknown error");
           setUiAuthError(message);
         } finally {
           if (authEpoch !== authFlowEpochRef.current) return;

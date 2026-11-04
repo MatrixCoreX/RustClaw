@@ -154,6 +154,13 @@ jobs:
         shell: bash
         run: |
           UI_BROWSER_ARTIFACTS="$RUNNER_TEMP/ui-reliability/aipp" node UI/test/run-aipp-browser-suite.mjs
+      - name: Verify authentication ownership and transient recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          UI_BROWSER_ARTIFACTS="$RUNNER_TEMP/ui-reliability/auth-ownership" node UI/test/authentication-ownership.browser.mjs
+          node UI/test/authentication-concurrency.browser.mjs
+          node UI/test/authentication-recovery.browser.mjs
       - name: Upload the verified production web UI
         if: ${{ runner.os == 'Linux' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

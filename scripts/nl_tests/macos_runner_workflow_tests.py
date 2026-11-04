@@ -144,6 +144,18 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
         self.assertIn("--only-binary=:all: --requirement scripts/nl_tests/requirements.txt",
                       named["Check browser preparation boundaries"]["run"])
 
+    def test_ui_authentication_browser_regressions_gate_both_native_artifacts(self):
+        job = load("ui-browser-reliability-ci.yml")["jobs"]["ui-and-browser"]
+        self.assertEqual(job["strategy"]["matrix"]["os"], ["ubuntu-22.04", "macos-15"])
+        steps = job["steps"]
+        gate = next(step for step in steps if step.get("name") == "Verify authentication ownership and transient recovery")
+        self.assertNotIn("if", gate)
+        self.assertIn("set -euo pipefail", gate["run"])
+        for fixture in ["ownership", "concurrency", "recovery"]:
+            self.assertIn(f"node UI/test/authentication-{fixture}.browser.mjs", gate["run"])
+        upload = next(step for step in steps if step.get("name") == "Upload the verified production web UI")
+        self.assertLess(steps.index(gate), steps.index(upload))
+
 
 if __name__ == "__main__":
     unittest.main()
