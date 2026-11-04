@@ -711,18 +711,13 @@ fn read_aipp_task_activity_page(
             |row| row.get(0),
         )
         .map_err(|_| "aipp_task_activity_query_failed".to_string())?;
+    // Sort and materialize only page identities; large JSON values must not be
+    // copied into the temporary ordering table before the page limit is known.
     let sql = format!(
         r#"
         WITH filtered AS MATERIALIZED (
             SELECT tasks.rowid AS activity_sequence,
-                   tasks.task_id,
-                   tasks.channel,
-                   tasks.status,
-                   tasks.payload_json,
-                   tasks.result_json,
-                   tasks.error_text,
-                   tasks.created_at,
-                   tasks.updated_at
+                   tasks.task_id
               FROM tasks
             {AIPP_TASK_ACTIVITY_MATCH_SQL}
                AND (:cursor IS NULL OR tasks.rowid {cursor_operator} :cursor)
@@ -763,16 +758,17 @@ fn read_aipp_task_activity_page(
         )
         SELECT filtered.activity_sequence,
                filtered.task_id,
-               filtered.channel,
-               filtered.status,
-               filtered.payload_json,
-               filtered.result_json,
-               filtered.error_text,
-               filtered.created_at,
-               filtered.updated_at,
+               page_tasks.channel,
+               page_tasks.status,
+               page_tasks.payload_json,
+               page_tasks.result_json,
+               page_tasks.error_text,
+               page_tasks.created_at,
+               page_tasks.updated_at,
                activity.event_at_ms,
                activity.action_refs
           FROM filtered
+          JOIN tasks AS page_tasks ON page_tasks.rowid = filtered.activity_sequence
           JOIN activity ON activity.task_id = filtered.task_id
          ORDER BY activity_sequence {order}
         "#
