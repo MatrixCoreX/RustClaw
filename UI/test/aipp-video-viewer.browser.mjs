@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { createServer } from "vite";
+import { isolatedUiServer } from "./helpers/isolated-ui-server.mjs";
+import { guardFixtureRequests } from "./helpers/fixture-network.mjs";
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || "playwright");
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -10,13 +11,13 @@ const output = process.env.UI_BROWSER_ARTIFACTS || "/tmp/aipp-video-viewer-tests
 await mkdir(output, { recursive: true });
 // A real, tiny WebM exercises browser decoding without using private downloaded media.
 const clip = execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=12", "-t", "2", "-c:v", "libvpx", "-pix_fmt", "yuv420p", "-threads", "2", "-an", "-f", "webm", "pipe:1"]);
-const server = await createServer({ root, server: { host: "127.0.0.1", port: 0, strictPort: true } });
+const server = await isolatedUiServer(root);
 let browser;
 try {
-  await server.listen();
-  const base = `http://127.0.0.1:${server.httpServer.address().port}`;
+  const base = server.base;
   browser = await chromium.launch({ executablePath: process.env.BROWSER_EXECUTABLE || undefined, headless: true });
   const page = await browser.newPage({ acceptDownloads: true });
+  await guardFixtureRequests(page, server.base);
   const errors = [], requests = [];
   page.on("pageerror", error => errors.push(error.message));
   const poster = Buffer.from(await page.evaluate(() => {

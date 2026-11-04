@@ -2,19 +2,20 @@ import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createServer } from "vite";
+import { isolatedUiServer } from "./helpers/isolated-ui-server.mjs";
+import { guardFixtureRequests } from "./helpers/fixture-network.mjs";
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || "playwright");
 const root = fileURLToPath(new URL("../", import.meta.url));
 const output = process.env.UI_BROWSER_ARTIFACTS || "/tmp/aipp-catalog-tests";
 await mkdir(output, { recursive: true });
-const server = await createServer({ root, server: { host: "127.0.0.1", port: 0, strictPort: true } });
+const server = await isolatedUiServer(root);
 let browser;
 try {
-  await server.listen();
-  const base = `http://127.0.0.1:${server.httpServer.address().port}`;
+  const base = server.base;
   browser = await chromium.launch({ executablePath: process.env.BROWSER_EXECUTABLE || undefined, headless: true });
   const page = await browser.newPage();
+  await guardFixtureRequests(page, server.base);
   const errors = [], requests = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("https://fonts.googleapis.com/**", (route) => route.abort());

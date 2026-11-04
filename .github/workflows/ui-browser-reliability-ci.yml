@@ -11,6 +11,8 @@ name: UI and signed browser reliability
       - "scripts/tests/test_prepare_macos_ci_browser.py"
       - "scripts/macos-system-browser.sh"
       - "scripts/tests/test_macos_system_browser.py"
+      - "scripts/report_storage_usage.py"
+      - "scripts/tests/test_report_storage_usage.py"
       - ".github/workflows/ui-browser-reliability-ci.yml"
       - ".github/workflows/macos-arm64-release-artifact.yml"
   push:
@@ -22,6 +24,8 @@ name: UI and signed browser reliability
       - "scripts/tests/test_prepare_macos_ci_browser.py"
       - "scripts/macos-system-browser.sh"
       - "scripts/tests/test_macos_system_browser.py"
+      - "scripts/report_storage_usage.py"
+      - "scripts/tests/test_report_storage_usage.py"
       - ".github/workflows/ui-browser-reliability-ci.yml"
       - ".github/workflows/macos-arm64-release-artifact.yml"
 
@@ -59,7 +63,9 @@ jobs:
         if: ${{ runner.os == 'Linux' }}
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq ripgrep
+          sudo apt-get install -y -qq ripgrep ffmpeg
+      - name: Verify metadata-only storage reports
+        run: python3 -m unittest discover -s scripts/tests -p test_report_storage_usage.py
       - name: Check browser preparation boundaries
         run: |
           python3 -m pip install --only-binary=:all: --requirement scripts/nl_tests/requirements.txt
@@ -70,6 +76,9 @@ jobs:
         run: |
           if ! command -v rg >/dev/null; then
             HOMEBREW_NO_AUTO_UPDATE=1 brew install ripgrep
+          fi
+          if ! command -v ffmpeg >/dev/null; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg
           fi
       - name: Prepare and verify native signed browser
         if: ${{ runner.os == 'macOS' }}
@@ -141,6 +150,10 @@ jobs:
         shell: bash
         run: |
           UI_BROWSER_ARTIFACTS="$RUNNER_TEMP/ui-reliability/status-contrast" node UI/test/status-contrast.browser.mjs
+      - name: Verify every isolated AiAPP browser fixture
+        shell: bash
+        run: |
+          UI_BROWSER_ARTIFACTS="$RUNNER_TEMP/ui-reliability/aipp" node UI/test/run-aipp-browser-suite.mjs
       - name: Upload the verified production web UI
         if: ${{ runner.os == 'Linux' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

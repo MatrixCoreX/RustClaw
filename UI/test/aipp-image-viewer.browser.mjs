@@ -3,21 +3,22 @@ import { mkdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createServer } from "vite";
+import { isolatedUiServer } from "./helpers/isolated-ui-server.mjs";
+import { guardFixtureRequests } from "./helpers/fixture-network.mjs";
 
 // Use an installed Playwright module without adding browser dependencies to the UI bundle.
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || "playwright");
 const root = fileURLToPath(new URL("../", import.meta.url));
 const output = process.env.UI_BROWSER_ARTIFACTS || path.join(os.tmpdir(), "aipp-image-viewer-tests");
 await mkdir(output, { recursive: true });
-const server = await createServer({ root, server: { host: "127.0.0.1", port: 0, strictPort: true } });
+const server = await isolatedUiServer(root);
 let browser;
 try {
-  await server.listen();
-  const base = `http://127.0.0.1:${server.httpServer.address().port}`;
+  const base = server.base;
   browser = await chromium.launch({ executablePath: process.env.BROWSER_EXECUTABLE || undefined, headless: true });
   const context = await browser.newContext({ acceptDownloads: true });
   const page = await context.newPage();
+  await guardFixtureRequests(page, server.base);
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   const downloads = [];

@@ -4,18 +4,19 @@ import { mkdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createServer } from "vite";
+import { isolatedUiServer } from "./helpers/isolated-ui-server.mjs";
+import { guardFixtureRequests } from "./helpers/fixture-network.mjs";
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || "playwright");
 const root = fileURLToPath(new URL("../", import.meta.url));
 const output = process.env.UI_BROWSER_ARTIFACTS || path.join(os.tmpdir(), "aipp-collection-tests");
 await mkdir(output, { recursive: true });
-const server = await createServer({ root, server: { host: "127.0.0.1", port: 0, strictPort: true, watch: { ignored: ["**"] } } });
+const server = await isolatedUiServer(root);
 let browser;
 try {
-  await server.listen();
   browser = await chromium.launch({ executablePath: process.env.BROWSER_EXECUTABLE || undefined, headless: true });
   const page = await browser.newPage();
+  await guardFixtureRequests(page, server.base);
   const errors = [];
   let galleryMode = false;
   let filterMode = false;
@@ -71,7 +72,7 @@ try {
   for (const width of [1440, 1280, 900, 390]) for (const theme of ["light", "dark"]) {
     const lang = theme === "light" ? "zh" : "en";
     await page.setViewportSize({ width, height: 1000 });
-    await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/test/fixtures/aipp-collection.html?lang=${lang}&theme=${theme}`);
+    await page.goto(`${server.base}/test/fixtures/aipp-collection.html?lang=${lang}&theme=${theme}`);
     await page.locator("article").nth(5).waitFor();
     await page.locator("article img").first().waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -112,7 +113,7 @@ try {
   for (const width of [1440, 390, 480]) for (const theme of ["light", "dark"]) {
     const lang = theme === "light" ? "zh" : "en";
     await page.setViewportSize({ width, height: width === 480 ? 320 : 900 });
-    await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/test/fixtures/aipp-collection.html?lang=${lang}&theme=${theme}`);
+    await page.goto(`${server.base}/test/fixtures/aipp-collection.html?lang=${lang}&theme=${theme}`);
     const cards = page.locator("article");
     const card = cards.first();
     await card.getByText("1 / 5", { exact: true }).waitFor();
@@ -176,7 +177,7 @@ try {
       global_sequence: 60 - i, post_sequence: 49 - i, image_sequence: 1 })));
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
-    await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/test/fixtures/aipp-collection.html?lang=zh&theme=light`);
+    await page.goto(`${server.base}/test/fixtures/aipp-collection.html?lang=zh&theme=light`);
     const waitCards = count => page.waitForFunction(expected => document.querySelectorAll("article").length === expected
       && document.querySelector('[aria-busy="false"]'), count);
     await waitCards(30);

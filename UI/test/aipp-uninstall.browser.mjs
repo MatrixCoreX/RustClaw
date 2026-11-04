@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { createServer } from "vite";
+import { isolatedUiServer } from "./helpers/isolated-ui-server.mjs";
+import { guardFixtureRequests } from "./helpers/fixture-network.mjs";
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || "playwright");
 const root = fileURLToPath(new URL("../", import.meta.url));
 const output = process.env.UI_BROWSER_ARTIFACTS || "/tmp/aipp-uninstall-tests";
 await mkdir(output, { recursive: true });
-const server = await createServer({ root, server: { host: "127.0.0.1", port: 0, strictPort: true } });
+const server = await isolatedUiServer(root);
 const app = (name) => ({
   skill_name: name, package_version: "1", renderer: "collection_feed_v1", data_contract: "media_collection_v1",
   icon: "download", default_locale: "en", titles: { en: name, zh: name }, descriptions: {},
@@ -14,12 +15,12 @@ const app = (name) => ({
 });
 let browser;
 try {
-  await server.listen();
-  const base = `http://127.0.0.1:${server.httpServer.address().port}`;
+  const base = server.base;
   browser = await chromium.launch({ executablePath: process.env.BROWSER_EXECUTABLE || undefined, headless: true });
   for (const lang of ["zh", "en"]) {
     const context = await browser.newContext({ viewport: { width: lang === "zh" ? 1440 : 390, height: 900 } });
     const page = await context.newPage();
+    await guardFixtureRequests(page, server.base);
     const errors = [], mutations = [];
     page.on("pageerror", error => errors.push(error.message));
     let apps = [app("example_one"), app("example_two")];
