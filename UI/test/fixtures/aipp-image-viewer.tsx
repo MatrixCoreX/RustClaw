@@ -25,9 +25,9 @@ const task: AippTaskActivityItem = {
   result_text: t("已保存图片和文本。", "Images and text saved."), error_text: null,
   source_urls: [], created_at: "1788912000", updated_at: "1788912000", event_at_ms: 1788912000000,
   artifacts: [
-    { schema_version: 1, id: "portrait", filename: "portrait.png", kind: "image", mime_type: "image/png", size_bytes: 1024, preview_url: "/fixture/portrait/preview", download_url: "/fixture/portrait/download" },
-    { schema_version: 1, id: "landscape", filename: "landscape-with-a-very-long-filename-that-must-not-displace-the-close-button.png", kind: "image", mime_type: "image/png", size_bytes: 2048, preview_url: "/fixture/landscape/preview", download_url: "/fixture/landscape/download" },
-    { schema_version: 1, id: "text", filename: "transcript.txt", kind: "file", mime_type: "text/plain", size_bytes: 8, preview_url: "/fixture/text/preview", download_url: "/fixture/text/download" },
+    { schema_version: 1, id: "portrait", filename: "portrait.png", kind: "image", mime_type: "image/png", size_bytes: 1024, preview_url: "/v1/tasks/image-viewer-test/artifacts/portrait/content?disposition=inline", download_url: "/v1/tasks/image-viewer-test/artifacts/portrait/content?disposition=attachment" },
+    { schema_version: 1, id: "landscape", filename: "landscape-with-a-very-long-filename-that-must-not-displace-the-close-button.png", kind: "image", mime_type: "image/png", size_bytes: 2048, preview_url: "/v1/tasks/image-viewer-test/artifacts/landscape/content?disposition=inline", download_url: "/v1/tasks/image-viewer-test/artifacts/landscape/content?disposition=attachment" },
+    { schema_version: 1, id: "text", filename: "transcript.txt", kind: "file", mime_type: "text/plain", size_bytes: 8, preview_url: "/v1/tasks/image-viewer-test/artifacts/text/content?disposition=inline", download_url: "/v1/tasks/image-viewer-test/artifacts/text/content?disposition=attachment" },
   ],
 };
 

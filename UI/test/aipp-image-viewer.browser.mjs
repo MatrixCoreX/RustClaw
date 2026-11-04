@@ -47,14 +47,16 @@ try {
     await route.fulfill({ contentType: "image/png", body: corruptCollection ? "corrupt" : portrait });
   });
   await page.route("https://expired.example.test/**", (route) => { remoteRequests++; return route.fulfill({ status: 403 }); });
-  await page.route("**/fixture/**", async (route) => {
-    const url = new URL(route.request().url()).pathname;
-    requests.push(url);
-    if ((url.endsWith("download") && failDownload) || (url.endsWith("preview") && failPreview)) {
+  await page.route("**/v1/tasks/image-viewer-test/artifacts/**", async (route) => {
+    const url = new URL(route.request().url());
+    const preview = url.searchParams.get("disposition") === "inline";
+    const text = url.pathname.includes("/text/");
+    requests.push(url.pathname + url.search);
+    if ((!preview && failDownload) || (preview && failPreview)) {
       await route.fulfill({ status: 403, body: "denied" }); return;
     }
-    if (url.endsWith("preview") && delayPreview) await new Promise((resolve) => setTimeout(resolve, 300));
-    await route.fulfill({ contentType: url.includes("text") ? "text/plain" : "image/png", body: url.includes("text") ? "contents" : corruptPreview && url.endsWith("preview") ? "invalid image" : url.includes("landscape") ? landscape : portrait });
+    if (preview && delayPreview) await new Promise((resolve) => setTimeout(resolve, 300));
+    await route.fulfill({ contentType: text ? "text/plain" : "image/png", body: text ? "contents" : corruptPreview && preview ? "invalid image" : url.pathname.includes("landscape") ? landscape : portrait });
   });
   const dialog = page.getByRole("dialog");
   const downloadImage = () => dialog.getByRole("button", { name: /^(?:下载图片|Download image)$/ });
@@ -91,7 +93,9 @@ try {
         const download = await downloadEvent;
         assert.equal(download.suggestedFilename(), kind === "activity" ? "portrait.png" : `media-${kind === "cover" ? "000000000002" : "000000000001"}.png`);
         assert.deepEqual(await readFile(await download.path()), portrait);
-        assert.ok(requests.at(-1).endsWith(kind === "activity" ? "/download" : "/preview"));
+        const downloaded = new URL(requests.at(-1), base);
+        if (kind === "activity") assert.equal(downloaded.searchParams.get("disposition"), "attachment");
+        else assert.ok(downloaded.pathname.endsWith("/preview"));
         await page.keyboard.press("Escape");
         await dialog.waitFor({ state: "detached" });
         assert.equal(await thumbnail.evaluate((node) => node === document.activeElement), true);
@@ -146,9 +150,14 @@ try {
   await page.keyboard.press("Tab");
   assert.equal(await dialog.evaluate((node) => node.contains(document.activeElement)), true);
   await page.keyboard.press("Escape");
-  const popupEvent = page.waitForEvent("popup");
+  const popupEvent = context.waitForEvent("page");
   await page.getByTestId("activity").getByTitle("Preview", { exact: true }).nth(2).click();
-  const popup = await popupEvent; await popup.close();
+  const popup = await popupEvent;
+  await popup.waitForLoadState("domcontentloaded");
+  assert.ok(popup.url().startsWith("blob:"));
+  assert.equal((await popup.locator("body").innerText()).trim(), "contents");
+  assert.equal(await popup.evaluate(() => window.opener === null), true);
+  await popup.close();
   assert.equal(await dialog.count(), 0);
   console.log("PASS pending request cancellation, keyboard focus, unchanged text preview");
   assert.deepEqual(errors, []);
