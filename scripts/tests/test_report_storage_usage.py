@@ -18,7 +18,7 @@ class StorageReportTests(unittest.TestCase):
     def setUp(self):
         fixture = tempfile.TemporaryDirectory()
         self.addCleanup(fixture.cleanup)
-        self.root = Path(fixture.name)
+        self.root = Path(fixture.name).resolve()
 
     def test_counts_files_without_reading_contents_and_preserves_data(self):
         data = self.root/"data"
@@ -132,6 +132,15 @@ class StorageReportTests(unittest.TestCase):
         with patch.object(Path, "lstat", lambda path: self.root.stat() if path == alias else original(path)):
             value = report.inventory(self.root)
         self.assertEqual(value["groups"]["alias"]["directory_aliases_skipped"], 1)
+
+    def test_explicit_symlinked_root_uses_the_same_canonical_baseline_scope(self):
+        alias = self.root/"root-alias"
+        alias.symlink_to(self.root, target_is_directory=True)
+        before = report.inventory(self.root)
+        after = report.inventory(alias)
+        self.assertEqual(after["root"], str(self.root))
+        self.assertEqual(before["root_identity"], after["root_identity"])
+        self.assertTrue(all(row["apparent_bytes_delta"] == 0 for row in report.compare(after, before)["groups"].values()))
 
 
 if __name__ == "__main__":
