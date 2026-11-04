@@ -1060,16 +1060,30 @@ async fn get_aipp_items(
     AxumPath(skill_name): AxumPath<String>,
     Query(query): Query<AippMediaQuery>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err(response) = require_ui_admin(&state, &headers) {
+    tokio::task::spawn_blocking(move || read_aipp_items(&state, &headers, &skill_name, &query))
+        .await
+        .unwrap_or_else(|error| {
+            tracing::warn!(%error, "aipp_items_read_join_failed");
+            aipp_api_error(StatusCode::INTERNAL_SERVER_ERROR, "aipp_read_task_failed")
+        })
+}
+
+fn read_aipp_items(
+    state: &AppState,
+    headers: &HeaderMap,
+    skill_name: &str,
+    query: &AippMediaQuery,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err(response) = require_ui_admin(state, headers) {
         return response;
     }
-    let active = match active_aipp_package(&state, &skill_name) {
+    let active = match active_aipp_package(state, skill_name) {
         Ok(Some(active)) => active,
         _ => return aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_available"),
     };
-    let view = match aipp_admission_service(&state).and_then(|service| {
+    let view = match aipp_admission_service(state).and_then(|service| {
         service
-            .aipp_view_state(&skill_name)
+            .aipp_view_state(skill_name)
             .map_err(|_| "aipp_view_state_unavailable".to_string())
     }) {
         Ok(view) if view.installed => view,
@@ -1083,34 +1097,24 @@ async fn get_aipp_items(
             .unwrap_or_else(|| "all".to_string());
         let cleared_through_event_ms = view.cleared_through_event_ms;
         let hidden_task_ids = view.hidden_task_ids.into_iter().collect::<Vec<_>>();
-        let query_state = state.clone();
-        let query_skill = skill_name.clone();
-        let page = tokio::task::spawn_blocking(move || {
-            let db = query_state
-                .core
-                .db
-                .get()
-                .map_err(|_| "aipp_task_activity_database_unavailable".to_string())?;
-            read_aipp_task_activity_page(
-                &db,
-                &query_skill,
-                &task_channel_scope,
-                cleared_through_event_ms,
-                &hidden_task_ids,
-                &query,
-            )
-        })
-        .await;
+        let page = state
+            .core
+            .db
+            .get()
+            .map_err(|_| "aipp_task_activity_database_unavailable".to_string())
+            .and_then(|db| {
+                read_aipp_task_activity_page(
+                    &db,
+                    skill_name,
+                    &task_channel_scope,
+                    cleared_through_event_ms,
+                    &hidden_task_ids,
+                    query,
+                )
+            });
         return match page {
-            Ok(Ok(data)) => (
-                StatusCode::OK,
-                Json(ApiResponse {
-                    ok: true,
-                    data: Some(data),
-                    error: None,
-                }),
-            ),
-            Ok(Err(error)) => {
+            Ok(data) => crate::api_ok(data),
+            Err(error) => {
                 let status = match error.as_str() {
                     "aipp_task_activity_filter_invalid"
                     | "aipp_task_activity_query_invalid"
@@ -1119,17 +1123,12 @@ async fn get_aipp_items(
                 };
                 aipp_api_error(status, &error)
             }
-            Err(_) => aipp_api_error(StatusCode::INTERNAL_SERVER_ERROR, "aipp_read_task_failed"),
         };
     }
     if active.aipp.data_contract != "media_collection_v1" {
         return aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_available");
     }
-    let root = match state
-        .core
-        .skill_storage
-        .resolved_directory_path(&skill_name)
-    {
+    let root = match state.core.skill_storage.resolved_directory_path(skill_name) {
         Ok(path) => path,
         Err(_) => return aipp_api_error(StatusCode::BAD_REQUEST, "aipp_storage_invalid"),
     };
@@ -1140,21 +1139,11 @@ async fn get_aipp_items(
         .as_ref()
         .map(|request| declared_media_platforms(&request.input_schema))
         .unwrap_or_default();
-    let page = tokio::task::spawn_blocking(move || {
-        read_aipp_media_page_with_platforms(&root, &query, &hidden_sequences, &declared_platforms)
-    })
-    .await;
+    let page =
+        read_aipp_media_page_with_platforms(&root, query, &hidden_sequences, &declared_platforms);
     match page {
-        Ok(Ok(data)) => (
-            StatusCode::OK,
-            Json(ApiResponse {
-                ok: true,
-                data: Some(data),
-                error: None,
-            }),
-        ),
-        Ok(Err(error)) => aipp_api_error(StatusCode::INTERNAL_SERVER_ERROR, &error),
-        Err(_) => aipp_api_error(StatusCode::INTERNAL_SERVER_ERROR, "aipp_read_task_failed"),
+        Ok(data) => crate::api_ok(data),
+        Err(error) => aipp_api_error(StatusCode::INTERNAL_SERVER_ERROR, &error),
     }
 }
 

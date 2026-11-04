@@ -1,6 +1,9 @@
 use super::*;
 use std::sync::Arc;
 
+#[path = "aipp_items_runtime_tests.rs"]
+mod runtime;
+
 struct Workspace(PathBuf);
 
 impl Drop for Workspace {
@@ -68,7 +71,12 @@ task_channel_scope = "all"
     fs::write(&manifest_path, manifest.to_toml_string().unwrap()).unwrap();
     let registry =
         claw_core::skill_registry::SkillsRegistry::load_from_path(&registry_path).unwrap();
-    let mut state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let mut state = AppState::test_default_with_fixture_provider();
+    state.core.db = r2d2::Pool::builder()
+        .max_size(1)
+        .build(r2d2_sqlite::SqliteConnectionManager::memory())
+        .unwrap();
+    state = state.with_seeded_db_schema();
     state.skill_rt.workspace_root = root.0.clone();
     state.reload_ctx.config_path_for_reload =
         root.0.join("configs/config.toml").display().to_string();
