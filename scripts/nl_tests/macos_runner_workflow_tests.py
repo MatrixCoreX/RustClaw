@@ -76,6 +76,37 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
         prepare = script.index("python3 scripts/prepare_macos_ci_browser.py")
         self.assertLess(prepare, script.index('executable="$(bash scripts/macos-system-browser.sh --resolve-executable)"'))
 
+    def test_runtime_reads_have_independent_cache_and_attested_core_artifacts(self):
+        jobs = load("macos-polyglot-skill-ci.yml")["jobs"]
+        sdk = jobs["skill-sdk-linux"]
+        runtime = jobs["runtime-read-linux"]
+        self.assertEqual(runtime["if"], jobs["polyglot-skill-macos"]["if"])
+        self.assertEqual(runtime["runs-on"], "ubuntu-22.04")
+        self.assertNotIn("cargo test --locked -p clawd", "\n".join(step.get("run", "") for step in sdk["steps"]))
+        steps = runtime["steps"]
+        named = {step.get("name"): step for step in steps}
+        gate = named["Verify Linux indexed history reads and startup upgrades"]
+        for selector in ["task_event_transport", "task_event_archive", "aipp", "run_skill"]:
+            self.assertIn(f"cargo test --locked -p clawd --bin clawd {selector}", gate["run"])
+        build = named["Build the exact verified Linux core without publishing a release"]
+        attest = named["Attest the exact Linux core provenance"]
+        upload = named["Preserve the exact verified Linux core artifact"]
+        self.assertLess(steps.index(gate), steps.index(build))
+        self.assertLess(steps.index(named["Verify both product identities with the shared UI"]), steps.index(build))
+        self.assertLess(steps.index(build), steps.index(attest))
+        self.assertLess(steps.index(attest), steps.index(upload))
+        self.assertIn("cargo build --locked --release -p clawd --bin clawd", build["run"])
+        self.assertIn("$GITHUB_SHA", build["run"])
+        self.assertIn("source-commit", build["run"])
+        self.assertIn("attest-build-provenance@", attest["uses"])
+        self.assertIn("${{ github.sha }}", upload["with"]["name"])
+        self.assertEqual(runtime["permissions"]["id-token"], "write")
+        caches = [next(step["with"] for step in job["steps"] if "Swatinem/rust-cache@" in step.get("uses", "")) for job in [sdk, runtime]]
+        self.assertNotEqual(caches[0]["key"], caches[1]["key"])
+        for cache in caches:
+            self.assertEqual(str(cache["cache-on-failure"]).lower(), "false")
+            self.assertEqual(cache["save-if"], "${{ github.event_name != 'pull_request' }}")
+
     def test_deployable_ui_is_captured_before_desktop_build_and_uploaded_only_after_checks(self):
         steps = load("ui-browser-reliability-ci.yml")["jobs"]["ui-and-browser"]["steps"]
         named = {step.get("name"): step for step in steps}

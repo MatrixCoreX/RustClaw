@@ -107,8 +107,12 @@ fn event_schema_upgrade_preserves_existing_event_bytes_and_is_idempotent() {
         .unwrap();
         db.execute("INSERT INTO task_event_archive VALUES ('existing',1,'original-hash',NULL,?1,1,'original-policy',10)", [event]).unwrap();
     }
-    let mut config = claw_core::config::AppConfig::default();
+    let config_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/config.toml");
+    let mut config = claw_core::config::AppConfig::load(config_path.to_str().unwrap())
+        .expect("load repository configuration for isolated database fixture");
     config.database.sqlite_path = path.to_string_lossy().into_owned();
+    config.database.pool_max_size = 2;
     for _ in 0..2 {
         let pool = crate::db_init::init_db(&config).expect("upgrade existing database at startup");
         let db = pool.get().unwrap();
