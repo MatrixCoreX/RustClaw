@@ -8,6 +8,16 @@ export type AippViewerImage = {
   initialSource?: string | null;
 };
 
+/** Pin gallery metadata and carry the selected thumbnail's authenticated blob. */
+export function snapshotAippViewerGallery(initial: AippViewerImage, images?: AippViewerImage[]): AippViewerImage[] {
+  return (images?.length ? images : [initial]).map(image => ({
+    ...image,
+    initialSource: image.previewUrl === initial.previewUrl
+      ? initial.initialSource ?? image.initialSource
+      : image.initialSource,
+  }));
+}
+
 export const AIPP_IMAGE_MAX_BYTES = 25 * 1024 * 1024;
 export const AIPP_GALLERY_MAX_BYTES = 128 * 1024 * 1024;
 const IMAGE_EXTENSIONS: Record<string, string> = {

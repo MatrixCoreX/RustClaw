@@ -1,10 +1,28 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { unzipSync } from "fflate";
-import { downloadAippGallery, fetchAippImage, imageDownloadName } from "./aipp-image-download";
+import { downloadAippGallery, fetchAippImage, imageDownloadName, snapshotAippViewerGallery, type AippViewerImage } from "./aipp-image-download";
 
 const image = (n: number) => ({ title: `Image ${n}`, filename: "../../same.png", previewUrl: `/images/${n}`, downloadUrl: `/images/${n}` });
 const response = (body = "picture", status = 200, mime = "image/jpeg") => new Response(body, { status, headers: { "content-type": mime } });
+test("gallery snapshot retains only the selected thumbnail blob without mutating input", () => {
+  const images: AippViewerImage[] = [{ ...image(1), initialSource: "blob:older" }, image(2)];
+  const before = structuredClone(images);
+  const selected = { ...image(1), initialSource: "blob:selected" };
+  const gallery = snapshotAippViewerGallery(selected, images);
+  assert.equal(gallery[0].initialSource, "blob:selected");
+  assert.equal(gallery[1].initialSource, undefined);
+  assert.deepEqual(images, before);
+  images[0].title = "changed after opening";
+  assert.equal(gallery[0].title, "Image 1");
+});
+test("missing selected images do not attach their cached blob to another gallery member", () => {
+  const selected = { ...image(3), initialSource: "blob:selected" };
+  assert.equal(snapshotAippViewerGallery(selected, [image(1)])[0].initialSource, undefined);
+  assert.equal(snapshotAippViewerGallery(selected)[0].initialSource, "blob:selected");
+  assert.equal(snapshotAippViewerGallery(selected, [])[0].initialSource, "blob:selected");
+  assert.equal(snapshotAippViewerGallery(image(1), [{ ...image(1), initialSource: "blob:cached" }])[0].initialSource, "blob:cached");
+});
 test("image filenames are flat, safe and match actual MIME", () => {
   assert.equal(imageDownloadName("../../bad:*.png", "image/jpeg"), "bad__.jpg");
   assert.equal(imageDownloadName("..\\.png", "image/webp"), "image.webp");

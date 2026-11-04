@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, Download, ImageOff, LoaderCircle, RefreshCw, X } from "lucide-react";
 
 import { saveTaskArtifactBlob, type ArtifactFetch } from "../lib/task-artifact-content";
-import { downloadAippGallery, fetchAippImage, imageDownloadName, type AippViewerImage } from "../lib/aipp-image-download";
+import { downloadAippGallery, fetchAippImage, imageDownloadName, snapshotAippViewerGallery, type AippViewerImage } from "../lib/aipp-image-download";
 export type { AippViewerImage } from "../lib/aipp-image-download";
 
 export function AippImageViewer({ image: initialImage, images, apiFetch, t, onClose }: {
@@ -14,7 +14,7 @@ export function AippImageViewer({ image: initialImage, images, apiFetch, t, onCl
   onClose: () => void;
 }) {
   // Keep a stable gallery while its collection is refreshed in the background.
-  const [gallery] = useState(() => images?.length ? images : [initialImage]);
+  const [gallery] = useState(() => snapshotAippViewerGallery(initialImage, images));
   const [index, setIndex] = useState(() => Math.max(0, gallery.findIndex((image) => image.previewUrl === initialImage.previewUrl)));
   const image = gallery[index];
   const dialogRef = useRef<HTMLDialogElement>(null);
