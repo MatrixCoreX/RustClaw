@@ -88,13 +88,12 @@ test("leaving a pending refresh releases the next view without letting its late 
   writeCachedAippCatalog(storage, [app], Date.now(), "fixture");
   let poll: (() => void) | undefined;
   const pending: Array<{ signal: AbortSignal; resolve: (response: Response) => void }> = [];
+  const visibility = { visibilityState: "visible", addEventListener: () => undefined, removeEventListener: () => undefined };
   Object.defineProperty(globalThis, "window", { configurable: true, value: {
     localStorage: storage, sessionStorage: storage, setTimeout, clearTimeout,
     setInterval: (callback: () => void) => { poll = callback; return 1; }, clearInterval: () => undefined,
   } });
-  Object.defineProperty(globalThis, "document", { configurable: true, value: {
-    visibilityState: "visible", addEventListener: () => undefined, removeEventListener: () => undefined,
-  } });
+  Object.defineProperty(globalThis, "document", { configurable: true, value: visibility });
   const response = (data: unknown) => new Response(JSON.stringify({ ok: true, data }));
   const emptyPage = () => response({ schema_version: 1, items: [], page_item_count: 0, total_item_count: 0,
     sort_order: "newest", next_cursor_sequence: null, updated_at_ms: null });
@@ -108,6 +107,10 @@ test("leaving a pending refresh releases the next view without letting its late 
         })}
       onOpenAgent={() => undefined} onOpenSkillStore={() => undefined} /></UiDialogProvider>); });
     await act(async () => { pending[0].resolve(emptyPage()); });
+    visibility.visibilityState = "hidden";
+    await act(async () => { poll?.(); });
+    assert.equal(pending.length, 1, "hidden pages must not poll");
+    visibility.visibilityState = "visible";
     await act(async () => { poll?.(); });
     assert.equal(pending.length, 2);
     await act(async () => { poll?.(); });

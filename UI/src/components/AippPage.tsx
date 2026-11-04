@@ -1405,7 +1405,8 @@ export function AippPage({ lang, t, apiFetch, requestScope, onOpenAgent, onOpenS
   useEffect(() => {
     if (showGuide || !selectedSkill || !["collection_feed_v1", "task_activity_v1"].includes(selectedApp?.renderer || "")) return;
     const refreshVisiblePage = async () => {
-      if (document.visibilityState === "visible") await fetchPage(true);
+      if (document.visibilityState !== "visible") return;
+      await fetchPage(true);
     };
     const timer = window.setInterval(() => void refreshVisiblePage(), AIPP_AUTO_REFRESH_INTERVAL_MS);
     const handleVisibilityChange = () => {
