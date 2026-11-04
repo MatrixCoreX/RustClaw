@@ -108,6 +108,7 @@ pub(crate) fn init_db(config: &AppConfig) -> anyhow::Result<DbPool> {
         .get()
         .map_err(|e| anyhow::anyhow!("get db conn: {e}"))?;
     conn.execute_batch(crate::INIT_SQL)?;
+    crate::task_event_transport::ensure_event_schema(&conn)?;
     apply_private_sqlite_permissions(database_path)?;
     Ok(pool)
 }

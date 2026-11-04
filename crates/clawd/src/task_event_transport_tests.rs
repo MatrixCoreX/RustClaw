@@ -77,6 +77,8 @@ fn event_schema_installs_skill_activity_indexes_for_aipp_queries() {
     for name in [
         "idx_task_event_stream_skill_activity",
         "idx_task_event_archive_skill_activity",
+        "idx_task_event_stream_skill_execution",
+        "idx_task_event_archive_skill_execution",
     ] {
         let count: u64 = db
             .query_row(
@@ -87,6 +89,61 @@ fn event_schema_installs_skill_activity_indexes_for_aipp_queries() {
             .expect("read index");
         assert_eq!(count, 1, "missing {name}");
     }
+}
+
+#[test]
+fn event_schema_upgrade_preserves_existing_event_bytes_and_is_idempotent() {
+    let root = std::env::temp_dir().join(format!("event-index-upgrade-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let path = root.join("runtime.db");
+    {
+        let db = rusqlite::Connection::open(&path).unwrap();
+        db.execute_batch(INIT_TASK_EVENT_SQL).unwrap();
+        let event = r#"{"event_kind":"tool_finished","payload":{"skill":"fixture","requested_action_ref":"fixture.download"}}"#;
+        db.execute(
+            "INSERT INTO task_event_stream VALUES ('existing',1,'original-hash',?1,10)",
+            [event],
+        )
+        .unwrap();
+        db.execute("INSERT INTO task_event_archive VALUES ('existing',1,'original-hash',NULL,?1,1,'original-policy',10)", [event]).unwrap();
+    }
+    let mut config = claw_core::config::AppConfig::default();
+    config.database.sqlite_path = path.to_string_lossy().into_owned();
+    for _ in 0..2 {
+        let pool = crate::db_init::init_db(&config).expect("upgrade existing database at startup");
+        let db = pool.get().unwrap();
+        for table in ["task_event_stream", "task_event_archive"] {
+            let row: (String, String, i64, i64) = db.query_row(
+                &format!("SELECT event_hash,event_json,seq,created_at_ms FROM {table} WHERE task_id='existing'"), [],
+                |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
+            ).unwrap();
+            assert_eq!(row.0, "original-hash");
+            assert_eq!(
+                row.1,
+                r#"{"event_kind":"tool_finished","payload":{"skill":"fixture","requested_action_ref":"fixture.download"}}"#
+            );
+            assert_eq!((row.2, row.3), (1, 10));
+            for suffix in ["skill_activity", "skill_execution"] {
+                let count: i64 = db
+                    .query_row(
+                        "SELECT count(*) FROM sqlite_master WHERE type='index' AND name=?1",
+                        [format!("idx_{table}_{suffix}")],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(count, 1);
+            }
+        }
+        let policy: String = db
+            .query_row(
+                "SELECT redaction_policy FROM task_event_archive WHERE task_id='existing'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(policy, "original-policy");
+    }
+    std::fs::remove_dir_all(&root).unwrap();
 }
 
 #[test]
@@ -679,11 +736,46 @@ async fn lagged_broadcast_consumer_recovers_from_persisted_replay() {
 #[test]
 fn retired_enrolled_task_cannot_recreate_large_payload_before_event_transaction() {
     let fixture = crate::task_result_retention::test_support::Fixture::new();
-    fixture.enroll(); fixture.insert(&fixture.task_id,"run_skill",&fixture.enrollment.idempotency_key(),&fixture.payload());
-    publish_event(&fixture.state,&fixture.task_id,"tool_finished",json!({"output":"before retirement"})).unwrap();
-    crate::repo::distributed_task_cleanup::retire_result(&fixture.state,&fixture.task_id,&fixture.enrollment).unwrap();
+    fixture.enroll();
+    fixture.insert(
+        &fixture.task_id,
+        "run_skill",
+        &fixture.enrollment.idempotency_key(),
+        &fixture.payload(),
+    );
+    publish_event(
+        &fixture.state,
+        &fixture.task_id,
+        "tool_finished",
+        json!({"output":"before retirement"}),
+    )
+    .unwrap();
+    crate::repo::distributed_task_cleanup::retire_result(
+        &fixture.state,
+        &fixture.task_id,
+        &fixture.enrollment,
+    )
+    .unwrap();
     // This is the prior autocommit insert before the later event transaction.
-    assert!(persist_large_payload_if_needed(&fixture.state,&fixture.task_id,"task_final",json!({"output":"x".repeat(EVENT_MAX_BYTES+100)}),now_ms()).is_err());
-    let count:usize=fixture.state.core.db.get().unwrap().query_row("SELECT COUNT(*) FROM task_event_artifacts WHERE task_id=?1",[&fixture.task_id],|r|r.get(0)).unwrap();
-    assert_eq!(count,0);
+    assert!(persist_large_payload_if_needed(
+        &fixture.state,
+        &fixture.task_id,
+        "task_final",
+        json!({"output":"x".repeat(EVENT_MAX_BYTES+100)}),
+        now_ms()
+    )
+    .is_err());
+    let count: usize = fixture
+        .state
+        .core
+        .db
+        .get()
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM task_event_artifacts WHERE task_id=?1",
+            [&fixture.task_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 0);
 }

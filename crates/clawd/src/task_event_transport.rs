@@ -80,6 +80,31 @@ CREATE TABLE IF NOT EXISTS task_event_artifacts (
 );
 "#;
 
+// Keep the broader activity indexes for other readers. These narrower indexes
+// let execution-history membership checks avoid loading large event JSON values.
+// The predicates must stay identical to the corresponding history SQL terms.
+pub(crate) const SKILL_EXECUTION_INDEX_SQL: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_task_event_stream_skill_execution
+    ON task_event_stream(
+        json_extract(event_json, '$.payload.skill'), created_at_ms, task_id
+    )
+    WHERE json_extract(event_json, '$.event_kind') = 'tool_finished'
+      AND COALESCE(json_extract(event_json, '$.payload.requested_action_ref'), '')
+          != (json_extract(event_json, '$.payload.skill') || '.capabilities');
+CREATE INDEX IF NOT EXISTS idx_task_event_archive_skill_execution
+    ON task_event_archive(
+        json_extract(event_json, '$.payload.skill'), created_at_ms, task_id
+    )
+    WHERE json_extract(event_json, '$.event_kind') = 'tool_finished'
+      AND COALESCE(json_extract(event_json, '$.payload.requested_action_ref'), '')
+          != (json_extract(event_json, '$.payload.skill') || '.capabilities');
+"#;
+
+pub(crate) fn ensure_event_schema(db: &rusqlite::Connection) -> rusqlite::Result<()> {
+    db.execute_batch(INIT_TASK_EVENT_SQL)?;
+    db.execute_batch(SKILL_EXECUTION_INDEX_SQL)
+}
+
 #[derive(Clone)]
 pub(crate) struct TaskEventNotifier {
     senders: Arc<Mutex<HashMap<String, broadcast::Sender<u64>>>>,
@@ -157,11 +182,14 @@ fn publish_event_internal(
     payload: Value,
     active_claim: Option<&ClaimedTask>,
 ) -> anyhow::Result<Option<Value>> {
-    let _result_write_guard = match crate::task_result_retention::write_gate::try_begin_writing(state, task_id) {
-        Ok(guard) => guard,
-        Err(error) if error.is::<crate::task_result_retention::write_gate::RetiredResult>() => return Ok(None),
-        Err(error) => return Err(error),
-    };
+    let _result_write_guard =
+        match crate::task_result_retention::write_gate::try_begin_writing(state, task_id) {
+            Ok(guard) => guard,
+            Err(error) if error.is::<crate::task_result_retention::write_gate::RetiredResult>() => {
+                return Ok(None)
+            }
+            Err(error) => return Err(error),
+        };
     if let Some(task) = active_claim {
         if !crate::repo::is_task_claim_active(state, task_id, task.claim_attempt)? {
             let db = state.core.db.get().context("task event claim db pool")?;
@@ -202,7 +230,7 @@ fn publish_event_internal(
         crate::sqlite_busy_retry::SqliteBusyRetryPolicy::default(),
         || {
             let mut db = state.core.db.get().context("task_event_db_pool")?;
-            db.execute_batch(INIT_TASK_EVENT_SQL)?;
+            ensure_event_schema(&db)?;
             let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
             if crate::task_result_retention::is_retired(state, &tx, task_id)? {
                 // A producer may have read the old result before ACK retirement.
@@ -332,7 +360,7 @@ pub(crate) fn replay_events_after(
     cursor: u64,
 ) -> anyhow::Result<ReplayBatch> {
     let mut db = state.core.db.get().context("task_event_db_pool")?;
-    db.execute_batch(INIT_TASK_EVENT_SQL)?;
+    ensure_event_schema(&db)?;
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     crate::task_event_archive::backfill_hot_suffix(&tx, task_id)?;
     tx.commit()?;
@@ -416,7 +444,7 @@ pub(crate) fn latest_skill_progress_event(
     task_id: &str,
 ) -> anyhow::Result<Option<Value>> {
     let db = state.core.db.get().context("task progress event db pool")?;
-    db.execute_batch(INIT_TASK_EVENT_SQL)?;
+    ensure_event_schema(&db)?;
     let mut statement = db.prepare(
         "SELECT event_json FROM task_event_stream
          WHERE task_id = ?1 ORDER BY seq DESC LIMIT ?2",
@@ -461,7 +489,7 @@ pub(crate) fn read_event_artifact(
         return Ok(None);
     }
     let db = state.core.db.get().context("task event artifact db pool")?;
-    db.execute_batch(INIT_TASK_EVENT_SQL)?;
+    ensure_event_schema(&db)?;
     let payload = db
         .query_row(
             "SELECT payload_json FROM task_event_artifacts
@@ -723,7 +751,8 @@ fn persist_large_payload_if_needed(
     payload: Value,
     timestamp_ms: u64,
 ) -> anyhow::Result<(Value, Vec<Value>)> {
-    let _result_write_guard = crate::task_result_retention::write_gate::try_begin_writing(state, task_id)?;
+    let _result_write_guard =
+        crate::task_result_retention::write_gate::try_begin_writing(state, task_id)?;
     let serialized = serde_json::to_vec(&payload)?;
     if serialized.len() <= EVENT_MAX_BYTES {
         let artifact_refs = collect_artifact_refs(&payload);
@@ -731,7 +760,7 @@ fn persist_large_payload_if_needed(
     }
     let artifact_id = format!("task_event_payload_{}", bytes_hash(&serialized));
     let db = state.core.db.get().context("task event artifact db pool")?;
-    db.execute_batch(INIT_TASK_EVENT_SQL)?;
+    ensure_event_schema(&db)?;
     db.execute(
         "INSERT OR IGNORE INTO task_event_artifacts
          (task_id, artifact_id, payload_json, payload_bytes, created_at_ms)

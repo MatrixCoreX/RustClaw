@@ -55,7 +55,7 @@ const AIPP_TASK_ACTIVITY_MATCH_SQL: &str = r#"
                            AND COALESCE(
                                json_extract(task_event_stream.event_json, '$.payload.requested_action_ref'),
                                ''
-                           ) != (:skill_name || '.capabilities')
+                           ) != (json_extract(task_event_stream.event_json, '$.payload.skill') || '.capabilities')
                            AND task_event_stream.created_at_ms > :cleared_through_event_ms
                         UNION
                         SELECT task_event_archive.task_id
@@ -65,7 +65,7 @@ const AIPP_TASK_ACTIVITY_MATCH_SQL: &str = r#"
                            AND COALESCE(
                                json_extract(task_event_archive.event_json, '$.payload.requested_action_ref'),
                                ''
-                           ) != (:skill_name || '.capabilities')
+                           ) != (json_extract(task_event_archive.event_json, '$.payload.skill') || '.capabilities')
                            AND task_event_archive.created_at_ms > :cleared_through_event_ms
                     )
                )
@@ -612,7 +612,7 @@ fn owned_aipp_task_activity_ids(
                        AND COALESCE(
                            json_extract(event_json, '$.payload.requested_action_ref'),
                            ''
-                       ) != (:skill_name || '.capabilities')
+                       ) != (json_extract(event_json, '$.payload.skill') || '.capabilities')
                        AND task_id IN (SELECT value FROM json_each(:ids_json))
                     UNION
                     SELECT task_id
@@ -622,7 +622,7 @@ fn owned_aipp_task_activity_ids(
                        AND COALESCE(
                            json_extract(event_json, '$.payload.requested_action_ref'),
                            ''
-                       ) != (:skill_name || '.capabilities')
+                       ) != (json_extract(event_json, '$.payload.skill') || '.capabilities')
                        AND task_id IN (SELECT value FROM json_each(:ids_json))
               )
             "#,
@@ -739,7 +739,7 @@ fn read_aipp_task_activity_page(
                AND COALESCE(
                    json_extract(task_event_stream.event_json, '$.payload.requested_action_ref'),
                    ''
-               ) != (:skill_name || '.capabilities')
+               ) != (json_extract(task_event_stream.event_json, '$.payload.skill') || '.capabilities')
                AND task_event_stream.created_at_ms > :cleared_through_event_ms
             UNION ALL
             SELECT task_event_archive.task_id,
@@ -752,7 +752,7 @@ fn read_aipp_task_activity_page(
                AND COALESCE(
                    json_extract(task_event_archive.event_json, '$.payload.requested_action_ref'),
                    ''
-               ) != (:skill_name || '.capabilities')
+               ) != (json_extract(task_event_archive.event_json, '$.payload.skill') || '.capabilities')
                AND task_event_archive.created_at_ms > :cleared_through_event_ms
         ), activity AS (
             SELECT task_id,

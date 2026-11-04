@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "aipp_activity_index_tests.rs"]
+mod activity_indexes;
+
 #[tokio::test]
 async fn aipp_catalog_rejects_non_admin_users_before_reading_skill_storage() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
