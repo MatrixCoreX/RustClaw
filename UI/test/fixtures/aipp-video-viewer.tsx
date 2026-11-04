@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { AippTaskActivityCard } from "../../src/components/AippPage";
 import type { AippTaskActivityItem } from "../../src/types/api";
 import { withSessionArtifactStreaming } from "../../src/lib/artifact-session-stream";
+import { TaskArtifactCard } from "../../src/components/ChatPage";
 import "../../src/index.css";
 
 const params = new URLSearchParams(location.search);
@@ -29,6 +30,9 @@ const task: AippTaskActivityItem = {
 };
 createRoot(document.getElementById("root")!).render(
   <StrictMode><main className="theme-shell min-h-screen p-4"><div className="mx-auto max-w-4xl">
-    <AippTaskActivityCard item={task} apiFetch={apiFetch} t={t} lang={lang} />
+    {params.get("view") === "chat" ? <TaskArtifactCard artifact={{ ...task.artifacts[0], schema_version: 2,
+      artifact_ref: "artifact:task/video-viewer-test/video-1", sha256: "a".repeat(64), size_bytes: 1024 ** 3,
+      preview_url: task.artifacts[0].preview_url ?? null }} artifactFetch={apiFetch} t={t} />
+      : <AippTaskActivityCard item={task} apiFetch={apiFetch} t={t} lang={lang} />}
   </div></main></StrictMode>,
 );

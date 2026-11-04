@@ -138,6 +138,20 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log("PASS desktop/mobile same-origin session: cookie-authenticated native Range playback and close cleanup without buffering");
+  for (const auth of ["webd", "key"]) {
+    requests.length = 0; nativeRequests.length = 0;
+    await page.goto(`${base}/test/fixtures/aipp-video-viewer.html?lang=en&auth=${auth}&view=chat`);
+    assert.equal(videoRequests().length, 0, "large chat videos remain manual");
+    await page.getByRole("button", { name:"Load preview", exact:true }).click();
+    await page.waitForFunction(() => document.querySelector("video")?.readyState >= 2);
+    assert.equal(await page.locator("video").evaluate(video => video.src.startsWith("blob:")), auth !== "webd");
+    assert.equal(videoRequests().some(url => url.searchParams.get("preview") === "browser"), auth !== "webd");
+    await page.locator("video").evaluate(async video => { await video.play(); window.chatVideo = video; });
+    await page.waitForFunction(() => window.chatVideo.currentTime > 0);
+    await page.goto(`${base}/test/fixtures/aipp-video-viewer.html`);
+  }
+  assert.deepEqual(errors, []);
+  console.log("PASS chat manual video: native session playback and unchanged authenticated key-mode compatible copy");
 } finally {
   await browser?.close(); await server.close();
 }

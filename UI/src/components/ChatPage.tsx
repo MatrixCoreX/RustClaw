@@ -49,6 +49,7 @@ import {
 import type { ChatActivitySummary } from "../lib/chat-activity";
 import {
   fetchTaskArtifactBlob,
+  fetchTaskArtifactVideoSource,
   MAX_AUTOMATIC_ARTIFACT_PREVIEW_BYTES,
   saveTaskArtifactBlob,
   taskArtifactBrowserVideoUrl,
@@ -1564,7 +1565,7 @@ function AttachmentPreview({
   );
 }
 
-function TaskArtifactCard({
+export function TaskArtifactCard({
   artifact,
   artifactFetch,
   t,
@@ -1575,8 +1576,11 @@ function TaskArtifactCard({
 }) {
   const previewKind = artifactPreviewKind(artifact);
   const previewUrl = artifact.preview_url ?? null;
+  const nativePreviewUrl = previewKind === "video" && previewUrl ? artifactFetch.nativeMediaUrl?.(previewUrl) ?? null : null;
+  const [useBrowserCopy, setUseBrowserCopy] = useState(false);
+  const [previewRetry, setPreviewRetry] = useState(0);
   const mediaPreviewUrl =
-    previewKind === "video" && previewUrl
+    previewKind === "video" && previewUrl && (!nativePreviewUrl || useBrowserCopy)
       ? taskArtifactBrowserVideoUrl(previewUrl)
       : previewUrl;
   const videoPosterUrl =
@@ -1596,6 +1600,15 @@ function TaskArtifactCard({
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const artifactFetchRef = useRef(artifactFetch);
   artifactFetchRef.current = artifactFetch;
+  const videoRef = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const video = videoRef.current;
+    return () => { video?.pause(); video?.removeAttribute("src"); video?.load(); };
+  }, [previewObjectUrl, videoPreviewUnsupported]);
+  const videoFailed = () => {
+    if (nativePreviewUrl && !useBrowserCopy) setUseBrowserCopy(true);
+    else setVideoPreviewUnsupported(true);
+  };
   const stopBubble = (event: { stopPropagation: () => void }) => event.stopPropagation();
   const icon =
     previewKind === "image" ? (
@@ -1626,11 +1639,13 @@ function TaskArtifactCard({
       setPreviewState("error");
       return;
     }
-    void fetchTaskArtifactBlob(artifactFetchRef.current, mediaPreviewUrl, controller.signal)
-      .then((blob) => {
+    const source = previewKind === "video"
+      ? fetchTaskArtifactVideoSource(artifactFetchRef.current, mediaPreviewUrl, controller.signal)
+      : fetchTaskArtifactBlob(artifactFetchRef.current, mediaPreviewUrl, controller.signal).then(blob => ({ kind: "blob" as const, blob }));
+    void source.then((source) => {
         if (controller.signal.aborted) return;
-        objectUrl = URL.createObjectURL(blob);
-        setPreviewObjectUrl(objectUrl);
+        if (source.kind === "blob") objectUrl = URL.createObjectURL(source.blob);
+        setPreviewObjectUrl(source.kind === "native" ? source.url : objectUrl);
         setPreviewState("ready");
       })
       .catch(() => {
@@ -1640,7 +1655,7 @@ function TaskArtifactCard({
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [artifact.id, mediaPreviewUrl, previewKind, previewRequested, previewUrl]);
+  }, [artifact.id, mediaPreviewUrl, nativePreviewUrl, previewKind, previewRequested, previewUrl, previewRetry]);
 
   useEffect(() => {
     if (!previewRequested || !videoPosterUrl) {
@@ -1681,6 +1696,8 @@ function TaskArtifactCard({
 
   const requestPreview = () => {
     setPreviewState("loading");
+    setUseBrowserCopy(false);
+    setPreviewRetry(value => value + 1);
     setPreviewRequested(true);
   };
 
@@ -1720,9 +1737,10 @@ function TaskArtifactCard({
       {previewKind === "video" && previewObjectUrl && !videoPreviewUnsupported ? (
         <div className="border-b border-white/10 bg-black/25">
           <video
+            ref={videoRef}
             controls
             playsInline
-            preload="auto"
+            preload="metadata"
             src={previewObjectUrl}
             poster={videoPosterObjectUrl ?? undefined}
             className="aspect-video w-full object-contain"
@@ -1730,14 +1748,14 @@ function TaskArtifactCard({
             onLoadedData={(event) => {
               const video = event.currentTarget;
               if (video.videoWidth <= 0 || video.videoHeight <= 0) {
-                setVideoPreviewUnsupported(true);
+                videoFailed();
                 return;
               }
               if (video.currentTime === 0 && Number.isFinite(video.duration) && video.duration > 0) {
                 video.currentTime = Math.min(0.05, video.duration / 100);
               }
             }}
-            onError={() => setVideoPreviewUnsupported(true)}
+            onError={videoFailed}
           />
         </div>
       ) : null}
@@ -1753,14 +1771,18 @@ function TaskArtifactCard({
           <p className="border-t border-white/10 px-3 py-2 text-xs text-white/65">
             {previewState === "error"
               ? t(
-                  "网页兼容版生成失败。高清原视频仍可下载，请重试预览或下载后播放。",
-                  "The browser-compatible copy could not be generated. The original high-quality video is still available to download; retry the preview or play it after downloading.",
+                  "视频预览加载失败。原视频仍可下载，请重试预览或下载后播放。",
+                  "The video preview could not be loaded. Retry the preview or download the original to play it.",
                 )
               : t(
                   "网页兼容版仍无法播放。高清原视频可正常下载。",
                   "The browser-compatible copy still cannot play. The original high-quality video remains available to download.",
                 )}
           </p>
+          <button type="button" onClick={requestPreview}
+            className="mb-2 ml-3 rounded-md border border-white/15 px-2.5 py-1.5 text-xs text-white/80 hover:bg-white/10">
+            {t("重新加载", "Retry")}
+          </button>
         </div>
       ) : null}
       {previewKind !== "none" &&
@@ -1783,7 +1805,9 @@ function TaskArtifactCard({
             <span className="inline-flex items-center gap-2">
               <Loader2 className="h-4 w-4 animate-spin" />
               {previewKind === "video"
-                ? t(
+                ? nativePreviewUrl && !useBrowserCopy
+                  ? t("正在加载视频预览…", "Loading video preview…")
+                  : t(
                     "正在准备浏览器兼容版，高清原视频不会改变…",
                     "Preparing a browser-compatible copy; the original high-quality video will not be changed…",
                   )
