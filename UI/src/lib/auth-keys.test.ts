@@ -184,6 +184,40 @@ test("localizes stable authentication codes without matching natural-language er
   );
   assert.equal(
     formatAuthenticationError("future_auth_machine_code", 500, t),
-    "身份验证失败 (500)，请重新登录。",
+    "登录服务暂时不可用，请稍后重试。",
+  );
+});
+
+test("server failures offer retry guidance even when a body contains credential codes", () => {
+  for (const status of [500, 502, 503, 599]) {
+    for (const code of ["auth_lookup_failed", "auth_key_invalid", "auth_key_required", "future_auth_machine_code", null, undefined]) {
+      assert.equal(
+        formatAuthenticationError(code, status, (zh, _en) => zh),
+        "登录服务暂时不可用，请稍后重试。",
+      );
+      assert.equal(
+        formatAuthenticationError(code, status, (_zh, en) => en),
+        "The sign-in service is temporarily unavailable. Try again shortly.",
+      );
+    }
+  }
+});
+
+test("non-auth HTTP failures never expire credentials based on body codes", async () => {
+  for (const status of [400, 403, 429, 500, 502, 503, 599]) {
+    for (const code of ["auth_lookup_failed", "auth_key_invalid", "auth_key_required", "webd_session_invalid", "future_auth_machine_code"]) {
+      assert.equal(
+        await responseIndicatesExpiredAuthentication(
+          Response.json({ ok: false, error: code, data: { error_code: code } }, { status }),
+        ),
+        false,
+      );
+    }
+  }
+  assert.equal(
+    await responseIndicatesExpiredAuthentication(
+      Response.json({ ok: false, error: "auth_lookup_failed" }, { status: 401 }),
+    ),
+    false,
   );
 });

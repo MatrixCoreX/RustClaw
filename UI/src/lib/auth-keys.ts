@@ -65,23 +65,23 @@ export function formatAuthenticationError(
   t: Translate,
 ): string {
   const code = error?.trim() ?? "";
-  if (code === "auth_key_required") {
-    return t("请先登录。", "Please sign in first.");
-  }
-  if (code === "auth_key_invalid") {
-    return t("访问凭证无效或已停用，请重新登录。", "Your access credential is invalid or disabled. Please sign in again.");
-  }
   if (code === "webd_login_upstream_unavailable") {
     return t("登录服务暂时无法连接核心服务，请稍后重试。", "The sign-in service cannot reach the core service right now. Try again shortly.");
-  }
-  if (code === "upstream_unavailable") {
-    return t("登录服务暂时不可用，请稍后重试。", "The sign-in service is temporarily unavailable. Try again shortly.");
   }
   if (
     code === "webd_login_upstream_body_read_failed" ||
     code === "webd_login_upstream_response_invalid"
   ) {
     return t("登录服务收到无效响应，请检查服务状态后重试。", "The sign-in service received an invalid response. Check service status and try again.");
+  }
+  if (code === "upstream_unavailable" || (status >= 500 && status < 600)) {
+    return t("登录服务暂时不可用，请稍后重试。", "The sign-in service is temporarily unavailable. Try again shortly.");
+  }
+  if (code === "auth_key_required") {
+    return t("请先登录。", "Please sign in first.");
+  }
+  if (code === "auth_key_invalid") {
+    return t("访问凭证无效或已停用，请重新登录。", "Your access credential is invalid or disabled. Please sign in again.");
   }
   return t(`身份验证失败 (${status})，请重新登录。`, `Authentication failed (${status}). Please sign in again.`);
 }
