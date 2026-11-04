@@ -187,7 +187,14 @@ async fn aipp_items_task_filter_errors_keep_their_bad_request_status() {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(!response.ok);
-        assert!(response.data.is_none());
+        let code = response.error.as_deref().unwrap();
+        assert_eq!(
+            response.data,
+            Some(json!({
+                "error_code": code,
+                "message_key": format!("clawd.ui.aipp.{code}"),
+            }))
+        );
         assert!(matches!(
             response.error.as_deref(),
             Some("aipp_task_activity_filter_invalid" | "aipp_media_sort_order_invalid")
