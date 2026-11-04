@@ -1,0 +1,84 @@
+name: Shell platform and build capacity verification
+
+"on":
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "scripts/shell_compat.sh"
+      - "scripts/shell_compat_tests.sh"
+      - "scripts/shell_capacity_tests.sh"
+      - "scripts/tests/test_shell_platform_workflow.py"
+      - ".github/workflows/shell-platform-ci.yml"
+  push:
+    branches: [main, "ci/build-capacity-*"]
+    paths:
+      - "scripts/shell_compat.sh"
+      - "scripts/shell_compat_tests.sh"
+      - "scripts/shell_capacity_tests.sh"
+      - "scripts/tests/test_shell_platform_workflow.py"
+      - ".github/workflows/shell-platform-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  platform:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Require a script-only candidate
+        if: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
+        run: |
+          git fetch --depth=1 origin main
+          python3 - <<'PY'
+          import subprocess
+          allowed = {
+              b'scripts/shell_compat.sh', b'scripts/shell_compat_tests.sh',
+              b'scripts/shell_capacity_tests.sh', b'.github/workflows/shell-platform-ci.yml',
+              b'scripts/tests/test_shell_platform_workflow.py',
+          }
+          changed = set(subprocess.check_output(['git', 'diff', '--name-only', '-z', 'origin/main', 'HEAD']).split(b'\0')) - {b''}
+          unexpected = changed - allowed
+          if unexpected:
+              raise SystemExit('Full runtime verification required for changes outside the script-only gate')
+          print('SCRIPT_ONLY_CANDIDATE ok')
+          PY
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - name: Verify shell behavior and platform contracts without compiling runtime
+        run: |
+          bash -n scripts/shell_compat.sh scripts/shell_compat_tests.sh scripts/shell_capacity_tests.sh
+          bash scripts/shell_compat_tests.sh
+          python3 -m unittest discover -s scripts/tests -p test_shell_platform_workflow.py
+          python3 scripts/check_on_demand_skill_builds.py
+          python3 scripts/check_cross_platform_contracts.py
+          python3 scripts/check_product_identity_coupling.py --self-test
+          python3 scripts/check_product_identity_coupling.py
+      - name: Verify both configured product identities with the shared UI
+        run: |
+          if ! command -v rg >/dev/null; then
+            if [[ "$RUNNER_OS" == Linux ]]; then
+              sudo apt-get update -qq
+              sudo apt-get install -y -qq ripgrep
+            else
+              HOMEBREW_NO_AUTO_UPDATE=1 brew install ripgrep
+            fi
+          fi
+          npm ci --ignore-scripts --prefix UI
+          bash scripts/product_identity_tests.sh --with-ui
+      - name: Report detected host capacity without starting a compiler
+        run: |
+          source scripts/shell_compat.sh
+          printf 'platform=%s architecture=%s cpus=%s memory_kib=%s available_kib=%s\n' \
+            "$(detect_host_os)" "$(detect_host_arch)" "$(cargo_host_cpu_count)" \
+            "$(cargo_host_memory_kb)" "$(cargo_host_available_memory_kb)"
+          unset CARGO_BUILD_JOBS
+          configure_cargo_build_jobs_for_small_host

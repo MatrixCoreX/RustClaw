@@ -539,25 +539,28 @@ launch_detached_process() {
 }
 
 cargo_jobs_for_host_capacity() {
-  local host_arch="${1:-unknown}"
-  local total_kb="${2:-0}"
-  local available_kb="${3:-0}"
-  local cpu_count="${4:-0}"
+  local total_kb="${1:-0}"
+  local available_kb="${2:-0}"
+  local cpu_count="${3:-0}"
   case "$total_kb:$available_kb:$cpu_count" in
     *[!0-9:]*) return 1 ;;
   esac
 
-  if [[ "$host_arch" == "aarch64" || "$host_arch" == "armv7" ]]; then
-    printf '%s\n' "1"
-    return 0
-  fi
   if [[ "$available_kb" -le 0 || "$cpu_count" -le 0 ]]; then
     return 1
   fi
+  if [[ "$total_kb" -gt 0 && "$available_kb" -gt "$total_kb" ]]; then
+    available_kb="$total_kb"
+  fi
 
   local jobs=1
-  if [[ "$available_kb" -ge 20971520 && "$cpu_count" -ge 8 ]]; then
-    jobs=8
+  if [[ "$available_kb" -ge 20971520 ]]; then
+    # Keep the existing high-memory allowance (20 GiB / 8 jobs), without
+    # imposing an architecture-specific or eight-job ceiling.
+    jobs=$(( available_kb / 2621440 ))
+    if [[ "$jobs" -gt "$cpu_count" ]]; then
+      jobs="$cpu_count"
+    fi
   elif [[ "$available_kb" -ge 10485760 && "$cpu_count" -ge 4 ]]; then
     jobs=4
   elif [[ "$available_kb" -ge 8388608 && "$cpu_count" -ge 2 ]]; then
@@ -590,8 +593,7 @@ node_heap_mb_for_available_memory() {
 }
 
 cargo_jobs_for_small_host() {
-  local host_arch mem_kb available_kb cpu_count
-  host_arch="$(detect_host_arch 2>/dev/null || printf '%s' "unknown")"
+  local mem_kb available_kb cpu_count
   mem_kb="$(cargo_host_memory_kb 2>/dev/null || printf '%s' "0")"
   available_kb="$(cargo_host_available_memory_kb 2>/dev/null || printf '%s' "0")"
   cpu_count="$(cargo_host_cpu_count 2>/dev/null || printf '%s' "0")"
@@ -604,7 +606,7 @@ cargo_jobs_for_small_host() {
   case "$cpu_count" in
     ''|*[!0-9]*) cpu_count=0 ;;
   esac
-  cargo_jobs_for_host_capacity "$host_arch" "$mem_kb" "$available_kb" "$cpu_count"
+  cargo_jobs_for_host_capacity "$mem_kb" "$available_kb" "$cpu_count"
 }
 
 configure_cargo_build_jobs_for_small_host() {
@@ -615,7 +617,8 @@ configure_cargo_build_jobs_for_small_host() {
   local jobs
   jobs="$(cargo_jobs_for_small_host 2>/dev/null || true)"
   if [[ -z "$jobs" ]]; then
-    return 0
+    jobs=1
+    echo "CPU or available-memory detection unavailable; using one Cargo job. Set CARGO_BUILD_JOBS to override."
   fi
 
   export CARGO_BUILD_JOBS="$jobs"

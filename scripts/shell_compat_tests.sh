@@ -15,12 +15,7 @@ source "$ROOT_DIR/scripts/shell_compat.sh"
   python3 -c 'import tomllib'
 )
 
-[[ "$(cargo_jobs_for_host_capacity x86_64 14680064 10485760 8)" == "4" ]]
-[[ "$(cargo_jobs_for_host_capacity x86_64 14680064 9437184 8)" == "2" ]]
-[[ "$(cargo_jobs_for_host_capacity x86_64 14680064 6291456 8)" == "1" ]]
-[[ "$(cargo_jobs_for_host_capacity aarch64 33554432 25165824 8)" == "1" ]]
-[[ "$(cargo_jobs_for_host_capacity x86_64 33554432 25165824 8)" == "8" ]]
-[[ "$(cargo_jobs_for_host_capacity x86_64 33554432 6291456 16)" == "1" ]]
+bash "$ROOT_DIR/scripts/shell_capacity_tests.sh"
 [[ "$(node_heap_mb_for_available_memory 4194304 1536)" == "1536" ]]
 [[ "$(node_heap_mb_for_available_memory 1572864 1536)" == "921" ]]
 [[ "$(node_heap_mb_for_available_memory 4194304 4096)" == "2457" ]]
