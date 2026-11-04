@@ -51,6 +51,15 @@ try {
     await page.goto(`${base}/test/fixtures/aipp-uninstall.html?lang=${lang}&theme=${lang === "zh" ? "light" : "dark"}`);
     const openName = (name) => `${lang === "zh" ? "打开" : "Open"}：${name}`;
     const uninstall = lang === "zh" ? "卸载应用和技能" : "Uninstall app and skill";
+    const confirmAgain = lang === "zh" ? "再次确认卸载" : "Confirm uninstall again";
+    const firstConfirmation = () => page.getByRole("alertdialog").getByRole("button", { name: uninstall, exact: true }).click();
+    const confirmRemoval = async () => {
+      const before = mutations.length;
+      await firstConfirmation();
+      await page.getByRole("alertdialog").getByRole("button", { name: confirmAgain, exact: true }).waitFor();
+      assert.equal(mutations.length, before, "First confirmation must not submit removal");
+      await page.getByRole("alertdialog").getByRole("button", { name: confirmAgain, exact: true }).click();
+    };
     await page.getByRole("button", { name: openName("example_one"), exact: true }).click();
     await page.getByRole("button", { name: uninstall, exact: true }).click();
     let dialog = page.getByRole("alertdialog");
@@ -61,13 +70,20 @@ try {
     await dialog.getByRole("button", { name: lang === "zh" ? "取消" : "Cancel", exact: true }).last().click();
     assert.equal(mutations.length, 0);
     await page.getByRole("button", { name: uninstall, exact: true }).click();
-    await page.getByRole("alertdialog").getByRole("button", { name: uninstall, exact: true }).click();
+    await firstConfirmation();
+    await page.getByRole("alertdialog").getByRole("button", { name: confirmAgain, exact: true }).waitFor();
+    assert.equal(mutations.length, 0);
+    await page.getByRole("alertdialog").getByRole("button", { name: lang === "zh" ? "返回" : "Go back", exact: true }).click();
+    assert.equal(mutations.length, 0, "Cancelling the final confirmation must preserve the app and skill");
+    await page.getByRole("button", { name: uninstall, exact: true }).click();
+    await confirmRemoval();
     await page.getByText(lang === "zh" ? "另一个技能正在安装或删除，请等待完成后重试。" : "Another skill is being installed or removed. Wait for it to finish, then try again.", { exact: true }).waitFor();
     assert.ok(await page.getByRole("button", { name: uninstall, exact: true }).isEnabled());
     rejectRemoval = false;
     await page.getByRole("button", { name: uninstall, exact: true }).click();
-    await page.getByRole("alertdialog").getByRole("button", { name: uninstall, exact: true }).click();
-    await page.waitForRequest(request => request.url().includes("/operations/remove-1"));
+    const operationRequested = page.waitForRequest(request => request.url().includes("/operations/remove-1"));
+    await confirmRemoval();
+    await operationRequested;
     assert.ok(await page.getByRole("button", { name: uninstall, exact: true }).isDisabled());
     failCatalog = true;
     releaseJob();
@@ -84,7 +100,7 @@ try {
     await page.reload();
     await page.getByRole("button", { name: openName("example_two"), exact: true }).click();
     await page.getByRole("button", { name: uninstall, exact: true }).click();
-    await page.getByRole("alertdialog").getByRole("button", { name: uninstall, exact: true }).click();
+    await confirmRemoval();
     await page.getByText(lang === "zh" ? "尚未安装应用。" : "No apps installed.", { exact: true }).waitFor();
     assert.equal(await page.getByTestId("aipp-launcher-icon").count(), 0);
     await page.reload();

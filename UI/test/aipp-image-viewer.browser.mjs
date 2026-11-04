@@ -57,13 +57,14 @@ try {
     await route.fulfill({ contentType: url.includes("text") ? "text/plain" : "image/png", body: url.includes("text") ? "contents" : corruptPreview && url.endsWith("preview") ? "invalid image" : url.includes("landscape") ? landscape : portrait });
   });
   const dialog = page.getByRole("dialog");
+  const downloadImage = () => dialog.getByRole("button", { name: /^(?:下载图片|Download image)$/ });
   const readyImage = () => page.waitForFunction(() => {
     const image = document.querySelector("dialog img");
     return image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0;
   });
   const checkLayout = async () => {
     const box = await dialog.boundingBox();
-    const button = await dialog.locator("footer button").boundingBox();
+    const button = await downloadImage().boundingBox();
     const viewport = page.viewportSize();
     assert.ok(box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width + 1 && box.y + box.height <= viewport.height + 1);
     assert.ok(button.x > box.x + box.width / 2 && button.y > box.y + box.height / 2);
@@ -86,7 +87,7 @@ try {
         assert.equal(requests.length, requestCount, "reuse the authenticated thumbnail blob");
         if (kind === "activity") await page.screenshot({ path: path.join(output, `${viewport.width}-${theme}.png`) });
         const downloadEvent = page.waitForEvent("download");
-        await dialog.locator("footer button").click();
+        await downloadImage().click();
         const download = await downloadEvent;
         assert.equal(download.suggestedFilename(), kind === "activity" ? "portrait.png" : `media-${kind === "cover" ? "000000000002" : "000000000001"}.png`);
         assert.deepEqual(await readFile(await download.path()), portrait);
@@ -121,12 +122,12 @@ try {
   await readyImage(); await checkLayout();
   assert.equal(await dialog.locator("img").evaluate((img) => img.naturalWidth), 1600);
   failDownload = true;
-  await dialog.locator("footer button").click();
+  await downloadImage().click();
   await dialog.getByText("Image download failed. Try again.", { exact: true }).waitFor();
   await checkLayout();
   failDownload = false;
   const retryDownload = page.waitForEvent("download");
-  await dialog.locator("footer button").click();
+  await downloadImage().click();
   assert.deepEqual(await readFile(await (await retryDownload).path()), landscape);
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   console.log("PASS image artifact preview, long filename, preview/download failure and retry");
