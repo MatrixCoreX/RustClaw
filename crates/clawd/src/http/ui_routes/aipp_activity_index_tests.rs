@@ -293,7 +293,7 @@ fn aipp_indexed_pages_preserve_totals_order_cursors_and_projection() {
                 let mut actual = Vec::new();
                 loop {
                     let page = read_aipp_task_activity_page(
-                        &db, "fixture", &query, false, cleared, &hidden,
+                        &db, "fixture", "all", cleared, &hidden, &query,
                     )
                     .unwrap();
                     assert_eq!(page["total_item_count"], expected.len());
