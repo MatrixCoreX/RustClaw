@@ -214,7 +214,7 @@ jobs:
       - name: Prepare native build and sandbox dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq bubblewrap pkg-config clang libclang-dev protobuf-compiler
+          sudo apt-get install -y -qq bubblewrap pkg-config clang libclang-dev protobuf-compiler ripgrep
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
           key: linux-runtime-read
@@ -243,7 +243,6 @@ jobs:
           python3 scripts/check_historical_hardcoded_language.py --fail-on-runtime --fail-on-ui-visible
           python3 scripts/check_task_lifecycle_contracts.py
           cargo test --locked -p clawd --bin clawd task_event_transport -- --test-threads=1
-          cargo test --locked -p clawd --bin clawd task_event_archive -- --test-threads=1
           cargo test --locked -p clawd --bin clawd aipp -- --test-threads=1
           cargo test --locked -p clawd --bin clawd run_skill -- --test-threads=1
       - name: Verify both product identities with the shared UI
@@ -258,7 +257,7 @@ jobs:
           mkdir -p "$artifact_root/runtime-read"
           install -m 755 target/release/clawd "$artifact_root/runtime-read/clawd"
           printf '%s\n' "$GITHUB_SHA" > "$artifact_root/runtime-read/source-commit"
-          printf '%s\n' 'task_event_transport task_event_archive aipp run_skill product_identity storage_ownership cross_platform task_lifecycle' > "$artifact_root/runtime-read/verified-gates"
+          printf '%s\n' 'task_event_transport_and_archive aipp run_skill product_identity storage_ownership cross_platform task_lifecycle' > "$artifact_root/runtime-read/verified-gates"
           (cd "$artifact_root/runtime-read" && sha256sum clawd source-commit verified-gates > SHA256SUMS)
           tar -czf "$artifact_root/runtime-read-${GITHUB_SHA}.tar.gz" -C "$artifact_root" runtime-read
           (cd "$artifact_root" && sha256sum "runtime-read-${GITHUB_SHA}.tar.gz" > "runtime-read-${GITHUB_SHA}.tar.gz.sha256")
@@ -387,7 +386,6 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p clawd --bin clawd task_event_transport -- --test-threads=1
-          cargo test --locked -p clawd --bin clawd task_event_archive -- --test-threads=1
           cargo test --locked -p clawd --bin clawd aipp -- --test-threads=1
           cargo test --locked -p clawd --bin clawd run_skill -- --test-threads=1
 

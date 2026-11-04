@@ -86,8 +86,10 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
         steps = runtime["steps"]
         named = {step.get("name"): step for step in steps}
         gate = named["Verify Linux indexed history reads and startup upgrades"]
-        for selector in ["task_event_transport", "task_event_archive", "aipp", "run_skill"]:
+        for selector in ["task_event_transport", "aipp", "run_skill"]:
             self.assertIn(f"cargo test --locked -p clawd --bin clawd {selector}", gate["run"])
+        self.assertNotIn("--bin clawd task_event_archive", gate["run"])
+        self.assertIn("ripgrep", named["Prepare native build and sandbox dependencies"]["run"])
         build = named["Build the exact verified Linux core without publishing a release"]
         attest = named["Attest the exact Linux core provenance"]
         upload = named["Preserve the exact verified Linux core artifact"]
