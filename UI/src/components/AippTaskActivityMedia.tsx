@@ -44,23 +44,19 @@ export function ActivityImagePreview({ artifact, apiFetch, t, onOpen }: {
   useEffect(() => {
     setSource(null);
     if (!endpoint) return;
-    let disposed = false;
+    const controller = new AbortController();
     let objectUrl: string | null = null;
-    void apiFetchRef.current(endpoint)
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`aipp_activity_preview_http_${response.status}`);
-        return response.blob();
-      })
+    void fetchTaskArtifactBlob(apiFetchRef.current, endpoint, controller.signal)
       .then((blob) => {
-        if (disposed) return;
+        if (controller.signal.aborted) return;
         objectUrl = URL.createObjectURL(blob);
         setSource(objectUrl);
       })
       .catch(() => {
-        if (!disposed) setSource(null);
+        if (!controller.signal.aborted) setSource(null);
       });
     return () => {
-      disposed = true;
+      controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [endpoint]);

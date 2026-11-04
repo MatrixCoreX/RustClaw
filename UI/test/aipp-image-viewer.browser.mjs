@@ -161,6 +161,34 @@ try {
   await popup.close();
   assert.equal(await dialog.count(), 0);
   console.log("PASS pending request cancellation, keyboard focus, unchanged text preview");
+  // Exercise component cleanup while a thumbnail body is still pending, not only viewer cleanup.
+  await page.addInitScript(() => {
+    window.fixturePreviewRequests = [];
+    const original = window.fetch;
+    window.fetch = function(input, init) {
+      const url = typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+      if (url.includes("/v1/tasks/image-viewer-test/artifacts/portrait/content?disposition=inline")) {
+        const signal = init?.signal || (input instanceof Request ? input.signal : null);
+        const record = { hasSignal: !!signal, aborted: !!signal?.aborted };
+        window.fixturePreviewRequests.push(record);
+        signal?.addEventListener("abort", () => { record.aborted = true; });
+      }
+      return original.call(this, input, init);
+    };
+  });
+  const heldPreviews = [];
+  await page.route("**/v1/tasks/image-viewer-test/artifacts/portrait/content?disposition=inline", route => { heldPreviews.push(route); });
+  try {
+    await page.reload();
+    await page.getByTestId("activity").waitFor();
+    await page.waitForFunction(() => window.fixturePreviewRequests.some(request => !request.aborted));
+    await page.evaluate(() => window.dispatchEvent(new Event("fixture-hide-activity")));
+    await page.getByTestId("activity").waitFor({ state: "detached" });
+    await page.waitForFunction(() => window.fixturePreviewRequests.every(request => request.hasSignal && request.aborted));
+    console.log("PASS removing a thumbnail aborts all pending requests, including StrictMode preflight");
+  } finally {
+    for (const route of heldPreviews) await route.abort().catch(() => {});
+  }
   assert.deepEqual(errors, []);
   console.log(`PASS browser suite; screenshots: ${output}`);
   await context.close();

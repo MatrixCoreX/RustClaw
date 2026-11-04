@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AippMediaItemCard, AippTaskActivityCard } from "../../src/components/AippPage";
 import type { AippMediaItem, AippTaskActivityItem } from "../../src/types/api";
@@ -31,14 +31,24 @@ const task: AippTaskActivityItem = {
   ],
 };
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
+function PreviewFixture() {
+  const [showActivity, setShowActivity] = useState(true);
+  useEffect(() => {
+    const hide = () => setShowActivity(false);
+    window.addEventListener("fixture-hide-activity", hide);
+    return () => window.removeEventListener("fixture-hide-activity", hide);
+  }, []);
+  return (
     <main className="theme-shell min-h-screen p-4">
       <div className="mx-auto grid max-w-5xl gap-4">
         <section data-testid="collection"><AippMediaItemCard item={media} skillName="example_collection" apiFetch={apiFetch} t={t} lang={lang} /></section>
         <section data-testid="cover"><AippMediaItemCard item={{ ...media, global_sequence: 2, kind: "video" }} skillName="example_collection" apiFetch={apiFetch} t={t} lang={lang} /></section>
-        <section data-testid="activity"><AippTaskActivityCard item={task} apiFetch={apiFetch} t={t} lang={lang} /></section>
+        {showActivity && <section data-testid="activity"><AippTaskActivityCard item={task} apiFetch={apiFetch} t={t} lang={lang} /></section>}
       </div>
     </main>
-  </StrictMode>,
+  );
+}
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode><PreviewFixture /></StrictMode>,
 );
