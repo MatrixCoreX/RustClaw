@@ -28,11 +28,20 @@ export async function fetchTaskArtifactBlob(
   if (!safeArtifactUrl(path)) {
     throw new Error("task_artifact_url_invalid");
   }
+  signal?.throwIfAborted();
   const response = await artifactFetch(path, signal ? { signal } : undefined);
+  if (!response.ok || signal?.aborted) {
+    // Stop error/obsolete bodies without delaying the original error if stream
+    // cleanup itself rejects or waits on an unresponsive producer.
+    void response.body?.cancel().catch(() => undefined);
+    signal?.throwIfAborted();
+  }
   if (!response.ok) {
     throw new Error(`task_artifact_http_${response.status}`);
   }
-  return response.blob();
+  const blob = await response.blob();
+  signal?.throwIfAborted();
+  return blob;
 }
 
 export async function fetchTaskArtifactVideoSource(

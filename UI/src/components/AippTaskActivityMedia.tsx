@@ -133,7 +133,7 @@ export function ActivityVideoPlayer({ artifact, apiFetch, t, initialPoster }: {
   const fallbackTried = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const downloadRequest = useRef<AbortController | null>(null);
-  useEffect(() => () => { downloadRequest.current?.abort(); }, []);
+  useEffect(() => () => { downloadRequest.current?.abort(); downloadRequest.current = null; }, []);
   useEffect(() => {
     const video = videoRef.current;
     return () => {
@@ -220,7 +220,7 @@ export function ActivityVideoPlayer({ artifact, apiFetch, t, initialPoster }: {
   }, [artifact.id, videoPosterUrl, initialPoster]);
 
   const download = async () => {
-    if (downloadLoading) return;
+    if (downloadRequest.current) return;
     setDownloadLoading(true);
     setDownloadError(null);
     const controller = new AbortController();
@@ -231,8 +231,10 @@ export function ActivityVideoPlayer({ artifact, apiFetch, t, initialPoster }: {
     } catch {
       if (!controller.signal.aborted) setDownloadError(t("视频下载失败，请重试。", "Could not download the video. Try again."));
     } finally {
-      if (!controller.signal.aborted) setDownloadLoading(false);
-      if (downloadRequest.current === controller) downloadRequest.current = null;
+      if (downloadRequest.current === controller) {
+        downloadRequest.current = null;
+        if (!controller.signal.aborted) setDownloadLoading(false);
+      }
     }
   };
 

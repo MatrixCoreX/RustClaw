@@ -1598,6 +1598,8 @@ export function TaskArtifactCard({
   const [videoPreviewUnsupported, setVideoPreviewUnsupported] = useState(false);
   const [downloadLoading, setDownloadLoading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const downloadRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => { downloadRequest.current?.abort(); downloadRequest.current = null; }, []);
   const artifactFetchRef = useRef(artifactFetch);
   artifactFetchRef.current = artifactFetch;
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -1681,16 +1683,21 @@ export function TaskArtifactCard({
   }, [artifact.id, previewRequested, videoPosterUrl]);
 
   const downloadArtifact = async () => {
-    if (downloadLoading) return;
+    if (downloadRequest.current) return;
+    const controller = new AbortController();
+    downloadRequest.current = controller;
     setDownloadLoading(true);
     setDownloadError(null);
     try {
-      const blob = await fetchTaskArtifactBlob(artifactFetchRef.current, artifact.download_url);
-      saveTaskArtifactBlob(blob, artifact.filename);
+      const blob = await fetchTaskArtifactBlob(artifactFetchRef.current, artifact.download_url, controller.signal);
+      if (!controller.signal.aborted) saveTaskArtifactBlob(blob, artifact.filename);
     } catch {
-      setDownloadError(t("下载失败，请重新登录后再试。", "Download failed. Sign in again and retry."));
+      if (!controller.signal.aborted) setDownloadError(t("下载失败，请重试。", "Download failed. Try again."));
     } finally {
-      setDownloadLoading(false);
+      if (downloadRequest.current === controller) {
+        downloadRequest.current = null;
+        if (!controller.signal.aborted) setDownloadLoading(false);
+      }
     }
   };
 

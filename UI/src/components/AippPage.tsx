@@ -530,6 +530,8 @@ export function AippTaskActivityCard({
   const [expanded, setExpanded] = useState(false);
   const [artifactAction, setArtifactAction] = useState<string | null>(null);
   const [artifactError, setArtifactError] = useState<string | null>(null);
+  const artifactRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => { artifactRequest.current?.abort(); artifactRequest.current = null; }, []);
   const [previewIndex, setPreviewIndex] = useState(0);
   const [videoIndex, setVideoIndex] = useState(0);
   const [viewerImage, setViewerImage] = useState<AippViewerImage | null>(null);
@@ -563,11 +565,14 @@ export function AippTaskActivityCard({
       openVideo(artifact);
       return;
     }
-    if (artifactAction) return;
+    if (artifactRequest.current) return;
+    const controller = new AbortController();
+    artifactRequest.current = controller;
     setArtifactAction(`${open ? "open" : "download"}:${artifact.id}`);
     setArtifactError(null);
     try {
-      const blob = await fetchTaskArtifactBlob(apiFetch, open && artifact.preview_url ? artifact.preview_url : artifact.download_url);
+      const blob = await fetchTaskArtifactBlob(apiFetch, open && artifact.preview_url ? artifact.preview_url : artifact.download_url, controller.signal);
+      if (controller.signal.aborted) return;
       if (open) {
         const objectUrl = URL.createObjectURL(blob);
         const anchor = document.createElement("a");
@@ -582,9 +587,12 @@ export function AippTaskActivityCard({
         saveTaskArtifactBlob(blob, artifact.filename);
       }
     } catch {
-      setArtifactError(t("文件读取失败，请重试。", "Could not read the file. Try again."));
+      if (!controller.signal.aborted) setArtifactError(t("文件读取失败，请重试。", "Could not read the file. Try again."));
     } finally {
-      setArtifactAction(null);
+      if (artifactRequest.current === controller) {
+        artifactRequest.current = null;
+        if (!controller.signal.aborted) setArtifactAction(null);
+      }
     }
   };
   const selectControl = onToggleSelected ? (

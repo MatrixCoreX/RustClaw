@@ -74,7 +74,7 @@ export function sharedUiAdapter(root: string): Plugin {
         text = once(text, '<SandboxedAipp app={selectedApp} lang={lang} apiFetch={apiFetch} requestScope={requestScope} />', '<DesktopAipp key={`${selectedApp.skill_name}:${requestScope}`} app={selectedApp} lang={lang} />', id);
         text = `import { DesktopAipp } from ${JSON.stringify(components)};\n` + text;
         imports.add('desktopDownload');
-        text = once(text, 'const blob = await fetchTaskArtifactBlob(apiFetch, open && artifact.preview_url ? artifact.preview_url : artifact.download_url);', 'if (!open) { await desktopDownload(artifact.download_url, artifact.filename); return; }\n      const blob = await fetchTaskArtifactBlob(apiFetch, open && artifact.preview_url ? artifact.preview_url : artifact.download_url);', id);
+        text = once(text, 'const blob = await fetchTaskArtifactBlob(apiFetch, open && artifact.preview_url ? artifact.preview_url : artifact.download_url, controller.signal);', 'if (!open) { await desktopDownload(artifact.download_url, artifact.filename); return; }\n      const blob = await fetchTaskArtifactBlob(apiFetch, open && artifact.preview_url ? artifact.preview_url : artifact.download_url, controller.signal);', id);
       }
       if (id === uiRoot + 'components/AippImageViewer.tsx') {
         imports.add('desktopDownload');
@@ -82,7 +82,7 @@ export function sharedUiAdapter(root: string): Plugin {
       }
       if (id === uiRoot + 'components/ChatPage.tsx') {
         imports.add('desktopDownload'); imports.add('desktopMediaUrl'); imports.add('desktopCloseMedia');
-        text = once(text, 'const blob = await fetchTaskArtifactBlob(artifactFetchRef.current, artifact.download_url);\n      saveTaskArtifactBlob(blob, artifact.filename);', 'await desktopDownload(artifact.download_url, artifact.filename);', id);
+        text = once(text, 'const blob = await fetchTaskArtifactBlob(artifactFetchRef.current, artifact.download_url, controller.signal);\n      if (!controller.signal.aborted) saveTaskArtifactBlob(blob, artifact.filename);', 'await desktopDownload(artifact.download_url, artifact.filename);', id);
         text = once(text, 'const source = previewKind === "video"', `if (previewKind === "video" || previewKind === "audio") {
       let mediaUrl: string | undefined;
       void desktopMediaUrl(mediaPreviewUrl).then(url => {

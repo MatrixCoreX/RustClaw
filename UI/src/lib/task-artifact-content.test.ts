@@ -64,3 +64,43 @@ test("derives a browser-compatible video preview URL while preserving the downlo
   );
   assert.equal(taskArtifactBrowserVideoUrl("https://example.com/video.mp4"), null);
 });
+
+test("an already cancelled artifact read never starts a request", async () => {
+  const controller = new AbortController(); controller.abort();
+  let calls = 0;
+  await assert.rejects(fetchTaskArtifactBlob(async () => { calls++; return new Response("obsolete"); },
+    "/v1/tasks/task-1/artifacts/artifact-1/content", controller.signal), { name: "AbortError" });
+  assert.equal(calls, 0);
+});
+
+test("a response arriving after cancellation is stopped without reading its body", async () => {
+  const controller = new AbortController(); let cancelled = 0, reads = 0;
+  const body = new ReadableStream({ cancel() { cancelled++; } });
+  const response = new Response(body);
+  response.blob = async () => { reads++; return new Blob(["obsolete"]); };
+  await assert.rejects(fetchTaskArtifactBlob(async () => { controller.abort(); return response; },
+    "/v1/tasks/task-1/artifacts/artifact-1/content", controller.signal), { name: "AbortError" });
+  assert.equal(cancelled, 1); assert.equal(reads, 0);
+});
+
+test("cancellation during body decoding cannot return obsolete bytes", async () => {
+  const controller = new AbortController();
+  const response = new Response("video");
+  response.blob = async () => { controller.abort(); return new Blob(["obsolete"]); };
+  await assert.rejects(fetchTaskArtifactBlob(async () => response,
+    "/v1/tasks/task-1/artifacts/artifact-1/content", controller.signal), { name: "AbortError" });
+});
+
+test("HTTP error bodies are cancelled and cleanup failures cannot mask the HTTP error", async () => {
+  for (const cleanup of ["ok", "reject", "pending"]) {
+    let cancelled = 0;
+    const body = new ReadableStream({ cancel() {
+      cancelled++;
+      if (cleanup === "reject") return Promise.reject(new Error("cleanup failed"));
+      if (cleanup === "pending") return new Promise<void>(() => undefined);
+    } });
+    await assert.rejects(fetchTaskArtifactBlob(async () => new Response(body, { status: 503 }),
+      "/v1/tasks/task-1/artifacts/artifact-1/content"), /task_artifact_http_503/);
+    assert.equal(cancelled, 1);
+  }
+});

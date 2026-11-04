@@ -65,6 +65,9 @@ test('AiAPP downloads keep native delivery while previews keep the shared endpoi
   assert.throws(() => transform(source.replace('apiFetch={apiFetch} requestScope={requestScope} />', 'apiFetch={apiFetch} />'), filename), /Shared UI contract changed/);
   assert.ok(output.includes('if (!open) { await desktopDownload(artifact.download_url, artifact.filename); return; }'));
   assert.ok(output.includes('open && artifact.preview_url ? artifact.preview_url : artifact.download_url'));
+  assert.ok(output.includes('artifact.preview_url : artifact.download_url, controller.signal)'));
+  assert.ok(output.includes('artifactRequest.current?.abort()'));
+  assert.throws(() => transform(source.replace('artifact.download_url, controller.signal)', 'artifact.download_url)'), filename), /Shared UI contract changed/);
 
   const viewerFilename = path.resolve(root, '../UI/src/components/AippImageViewer.tsx');
   const viewerSource = fs.readFileSync(viewerFilename, 'utf8');
@@ -80,6 +83,8 @@ test('chat media keeps the native authenticated bridge ahead of browser-session 
   for (const id of [filename, filename.replaceAll('\\', '/')]) for (const newline of ['\n', '\r\n']) {
     const output = transform(source.replaceAll(/\r?\n/g, newline), id)?.code ?? '';
     assert.ok(output.includes('await desktopDownload(artifact.download_url, artifact.filename);'));
+    assert.ok(!output.includes('fetchTaskArtifactBlob(artifactFetchRef.current, artifact.download_url'));
+    assert.ok(output.includes('downloadRequest.current?.abort()'));
     const native = output.indexOf('if (previewKind === "video" || previewKind === "audio")');
     const browser = output.indexOf('const source = previewKind === "video"');
     assert.ok(native >= 0 && browser > native);
