@@ -1136,7 +1136,15 @@ async fn get_aipp_items(
         return response;
     }
     let active = match active_aipp_package(&state, &skill_name) {
-        Ok(Some(active)) if aipp_is_installed(&state, &skill_name) => active,
+        Ok(Some(active)) => active,
+        _ => return aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_available"),
+    };
+    let view = match aipp_admission_service(&state).and_then(|service| {
+        service
+            .aipp_view_state(&skill_name)
+            .map_err(|_| "aipp_view_state_unavailable".to_string())
+    }) {
+        Ok(view) if view.installed => view,
         _ => return aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_available"),
     };
     if active.aipp.data_contract == "skill_task_activity_v1" {
@@ -1145,32 +1153,8 @@ async fn get_aipp_items(
             .task_channel_scope
             .clone()
             .unwrap_or_else(|| "all".to_string());
-        let cleared_through_event_ms = match aipp_admission_service(&state).and_then(|service| {
-            service
-                .aipp_cleared_through_event_ms(&skill_name)
-                .map_err(|_| "aipp_view_state_unavailable".to_string())
-        }) {
-            Ok(sequence) => sequence,
-            Err(_) => {
-                return aipp_api_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "aipp_view_state_unavailable",
-                );
-            }
-        };
-        let hidden_task_ids = match aipp_admission_service(&state).and_then(|service| {
-            service
-                .aipp_hidden_task_ids(&skill_name)
-                .map_err(|_| "aipp_view_state_unavailable".to_string())
-        }) {
-            Ok(task_ids) => task_ids.into_iter().collect::<Vec<_>>(),
-            Err(_) => {
-                return aipp_api_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "aipp_view_state_unavailable",
-                );
-            }
-        };
+        let cleared_through_event_ms = view.cleared_through_event_ms;
+        let hidden_task_ids = view.hidden_task_ids.into_iter().collect::<Vec<_>>();
         let query_state = state.clone();
         let query_skill = skill_name.clone();
         let page = tokio::task::spawn_blocking(move || {
@@ -1221,19 +1205,7 @@ async fn get_aipp_items(
         Ok(path) => path,
         Err(_) => return aipp_api_error(StatusCode::BAD_REQUEST, "aipp_storage_invalid"),
     };
-    let hidden_sequences = match aipp_admission_service(&state).and_then(|service| {
-        service
-            .aipp_hidden_record_sequences(&skill_name)
-            .map_err(|_| "aipp_view_state_unavailable".to_string())
-    }) {
-        Ok(sequences) => sequences,
-        Err(_) => {
-            return aipp_api_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "aipp_view_state_unavailable",
-            );
-        }
-    };
+    let hidden_sequences = view.hidden_record_sequences;
     let declared_platforms = active
         .manifest
         .capability_request

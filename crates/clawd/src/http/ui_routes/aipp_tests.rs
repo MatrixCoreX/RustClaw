@@ -6,6 +6,9 @@ mod activity_indexes;
 #[path = "aipp_activity_page_tests.rs"]
 mod activity_pages;
 
+#[path = "aipp_items_state_tests.rs"]
+mod items_state;
+
 #[tokio::test]
 async fn aipp_catalog_rejects_non_admin_users_before_reading_skill_storage() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
@@ -1109,7 +1112,6 @@ fn sandbox_bundle_headers_confine_code_and_browser_features() {
     );
 }
 
-
 #[test]
 fn personal_activity_excludes_distributed_work_but_keeps_auditable_tasks() {
     let db = task_activity_db();
@@ -1119,8 +1121,14 @@ fn personal_activity_excludes_distributed_work_but_keeps_auditable_tasks() {
     db.execute("UPDATE tasks SET payload_json=?1 WHERE task_id='distributed'",
         [json!({"_task_source": "distributed_work", "args": {"share": "https://media.example.test/item"}}).to_string()]).unwrap();
     db.execute("UPDATE tasks SET idempotency_key='nni-capability:fixture:1' WHERE task_id='legacy-distributed'", []).unwrap();
-    let page = read_aipp_task_activity_page(&db, "fixture", "all", 0, &[], &AippMediaQuery::default()).unwrap();
+    let page =
+        read_aipp_task_activity_page(&db, "fixture", "all", 0, &[], &AippMediaQuery::default())
+            .unwrap();
     assert_eq!(page["total_item_count"], 1);
     assert_eq!(page["items"][0]["task_id"], "personal");
-    assert_eq!(db.query_row("SELECT count(*) FROM tasks", [], |row| row.get::<_, i64>(0)).unwrap(), 3);
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        3
+    );
 }

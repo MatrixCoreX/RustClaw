@@ -167,8 +167,9 @@ fn aipp_removal_is_independent_from_skill_admission_state() {
         .expect("restored state"));
     assert_eq!(
         service
-            .aipp_cleared_through_event_ms("fixture_app")
-            .expect("default clear sequence"),
+            .aipp_view_state("fixture_app")
+            .expect("default clear sequence")
+            .cleared_through_event_ms,
         0
     );
     service
@@ -176,8 +177,9 @@ fn aipp_removal_is_independent_from_skill_admission_state() {
         .expect("set clear sequence");
     assert_eq!(
         service
-            .aipp_cleared_through_event_ms("fixture_app")
-            .expect("stored clear sequence"),
+            .aipp_view_state("fixture_app")
+            .expect("stored clear sequence")
+            .cleared_through_event_ms,
         42
     );
     assert!(service

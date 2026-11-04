@@ -70,6 +70,15 @@ pub(crate) struct AdmissionMutation {
     pub(crate) grant: Option<HostPolicyGrant>,
 }
 
+/// Request-owned presentation state; not an execution grant or a persistent cache.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct AippViewState {
+    pub(crate) installed: bool,
+    pub(crate) cleared_through_event_ms: u64,
+    pub(crate) hidden_task_ids: BTreeSet<String>,
+    pub(crate) hidden_record_sequences: BTreeSet<u64>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct OverlaySnapshot {
     pub(crate) generation: u64,

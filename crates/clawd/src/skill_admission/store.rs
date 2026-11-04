@@ -20,6 +20,7 @@ use super::model::{
     OVERLAY_GENERATION_SCHEMA_VERSION,
 };
 use super::registry::render_registry_fragment;
+use super::AippViewState;
 
 const OVERLAY_DIRECTORY: &str = ".runtime-admission";
 const AIPP_INSTALL_STATE_SCHEMA_VERSION: u32 = 1;
@@ -117,6 +118,25 @@ impl SkillAdmissionService {
         Ok(!state.removed.contains(skill_name))
     }
 
+    pub(crate) fn aipp_view_state(&self, skill_name: &str) -> Result<AippViewState> {
+        skill_sdk::validate_safe_name(skill_name, "aipp.skill_name")
+            .map_err(|source| error("aipp_skill_name_invalid", source.to_string()))?;
+        let mut state = self.read_aipp_install_state()?;
+        Ok(AippViewState {
+            installed: !state.removed.contains(skill_name),
+            cleared_through_event_ms: state
+                .cleared_through_event_ms
+                .get(skill_name)
+                .copied()
+                .unwrap_or_default(),
+            hidden_task_ids: state.hidden_task_ids.remove(skill_name).unwrap_or_default(),
+            hidden_record_sequences: state
+                .hidden_record_sequences
+                .remove(skill_name)
+                .unwrap_or_default(),
+        })
+    }
+
     pub(crate) fn set_aipp_installed(&self, skill_name: &str, installed: bool) -> Result<()> {
         skill_sdk::validate_safe_name(skill_name, "aipp.skill_name")
             .map_err(|source| error("aipp_skill_name_invalid", source.to_string()))?;
@@ -127,17 +147,6 @@ impl SkillAdmissionService {
                 state.removed.insert(skill_name.to_string());
             }
         })
-    }
-
-    pub(crate) fn aipp_cleared_through_event_ms(&self, skill_name: &str) -> Result<u64> {
-        skill_sdk::validate_safe_name(skill_name, "aipp.skill_name")
-            .map_err(|source| error("aipp_skill_name_invalid", source.to_string()))?;
-        Ok(self
-            .read_aipp_install_state()?
-            .cleared_through_event_ms
-            .get(skill_name)
-            .copied()
-            .unwrap_or_default())
     }
 
     pub(crate) fn set_aipp_cleared_through_event_ms(
