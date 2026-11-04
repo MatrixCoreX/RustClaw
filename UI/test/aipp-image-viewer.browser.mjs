@@ -39,6 +39,8 @@ try {
   const portrait = Buffer.from(await makePng(600, 900), "base64");
   const landscape = Buffer.from(await makePng(1600, 700), "base64");
   let failPreview = false, failDownload = false, corruptPreview = false, delayPreview = false;
+  let largeDownload = false, oversizedDownload = false;
+  const largeOriginal = Buffer.concat([portrait, Buffer.alloc(26 * 1024 * 1024 - portrait.length)]);
   let collectionFailures = 0, corruptCollection = false, remoteRequests = 0;
   const requests = [];
   await page.route("**/v1/aipps/**/preview", async (route) => {
@@ -56,6 +58,10 @@ try {
       await route.fulfill({ status: 403, body: "denied" }); return;
     }
     if (preview && delayPreview) await new Promise((resolve) => setTimeout(resolve, 300));
+    if (!preview && !text && oversizedDownload) {
+      return route.fulfill({ contentType: "image/png", headers: { "content-length": String(128 * 1024 * 1024 + 1) }, body: portrait });
+    }
+    if (!preview && !text && largeDownload) return route.fulfill({ contentType: "image/png", body: largeOriginal });
     await route.fulfill({ contentType: text ? "text/plain" : "image/png", body: text ? "contents" : corruptPreview && preview ? "invalid image" : url.pathname.includes("landscape") ? landscape : portrait });
   });
   const dialog = page.getByRole("dialog");
@@ -161,6 +167,20 @@ try {
   await popup.close();
   assert.equal(await dialog.count(), 0);
   console.log("PASS pending request cancellation, keyboard focus, unchanged text preview");
+  await page.getByTestId("activity").getByRole("button", { name: "Enlarge image", exact: true }).click();
+  await readyImage(); largeDownload = true;
+  const largeDownloadEvent = page.waitForEvent("download");
+  await downloadImage().click();
+  assert.deepEqual(await readFile(await (await largeDownloadEvent).path()), largeOriginal);
+  largeDownload = false; oversizedDownload = true;
+  await downloadImage().click();
+  await dialog.getByRole("alert").filter({ hasText: "browser download memory budget" }).waitFor();
+  oversizedDownload = false;
+  const recoveredDownload = page.waitForEvent("download");
+  await downloadImage().click();
+  assert.deepEqual(await readFile(await (await recoveredDownload).path()), portrait);
+  await page.keyboard.press("Escape"); await dialog.waitFor({ state: "detached" });
+  console.log("PASS 26MiB original download, explicit memory-budget error and successful retry");
   // Exercise component cleanup while a thumbnail body is still pending, not only viewer cleanup.
   await page.addInitScript(() => {
     window.fixturePreviewRequests = [];

@@ -36,6 +36,7 @@ try {
     await route.fulfill({ status: failVideo ? 503 : 200, contentType: "video/webm", body: failVideo ? "unavailable" : corrupt ? "invalid video" : clip });
   });
   const videoRequests = () => requests.filter(url => url.searchParams.get("preview") !== "poster");
+  const posterRequests = () => requests.filter(url => url.searchParams.get("preview") === "poster" && url.pathname.includes("video-1"));
   const dialog = page.getByRole("dialog");
   const ready = () => page.waitForFunction(() => {
     const video = document.querySelector("dialog video");
@@ -55,10 +56,13 @@ try {
     requests.length = 0;
     await page.goto(`${base}/test/fixtures/aipp-video-viewer.html?lang=${lang}&theme=${theme}`);
     await page.locator("article img").waitFor();
+    await page.locator("article img").evaluate(image => image.decode());
+    const loadedPosters = posterRequests().length;
     assert.equal(await page.locator("video").count(), 0, "the card must not contain a player");
     assert.equal(videoRequests().length, 0, "the list must fetch posters only");
     const open = page.getByRole("button", { name: lang === "zh" ? "展开视频" : "Expand video", exact: true });
     await open.focus(); await page.keyboard.press("Enter"); await ready(); await layout();
+    assert.equal(posterRequests().length, loadedPosters, "opening a loaded thumbnail must reuse its poster bytes");
     assert.equal(await dialog.locator("video").evaluate(video => video.controls && video.playsInline), true);
     await dialog.locator("video").evaluate(async video => {
       await video.play();
@@ -74,6 +78,9 @@ try {
     assert.equal(await page.evaluate(() => window.testVideo.paused && !window.testVideo.hasAttribute("src")), true, "closing stops playback and releases the source");
     assert.equal(await open.evaluate(node => node === document.activeElement), true);
     assert.notEqual(await page.evaluate(() => document.body.style.overflow), "hidden");
+    await page.getByTitle(lang === "zh" ? "预览" : "Preview", { exact: true }).nth(0).click(); await ready();
+    assert.equal(posterRequests().length, loadedPosters, "the file preview action also reuses the loaded poster");
+    await page.keyboard.press("Escape"); await dialog.waitFor({ state: "detached" });
     await page.getByTitle(lang === "zh" ? "预览" : "Preview", { exact: true }).nth(1).click(); await ready(); await layout();
     assert.ok(videoRequests().some(url => url.pathname.includes("video-2") && url.searchParams.get("preview") === "browser"), "large/unsupported-format video opens using the browser preview");
     await dialog.locator("header button").click(); await dialog.waitFor({ state: "detached" });

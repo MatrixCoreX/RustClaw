@@ -533,7 +533,8 @@ export function AippTaskActivityCard({
   const [previewIndex, setPreviewIndex] = useState(0);
   const [videoIndex, setVideoIndex] = useState(0);
   const [viewerImage, setViewerImage] = useState<AippViewerImage | null>(null);
-  const [viewerVideo, setViewerVideo] = useState<AippTaskActivityArtifact | null>(null);
+  const [viewerVideo, setViewerVideo] = useState<{ artifact: AippTaskActivityArtifact; initialPoster: Blob | null } | null>(null);
+  const videoPoster = useRef<{ id: string; endpoint: string; blob: Blob } | null>(null);
   const previewImages = activityImageArtifacts(item);
   const previewVideos = activityVideoArtifacts(item);
   const selectedPreviewIndex = previewImages.length === 0 ? 0 : Math.min(previewIndex, previewImages.length - 1);
@@ -546,6 +547,10 @@ export function AippTaskActivityCard({
   const openImage = (artifact: AippTaskActivityArtifact, initialSource?: string | null) => {
     setViewerImage(activityViewerImage(artifact, initialSource));
   };
+  const openVideo = (artifact: AippTaskActivityArtifact) => {
+    const cached = videoPoster.current;
+    setViewerVideo({ artifact, initialPoster: cached?.id === artifact.id && cached.endpoint === (artifact.preview_url || artifact.download_url) ? cached.blob : null });
+  };
   const longContent = item.input_text.length > 320 || item.result_text.length > 720;
   const fetchArtifact = async (artifact: AippTaskActivityArtifact, open: boolean) => {
     if (open && artifact.kind === "image") {
@@ -555,7 +560,7 @@ export function AippTaskActivityCard({
     if (open && artifact.kind === "video") {
       const index = previewVideos.findIndex((entry) => entry.id === artifact.id);
       if (index >= 0) setVideoIndex(index);
-      setViewerVideo(artifact);
+      openVideo(artifact);
       return;
     }
     if (artifactAction) return;
@@ -651,7 +656,8 @@ export function AippTaskActivityCard({
             {video ? (
               <div className={`relative ${preview ? "border-t border-white/10" : "aspect-video min-h-24 max-h-36 flex-1 sm:aspect-auto sm:min-h-28"}`}>
                 <div className={previewVideos.length > 1 ? "h-[calc(100%-2rem)]" : "h-full"}>
-                  <ActivityVideoPreview key={video.id} artifact={video} apiFetch={apiFetch} t={t} onOpen={() => setViewerVideo(video)} />
+                  <ActivityVideoPreview key={video.id} artifact={video} apiFetch={apiFetch} t={t} onOpen={() => openVideo(video)}
+                    onPosterLoaded={blob => { videoPoster.current = { id: video.id, endpoint: video.preview_url || video.download_url, blob }; }} />
                 </div>
                 {previewVideos.length > 1 ? (
                   <div className="absolute inset-x-0 bottom-0 flex h-8 items-center justify-between border-t border-[var(--theme-border)] bg-[var(--theme-dialog-bg)] px-1 text-xs text-[var(--theme-text-strong)]">
@@ -767,7 +773,7 @@ export function AippTaskActivityCard({
         </div>
       ) : null}
       {viewerImage ? <AippImageViewer image={viewerImage} images={viewerImages} apiFetch={apiFetch} t={t} onClose={() => setViewerImage(null)} /> : null}
-      {viewerVideo ? <AippVideoViewer artifact={viewerVideo} apiFetch={apiFetch} t={t} onClose={() => setViewerVideo(null)} /> : null}
+      {viewerVideo ? <AippVideoViewer artifact={viewerVideo.artifact} initialPoster={viewerVideo.initialPoster} apiFetch={apiFetch} t={t} onClose={() => setViewerVideo(null)} /> : null}
     </article>
   );
 }

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, Download, ImageOff, LoaderCircle, RefreshCw, X } from "lucide-react";
 
 import { saveTaskArtifactBlob, type ArtifactFetch } from "../lib/task-artifact-content";
-import { downloadAippGallery, fetchAippImage, imageDownloadName, snapshotAippViewerGallery, type AippViewerImage } from "../lib/aipp-image-download";
+import { downloadAippGallery, fetchAippImage, fetchAippImageDownload, imageDownloadName, snapshotAippViewerGallery, type AippViewerImage } from "../lib/aipp-image-download";
 export type { AippViewerImage } from "../lib/aipp-image-download";
 
 export function AippImageViewer({ image: initialImage, images, apiFetch, t, onClose }: {
@@ -25,6 +25,7 @@ export function AippImageViewer({ image: initialImage, images, apiFetch, t, onCl
   const [previewFailed, setPreviewFailed] = useState(false);
   const [retry, setRetry] = useState(0);
   const [downloadState, setDownloadState] = useState<"idle" | "working" | "failed">("idle");
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const downloadRequest = useRef<AbortController | null>(null);
   const [downloadMode, setDownloadMode] = useState<"single" | "all">("single");
   const [completed, setCompleted] = useState(0);
@@ -76,17 +77,25 @@ export function AippImageViewer({ image: initialImage, images, apiFetch, t, onCl
     const controller = new AbortController();
     downloadRequest.current = controller;
     setDownloadState("working");
+    setDownloadError(null);
     setDownloadMode(mode);
     setCompleted(0);
     try {
       const blob = mode === "all"
         ? await downloadAippGallery(gallery, apiFetchRef.current, controller.signal, setCompleted)
-        : await fetchAippImage(apiFetchRef.current, image.downloadUrl, controller.signal);
+        : await fetchAippImageDownload(apiFetchRef.current, image.downloadUrl, controller.signal);
       if (controller.signal.aborted) return;
       saveTaskArtifactBlob(blob, mode === "all" ? `${imageDownloadName(gallery[0].filename, "image/png").replace(/\.png$/, "")}-all.zip` : imageDownloadName(image.filename, blob.type));
       setDownloadState("idle");
-    } catch {
-      if (!controller.signal.aborted) setDownloadState("failed");
+    } catch (cause) {
+      if (!controller.signal.aborted) {
+        const code = cause instanceof Error ? cause.message : "";
+        if (code === "aipp_image_size_limit") setDownloadError(mode === "all"
+          ? t("图片组超过浏览器内存下载预算，未生成压缩包。请逐张下载。", "The gallery exceeds the browser download memory budget. No ZIP was saved. Download images individually.")
+          : t("图片超过浏览器内存下载预算，无法安全下载。原文件仍保留在设备上。", "The image exceeds the browser download memory budget and cannot be downloaded safely. The original remains on the device."));
+        else if (code === "aipp_image_idle_timeout") setDownloadError(t("下载长时间没有收到数据，已停止。请检查连接后重试。", "The download stopped because no data arrived for a while. Check the connection and retry."));
+        setDownloadState("failed");
+      }
     } finally {
       if (downloadRequest.current === controller) downloadRequest.current = null;
     }
@@ -139,7 +148,7 @@ export function AippImageViewer({ image: initialImage, images, apiFetch, t, onCl
           </> : null}
         </div>
         <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-[var(--theme-border)] px-3 py-2 sm:px-4">
-          {downloadState === "failed" ? <p role="alert" className="w-full text-sm text-[var(--theme-text-body)]">{downloadMode === "all" ? t(`第 ${completed + 1} 张下载失败或图片组过大，未生成压缩包。可重试或单张下载。`, `Image ${completed + 1} failed or the gallery is too large. No ZIP was saved. Retry or download individually.`) : t("图片下载失败，请重试。", "Image download failed. Try again.")}</p> : null}
+          {downloadState === "failed" ? <p role="alert" className="w-full text-sm text-[var(--theme-text-body)]">{downloadError || (downloadMode === "all" ? t(`第 ${completed + 1} 张下载失败或图片组过大，未生成压缩包。可重试或单张下载。`, `Image ${completed + 1} failed or the gallery is too large. No ZIP was saved. Retry or download individually.`) : t("图片下载失败，请重试。", "Image download failed. Try again."))}</p> : null}
           {gallery.length > 1 ? <span className="mr-auto text-xs tabular-nums" aria-live="polite">{index + 1} / {gallery.length}</span> : null}
           {gallery.length > 1 ? <button type="button" className="theme-secondary-btn px-3 py-2 text-xs" disabled={downloadState === "working"} onClick={() => void download("all")}>
             {downloadState === "working" && downloadMode === "all" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}

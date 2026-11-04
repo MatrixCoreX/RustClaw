@@ -5,11 +5,12 @@ import type { AippTaskActivityArtifact } from "../types/api";
 import type { ArtifactFetch } from "../lib/task-artifact-content";
 import { ActivityVideoPlayer } from "./AippTaskActivityMedia";
 
-export function AippVideoViewer({ artifact, apiFetch, t, onClose }: {
+export function AippVideoViewer({ artifact, apiFetch, t, onClose, initialPoster }: {
   artifact: AippTaskActivityArtifact;
   apiFetch: ArtifactFetch;
   t: (zh: string, en: string) => string;
   onClose: () => void;
+  initialPoster?: Blob | null;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -40,7 +41,7 @@ export function AippVideoViewer({ artifact, apiFetch, t, onClose }: {
           <button type="button" autoFocus className="theme-icon-btn h-9 w-9 shrink-0" onClick={onClose} title={t("关闭", "Close")} aria-label={t("关闭", "Close")}><X className="h-5 w-5" /></button>
         </header>
         <div className="min-h-0 flex-1 overflow-hidden p-2 sm:p-4">
-          <ActivityVideoPlayer key={artifact.id} artifact={artifact} apiFetch={apiFetch} t={t} />
+          <ActivityVideoPlayer key={artifact.id} artifact={artifact} apiFetch={apiFetch} t={t} initialPoster={initialPoster} />
         </div>
       </div>
     </dialog>, document.body,

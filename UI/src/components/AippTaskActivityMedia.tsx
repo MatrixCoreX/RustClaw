@@ -68,15 +68,18 @@ export function ActivityImagePreview({ artifact, apiFetch, t, onOpen }: {
   );
 }
 
-export function ActivityVideoPreview({ artifact, apiFetch, t, onOpen }: {
+export function ActivityVideoPreview({ artifact, apiFetch, t, onOpen, onPosterLoaded }: {
   artifact: AippTaskActivityArtifact;
   apiFetch: ApiFetch;
   t: Translate;
   onOpen: () => void;
+  onPosterLoaded?: (blob: Blob) => void;
 }) {
   const [poster, setPoster] = useState<string | null>(null);
   const apiFetchRef = useRef(apiFetch);
   apiFetchRef.current = apiFetch;
+  const onPosterLoadedRef = useRef(onPosterLoaded);
+  onPosterLoadedRef.current = onPosterLoaded;
   const endpoint = taskArtifactVideoPosterUrl(artifact.preview_url || artifact.download_url);
   useEffect(() => {
     setPoster(null);
@@ -87,6 +90,7 @@ export function ActivityVideoPreview({ artifact, apiFetch, t, onOpen }: {
       if (controller.signal.aborted) return;
       objectUrl = URL.createObjectURL(blob);
       setPoster(objectUrl);
+      onPosterLoadedRef.current?.(blob);
     }).catch(() => { /* A missing poster must not prevent opening the video. */ });
     return () => {
       controller.abort();
@@ -102,10 +106,11 @@ export function ActivityVideoPreview({ artifact, apiFetch, t, onOpen }: {
 }
 
 // Mounted only inside the expanded viewer; the list never fetches the video body.
-export function ActivityVideoPlayer({ artifact, apiFetch, t }: {
+export function ActivityVideoPlayer({ artifact, apiFetch, t, initialPoster }: {
   artifact: AippTaskActivityArtifact;
   apiFetch: ApiFetch;
   t: Translate;
+  initialPoster?: Blob | null;
 }) {
   const previewUrl = artifact.preview_url || artifact.download_url;
   const browserPreviewUrl = taskArtifactBrowserVideoUrl(previewUrl);
@@ -185,6 +190,11 @@ export function ActivityVideoPlayer({ artifact, apiFetch, t }: {
   }, [artifact.id, mediaPreviewUrl, originalPreviewUrl, retry, sourceMode]);
 
   useEffect(() => {
+    if (initialPoster) {
+      const objectUrl = URL.createObjectURL(initialPoster);
+      setPosterObjectUrl(objectUrl);
+      return () => URL.revokeObjectURL(objectUrl);
+    }
     if (!videoPosterUrl) {
       setPosterObjectUrl(null);
       return;
@@ -205,7 +215,7 @@ export function ActivityVideoPlayer({ artifact, apiFetch, t }: {
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [artifact.id, videoPosterUrl]);
+  }, [artifact.id, videoPosterUrl, initialPoster]);
 
   const download = async () => {
     if (downloadLoading) return;

@@ -19,7 +19,8 @@ export function snapshotAippViewerGallery(initial: AippViewerImage, images?: Aip
 }
 
 export const AIPP_IMAGE_MAX_BYTES = 25 * 1024 * 1024;
-export const AIPP_GALLERY_MAX_BYTES = 128 * 1024 * 1024;
+// Blob-backed originals and ZIPs share a memory budget distinct from previews.
+export const AIPP_DOWNLOAD_MAX_BYTES = 128 * 1024 * 1024;
 const IMAGE_EXTENSIONS: Record<string, string> = {
   "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
   "image/gif": "gif", "image/avif": "avif",
@@ -37,13 +38,21 @@ export async function fetchAippImage(apiFetch: ArtifactFetch, path: string, sign
   if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\")) throw new Error("aipp_image_url_invalid");
   for (let attempt = 0; ; attempt++) {
     const controller = new AbortController();
-    const abort = () => controller.abort();
+    const abort = () => controller.abort(signal.reason);
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) controller.abort();
-    const timeout = setTimeout(abort, 60_000);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const receivedData = () => {
+      if (controller.signal.aborted) return;
+      clearTimeout(timeout);
+      timeout = setTimeout(() => controller.abort(new Error("aipp_image_idle_timeout")), 60_000);
+    };
+    receivedData();
     let retryable = true;
     try {
       const response = await apiFetch(path, { signal: controller.signal });
+      controller.signal.throwIfAborted();
+      receivedData();
       retryable = response.status >= 500;
       if (!response.ok) {
         await response.body?.cancel();
@@ -51,33 +60,45 @@ export async function fetchAippImage(apiFetch: ArtifactFetch, path: string, sign
       }
       retryable = false;
       const mime = (response.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
-      if (!IMAGE_EXTENSIONS[mime] || Number(response.headers.get("content-length")) > maxBytes || !response.body) {
+      if (!IMAGE_EXTENSIONS[mime] || !response.body) {
         await response.body?.cancel();
         throw new Error("aipp_image_content_invalid");
+      }
+      if (Number(response.headers.get("content-length")) > maxBytes) {
+        await response.body.cancel();
+        throw new Error("aipp_image_size_limit");
       }
       const reader = response.body.getReader();
       const chunks: Uint8Array<ArrayBuffer>[] = [];
       let size = 0;
       try {
         while (true) {
-          signal.throwIfAborted();
+          controller.signal.throwIfAborted();
           const { value, done } = await reader.read();
           if (done) break;
+          if (value.byteLength) receivedData();
           size += value.byteLength;
           if (size > maxBytes) throw new Error("aipp_image_size_limit");
           chunks.push(value);
         }
-      } finally { await reader.cancel(); reader.releaseLock(); }
-      signal.throwIfAborted();
+      } finally {
+        try { await reader.cancel(); } finally { reader.releaseLock(); }
+      }
+      controller.signal.throwIfAborted();
       if (!size) throw new Error("aipp_image_empty");
       return new Blob(chunks, { type: mime });
     } catch (error) {
-      if (signal.aborted || !retryable || attempt >= 1) throw error;
+      if (signal.aborted) throw signal.reason;
+      if (!retryable || attempt >= 1) throw controller.signal.aborted ? controller.signal.reason : error;
     } finally {
       clearTimeout(timeout);
       signal.removeEventListener("abort", abort);
     }
   }
+}
+
+export function fetchAippImageDownload(apiFetch: ArtifactFetch, path: string, signal: AbortSignal, maxBytes = AIPP_DOWNLOAD_MAX_BYTES): Promise<Blob> {
+  return fetchAippImage(apiFetch, path, signal, maxBytes);
 }
 
 export async function downloadAippGallery(images: AippViewerImage[], apiFetch: ArtifactFetch, signal: AbortSignal, onProgress: (completed: number) => void): Promise<Blob> {
@@ -93,7 +114,7 @@ export async function downloadAippGallery(images: AippViewerImage[], apiFetch: A
   let bytes = 0;
   try {
     for (const [index, image] of images.entries()) {
-      const blob = await fetchAippImage(apiFetch, image.downloadUrl, signal, Math.min(AIPP_IMAGE_MAX_BYTES, AIPP_GALLERY_MAX_BYTES - bytes));
+      const blob = await fetchAippImageDownload(apiFetch, image.downloadUrl, signal, AIPP_DOWNLOAD_MAX_BYTES - bytes);
       bytes += blob.size;
       signal.throwIfAborted();
       // Already-compressed images need no CPU-heavy recompression on small devices.
