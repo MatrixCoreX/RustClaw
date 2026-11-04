@@ -67,3 +67,73 @@ test("AiAPP polling cannot leave a slow foreground request permanently loading",
     else Reflect.deleteProperty(globalThis, "document");
   }
 });
+
+test("leaving a pending refresh releases the next view without letting its late response release a newer read", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const previousDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value); },
+    removeItem: (key: string) => { values.delete(key); },
+  };
+  const app: AippCatalogItem = {
+    skill_name: "fixture", package_version: "1.0.0", renderer: "task_activity_v1",
+    data_contract: "skill_task_activity_v1", icon: "download", default_locale: "en",
+    titles: { en: "Fixture" }, descriptions: {}, installed: true,
+    entrypoint: null, bridge_capabilities: [], task_channel_scope: "all",
+  };
+  storage.setItem(appStorageKey("monitor.aipp.selectedSkill"), "fixture");
+  writeCachedAippCatalog(storage, [app], Date.now(), "fixture");
+  let poll: (() => void) | undefined;
+  const pending: Array<{ signal: AbortSignal; resolve: (response: Response) => void }> = [];
+  Object.defineProperty(globalThis, "window", { configurable: true, value: {
+    localStorage: storage, sessionStorage: storage, setTimeout, clearTimeout,
+    setInterval: (callback: () => void) => { poll = callback; return 1; }, clearInterval: () => undefined,
+  } });
+  Object.defineProperty(globalThis, "document", { configurable: true, value: {
+    visibilityState: "visible", addEventListener: () => undefined, removeEventListener: () => undefined,
+  } });
+  const response = (data: unknown) => new Response(JSON.stringify({ ok: true, data }));
+  const emptyPage = () => response({ schema_version: 1, items: [], page_item_count: 0, total_item_count: 0,
+    sort_order: "newest", next_cursor_sequence: null, updated_at_ms: null });
+  let root: ReactTestRenderer | undefined;
+  try {
+    await act(async () => { root = create(<UiDialogProvider><AippPage requestScope="fixture" lang="en" t={(_zh, en) => en}
+      apiFetch={(path, init) => path === "/v1/aipps" ? Promise.resolve(response({ apps: [app] }))
+        : new Promise(resolve => {
+          assert.ok(init?.signal);
+          pending.push({ signal: init.signal, resolve });
+        })}
+      onOpenAgent={() => undefined} onOpenSkillStore={() => undefined} /></UiDialogProvider>); });
+    await act(async () => { pending[0].resolve(emptyPage()); });
+    await act(async () => { poll?.(); });
+    assert.equal(pending.length, 2);
+    await act(async () => { poll?.(); });
+    assert.equal(pending.length, 2, "background reads must not overlap");
+    await act(async () => root!.root.findAllByProps({ role: "tab" })[1].props.onClick());
+    assert.equal(pending[1].signal.aborted, true, "leaving Results cancels the abandoned read");
+    await act(async () => root!.root.findAllByProps({ role: "tab" })[0].props.onClick());
+    assert.equal(pending.length, 3);
+    await act(async () => { pending[2].resolve(emptyPage()); });
+    await act(async () => { poll?.(); });
+    assert.equal(pending.length, 4, "the new view can refresh before the abandoned request settles");
+    // Simulate a transport that returns even after abort; its finalizer must not clear read 4.
+    await act(async () => { pending[1].resolve(emptyPage()); });
+    await act(async () => { poll?.(); });
+    assert.equal(pending.length, 4, "an obsolete finalizer must not release a newer request's slot");
+    await act(async () => { pending[3].resolve(emptyPage()); });
+    await act(async () => { poll?.(); });
+    assert.equal(pending.length, 5);
+    await act(async () => root!.unmount());
+    assert.equal(pending[4].signal.aborted, true, "unmount also cancels a pending read");
+    await act(async () => { pending[4].resolve(emptyPage()); });
+  } finally {
+    await act(async () => root?.unmount());
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+    if (previousDocument) Object.defineProperty(globalThis, "document", previousDocument);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});

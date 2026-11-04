@@ -1082,7 +1082,7 @@ export function AippPage({ lang, t, apiFetch, requestScope, onOpenAgent, onOpenS
   const [installActionSkill, setInstallActionSkill] = useState<string | null>(null);
   const installAbortRef = useRef<AbortController | null>(null);
   const pageRequests = useRef(new PageRequestLifecycle());
-  const autoRefreshInFlight = useRef(false);
+  const pageRead = useRef<AbortController | null>(null);
   const apiFetchRef = useRef(apiFetch);
   const translateRef = useRef(t);
   apiFetchRef.current = apiFetch;
@@ -1218,8 +1218,11 @@ export function AippPage({ lang, t, apiFetch, requestScope, onOpenAgent, onOpenS
 
   const fetchPage = useCallback(async (silent = false) => {
     if (!isCurrent()) return;
+    if (silent && pageRead.current) return;
     const currentRequest = pageRequests.current.begin(silent);
     if (currentRequest === null) return;
+    pageRead.current?.abort();
+    pageRead.current = null;
     if (showGuide) { pageRequests.current.invalidate(); setLoading(false); return; }
     if (
       !selectedSkill
@@ -1246,9 +1249,13 @@ export function AippPage({ lang, t, apiFetch, requestScope, onOpenAgent, onOpenS
       if (activityStatus !== "all") params.set("status", activityStatus);
     }
     if (searchQuery) params.set("query", searchQuery);
+    const controller = new AbortController();
+    pageRead.current = controller;
+    const requestApiFetch = apiFetchRef.current;
     try {
-      const response = await apiFetchRef.current(
+      const response = await requestApiFetch(
         `/v1/aipps/${encodeURIComponent(selectedSkill)}/items?${params.toString()}`,
+        { signal: controller.signal },
       );
       const body = (await response.json()) as ApiResponse<AippMediaPageResponse | AippTaskActivityPageResponse>;
       if (!isCurrent()) return;
@@ -1260,7 +1267,7 @@ export function AippPage({ lang, t, apiFetch, requestScope, onOpenAgent, onOpenS
           const complete = await completeCollectionPage(body.data as AippMediaPageResponse, async nextCursor => {
             const nextParams = new URLSearchParams(params);
             nextParams.set("cursor_sequence", String(nextCursor));
-            const nextResponse = await apiFetchRef.current(`/v1/aipps/${encodeURIComponent(selectedSkill)}/items?${nextParams}`);
+            const nextResponse = await requestApiFetch(`/v1/aipps/${encodeURIComponent(selectedSkill)}/items?${nextParams}`, { signal: controller.signal });
             const nextBody = await nextResponse.json() as ApiResponse<AippMediaPageResponse>;
             if (!nextResponse.ok || !nextBody.ok || !nextBody.data) throw new Error(nextBody.error || `aipp_items_http_${nextResponse.status}`);
             return nextBody.data;
@@ -1274,10 +1281,11 @@ export function AippPage({ lang, t, apiFetch, requestScope, onOpenAgent, onOpenS
         }
       }
     } catch (cause) {
-      if (isCurrent() && !silent && pageRequests.current.isCurrent(currentRequest)) {
+      if (!controller.signal.aborted && isCurrent() && !silent && pageRequests.current.isCurrent(currentRequest)) {
         setError(formatUiError(cause, translateRef.current, "Ai APP 内容读取失败。", "Could not load Ai APP content."));
       }
     } finally {
+      if (pageRead.current === controller) pageRead.current = null;
       if (isCurrent() && pageRequests.current.finish(currentRequest)) setLoading(false);
     }
   }, [activityChannel, activityStatus, cursor, isCurrent, kind, platform, searchQuery, selectedApp?.installed, selectedApp?.renderer, selectedSkill, sortOrder, showGuide]);
@@ -1387,19 +1395,17 @@ export function AippPage({ lang, t, apiFetch, requestScope, onOpenAgent, onOpenS
 
   useEffect(() => {
     void fetchPage();
-    return () => pageRequests.current.invalidate();
+    return () => {
+      pageRequests.current.invalidate();
+      pageRead.current?.abort();
+      pageRead.current = null;
+    };
   }, [fetchPage]);
 
   useEffect(() => {
     if (showGuide || !selectedSkill || !["collection_feed_v1", "task_activity_v1"].includes(selectedApp?.renderer || "")) return;
     const refreshVisiblePage = async () => {
-      if (document.visibilityState !== "visible" || autoRefreshInFlight.current) return;
-      autoRefreshInFlight.current = true;
-      try {
-        await fetchPage(true);
-      } finally {
-        autoRefreshInFlight.current = false;
-      }
+      if (document.visibilityState === "visible") await fetchPage(true);
     };
     const timer = window.setInterval(() => void refreshVisiblePage(), AIPP_AUTO_REFRESH_INTERVAL_MS);
     const handleVisibilityChange = () => {

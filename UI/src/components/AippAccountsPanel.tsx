@@ -39,6 +39,7 @@ export function AippAccountsPanel({ skill, controls, apiFetch, requestScope, t }
   skill: string; controls: AippAccountControls; apiFetch: ApiFetch; requestScope: string; t: Translate;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [hasOpened, setHasOpened] = useState(false);
   const contentId = useId();
   const isCurrent = useRequestOwner(requestScope);
   const api = useRef(apiFetch); api.current = apiFetch;
@@ -64,14 +65,15 @@ export function AippAccountsPanel({ skill, controls, apiFetch, requestScope, t }
     }
   }, [isCurrent, skill]);
   useEffect(() => {
+    if (!hasOpened) return;
     void perform("status");
     return () => { active.current?.abort(); active.current = null; };
-  }, [perform, controls.status_capability, controls.logout_capability]);
+  }, [perform, controls.status_capability, controls.logout_capability, hasOpened]);
   return <section className="theme-panel-soft p-3 sm:p-4">
     <h2>
       <button type="button" aria-expanded={expanded} aria-controls={contentId}
         className="flex w-full items-center justify-between gap-3 rounded text-left text-sm font-medium text-white/85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/40"
-        onClick={() => setExpanded(value => !value)}>
+        onClick={() => { setHasOpened(true); setExpanded(value => !value); }}>
         {t("平台账号", "Platform accounts")}
         <ChevronDown aria-hidden="true" className={`h-4 w-4 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} />
       </button>

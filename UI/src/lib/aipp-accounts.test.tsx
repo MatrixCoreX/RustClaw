@@ -65,9 +65,11 @@ test("account panel defaults collapsed and preserves status/logout feedback when
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   let root: ReactTestRenderer | undefined;
   let signedOut = false;
+  let controlRequests = 0;
   const controls = { schema_version: 1, status_capability: "fixture.account_status", logout_capability: "fixture.account_logout" };
   const apiFetch = async (url: string, init?: RequestInit) => {
     if (url.endsWith("account-control")) {
+      controlRequests++;
       signedOut = JSON.parse(String(init?.body)).operation === "logout";
       return response({ task_id: "fixture-task" });
     }
@@ -79,20 +81,25 @@ test("account panel defaults collapsed and preserves status/logout feedback when
     assert.ok(toggle.children.includes("Platform accounts"));
     const content = () => root!.root.findByProps({ id: toggle.props["aria-controls"] });
     assert.equal(content().props.hidden, true);
+    assert.equal(controlRequests, 0, "a collapsed panel must not submit a status task");
     await act(async () => { toggle.props.onClick(); });
+    assert.equal(controlRequests, 1);
     assert.equal(toggle.props["aria-expanded"], true);
     assert.equal(content().props.hidden, false);
     assert.match(JSON.stringify(root!.toJSON()), /Saved session; account unverified/u);
     const logout = root!.root.findAllByType("button").find(node => node.children.includes("Sign out"));
     assert.ok(logout);
     await act(async () => { logout!.props.onClick(); });
+    assert.equal(controlRequests, 2, "logout is still an explicit operation");
     assert.match(JSON.stringify(root!.toJSON()), /Signed out\. Sign in again/u);
+    assert.equal(controlRequests, 2, "toggling must preserve results without another task");
     assert.equal(root!.root.findAllByType("button").filter(node => node.children.includes("Sign out")).length, 0);
     await act(async () => { toggle.props.onClick(); });
     assert.equal(content().props.hidden, true);
     await act(async () => { toggle.props.onClick(); });
     assert.equal(content().props.hidden, false);
     assert.match(JSON.stringify(root!.toJSON()), /Signed out\. Sign in again/u);
+    assert.equal(controlRequests, 2, "reopening after logout must not create a status task");
   } finally { await act(async () => root?.unmount()); }
 });
 
@@ -115,9 +122,11 @@ test("account panels expand independently without restarting or aborting pending
     const panels = root!.root.findAllByType(AippAccountsPanel);
     const toggles = panels.map(panel => panel.findByProps({ "aria-expanded": false }));
     assert.notEqual(toggles[0].props["aria-controls"], toggles[1].props["aria-controls"]);
-    assert.equal(pending.length, 2);
-    const count = requests.length;
+    assert.equal(pending.length, 0);
+    assert.equal(requests.length, 0);
     await act(async () => { toggles[0].props.onClick(); });
+    assert.equal(pending.length, 1);
+    const count = requests.length;
     assert.equal(toggles[0].props["aria-expanded"], true);
     assert.equal(toggles[1].props["aria-expanded"], false);
     await act(async () => { toggles[0].props.onClick(); });
@@ -126,8 +135,10 @@ test("account panels expand independently without restarting or aborting pending
     assert.ok(requests.every(request => request.signal && !request.signal.aborted));
     await act(async () => { for (const resolve of pending) resolve(task("succeeded")); });
     await act(async () => { toggles[1].props.onClick(); });
+    assert.equal(pending.length, 2, "only opening the second panel starts its first check");
+    await act(async () => { pending[1](task("succeeded")); });
     assert.ok(panels[1].findAllByType("p").some(node => node.children.includes("Saved session; account unverified")));
-    assert.equal(requests.length, count);
+    assert.equal(requests.length, count + 2);
   } finally { await act(async () => root?.unmount()); }
 });
 
