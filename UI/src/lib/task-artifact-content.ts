@@ -1,6 +1,6 @@
 import { safeArtifactUrl } from "./task-artifacts";
-
-export type ArtifactFetch = (path: string, init?: RequestInit) => Promise<Response>;
+import type { ArtifactFetch } from "./artifact-session-stream";
+export type { ArtifactFetch } from "./artifact-session-stream";
 
 export const MAX_AUTOMATIC_ARTIFACT_PREVIEW_BYTES = 25 * 1024 * 1024;
 
@@ -33,6 +33,28 @@ export async function fetchTaskArtifactBlob(
     throw new Error(`task_artifact_http_${response.status}`);
   }
   return response.blob();
+}
+
+export async function fetchTaskArtifactVideoSource(
+  artifactFetch: ArtifactFetch,
+  path: string,
+  signal: AbortSignal,
+): Promise<{ kind: "native"; url: string } | { kind: "blob"; blob: Blob }> {
+  if (!safeArtifactUrl(path)) throw new Error("task_artifact_url_invalid");
+  const nativeUrl = artifactFetch.nativeMediaUrl?.(path);
+  if (nativeUrl) {
+    // Authenticate and surface session expiry through the ordinary API boundary
+    // before letting the browser issue its own cookie-authenticated Range GETs.
+    const response = await artifactFetch(path, { method: "HEAD", signal });
+    signal.throwIfAborted();
+    if (!response.ok) throw new Error(`task_artifact_http_${response.status}`);
+    if (artifactFetch.nativeMediaUrl?.(path) !== nativeUrl) throw new DOMException("Request owner changed", "AbortError");
+    if (response.headers.get("accept-ranges")?.toLowerCase() === "bytes"
+      && /^video\/(mp4|webm)(?:;|$)/i.test(response.headers.get("content-type") || "")) {
+      return { kind: "native", url: nativeUrl };
+    }
+  }
+  return { kind: "blob", blob: await fetchTaskArtifactBlob(artifactFetch, path, signal) };
 }
 
 export function saveTaskArtifactBlob(blob: Blob, filename: string): void {

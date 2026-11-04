@@ -3,15 +3,16 @@ import { Download, Image as ImageIcon, LoaderCircle, Play, RefreshCw, Video, Zoo
 
 import {
   fetchTaskArtifactBlob,
+  fetchTaskArtifactVideoSource,
   saveTaskArtifactBlob,
   taskArtifactBrowserVideoUrl,
   taskArtifactVideoPosterUrl,
 } from "../lib/task-artifact-content";
+import type { ArtifactFetch as ApiFetch } from "../lib/task-artifact-content";
 import type { AippTaskActivityArtifact, AippTaskActivityItem } from "../types/api";
 import type { AippViewerImage } from "./AippImageViewer";
 
 type Translate = (zh: string, en: string) => string;
-type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 
 export function activityImageArtifacts(item: AippTaskActivityItem): AippTaskActivityArtifact[] {
   return item.artifacts.filter((artifact) => artifact.kind === "image" && Boolean(artifact.preview_url || artifact.download_url));
@@ -119,6 +120,7 @@ export function ActivityVideoPlayer({ artifact, apiFetch, t, initialPoster }: {
   const playableInline = /^(video\/mp4|video\/webm)$/i.test(artifact.mime_type.split(";", 1)[0].trim());
   const [sourceMode, setSourceMode] = useState<"browser" | "original">(playableInline ? "original" : "browser");
   const mediaPreviewUrl = sourceMode === "browser" ? (browserPreviewUrl || originalPreviewUrl) : originalPreviewUrl;
+  const nativePreviewUrl = apiFetch.nativeMediaUrl?.(mediaPreviewUrl) ?? null;
   const [retry, setRetry] = useState(0);
   const [previewState, setPreviewState] = useState<"loading" | "ready" | "error">("loading");
   const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
@@ -171,11 +173,11 @@ export function ActivityVideoPlayer({ artifact, apiFetch, t, initialPoster }: {
     setPreviewState("loading");
     setPreviewObjectUrl(null);
     setUnsupported(false);
-    void fetchTaskArtifactBlob(apiFetchRef.current, mediaPreviewUrl, controller.signal)
-      .then((blob) => {
+    void fetchTaskArtifactVideoSource(apiFetchRef.current, mediaPreviewUrl, controller.signal)
+      .then((source) => {
         if (controller.signal.aborted) return;
-        objectUrl = URL.createObjectURL(blob);
-        setPreviewObjectUrl(objectUrl);
+        if (source.kind === "blob") objectUrl = URL.createObjectURL(source.blob);
+        setPreviewObjectUrl(source.kind === "native" ? source.url : objectUrl);
         setPreviewState("ready");
       })
       .catch(() => {
@@ -187,7 +189,7 @@ export function ActivityVideoPlayer({ artifact, apiFetch, t, initialPoster }: {
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [artifact.id, mediaPreviewUrl, originalPreviewUrl, retry, sourceMode]);
+  }, [artifact.id, mediaPreviewUrl, originalPreviewUrl, nativePreviewUrl, retry, sourceMode]);
 
   useEffect(() => {
     if (initialPoster) {

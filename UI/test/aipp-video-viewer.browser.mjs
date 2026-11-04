@@ -18,7 +18,7 @@ try {
   browser = await chromium.launch({ executablePath: process.env.BROWSER_EXECUTABLE || undefined, headless: true });
   const page = await browser.newPage({ acceptDownloads: true });
   await guardFixtureRequests(page, server.base);
-  const errors = [], requests = [];
+  const errors = [], requests = [], nativeRequests = [];
   page.on("pageerror", error => errors.push(error.message));
   const poster = Buffer.from(await page.evaluate(() => {
     const canvas = document.createElement("canvas"); canvas.width = 640; canvas.height = 360;
@@ -30,6 +30,19 @@ try {
     const url = new URL(route.request().url()); requests.push(url);
     if (url.searchParams.get("preview") === "poster") {
       await route.fulfill({ status: failPoster ? 503 : 200, contentType: "image/png", body: failPoster ? "unavailable" : poster }); return;
+    }
+    if (route.request().method() === "HEAD") {
+      await route.fulfill({ status: failVideo ? 401 : 200, headers: { "content-type": "video/webm", "accept-ranges": "bytes", "content-length": String(clip.length) } }); return;
+    }
+    if (route.request().resourceType() === "media") {
+      const headers = await route.request().allHeaders();
+      nativeRequests.push({ url: url.href, headers });
+      const range = /^bytes=(\d+)-(\d*)$/.exec(headers.range || "");
+      const start = range ? Number(range[1]) : 0;
+      const end = range?.[2] ? Math.min(Number(range[2]), clip.length - 1) : clip.length - 1;
+      await route.fulfill({ status: range ? 206 : 200, headers: { "content-type": "video/webm", "accept-ranges": "bytes",
+        ...(range ? { "content-range": `bytes ${start}-${end}/${clip.length}` } : {}),
+      }, body: clip.subarray(start, end + 1) }); return;
     }
     if (delayVideo) await new Promise(resolve => setTimeout(resolve, 300));
     const corrupt = corruptOriginal && !url.searchParams.has("preview");
@@ -110,6 +123,21 @@ try {
   await page.keyboard.press("Escape");
   assert.deepEqual(errors, []);
   console.log("PASS corrupt original fallback, failed preview retry, missing poster, backdrop close, pending-load cancellation and focus containment");
+  await page.context().addCookies([{ name: "fixture-session", value: "browser-only", url: base, httpOnly: true, sameSite: "Strict" }]);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 }); requests.length = 0; nativeRequests.length = 0;
+    await page.goto(`${base}/test/fixtures/aipp-video-viewer.html?lang=en&auth=webd`);
+    await open.click(); await ready();
+    assert.equal(await dialog.locator("video").evaluate(video => video.src.startsWith("blob:")), false);
+    await dialog.locator("video").evaluate(async video => { await video.play(); window.nativeVideo = video; });
+    await page.waitForFunction(() => window.nativeVideo.currentTime > 0);
+    assert.ok(nativeRequests.some(request => request.headers.range?.startsWith("bytes=") && request.headers.cookie?.includes("fixture-session=browser-only")));
+    assert.ok(videoRequests().every(url => !url.searchParams.has("preview")), "normal streaming must not trigger conversion");
+    await page.keyboard.press("Escape"); await dialog.waitFor({ state: "detached" });
+    assert.equal(await page.evaluate(() => window.nativeVideo.paused && !window.nativeVideo.hasAttribute("src")), true);
+  }
+  assert.deepEqual(errors, []);
+  console.log("PASS desktop/mobile same-origin session: cookie-authenticated native Range playback and close cleanup without buffering");
 } finally {
   await browser?.close(); await server.close();
 }

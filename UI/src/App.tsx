@@ -19,6 +19,7 @@ import {
 import { formatDuration, toLocalTime } from "./lib/display-format";
 import { runCoalescedResponseRead } from "./lib/resilient-read";
 import { runtimeApiFetch } from "./lib/runtime-api-transport";
+import { withSessionArtifactStreaming } from "./lib/artifact-session-stream";
 import { formatUiError } from "./lib/ui-error";
 import {
   buildRuntimeRequestHeaders,
@@ -315,7 +316,7 @@ export default function App() {
     }
   };
 
-  const apiFetch = (path: string, init?: RequestInit) => {
+  const apiFetch = withSessionArtifactStreaming((path: string, init?: RequestInit) => {
     const method = (init?.method || "GET").toUpperCase();
     if (path !== "/v1/skills/config" || method !== "GET") {
       return safeFetch(path, init, true);
@@ -325,7 +326,7 @@ export default function App() {
     return runCoalescedResponseRead(sharedApiReadsRef.current, key, () =>
       safeFetch(path, init, true),
     );
-  };
+  }, { authMode: uiAuthReady ? authMode : null, apiBase, pageUrl: window.location.href, isCurrent: isCurrentApiRequest });
   const publicApiFetch = (path: string, init?: RequestInit) => safeFetch(path, init, false);
   const {
     agentConfig,
