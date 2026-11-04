@@ -153,6 +153,7 @@ try {
   const popupEvent = context.waitForEvent("page");
   await page.getByTestId("activity").getByTitle("Preview", { exact: true }).nth(2).click();
   const popup = await popupEvent;
+  await popup.waitForURL(/^blob:/);
   await popup.waitForLoadState("domcontentloaded");
   assert.ok(popup.url().startsWith("blob:"));
   assert.equal((await popup.locator("body").innerText()).trim(), "contents");
