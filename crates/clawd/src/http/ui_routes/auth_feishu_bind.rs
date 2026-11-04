@@ -1149,14 +1149,13 @@ pub(crate) fn require_ui_identity(
     match resolve_auth_identity_by_key(state, raw_key) {
         Ok(Some(identity)) => Ok(identity),
         Ok(None) => Err(ui_auth_error("auth_key_invalid")),
-        Err(err) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(format!("auth lookup failed: {err}")),
-            }),
-        )),
+        Err(error) => {
+            tracing::warn!(%error, "ui_auth_lookup_failed");
+            Err(crate::api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "auth_lookup_failed",
+            ))
+        }
     }
 }
 
@@ -1385,14 +1384,10 @@ async fn verify_ui_key(
             }),
         ),
         Ok(None) => ui_auth_code_error("auth_key_invalid"),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(format!("auth lookup failed: {err}")),
-            }),
-        ),
+        Err(error) => {
+            tracing::warn!(%error, "ui_auth_lookup_failed");
+            crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "auth_lookup_failed")
+        }
     }
 }
 
