@@ -1,0 +1,77 @@
+import contextlib
+import copy
+import io
+import json
+from pathlib import Path
+import subprocess
+import tempfile
+import unittest
+from run_privileged_secure_fs_case import TEST_NAME, resolve_executable, run_case
+
+
+class PrivilegedFilesystemCaseTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory(prefix='agent-secure-fs-runner-')
+        self.addCleanup(self.directory.cleanup)
+        self.workspace = Path(self.directory.name)
+        self.executable = self.workspace / 'target/debug/deps/fixture-clawd'
+        self.executable.parent.mkdir(parents=True)
+        self.executable.write_bytes(b'fixture executable, never run')
+        self.executable.chmod(0o700)
+        self.item = {'reason':'compiler-artifact','target':{'name':'clawd','kind':['bin']},
+                     'profile':{'test':True},'executable':str(self.executable)}
+
+    def resolve(self, item=None):
+        return resolve_executable(json.dumps(self.item if item is None else item), self.workspace)
+
+    def test_exact_cargo_test_binary_required(self):
+        self.assertEqual(self.resolve(),self.executable)
+        self.assertEqual(resolve_executable(json.dumps(self.item)+'\n'+json.dumps(self.item), self.workspace),self.executable)
+
+    def test_wrong_target_profile_and_missing_executable_rejected(self):
+        for path,value in [('name','other'),('kind',['lib']),('test',False),('test','true'),('executable',None)]:
+            item=copy.deepcopy(self.item)
+            if path in ['name','kind']: item['target'][path]=value
+            elif path=='test': item['profile'][path]=value
+            else: item[path]=value
+            with self.assertRaises(ValueError): self.resolve(item)
+
+    def test_outside_nonexecutable_and_symlink_rejected(self):
+        outside=self.workspace/'outside'
+        outside.write_bytes(b'fixture')
+        outside.chmod(0o700)
+        self.item['executable']=str(outside)
+        with self.assertRaises(ValueError): self.resolve()
+        self.item['executable']=str(self.executable)
+        self.executable.chmod(0o600)
+        with self.assertRaises(ValueError): self.resolve()
+        self.executable.unlink()
+        self.executable.symlink_to(outside)
+        with self.assertRaises(ValueError): self.resolve()
+
+    def test_ambiguous_or_malformed_artifacts_rejected(self):
+        other=copy.deepcopy(self.item)
+        other['executable']=str(self.workspace/'target/debug/deps/other')
+        with self.assertRaises(ValueError):
+            resolve_executable(json.dumps(self.item)+'\n'+json.dumps(other),self.workspace)
+        with self.assertRaises(ValueError): resolve_executable('invalid JSON',self.workspace)
+
+    def test_only_the_exact_fixture_is_invoked_without_a_shell(self):
+        log='secure_workspace_metadata_preserved=true privileged_owner_check=true\ntest result: ok. 1 passed; 0 failed; 0 ignored;\n'
+        calls=[]
+        def run(args,**kwargs):
+            calls.append((args,kwargs))
+            return subprocess.CompletedProcess(args,0,log)
+        with contextlib.redirect_stdout(io.StringIO()): run_case(self.executable,run)
+        self.assertEqual(calls[0][0],['sudo','-n',str(self.executable),TEST_NAME,'--exact','--nocapture'])
+        self.assertNotIn('shell',calls[0][1])
+
+    def test_root_mode_and_a_complete_single_success_are_mandatory(self):
+        for code,log in [(1,'test result: ok. 1 passed; 0 failed; 0 ignored;'),
+                         (0,'secure_workspace_metadata_preserved=true privileged_owner_check=false\ntest result: ok. 1 passed; 0 failed; 0 ignored;'),
+                         (0,'secure_workspace_metadata_preserved=true privileged_owner_check=true\ntest result: ok. 0 passed; 0 failed; 1 ignored;')]:
+            with self.assertRaises(ValueError), contextlib.redirect_stdout(io.StringIO()):
+                run_case(self.executable,lambda args,**kwargs:subprocess.CompletedProcess(args,code,log))
+
+
+if __name__ == '__main__': unittest.main()

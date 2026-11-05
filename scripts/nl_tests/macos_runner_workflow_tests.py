@@ -86,7 +86,7 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
         steps = runtime["steps"]
         named = {step.get("name"): step for step in steps}
         gate = named["Verify Linux indexed history reads and startup upgrades"]
-        for selector in ["task_event_transport", "auth_contract_tests", "model_catalog", "aipp", "run_skill"]:
+        for selector in ["task_event_transport", "auth_contract_tests", "model_catalog", "model_settings_integrity_tests", "secure_workspace_fs", "aipp", "run_skill"]:
             self.assertIn(f"cargo test --locked -p clawd --bin clawd {selector}", gate["run"])
         native_steps = jobs["polyglot-skill-macos"]["steps"]
         stress_command = "cargo test --locked -p claw-core model_catalog::tests -- --test-threads=16"
@@ -120,6 +120,14 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
         self.assertIn("aipp_read_surfaces", build["run"])
         self.assertIn("aipp_generation", build["run"])
         self.assertIn("model_catalog_read", build["run"])
+        for selector in ["model_settings_integrity_tests", "secure_workspace_fs"]:
+            command = f"cargo test --locked -p clawd --bin clawd {selector} -- --test-threads=1 --nocapture"
+            self.assertIn(command, gate["run"])
+            self.assertEqual(sum(command in step.get("run", "") for step in native_steps), 1)
+        self.assertIn("--no-run --message-format=json", gate["run"])
+        self.assertIn("scripts/tests/run_privileged_secure_fs_case.py", gate["run"])
+        self.assertIn("model_settings_integrity", build["run"])
+        self.assertIn("secure_workspace_metadata", build["run"])
         self.assertIn("attest-build-provenance@", attest["uses"])
         self.assertIn("${{ github.sha }}", upload["with"]["name"])
         self.assertEqual(runtime["permissions"]["id-token"], "write")

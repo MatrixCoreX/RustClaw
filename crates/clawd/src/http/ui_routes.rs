@@ -551,6 +551,9 @@ include!("ui_routes/workspace_nginx.rs");
 include!("ui_routes/workspace_webd.rs");
 include!("ui_routes/health_skills_import.rs");
 include!("ui_routes/model_provider_config.rs");
+include!("ui_routes/model_settings_files.rs");
+include!("ui_routes/model_settings_mutations.rs");
+include!("ui_routes/model_settings_api.rs");
 include!("ui_routes/model_catalog_read.rs");
 include!("ui_routes/skill_import_config.rs");
 include!("ui_routes/skill_store_installation.rs");
@@ -576,6 +579,10 @@ mod model_provider_config_tests;
 #[cfg(test)]
 #[path = "ui_routes/model_catalog_read_tests.rs"]
 mod model_catalog_read_tests;
+
+#[cfg(test)]
+#[path = "ui_routes/model_settings_integrity_tests.rs"]
+mod model_settings_integrity_tests;
 
 #[cfg(test)]
 #[path = "ui_routes/llm_credentials_tests.rs"]

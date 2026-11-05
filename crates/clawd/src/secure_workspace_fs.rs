@@ -9,7 +9,7 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 #[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
 fn invalid_path(code: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::PermissionDenied, code)
@@ -282,7 +282,7 @@ fn atomic_publish_workspace_file(
         uuid::Uuid::new_v4().simple()
     ))
     .expect("generated filename");
-    let existing_mode = match open_workspace_file(workspace_root, target) {
+    let existing_metadata = match open_workspace_file(workspace_root, target) {
         Ok(_) if matches!(publication, Publication::CreateNew) => {
             // Another publisher may not have synced its rename yet. Make reuse
             // durable before the caller verifies and publishes its reference.
@@ -292,7 +292,7 @@ fn atomic_publish_workspace_file(
                 "workspace_file_exists",
             ));
         }
-        Ok(file) => Some(file.metadata()?.permissions().mode() & 0o7777),
+        Ok(file) => Some(file.metadata()?),
         Err(error) if error.kind() == io::ErrorKind::NotFound => None,
         Err(error) => return Err(error),
     };
@@ -303,7 +303,10 @@ fn atomic_publish_workspace_file(
             parent.as_raw_fd(),
             temporary_name.as_ptr(),
             libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC | libc::O_NOFOLLOW,
-            existing_mode.unwrap_or(0o600) as libc::c_uint,
+            existing_metadata
+                .as_ref()
+                .map(|metadata| metadata.permissions().mode() & 0o7777)
+                .unwrap_or(0o600) as libc::c_uint,
         )
     };
     if fd < 0 {
@@ -312,6 +315,21 @@ fn atomic_publish_workspace_file(
     // SAFETY: `fd` is uniquely owned and transferred to File.
     let mut file = unsafe { File::from_raw_fd(fd) };
     let result = (|| {
+        if let Some(metadata) = existing_metadata.as_ref() {
+            let temporary_metadata = file.metadata()?;
+            if metadata.uid() != temporary_metadata.uid()
+                || metadata.gid() != temporary_metadata.gid()
+            {
+                // SAFETY: the live temporary descriptor is owned here; preserve
+                // the existing identity or fail before replacing the target.
+                if unsafe { libc::fchown(file.as_raw_fd(), metadata.uid(), metadata.gid()) } != 0 {
+                    return Err(io::Error::last_os_error());
+                }
+            }
+            // openat applies umask and chown may clear mode bits. Restore the
+            // original mode explicitly before publishing the replacement.
+            file.set_permissions(metadata.permissions())?;
+        }
         file.write_all(bytes)?;
         file.flush()?;
         file.sync_all()?;
@@ -441,7 +459,7 @@ pub(crate) fn remove_workspace_file(workspace_root: &Path, target: &Path) -> io:
     if removed != 0 {
         return Err(io::Error::last_os_error());
     }
-    Ok(())
+    sync_directory(&parent)
 }
 
 #[cfg(not(unix))]

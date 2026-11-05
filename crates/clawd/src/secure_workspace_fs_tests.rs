@@ -1,7 +1,89 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use super::remove_workspace_file;
 use super::{atomic_create_workspace_file, atomic_write_workspace_file, open_workspace_file};
+
+#[cfg(unix)]
+#[test]
+fn secure_workspace_atomic_replacement_preserves_mode_and_ownership() {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let root = TestWorkspace::new("replacement-metadata");
+    let target = root.path().join("config.toml");
+    std::fs::write(&target, b"fixture before").unwrap();
+    // A dedicated Linux CI invocation runs only this fixture under sudo to
+    // cover container-root replacement of files owned by a different UID.
+    let privileged = unsafe { libc::geteuid() } == 0;
+    if privileged {
+        let file = std::fs::File::open(&target).unwrap();
+        assert_eq!(unsafe { libc::fchown(file.as_raw_fd(), 65534, 65534) }, 0);
+    }
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o660)).unwrap();
+    let before = std::fs::metadata(&target).unwrap();
+    atomic_write_workspace_file(root.path(), &target, b"fixture after").unwrap();
+    let after = std::fs::metadata(&target).unwrap();
+    assert_eq!(
+        (after.uid(), after.gid(), after.mode() & 0o7777),
+        (before.uid(), before.gid(), before.mode() & 0o7777)
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), b"fixture after");
+    eprintln!("secure_workspace_metadata_preserved=true privileged_owner_check={privileged}");
+}
+
+#[cfg(unix)]
+#[test]
+fn secure_workspace_remove_unlinks_only_requested_leaf() {
+    let root = TestWorkspace::new("remove-leaf");
+    let target = root.path().join("remove.txt");
+    let keep = root.path().join("keep.txt");
+    std::fs::write(&target, b"fixture target").unwrap();
+    std::fs::write(&keep, b"fixture keep").unwrap();
+    remove_workspace_file(root.path(), &target).unwrap();
+    assert!(!target.exists());
+    assert_eq!(std::fs::read(&keep).unwrap(), b"fixture keep");
+    assert_eq!(
+        remove_workspace_file(root.path(), &target)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::NotFound
+    );
+    assert!(remove_workspace_file(root.path(), root.path()).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn secure_workspace_remove_rejects_parent_links_and_outside_paths() {
+    use std::os::unix::fs::symlink;
+    let root = TestWorkspace::new("remove-root");
+    let outside = TestWorkspace::new("remove-outside");
+    let target = outside.path().join("keep.txt");
+    std::fs::write(&target, b"fixture keep").unwrap();
+    symlink(outside.path(), root.path().join("linked")).unwrap();
+    for candidate in [
+        target.clone(),
+        root.path().join("linked/keep.txt"),
+        root.path().join("../keep.txt"),
+    ] {
+        assert!(remove_workspace_file(root.path(), &candidate).is_err());
+    }
+    assert_eq!(std::fs::read(&target).unwrap(), b"fixture keep");
+}
+
+#[cfg(unix)]
+#[test]
+fn secure_workspace_remove_rejects_a_leaf_symlink_without_touching_its_target() {
+    use std::os::unix::fs::symlink;
+    let root = TestWorkspace::new("remove-link");
+    let outside = TestWorkspace::new("remove-link-target");
+    let target = outside.path().join("keep.txt");
+    std::fs::write(&target, b"fixture keep").unwrap();
+    let link = root.path().join("leaf");
+    symlink(&target, &link).unwrap();
+    assert!(remove_workspace_file(root.path(), &link).is_err());
+    assert!(link.is_symlink());
+    assert_eq!(std::fs::read(&target).unwrap(), b"fixture keep");
+}
 
 pub(crate) struct TestWorkspace(PathBuf);
 
@@ -11,7 +93,7 @@ impl TestWorkspace {
             "agent-runtime-secure-workspace-{label}-{}",
             uuid::Uuid::new_v4().simple()
         ));
-        std::fs::create_dir_all(&path).expect("create test workspace");
+        std::fs::create_dir(&path).expect("exclusively create test workspace");
         Self(path)
     }
 
@@ -23,7 +105,7 @@ impl TestWorkspace {
             "ar-secure-socket-{}",
             uuid::Uuid::new_v4().simple()
         ));
-        std::fs::create_dir_all(&path).expect("create socket test workspace");
+        std::fs::create_dir(&path).expect("exclusively create socket test workspace");
         Self(path)
     }
 
