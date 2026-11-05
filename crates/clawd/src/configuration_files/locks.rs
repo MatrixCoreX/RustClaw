@@ -23,47 +23,41 @@ pub(super) fn key(path: &Path) -> io::Result<PathBuf> {
     if !path.is_absolute() {
         return Err(io::Error::other("configuration_path_not_absolute"));
     }
-    match path.canonicalize() {
-        Ok(resolved) => return Ok(resolved),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => (),
-        Err(error) => return Err(error),
-    }
-    let mut ancestor = path;
-    let mut tail = Vec::new();
-    loop {
-        match ancestor.canonicalize() {
-            Ok(mut resolved) => {
-                if !resolved.is_dir() {
-                    return Err(io::Error::other("configuration_parent_not_directory"));
-                }
-                for component in tail.iter().rev() {
-                    match component {
-                        Component::ParentDir => {
-                            if !resolved.pop() {
-                                return Err(io::Error::other("configuration_path_invalid"));
-                            }
-                        }
-                        Component::Normal(part) => resolved.push(part),
-                        _ => return Err(io::Error::other("configuration_path_invalid")),
-                    }
-                }
-                return Ok(resolved);
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                // Resolve the existing prefix before collapsing missing tail
-                // components. Lexically removing `..` first changes the
-                // meaning of `directory-symlink/../missing-file`.
-                tail.push(match ancestor.components().next_back() {
-                    Some(component @ (Component::Normal(_) | Component::ParentDir)) => component,
-                    _ => return Err(error),
-                });
-                ancestor = ancestor
-                    .parent()
-                    .ok_or_else(|| io::Error::other("configuration_path_parent_missing"))?;
-            }
+    if !path.components().any(|part| part == Component::ParentDir) {
+        match path.canonicalize() {
+            Ok(resolved) => return Ok(resolved),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => (),
             Err(error) => return Err(error),
         }
     }
+    // Some platform canonicalizers collapse `file/..` without rejecting the
+    // non-directory prefix. Walk directories before processing parent tokens;
+    // this also resolves directory symlinks before their following `..`.
+    let mut resolved = PathBuf::new();
+    let mut components = path.components().peekable();
+    while let Some(component) = components.next() {
+        match component {
+            Component::Prefix(_) | Component::RootDir => resolved.push(component.as_os_str()),
+            Component::CurDir => (),
+            Component::ParentDir => {
+                resolved.pop();
+            }
+            Component::Normal(part) => {
+                resolved.push(part);
+                match resolved.canonicalize() {
+                    Ok(physical) => {
+                        if components.peek().is_some() && !physical.metadata()?.is_dir() {
+                            return Err(io::Error::other("configuration_parent_not_directory"));
+                        }
+                        resolved = physical;
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => (),
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+    }
+    Ok(resolved)
 }
 
 pub(crate) fn with_locked_files<T>(

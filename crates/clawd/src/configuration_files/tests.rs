@@ -48,14 +48,35 @@ fn configuration_files_missing_target_alias_resolves_symlink_before_parent_compo
 fn configuration_files_parent_normalization_does_not_treat_a_file_as_a_directory() {
     let fixture = Fixture::new();
     fs::write(fixture.0.join("not-directory"), b"untouched").unwrap();
-    let invalid = fixture.0.join("not-directory/../target");
-    assert!(locks::key(&invalid).is_err());
-    assert!(Target::configured(&fixture.0, invalid).is_err());
-    assert_eq!(
-        fs::read(fixture.0.join("not-directory")).unwrap(),
-        b"untouched"
-    );
-    assert!(!fixture.0.join("target").exists());
+    let mut prefixes = vec!["not-directory"];
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(fixture.0.join("not-directory"), fixture.0.join("file-link"))
+            .unwrap();
+        prefixes.push("file-link");
+    }
+    for existing_target in [false, true] {
+        if existing_target {
+            fs::write(fixture.0.join("target"), b"original target").unwrap();
+        }
+        for prefix in &prefixes {
+            let invalid = fixture.0.join(prefix).join("../target");
+            assert!(locks::key(&invalid).is_err());
+            assert!(Target::configured(&fixture.0, invalid).is_err());
+            assert_eq!(
+                fs::read(fixture.0.join("not-directory")).unwrap(),
+                b"untouched"
+            );
+            if existing_target {
+                assert_eq!(
+                    fs::read(fixture.0.join("target")).unwrap(),
+                    b"original target"
+                );
+            } else {
+                assert!(!fixture.0.join("target").exists());
+            }
+        }
+    }
 }
 
 #[test]
