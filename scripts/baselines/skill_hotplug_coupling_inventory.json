@@ -31,7 +31,7 @@
     "registration_write_or_reload|crates/clawd/src/execution_recipe.rs": 1,
     "registration_write_or_reload|crates/clawd/src/http/ui_routes.rs": 1,
     "registration_write_or_reload|crates/clawd/src/http/ui_routes/health_skills_import.rs": 1,
-    "registration_write_or_reload|crates/clawd/src/http/ui_routes/llm_skill_config.rs": 14,
+    "registration_write_or_reload|crates/clawd/src/http/ui_routes/llm_skill_config.rs": 12,
     "registration_write_or_reload|crates/clawd/src/http/ui_routes/skill_import_config.rs": 1,
     "registration_write_or_reload|crates/clawd/src/http/ui_routes/skill_store.rs": 3,
     "registration_write_or_reload|crates/clawd/src/main.rs": 2,

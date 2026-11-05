@@ -111,3 +111,14 @@ export function runCoalescedResponseRead(
   }
   return request.then((response) => response.clone());
 }
+
+/** A post-write read must not join a read started before the write completed. */
+export async function runInvalidatingWrite(
+  inFlight: Map<string, Promise<Response>>,
+  key: string,
+  start: () => Promise<Response>,
+): Promise<Response> {
+  inFlight.delete(key);
+  try { return await start(); }
+  finally { inFlight.delete(key); }
+}

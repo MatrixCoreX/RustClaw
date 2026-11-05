@@ -10,7 +10,7 @@ const t = (cn: string, en: string) => zh ? cn : en;
 document.documentElement.dataset.theme = params.get("theme") || "light";
 const apiFetch = (path: string, init?: RequestInit) => fetch(path, init);
 function Fixture() {
-  const runtime = useModelConfigRuntime({ apiFetch, t });
+  const runtime = useModelConfigRuntime({ apiFetch, t, requestScope: "fixture" });
   useEffect(() => { void runtime.fetchLlmConfig(); }, []);
   return <main className="theme-shell mx-auto max-w-5xl p-4"><ModelConfigPage
     {...runtime} t={t} tSlash={text => text.split(" / ")[zh ? 0 : 1] || text}

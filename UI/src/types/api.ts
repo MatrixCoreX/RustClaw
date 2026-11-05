@@ -732,6 +732,7 @@ export interface SkillsResponse {
 }
 
 export interface SkillsConfigResponse {
+  revision: string;
   config_path: string;
   skills_list: string[];
   skill_switches: Record<string, boolean>;

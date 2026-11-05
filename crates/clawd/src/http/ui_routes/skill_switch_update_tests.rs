@@ -48,6 +48,7 @@ impl Fixture {
     }
 
     async fn save(&self, key: &str, switches: Value) -> (StatusCode, Value) {
+        let (_, current) = self.config_request(Method::GET, Value::Null).await;
         let router = axum::Router::new()
             .nest("/v1", build_ui_router())
             .with_state(self.state.clone());
@@ -62,7 +63,10 @@ impl Fixture {
             .oneshot(
                 request
                     .body(Body::from(
-                        serde_json::json!({"skill_switches":switches}).to_string(),
+                        serde_json::json!({
+                            "skill_switches":switches,
+                            "expected_revision":current["data"]["revision"],
+                        }).to_string(),
                     ))
                     .unwrap(),
             )

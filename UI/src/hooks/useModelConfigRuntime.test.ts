@@ -24,7 +24,7 @@ test("all direct vendors send draft keys for testing and saving, never reuse a k
       return new Response(JSON.stringify({ ok: true, data }));
     };
     let runtime: ReturnType<typeof useModelConfigRuntime>;
-    function Probe() { runtime = useModelConfigRuntime({ apiFetch, t }); return null; }
+    function Probe() { runtime = useModelConfigRuntime({ apiFetch, t, requestScope: "fixture" }); return null; }
     let renderer: ReactTestRenderer;
     await act(async () => { renderer = create(React.createElement(Probe)); });
     try {
@@ -61,7 +61,7 @@ test("malformed successful model responses never replace valid state or break re
   let payload: unknown = {};
   let runtime: ReturnType<typeof useModelConfigRuntime>;
   const apiFetch = async () => new Response(JSON.stringify({ ok: true, data: payload }));
-  function Probe() { runtime = useModelConfigRuntime({ apiFetch, t }); return null; }
+  function Probe() { runtime = useModelConfigRuntime({ apiFetch, t, requestScope: "fixture" }); return null; }
   let renderer: ReactTestRenderer;
   await act(async () => { renderer = create(React.createElement(Probe)); });
   try {

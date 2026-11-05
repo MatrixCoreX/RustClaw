@@ -5,6 +5,7 @@ import {
   fetchResilientRead,
   runCoalescedRead,
   runCoalescedResponseRead,
+  runInvalidatingWrite,
 } from "./resilient-read";
 
 test("resilient read retries transient network failures", async () => {
@@ -22,6 +23,34 @@ test("resilient read retries transient network failures", async () => {
 
   assert.equal(await response.text(), "ok");
   assert.equal(attempts, 3);
+});
+
+test("config writes invalidate reads begun before and during the write without stale cleanup", async () => {
+  const reads = new Map<string, Promise<Response>>();
+  const resolutions: Array<(value: Response) => void> = [];
+  const start = () => new Promise<Response>(resolve => resolutions.push(resolve));
+  const before = runCoalescedResponseRead(reads, "config", start);
+  let finishWrite!: (value: Response) => void;
+  const write = runInvalidatingWrite(reads, "config", () => new Promise(resolve => { finishWrite = resolve; }));
+  const during = runCoalescedResponseRead(reads, "config", start);
+  assert.equal(resolutions.length, 2);
+  finishWrite(new Response("saved")); await write;
+  const after = runCoalescedResponseRead(reads, "config", start);
+  resolutions[0](new Response("old")); resolutions[1](new Response("during")); await before; await during;
+  const joined = runCoalescedResponseRead(reads, "config", start);
+  assert.equal(resolutions.length, 3, "old finalizers cannot release a newer read");
+  resolutions[2](new Response("current"));
+  assert.equal(await (await after).text(), "current");
+  assert.equal(await (await joined).text(), "current");
+});
+
+test("a failed write also invalidates possibly stale coalesced reads", async () => {
+  const reads = new Map<string, Promise<Response>>();
+  await assert.rejects(runInvalidatingWrite(reads, "config", async () => {
+    void runCoalescedResponseRead(reads, "config", async () => new Response("stale"));
+    throw new Error("ambiguous write response");
+  }), /ambiguous/);
+  assert.equal(reads.size, 0);
 });
 
 test("resilient read does not retry application JSON errors", async () => {

@@ -3,6 +3,7 @@ import test from "node:test";
 import { confirmSkillSwitchUpdate, hasSkillSwitchBaseline, skillSwitchChanges, skillSwitchErrorMessage, skillSwitchIsChanged } from "./skill-switches";
 
 const locked = new Set(["fixture_locked"]);
+const revision = "a".repeat(64);
 const baseline = {
   skills_list: ["fixture_enabled", "fixture_locked"],
   skill_switches: { fixture_enabled: true, fixture_disabled: false, fixture_locked: false },
@@ -56,7 +57,7 @@ test("skill switch dictionaries use own properties and preserve prototype-shaped
 });
 
 const readData = {
-  ...baseline, managed_skills: [], effective_enabled_skills_preview: [], runtime_enabled_skills: [],
+  ...baseline, revision, managed_skills: [], effective_enabled_skills_preview: [], runtime_enabled_skills: [],
 };
 
 test("switch baseline validates lists and boolean maps before accepting a read", () => {
@@ -64,29 +65,30 @@ test("switch baseline validates lists and boolean maps before accepting a read",
   for (const value of [null, [], {}, { ...readData, skills_list: "fixture" }, { ...readData, managed_skills: {} },
     { ...readData, skills_list: [false] }, { ...readData, skill_switches: [] },
     { ...readData, skill_switches: { fixture: "false" } }, { ...readData, locked_skill_names: {} },
-    { ...readData, skill_items: [null] }, { ...readData, skill_items: [{ name: false }] }]) {
+    { ...readData, skill_items: [null] }, { ...readData, skill_items: [{ name: false }] },
+    { ...readData, revision: null }, { ...readData, revision: "stale" }]) {
     assert.equal(hasSkillSwitchBaseline(value), false, JSON.stringify(value));
   }
   assert.equal(hasSkillSwitchBaseline({ ...readData, locked_skill_names: [], skill_items: [{ name: "fixture" }] }), true);
 });
 
 test("switch acknowledgements require explicit restart state and the requested values", () => {
-  assert.equal(confirmSkillSwitchUpdate({ restart_required: false, skill_switches: { fixture: true } }, { fixture: true }), false);
-  assert.equal(confirmSkillSwitchUpdate({ restart_required: true, skill_switches: { fixture: true } }, { fixture: true }), true);
+  assert.equal(confirmSkillSwitchUpdate({ revision, restart_required: false, skill_switches: { fixture: true } }, { fixture: true }), false);
+  assert.equal(confirmSkillSwitchUpdate({ revision, restart_required: true, skill_switches: { fixture: true } }, { fixture: true }), true);
   for (const value of [null, {}, { skill_switches: {} }, { restart_required: false },
     { restart_required: "false", skill_switches: {} }, { restart_required: false, skill_switches: [] },
     { restart_required: false, skill_switches: { fixture: "true" } }]) {
     assert.throws(() => confirmSkillSwitchUpdate(value, { fixture: true }), /skill_config_update_invalid/);
   }
   for (const switches of [{}, { fixture: false }, Object.create({ fixture: true })]) {
-    assert.throws(() => confirmSkillSwitchUpdate({ restart_required: false, skill_switches: switches }, { fixture: true }), /skill_config_update_not_applied/);
+    assert.throws(() => confirmSkillSwitchUpdate({ revision, restart_required: false, skill_switches: switches }, { fixture: true }), /skill_config_update_not_applied/);
   }
 });
 
 test("acknowledgements confirm prototype-shaped keys only from own response fields", () => {
   const changes = Object.fromEntries([["__proto__", true]]);
-  assert.equal(confirmSkillSwitchUpdate({ restart_required: false, skill_switches: changes }, changes), false);
-  assert.throws(() => confirmSkillSwitchUpdate({ restart_required: false, skill_switches: {} }, changes), /not_applied/);
+  assert.equal(confirmSkillSwitchUpdate({ revision, restart_required: false, skill_switches: changes }, changes), false);
+  assert.throws(() => confirmSkillSwitchUpdate({ revision, restart_required: false, skill_switches: {} }, changes), /not_applied/);
 });
 
 test("switch errors provide localized recovery guidance without showing machine tokens", () => {

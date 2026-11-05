@@ -48,6 +48,12 @@ async function harness() {
       const method = init?.method ?? "GET";
       calls.push({ scope, path, method });
       if (path === "/v1/skills") return response({ skills: [], skill_items: [] });
+      if (path.startsWith("/v1/skills/store?")) {
+        const gate = reads.get(scope); reads.delete(scope);
+        if (gate) await gate.promise;
+        return response({ items: [{ name: `store_${scope}`, kind: "builtin", source_kind: "bundled_optional",
+          installed: false, enabled: false, skill: { name: `store_${scope}` } }], uninstalled_skill_names: [], active_operation: null });
+      }
       assert.equal(path, "/v1/skills/config");
       let held: ReturnType<typeof deferred> | undefined;
       if (method === "POST") {
@@ -78,6 +84,7 @@ async function harness() {
     holdWrite(scope = "A") { const gate = deferred(); writes.set(scope, gate); return gate; },
     async startRead() { let pending!: Promise<void>; await act(async () => { pending = current.fetchSkillsConfig(); }); return { pending }; },
     async startSave() { let pending!: Promise<void>; await act(async () => { pending = current.saveSkillSwitches(); }); return { pending }; },
+    async startStoreRead() { let pending!: Promise<void>; await act(async () => { pending = current.fetchSkillStore(true); }); return { pending }; },
     async release(gate: ReturnType<typeof deferred>, pending: Promise<void>) { await act(async () => { gate.resolve(); await pending; }); },
     async refresh() { await act(async () => { await current.fetchSkillsConfig(); }); },
     async save() { await act(async () => { await current.saveSkillSwitches(); }); },
@@ -195,5 +202,39 @@ test("skill switch saves carry the revision actually observed by the page", asyn
   try {
     await h.toggle(ALPHA, false); await h.save();
     assert.equal(h.posts[0].data.expected_revision, "a".repeat(64));
+  } finally { await h.dispose(); }
+});
+
+test("skill store reads and pending slots belong to the current device owner", async () => {
+  const h = await harness(); const gate = h.holdRead(); const oldRead = await h.startStoreRead();
+  let nextRead: { pending: Promise<void> } | undefined;
+  try {
+    await h.scope("B"); nextRead = await h.startStoreRead();
+    assert.ok(h.calls.some(call => call.scope === "B" && call.path.startsWith("/v1/skills/store?")));
+    await h.release(gate, oldRead.pending); await nextRead.pending;
+    assert.equal(h.current.skillStoreData?.items[0]?.name, "store_B");
+    assert.equal(h.current.skillStoreLoading, false);
+  } finally { gate.resolve(); await oldRead.pending; if (nextRead) await nextRead.pending; await h.dispose(); }
+});
+
+test("unmounted skill store mutation callbacks cannot remove a package", async () => {
+  const h = await harness(); const remove = h.current.removeSkillFromStore; await h.dispose();
+  const count = h.calls.length; await act(async () => { await remove("store_fixture"); });
+  assert.equal(h.calls.length, count);
+});
+
+test("previous-device skill UI callbacks cannot modify the new owner's local state", async () => {
+  const h = await harness();
+  const old = h.current;
+  try {
+    await h.scope("B");
+    await act(async () => {
+      old.setSkillImportSource("previous-device-directory");
+      old.setLocalImportPickerOpen(true);
+      old.setSkillsSearchQuery("previous-device-search");
+    });
+    assert.equal(h.current.skillImportSource, "");
+    assert.equal(h.current.localImportPickerOpen, false);
+    assert.equal(h.current.skillsSearchQuery, "");
   } finally { await h.dispose(); }
 });

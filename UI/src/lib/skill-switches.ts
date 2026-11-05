@@ -1,5 +1,5 @@
 import type { SkillsConfigResponse } from "../types/api";
-import { isVisibleSkillName } from "./skill-display";
+import { baseSkillNamesFromRegistry, isVisibleSkillName, visibleSkillNames } from "./skill-display";
 import { formatUiError, type UiErrorTranslate } from "./ui-error";
 
 type SwitchBaseline = Pick<SkillsConfigResponse, "skills_list" | "skill_switches">;
@@ -13,6 +13,17 @@ function stringList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((name) => typeof name === "string");
 }
 
+export function hasSkillSwitchRevision(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+}
+
+export function skillSwitchLocks(config: SkillsConfigResponse | null): ReadonlySet<string> {
+  const names = config?.locked_skill_names;
+  return new Set(visibleSkillNames(names?.length ? names : [
+    ...baseSkillNamesFromRegistry(config?.base_skill_names), ...visibleSkillNames(config?.tool_skill_names),
+  ]));
+}
+
 /** Validate the read fields that establish the meaning of a switch edit. */
 export function hasSkillSwitchBaseline(value: unknown): boolean {
   if (value === null || typeof value !== "object") return false;
@@ -21,7 +32,8 @@ export function hasSkillSwitchBaseline(value: unknown): boolean {
     "base_skill_names", "core_skill_names", "fixed_on_skill_names", "initial_core_skill_names",
     "deferred_skill_names", "tool_skill_names", "locked_skill_names", "external_skill_names", "uninstalled_skill_names",
   ];
-  return [data.skills_list, data.managed_skills, data.effective_enabled_skills_preview, data.runtime_enabled_skills].every(stringList)
+  return hasSkillSwitchRevision(data.revision)
+    && [data.skills_list, data.managed_skills, data.effective_enabled_skills_preview, data.runtime_enabled_skills].every(stringList)
     && booleanMap(data.skill_switches)
     && optionalLists.every((key) => data[key] === undefined || stringList(data[key]))
     && (data.skill_items === undefined || (Array.isArray(data.skill_items) && data.skill_items.every((item) =>
@@ -57,10 +69,16 @@ export function skillSwitchChanges(
     .map((name) => [name, valueFor(config, draft, name)]));
 }
 
-export function confirmSkillSwitchUpdate(value: unknown, changes: Readonly<Record<string, boolean>>): boolean {
+export interface SkillSwitchAcknowledgement {
+  revision: string;
+  restart_required: boolean;
+  skill_switches: Record<string, boolean>;
+}
+
+export function readSkillSwitchAcknowledgement(value: unknown, changes: Readonly<Record<string, boolean>>): SkillSwitchAcknowledgement {
   if (value === null || typeof value !== "object") throw new Error("skill_config_update_invalid");
   const data = value as Record<string, unknown>;
-  if (typeof data.restart_required !== "boolean" || !booleanMap(data.skill_switches)) {
+  if (!hasSkillSwitchRevision(data.revision) || typeof data.restart_required !== "boolean" || !booleanMap(data.skill_switches)) {
     throw new Error("skill_config_update_invalid");
   }
   const applied = data.skill_switches;
@@ -68,13 +86,20 @@ export function confirmSkillSwitchUpdate(value: unknown, changes: Readonly<Recor
     !Object.prototype.hasOwnProperty.call(applied, name) || applied[name] !== enabled)) {
     throw new Error("skill_config_update_not_applied");
   }
-  return data.restart_required;
+  return { revision: data.revision, restart_required: data.restart_required, skill_switches: applied };
+}
+
+export function confirmSkillSwitchUpdate(value: unknown, changes: Readonly<Record<string, boolean>>): boolean {
+  return readSkillSwitchAcknowledgement(value, changes).restart_required;
 }
 
 export function skillSwitchErrorMessage(cause: unknown, t: UiErrorTranslate): string {
   const code = cause instanceof Error ? cause.message : "";
-  if (code === "skill_admission_generation_changed") {
+  if (["skill_admission_generation_changed", "skill_switch_revision_changed", "skill_switch_revision_required"].includes(code)) {
     return t("另一个操作更新了技能设置。请刷新状态，重新确认开关后再保存。", "Another operation changed the skill settings. Refresh, review the switches, and save again.");
+  }
+  if (code === "skill_admission_missing") {
+    return t("请先安装技能并确认授权，再修改开关。", "Install the skill and review its permissions before changing its switch.");
   }
   if (code === "skill_config_update_not_applied") {
     return t("部分开关没有生效。请刷新状态，检查技能安装和授权后重试。", "Some switches were not applied. Refresh and check skill installation and authorization before trying again.");

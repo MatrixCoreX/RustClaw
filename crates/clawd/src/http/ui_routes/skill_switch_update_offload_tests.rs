@@ -5,6 +5,12 @@ use std::time::{Duration, Instant};
 
 async fn observe_admission_lock(inline: bool) {
     let fixture = Fixture::new().await;
+    let revision = fixture
+        .observed_revision()
+        .await
+        .as_str()
+        .unwrap()
+        .to_string();
     let lock = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -29,6 +35,7 @@ async fn observe_admission_lock(inline: bool) {
                     headers,
                     axum::Json(UpdateSkillsConfigRequest {
                         skill_switches: [(ALPHA.to_string(), false)].into(),
+                        expected_revision: Some(revision),
                     }),
                 );
                 (status, serde_json::to_value(body).unwrap())

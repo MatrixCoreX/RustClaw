@@ -476,6 +476,7 @@ fn compute_effective_enabled(
     set.into_keys().collect()
 }
 
+#[cfg(test)]
 fn render_switches_inline_table(switches: &BTreeMap<String, bool>) -> String {
     if switches.is_empty() {
         return "skill_switches = {}".to_string();
@@ -488,6 +489,7 @@ fn render_switches_inline_table(switches: &BTreeMap<String, bool>) -> String {
     format!("skill_switches = {{ {pairs} }}")
 }
 
+#[cfg(test)]
 fn upsert_skill_switches_line(raw: &str, rendered_line: &str) -> String {
     let mut lines: Vec<String> = raw.lines().map(|s| s.to_string()).collect();
     let mut in_skills = false;
@@ -620,6 +622,77 @@ fn ensure_string_array_contains_in_section(
     out
 }
 
+#[derive(Serialize)]
+struct SkillSwitchRevisionState {
+    baseline: Vec<String>,
+    switches: BTreeMap<String, bool>,
+    uninstalled: BTreeSet<String>,
+    locked: BTreeSet<String>,
+    generation: u64,
+    generation_digest: Option<String>,
+    base_registry_digest: Option<String>,
+}
+
+fn skill_switch_state(
+    parsed: &toml::Value,
+    state: &AppState,
+    snapshot: &crate::skill_admission::OverlaySnapshot,
+) -> SkillSwitchRevisionState {
+    let mut baseline = collect_skills_baseline(parsed, state);
+    baseline.retain(|name| !hide_skill_in_ui(state, name));
+    baseline.sort_unstable();
+    let mut switches = collect_skill_switches(parsed, state);
+    let mut uninstalled = collect_uninstalled_skills(parsed, state);
+    project_admission_config_state(snapshot, &mut switches, &mut uninstalled);
+    SkillSwitchRevisionState {
+        baseline,
+        switches,
+        uninstalled,
+        locked: state
+            .fixed_on_skill_names()
+            .into_iter()
+            .chain(registry_tool_capability_names(state))
+            .filter(|name| !hide_skill_in_ui(state, name))
+            .collect(),
+        generation: snapshot.generation,
+        generation_digest: snapshot.generation_digest.clone(),
+        base_registry_digest: snapshot.base_registry_digest.clone(),
+    }
+}
+
+fn skill_switch_response(
+    state: &AppState,
+    public: &SkillSwitchRevisionState,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let mut effective = compute_effective_enabled(
+        &public.baseline, &public.switches, &public.uninstalled, state,
+    );
+    effective.retain(|name| !hide_skill_in_ui(state, name));
+    let runtime = state
+        .get_skills_list()
+        .iter()
+        .filter(|name| !hide_skill_in_ui(state, name))
+        .cloned()
+        .collect::<Vec<_>>();
+    let restart_required = skills_restart_required(&runtime, &effective);
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(json!({
+                "config_path": "configs/config.toml", "skill_switches": public.switches,
+                "uninstalled_skill_names": public.uninstalled,
+                "effective_enabled_skills_preview": effective,
+                "restart_required": restart_required,
+                "registry_generation": public.generation,
+                "registry_generation_digest": public.generation_digest,
+                "revision": skill_switch_revision(public),
+            })),
+            error: None,
+        }),
+    )
+}
+
 fn read_skills_config(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -636,9 +709,6 @@ fn read_skills_config(
             );
         }
     };
-    let baseline = collect_skills_baseline(&parsed, &state);
-    let mut switches = collect_skill_switches(&parsed, &state);
-    let mut uninstalled = collect_uninstalled_skills(&parsed, &state);
     let admission_snapshot = match admission_service(&state).and_then(|service| {
         service
             .catalog_snapshot()
@@ -653,13 +723,10 @@ fn read_skills_config(
             );
         }
     };
-    project_admission_config_state(&admission_snapshot, &mut switches, &mut uninstalled);
-    let mut baseline_visible = baseline
-        .iter()
-        .filter(|s| !hide_skill_in_ui(&state, s))
-        .cloned()
-        .collect::<Vec<_>>();
-    baseline_visible.sort_unstable();
+    let public = skill_switch_state(&parsed, &state, &admission_snapshot);
+    let switches = &public.switches;
+    let uninstalled = &public.uninstalled;
+    let baseline_visible = public.baseline.clone();
     let mut runtime_visible = state
         .get_skills_list()
         .iter()
@@ -682,7 +749,7 @@ fn read_skills_config(
             .filter(|name| !uninstalled.contains(name))
             .collect::<Vec<_>>()
     };
-    let mut effective = compute_effective_enabled(&baseline, &switches, &uninstalled, &state);
+    let mut effective = compute_effective_enabled(&public.baseline, switches, uninstalled, &state);
     effective.retain(|s| !hide_skill_in_ui(&state, s));
     let restart_required = skills_restart_required(&runtime_visible, &effective);
     let mut fixed_on_skill_names = state
@@ -699,16 +766,7 @@ fn read_skills_config(
         .map(|registry| (registry.initial_core_names(), registry.deferred_names()))
         .unwrap_or_default();
     let tool_skill_names = registry_tool_capability_names(&state);
-    let locked_skill_names = {
-        let mut set = BTreeSet::new();
-        for name in &core_skill_names {
-            set.insert(name.clone());
-        }
-        for name in &tool_skill_names {
-            set.insert(name.clone());
-        }
-        set.into_iter().collect::<Vec<_>>()
-    };
+    let locked_skill_names = public.locked.iter().cloned().collect::<Vec<_>>();
     let external_skill_names = state
         .get_skills_registry()
         .as_ref()
@@ -752,7 +810,8 @@ fn read_skills_config(
                 "skill_items": skill_items,
                 "effective_enabled_skills_preview": effective,
                 "runtime_enabled_skills": runtime_visible,
-                "restart_required": restart_required
+                "restart_required": restart_required,
+                "revision": skill_switch_revision(&public)
             })),
             error: None,
         }),
@@ -1195,15 +1254,13 @@ fn write_skills_config(
             }),
         );
     }
-    let (raw, parsed) = match read_skill_config_file(&state) {
+    let (_, parsed) = match read_skill_config_file(&state) {
         Ok(v) => v,
         Err(err) => {
             tracing::warn!(error = %err, "skill_switch_config_read_failed");
             return crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "skills_config_read_failed");
         }
     };
-    let mut uninstalled = collect_uninstalled_skills(&parsed, &state);
-    let existing_switches = collect_skill_switches(&parsed, &state);
     let service = match admission_service(&state) {
         Ok(service) => service,
         Err(error) => {
@@ -1211,30 +1268,29 @@ fn write_skills_config(
             return crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "skills_config_read_failed");
         }
     };
-    let original_admission = match service.snapshot() {
+    let original_admission = match service.catalog_snapshot() {
         Ok(snapshot) => snapshot,
         Err(error) => {
             tracing::warn!(%error, "skill_switch_admission_read_failed");
             return crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "skills_config_read_failed");
         }
     };
-    let fixed_on_skills = state
-        .fixed_on_skill_names()
-        .into_iter()
-        .collect::<BTreeSet<_>>();
-    let tool_skill_names = registry_tool_capability_names(&state)
-        .into_iter()
-        .collect::<BTreeSet<_>>();
-    let mut persisted_switches = existing_switches.clone();
+    let public = skill_switch_state(&parsed, &state, &original_admission);
+    let Some(expected_revision) = req.expected_revision.as_deref().filter(|revision| {
+        revision.len() == 64 && revision.bytes().all(|byte| byte.is_ascii_hexdigit())
+    }) else {
+        return crate::api_err(StatusCode::BAD_REQUEST, "skill_switch_revision_required");
+    };
+    if expected_revision != skill_switch_revision(&public) {
+        return crate::api_err(StatusCode::CONFLICT, "skill_switch_revision_changed");
+    }
     let mut admission_updates = Vec::new();
     for (k, v) in req.skill_switches {
         let skill = state.resolve_canonical_skill_name(k.trim());
         if skill.is_empty() || hide_skill_in_ui(&state, &skill) {
             continue;
         }
-        let is_core = fixed_on_skills.contains(&skill);
-        let is_tool = tool_skill_names.contains(&skill);
-        let requested = if is_core || is_tool { true } else { v };
+        let requested = if public.locked.contains(&skill) { true } else { v };
         if let Some(current) = original_admission.state(&skill) {
             let target = match (current, requested) {
                 (skill_sdk::AdmissionState::Enabled, false) => {
@@ -1253,8 +1309,13 @@ fn write_skills_config(
                 });
             }
         } else {
-            persisted_switches.insert(skill, requested);
+            return crate::api_err(StatusCode::CONFLICT, "skill_admission_missing");
         }
+    }
+    // No mutation needs no reload or execution verification. This is only the
+    // same presentation projection exposed by GET, with fresh authorization.
+    if admission_updates.is_empty() {
+        return skill_switch_response(&state, &public);
     }
     let committed = match service.set_states(admission_updates, Some(original_admission.generation)) {
         Ok(snapshot) => snapshot,
@@ -1270,34 +1331,9 @@ fn write_skills_config(
             );
         }
     };
-    let committed_generation =
-        (committed.generation != original_admission.generation).then_some(committed.generation);
-    let updated = if persisted_switches == existing_switches {
-        raw.clone()
-    } else {
-        let rendered = render_switches_inline_table(&persisted_switches);
-        upsert_skill_switches_line(&raw, &rendered)
-    };
-    if updated != raw {
-        if let Err(err) = write_runtime_config_file(&state, &updated) {
-            let rollback =
-                committed_generation.map(|generation| service.rollback_generation(generation));
-            tracing::warn!(error = %err, ?rollback, "skill_switch_config_write_failed");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some("skills_config_write_failed".to_string()),
-                }),
-            );
-        }
-    }
     if let Err(error) = reload_skill_views(&state) {
-        let config_rollback = (updated != raw).then(|| write_runtime_config_file(&state, &raw));
-        let admission_rollback =
-            committed_generation.map(|generation| service.rollback_generation(generation));
-        tracing::warn!(%error, ?config_rollback, ?admission_rollback, "skill_switch_reload_failed");
+        let admission_rollback = service.rollback_generation(committed.generation);
+        tracing::warn!(%error, ?admission_rollback, "skill_switch_reload_failed");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse {
@@ -1314,31 +1350,7 @@ fn write_skills_config(
             return crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "skills_config_read_failed");
         }
     };
-    let mut switches = persisted_switches;
-    project_admission_config_state(&current_admission, &mut switches, &mut uninstalled);
-    let mut effective = state
-        .get_skills_list()
-        .iter()
-        .filter(|s| !hide_skill_in_ui(&state, s))
-        .cloned()
-        .collect::<Vec<_>>();
-    effective.sort_unstable();
-    (
-        StatusCode::OK,
-        Json(ApiResponse {
-            ok: true,
-            data: Some(json!({
-                "config_path": "configs/config.toml",
-                "skill_switches": switches,
-                "uninstalled_skill_names": uninstalled,
-                "effective_enabled_skills_preview": effective,
-                "restart_required": false,
-                "registry_generation": current_admission.generation,
-                "registry_generation_digest": current_admission.generation_digest,
-            })),
-            error: None,
-        }),
-    )
+    skill_switch_response(&state, &skill_switch_state(&parsed, &state, &current_admission))
 }
 
 async fn uninstall_external_skill(

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 
 import { useUiDialog } from "../components/UiDialogProvider";
 import {
@@ -12,7 +12,10 @@ import {
 } from "../lib/skill-display";
 import { removableSkillNames, resolveSkillStoreActionName, skillStoreErrorMessage } from "../lib/skill-store";
 import { formatUiError } from "../lib/ui-error";
-import { confirmSkillSwitchUpdate, hasSkillSwitchBaseline, skillSwitchChanges, skillSwitchErrorMessage } from "../lib/skill-switches";
+import { hasSkillSwitchBaseline, readSkillSwitchAcknowledgement, skillSwitchChanges, skillSwitchErrorMessage, skillSwitchLocks } from "../lib/skill-switches";
+import { SkillSwitchDraft } from "../lib/skill-switch-draft";
+import { PageRequestLifecycle } from "../lib/page-request-lifecycle";
+import { useRequestOwner } from "./useRequestOwner";
 import type {
   ApiResponse,
   BrowserFileWithPath,
@@ -32,17 +35,23 @@ type RestartSystem = () => Promise<boolean>;
 export interface UseSkillsRuntimeParams {
   apiFetch: ApiFetch;
   t: Translate;
+  requestScope: string;
 }
 
-export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
+export function useSkillsRuntime({ apiFetch, t, requestScope }: UseSkillsRuntimeParams) {
   const { confirm: showConfirm } = useUiDialog();
+  const isCurrent = useRequestOwner(requestScope);
+  const owner = useMemo(() => ({
+    draft: new SkillSwitchDraft(), configReads: new PageRequestLifecycle(), metadataReads: new PageRequestLifecycle(),
+    saving: false, storeFetch: null as Promise<void> | null, storeFetchedAt: 0, storePage: 1, storeQuery: "",
+    previousOperation: null as SkillStoreResponse["active_operation"],
+  }), [isCurrent]);
   const [skillsData, setSkillsData] = useState<SkillsResponse | null>(null);
   const [skillsConfigLoading, setSkillsConfigLoading] = useState(false);
   const [skillsConfigError, setSkillsConfigError] = useState<string | null>(null);
   const [skillsConfigData, setSkillsConfigData] = useState<SkillsConfigResponse | null>(null);
   const [skillSwitchDraft, setSkillSwitchDraft] = useState<Record<string, boolean>>({});
   const [skillSwitchSaving, setSkillSwitchSaving] = useState(false);
-  const skillSwitchSaveInFlight = useRef(false);
   const [skillStoreData, setSkillStoreData] = useState<SkillStoreResponse | null>(null);
   const [skillStoreLoading, setSkillStoreLoading] = useState(false);
   const [skillStoreError, setSkillStoreError] = useState<string | null>(null);
@@ -59,17 +68,31 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
   const [localImportPickerOpen, setLocalImportPickerOpen] = useState(false);
   const folderImportInputRef = useRef<HTMLInputElement | null>(null);
   const fileImportInputRef = useRef<HTMLInputElement | null>(null);
-  const previousSkillStoreOperationRef = useRef<SkillStoreResponse["active_operation"]>(null);
-  const skillStoreFetchRef = useRef<Promise<void> | null>(null);
-  const skillStoreFetchedAtRef = useRef(0);
-  const skillStorePageRef = useRef(1);
-  const skillStoreQueryRef = useRef("");
   const skillStoreActionName = resolveSkillStoreActionName(localSkillStoreActionName, skillStoreData);
 
+  useEffect(() => {
+    setSkillsData(null); setSkillsConfigData(null); setSkillSwitchDraft({});
+    setSkillsConfigLoading(false); setSkillsConfigError(null); setSkillSwitchSaving(false); setSkillSwitchSaveMessage(null);
+    setSkillStoreData(null); setSkillStoreLoading(false); setSkillStoreError(null); setSkillStoreMessage(null);
+    setLocalSkillStoreActionName(null); setSkillsSearchQuery(""); setSkillImportSource("");
+    setSkillImportLoading(false); setSkillImportError(null); setSkillImportMessage(null); setSkillImportPreview(null);
+    setRecentImportedSkillName(null); setLocalImportPickerOpen(false);
+    if (folderImportInputRef.current) folderImportInputRef.current.value = "";
+    if (fileImportInputRef.current) fileImportInputRef.current.value = "";
+  }, [owner]);
+
+  const publishSwitchDraft = () => {
+    setSkillsConfigData(owner.draft.baseline);
+    setSkillSwitchDraft(owner.draft.values());
+  };
+
   const fetchSkills = async () => {
+    if (!isCurrent()) return;
+    const request = owner.metadataReads.begin(false)!;
     try {
       const res = await apiFetch(`/v1/skills`);
       const body = (await res.json()) as ApiResponse<SkillsResponse>;
+      if (!isCurrent() || !owner.metadataReads.isCurrent(request)) return;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `skills_fetch_http_${res.status}`);
       }
@@ -79,44 +102,46 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     }
   };
 
-  const fetchSkillsConfig = async () => {
+  const loadSkillsConfig = async (duringSave = false) => {
+    if (!isCurrent() || (owner.saving && !duringSave)) return;
+    const request = owner.configReads.begin(false)!;
+    const ownsRead = () => isCurrent() && owner.configReads.isCurrent(request) && (!owner.saving || duringSave);
     setSkillsConfigLoading(true);
     setSkillsConfigError(null);
     try {
       const res = await apiFetch(`/v1/skills/config`);
       const body = (await res.json()) as ApiResponse<SkillsConfigResponse>;
+      if (!ownsRead()) return;
       if (!res.ok || !body?.ok || !body.data || !hasSkillSwitchBaseline(body.data)) {
         throw new Error(body?.error || `skill_config_fetch_http_${res.status}`);
       }
-      setSkillsConfigData(body.data);
-      const nextSwitchDraft = { ...(body.data.skill_switches || {}) };
-      (body.data.locked_skill_names || body.data.core_skill_names || []).forEach((name) => {
-        if (nextSwitchDraft[name] === false) nextSwitchDraft[name] = true;
-      });
-      setSkillSwitchDraft(nextSwitchDraft);
+      owner.draft.rebase(body.data);
+      publishSwitchDraft();
     } catch (err) {
+      if (!ownsRead()) return;
       const message = formatUiError(err, t, "技能设置暂时无法读取。", "Skill settings are temporarily unavailable.");
       setSkillsConfigError(message);
     } finally {
-      setSkillsConfigLoading(false);
+      if (ownsRead() && owner.configReads.finish(request)) setSkillsConfigLoading(false);
     }
   };
+  const fetchSkillsConfig = () => loadSkillsConfig();
 
   const fetchSkillStore = (
     force = false,
-    page = skillStorePageRef.current,
-    query = skillStoreQueryRef.current,
+    page = owner.storePage,
+    query = owner.storeQuery,
   ): Promise<void> => {
+    if (!isCurrent()) return Promise.resolve();
     const normalizedPage = Math.max(1, Math.trunc(page));
     const normalizedQuery = query.trim();
-    const browsingChanged = normalizedPage !== skillStorePageRef.current
-      || normalizedQuery !== skillStoreQueryRef.current;
-    skillStorePageRef.current = normalizedPage;
-    skillStoreQueryRef.current = normalizedQuery;
-    const freshEnough = Date.now() - skillStoreFetchedAtRef.current < 3_000;
+    const browsingChanged = normalizedPage !== owner.storePage || normalizedQuery !== owner.storeQuery;
+    owner.storePage = normalizedPage;
+    owner.storeQuery = normalizedQuery;
+    const freshEnough = Date.now() - owner.storeFetchedAt < 3_000;
     if (!force && !browsingChanged && freshEnough) return Promise.resolve();
-    if (skillStoreFetchRef.current) {
-      const activeRequest = skillStoreFetchRef.current;
+    if (owner.storeFetch) {
+      const activeRequest = owner.storeFetch;
       return browsingChanged
         ? activeRequest.then(() => fetchSkillStore(true, normalizedPage, normalizedQuery))
         : activeRequest;
@@ -132,13 +157,14 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
         if (normalizedQuery) params.set("q", normalizedQuery);
         const res = await apiFetch(`/v1/skills/store?${params.toString()}`);
         const body = (await res.json()) as ApiResponse<SkillStoreResponse>;
+        if (!isCurrent()) return;
         if (!res.ok || !body.ok || !body.data) {
           throw new Error(skillStoreErrorMessage(body.error, t));
         }
-        skillStoreFetchedAtRef.current = Date.now();
-        const previousOperation = previousSkillStoreOperationRef.current;
+        owner.storeFetchedAt = Date.now();
+        const previousOperation = owner.previousOperation;
         const activeOperation = body.data.active_operation ?? null;
-        previousSkillStoreOperationRef.current = activeOperation;
+        owner.previousOperation = activeOperation;
         setSkillStoreData(body.data);
         if (previousOperation && !activeOperation) {
           const completedOperation = body.data.recent_operations?.find(
@@ -186,22 +212,25 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
           await fetchSkills();
         }
       } catch (err) {
+        if (!isCurrent()) return;
         const message = formatUiError(err, t, "Skill Store 暂时无法读取。", "Skill Store is temporarily unavailable.");
         setSkillStoreError(message);
       } finally {
-        setSkillStoreLoading(false);
+        if (isCurrent()) setSkillStoreLoading(false);
       }
     })();
-    skillStoreFetchRef.current = request;
+    owner.storeFetch = request;
     void request.finally(() => {
-      if (skillStoreFetchRef.current === request) skillStoreFetchRef.current = null;
+      if (owner.storeFetch === request) owner.storeFetch = null;
     });
     return request;
   };
 
   const fetchSkillStoreDependencies = async (skillName: string): Promise<SkillStoreDependencyResponse> => {
+    if (!isCurrent()) throw new Error("skill_request_scope_changed");
     const res = await apiFetch(`/v1/skills/store/${encodeURIComponent(skillName)}/dependencies`);
     const body = (await res.json()) as ApiResponse<SkillStoreDependencyResponse>;
+    if (!isCurrent()) throw new Error("skill_request_scope_changed");
     if (!res.ok || !body.ok || !body.data) {
       throw new Error(skillStoreErrorMessage(body.error, t));
     }
@@ -210,6 +239,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
 
   const scrollToSkillRow = (skillName: string) => {
     window.setTimeout(() => {
+      if (!isCurrent()) return;
       const row = document.getElementById(`skill-row-${skillName}`);
       row?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 180);
@@ -232,18 +262,12 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
   }, [skillsConfigData?.tool_skill_names]);
 
   const lockedSkillNamesSet = useMemo(() => {
-    const list = skillsConfigData?.locked_skill_names;
-    const useList = list && list.length > 0 ? list : [...Array.from(baseSkillNamesSet), ...Array.from(toolSkillNamesSet)];
-    return new Set<string>(visibleSkillNames(useList));
-  }, [baseSkillNamesSet, skillsConfigData?.locked_skill_names, toolSkillNamesSet]);
+    return skillSwitchLocks(skillsConfigData);
+  }, [skillsConfigData]);
 
   const externalSkillNamesSet = useMemo(() => {
     return new Set<string>(visibleSkillNames(skillsConfigData?.external_skill_names));
   }, [skillsConfigData?.external_skill_names]);
-
-  const baseEnabledSkills = useMemo(() => {
-    return new Set<string>(visibleSkillNames(skillsConfigData?.skills_list));
-  }, [skillsConfigData]);
 
   const configuredEnabledSkills = useMemo(() => {
     const set = new Set<string>(visibleSkillNames(skillsConfigData?.skills_list));
@@ -307,7 +331,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
 
   useEffect(() => {
     const activeOperation = skillStoreData?.active_operation;
-    if (!activeOperation) return;
+    if (!isCurrent() || !activeOperation) return;
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") void fetchSkillStore(true);
     };
@@ -322,6 +346,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     // The operation identity is the server-owned polling boundary.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    isCurrent,
     skillStoreData?.active_operation?.operation_id,
     skillStoreData?.active_operation?.status,
     skillStoreData?.active_operation?.stage,
@@ -331,33 +356,42 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
   ]);
 
   const saveSkillSwitches = async (restartSystem?: RestartSystem) => {
-    if (skillSwitchSaveInFlight.current) return;
+    if (!isCurrent() || owner.saving) return;
     setSkillSwitchSaveMessage(null);
     setSkillsConfigError(null);
-    if (!skillsConfigData) {
+    const baseline = owner.draft.baseline;
+    if (!baseline) {
       setSkillsConfigError(t("技能设置尚未加载，请先刷新。", "Load the skill settings before saving."));
       return;
     }
-    if (!hasUnsavedSkillSwitchChanges) {
+    const changes = owner.draft.changes();
+    if (Object.keys(changes).length === 0) {
       setSkillSwitchSaveMessage(t("当前没有需要保存的修改。", "There are no changes to save."));
       return;
     }
-    skillSwitchSaveInFlight.current = true;
+    owner.saving = true;
+    const sequence = owner.draft.beginWrite();
+    owner.configReads.invalidate();
+    setSkillsConfigLoading(false);
     setSkillSwitchSaving(true);
     try {
       const res = await apiFetch(`/v1/skills/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ skill_switches: pendingSkillSwitchChanges }),
+        body: JSON.stringify({ skill_switches: changes, expected_revision: baseline.revision }),
       });
       const body = (await res.json()) as ApiResponse<unknown>;
+      if (!isCurrent()) return;
       if (!res.ok || !body?.ok) {
         throw new Error(body?.error || `skill_config_save_http_${res.status}`);
       }
-      const restartRequired = confirmSkillSwitchUpdate(body.data, pendingSkillSwitchChanges);
+      const ack = readSkillSwitchAcknowledgement(body.data, changes);
+      owner.draft.acknowledge(ack, sequence, changes);
+      publishSwitchDraft();
+      const restartRequired = ack.restart_required;
       let savedMessage = t(
-        "技能开关已生效。",
-        "Skill switches are active.",
+        "本次开关修改已生效。",
+        "The submitted switch changes are active.",
       );
       if (restartRequired) {
         const confirmed = await showConfirm({
@@ -368,6 +402,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
           ),
           confirmLabel: t("立即重启", "Restart now"),
         });
+        if (!isCurrent()) return;
         if (confirmed) {
           savedMessage = t(
             "技能开关已保存，正在重启 {product_name}，请稍候。",
@@ -380,10 +415,12 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
           );
         }
         setSkillSwitchSaveMessage(savedMessage);
-        await fetchSkillsConfig();
+        await loadSkillsConfig(true);
         await fetchSkills();
+        if (!isCurrent()) return;
         if (confirmed && restartSystem) {
           const restarted = await restartSystem();
+          if (!isCurrent()) return;
           setSkillSwitchSaveMessage(
             restarted
               ? t("{product_name} 已重启完成，技能开关现在已经生效。", "{product_name} restarted successfully. Skill switches are now active.")
@@ -393,18 +430,21 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
         return;
       }
       setSkillSwitchSaveMessage(savedMessage);
-      await fetchSkillsConfig();
+      await loadSkillsConfig(true);
       await fetchSkills();
     } catch (err) {
+      if (!isCurrent()) return;
       const message = skillSwitchErrorMessage(err, t);
       setSkillsConfigError(message);
     } finally {
-      skillSwitchSaveInFlight.current = false;
-      setSkillSwitchSaving(false);
+      owner.saving = false;
+      owner.draft.finishWrite();
+      if (isCurrent()) { publishSwitchDraft(); setSkillSwitchSaving(false); }
     }
   };
 
   const importExternalSkill = async () => {
+    if (!isCurrent()) return;
     const source = skillImportSource.trim();
     if (!source) {
       setSkillImportError(t("请先输入包含 skill.toml 和 INTERFACE.md 的本地目录。", "Enter a local directory containing skill.toml and INTERFACE.md."));
@@ -419,6 +459,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       confirmLabel: t("允许本次联网", "Allow this time"),
       cancelLabel: t("保持离线导入", "Import offline"),
     });
+    if (!isCurrent()) return;
     setSkillImportLoading(true);
     setSkillImportError(null);
     setSkillImportMessage(null);
@@ -429,6 +470,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
         body: JSON.stringify({ source, enabled: true, allow_network: allowNetwork }),
       });
       const body = (await res.json()) as ApiResponse<ImportedSkillResponse>;
+      if (!isCurrent()) return;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error === "skill_store_precompiled_required"
           ? skillStoreErrorMessage(body.error, t)
@@ -448,14 +490,16 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       await fetchSkillStore(true);
       scrollToSkillRow(body.data.skill_name);
     } catch (err) {
+      if (!isCurrent()) return;
       const message = formatUiError(err, t, "技能导入失败，请检查技能包后重试。", "Skill import failed. Check the package and try again.");
       setSkillImportError(message);
     } finally {
-      setSkillImportLoading(false);
+      if (isCurrent()) setSkillImportLoading(false);
     }
   };
 
   const uploadImportedSkillFiles = async (fileList: FileList | null) => {
+    if (!isCurrent()) return;
     const files = fileList ? Array.from(fileList) as BrowserFileWithPath[] : [];
     if (files.length === 0) {
       return;
@@ -469,6 +513,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       confirmLabel: t("允许本次联网", "Allow this time"),
       cancelLabel: t("保持离线导入", "Import offline"),
     });
+    if (!isCurrent()) return;
     const firstFile = files[0];
     const guessedBundleName =
       firstFile.webkitRelativePath?.split("/")[0]?.trim() ||
@@ -492,6 +537,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
         body: formData,
       });
       const body = (await res.json()) as ApiResponse<ImportedSkillResponse>;
+      if (!isCurrent()) return;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error === "skill_store_precompiled_required"
           ? skillStoreErrorMessage(body.error, t)
@@ -511,13 +557,16 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       await fetchSkillStore(true);
       scrollToSkillRow(body.data.skill_name);
     } catch (err) {
+      if (!isCurrent()) return;
       const message = formatUiError(err, t, "技能导入失败，请检查技能包后重试。", "Skill import failed. Check the package and try again.");
       setSkillImportError(message);
     } finally {
-      setSkillImportLoading(false);
-      setLocalImportPickerOpen(false);
-      if (folderImportInputRef.current) folderImportInputRef.current.value = "";
-      if (fileImportInputRef.current) fileImportInputRef.current.value = "";
+      if (isCurrent()) {
+        setSkillImportLoading(false);
+        setLocalImportPickerOpen(false);
+        if (folderImportInputRef.current) folderImportInputRef.current.value = "";
+        if (fileImportInputRef.current) fileImportInputRef.current.value = "";
+      }
     }
   };
 
@@ -528,6 +577,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     preserveData = true,
     allowNetwork = false,
   ) => {
+    if (!isCurrent()) return;
     setLocalSkillStoreActionName(skillName);
     setSkillStoreError(null);
     setSkillStoreMessage(null);
@@ -542,11 +592,12 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
         }),
       });
       const body = (await res.json()) as ApiResponse<SkillStoreOperationResponse>;
+      if (!isCurrent()) return;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(skillStoreErrorMessage(body.error, t));
       }
       const operation = body.data.operation;
-      previousSkillStoreOperationRef.current = operation;
+      owner.previousOperation = operation;
       setSkillStoreData((current) =>
         current ? { ...current, active_operation: operation } : current,
       );
@@ -557,14 +608,16 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       );
       await fetchSkillStore(true);
     } catch (err) {
+      if (!isCurrent()) return;
       const message = formatUiError(err, t, "技能操作未完成，请稍后重试。", "The skill operation did not complete. Try again shortly.");
       setSkillStoreError(message);
     } finally {
-      setLocalSkillStoreActionName(null);
+      if (isCurrent()) setLocalSkillStoreActionName(null);
     }
   };
 
   const installSkillFromStore = async (skillName: string) => {
+    if (!isCurrent()) return;
     const item = skillStoreData?.items.find((candidate) => candidate.name === skillName);
     const allowNetwork = item?.build_network_policy === "approval_required";
     if (allowNetwork) {
@@ -580,7 +633,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
         ),
         confirmLabel: item?.installed ? t("允许修复并启用", "Allow repair and enable") : t("允许并安装", "Allow and install"),
       });
-      if (!confirmed) return;
+      if (!isCurrent() || !confirmed) return;
     }
     await mutateSkillStoreItem(skillName, true, true, true, allowNetwork);
   };
@@ -588,12 +641,14 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     mutateSkillStoreItem(skillName, false, preserveConfig, preserveData);
 
   const cancelSkillStoreOperation = async (operationId: string) => {
+    if (!isCurrent()) return;
     setSkillStoreError(null);
     try {
       const res = await apiFetch(`/v1/skills/store/operations/${operationId}/cancel`, {
         method: "POST",
       });
       const body = (await res.json()) as ApiResponse<SkillStoreOperationResponse>;
+      if (!isCurrent()) return;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(skillStoreErrorMessage(body.error, t));
       }
@@ -602,38 +657,30 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       );
       setSkillStoreMessage(t("正在安全取消操作…", "Cancelling the operation safely…"));
     } catch (err) {
+      if (!isCurrent()) return;
       const message = formatUiError(err, t, "技能操作暂时无法取消，请稍后重试。", "The skill operation could not be cancelled. Try again shortly.");
       setSkillStoreError(message);
     }
   };
 
   const toggleSkillEnabled = (name: string, nextEnabled: boolean) => {
-    if (isUiHiddenSkill(name)) return;
-    if (lockedSkillNamesSet.has(name)) return;
-    setSkillSwitchDraft((prev) => {
-      const next = { ...prev };
-      const baseEnabled = baseEnabledSkills.has(name);
-      if (nextEnabled === baseEnabled) {
-        delete next[name];
-      } else {
-        return { ...prev, [name]: nextEnabled };
-      }
-      return next;
-    });
+    if (!isCurrent()) return;
+    owner.draft.set(name, nextEnabled);
+    publishSwitchDraft();
   };
 
-  const clearSkillsConfigError = () => setSkillsConfigError(null);
+  const clearSkillsConfigError = () => { if (isCurrent()) setSkillsConfigError(null); };
 
   return {
     skillImportSource,
-    setSkillImportSource,
+    setSkillImportSource: (value: SetStateAction<string>) => { if (isCurrent()) setSkillImportSource(value); },
     skillImportLoading,
     skillImportError,
     skillImportMessage,
     skillImportPreview,
-    setSkillImportPreview,
+    setSkillImportPreview: (value: SetStateAction<ImportedSkillResponse | null>) => { if (isCurrent()) setSkillImportPreview(value); },
     localImportPickerOpen,
-    setLocalImportPickerOpen,
+    setLocalImportPickerOpen: (value: SetStateAction<boolean>) => { if (isCurrent()) setLocalImportPickerOpen(value); },
     folderImportInputRef,
     fileImportInputRef,
     skillsConfigData,
@@ -652,7 +699,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     filteredSkillsOther,
     normalizedSkillsSearchQuery,
     skillsSearchQuery,
-    setSkillsSearchQuery,
+    setSkillsSearchQuery: (value: SetStateAction<string>) => { if (isCurrent()) setSkillsSearchQuery(value); },
     skillItemsByName,
     configuredEnabledSkills,
     skillSwitchDraft,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type SetStateAction } from "react";
 
 import {
   hasUnsavedLlmDraftChanges,
@@ -20,6 +20,9 @@ import {
 import { formatUiError } from "../lib/ui-error";
 import { readLlmConfig } from "../lib/llm-config-response";
 import { readJsonApiResponse } from "../lib/api-response";
+import { hasSkillSwitchBaseline, readSkillSwitchAcknowledgement, skillSwitchErrorMessage } from "../lib/skill-switches";
+import { PageRequestLifecycle } from "../lib/page-request-lifecycle";
+import { useRequestOwner } from "./useRequestOwner";
 import type {
   ApiResponse,
   LlmConfigResponse,
@@ -36,14 +39,24 @@ type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
 export interface UseModelConfigRuntimeParams {
   apiFetch: ApiFetch;
   t: Translate;
+  requestScope: string;
   onBeforeSaveLlm?: () => void;
 }
 
 export function useModelConfigRuntime({
   apiFetch,
   t,
+  requestScope,
   onBeforeSaveLlm,
 }: UseModelConfigRuntimeParams) {
+  const isCurrent = useRequestOwner(requestScope);
+  const owner = useMemo(() => ({
+    llmReads: new PageRequestLifecycle(), llmTests: new PageRequestLifecycle(), multimodalReads: new PageRequestLifecycle(), catalogReads: new PageRequestLifecycle(),
+    llmSaving: false, multimodalSaving: false, switchSaving: false,
+    llmDirty: false, llmEdit: 0, multimodalDirty: false, multimodalEdit: 0,
+  }), [isCurrent]);
+  const renderedLlmEdit = owner.llmEdit;
+  const renderedMultimodalEdit = owner.multimodalEdit;
   const [llmConfigLoading, setLlmConfigLoading] = useState(false);
   const [llmConfigError, setLlmConfigError] = useState<string | null>(null);
   const [llmConfigData, setLlmConfigData] = useState<LlmConfigResponse | null>(null);
@@ -70,6 +83,21 @@ export function useModelConfigRuntime({
   const [modelCatalogData, setModelCatalogData] = useState<ModelCatalogResponse | null>(null);
   const [modelCatalogLoading, setModelCatalogLoading] = useState(false);
   const [modelCatalogError, setModelCatalogError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLlmConfigData(null); setLlmConfigLoading(false); setLlmConfigError(null);
+    setLlmConfigSaving(false); setLlmConfigSaveMessage(null);
+    setLlmDraftVendor(""); setLlmDraftModel(""); setLlmDraftBaseUrl(""); setLlmDraftApiFormat("openai_compat"); setLlmDraftApiKey("");
+    setLlmTestLoading(false); setLlmTestError(null); setLlmTestMessage(null);
+    setMultimodalConfigData(null); setMultimodalDraft({}); setMultimodalConfigLoading(false); setMultimodalConfigError(null);
+    setMultimodalConfigSaving(false); setMultimodalConfigSaveMessage(null); setMultimodalSkillEnabled({});
+    setMultimodalSkillSwitchSaving(null); setMultimodalSkillSwitchMessage(null); setModelsAdvancedOpen(false);
+    setModelCatalogData(null); setModelCatalogLoading(false); setModelCatalogError(null);
+  }, [owner]);
+
+  const editLlm = () => {
+    owner.llmEdit += 1; owner.llmDirty = true; owner.llmTests.invalidate(); setLlmTestLoading(false);
+  };
 
   const selectedLlmVendorInfo = useMemo(
     () => llmConfigData?.vendors.find((vendor) => vendor.name === llmDraftVendor) ?? null,
@@ -125,12 +153,16 @@ export function useModelConfigRuntime({
     setLlmTestError(null);
   }, [llmDraftApiFormat, llmDraftApiKey, llmDraftBaseUrl, llmDraftModel, llmDraftVendor]);
 
-  const fetchLlmConfig = async () => {
+  const loadLlmConfig = async (duringSave = false) => {
+    if (!isCurrent() || (owner.llmSaving && !duringSave)) return;
+    const request = owner.llmReads.begin(false)!;
+    const ownsRead = () => isCurrent() && owner.llmReads.isCurrent(request) && (!owner.llmSaving || duringSave);
     setLlmConfigLoading(true);
     setLlmConfigError(null);
     try {
       const res = await apiFetch(`/v1/llm/config`);
       const body = await readJsonApiResponse<ApiResponse<unknown> | null>(res);
+      if (!ownsRead()) return;
       if (!res.ok || !body?.ok || !body.data) {
         throw new Error(typeof body?.error === "string" ? body.error : `llm_config_fetch_http_${res.status}`);
       }
@@ -143,25 +175,31 @@ export function useModelConfigRuntime({
         runtime: config.runtime,
       });
       setLlmConfigData(config);
-      setLlmDraftVendor(draft.vendor);
-      setLlmDraftModel(draft.model);
-      setLlmDraftBaseUrl(draft.baseUrl);
-      setLlmDraftApiFormat(draft.apiFormat);
-      setLlmDraftApiKey("");
+      if (!owner.llmDirty) {
+        owner.llmTests.invalidate(); setLlmTestLoading(false);
+        setLlmDraftVendor(draft.vendor); setLlmDraftModel(draft.model);
+        setLlmDraftBaseUrl(draft.baseUrl); setLlmDraftApiFormat(draft.apiFormat); setLlmDraftApiKey("");
+      }
     } catch (err) {
+      if (!ownsRead()) return;
       const message = formatUiError(err, t, "大模型设置暂时无法读取。", "LLM settings are temporarily unavailable.");
       setLlmConfigError(message);
     } finally {
-      setLlmConfigLoading(false);
+      if (ownsRead() && owner.llmReads.finish(request)) setLlmConfigLoading(false);
     }
   };
+  const fetchLlmConfig = () => loadLlmConfig();
 
   const saveLlmConfig = async () => {
+    if (!isCurrent() || owner.llmSaving) return;
+    owner.llmSaving = true; owner.llmReads.invalidate(); owner.llmTests.invalidate(); owner.catalogReads.invalidate();
+    setLlmTestLoading(false);
+    setLlmConfigLoading(false); setModelCatalogLoading(false);
     setLlmConfigSaving(true);
     setLlmConfigSaveMessage(null);
     setLlmConfigError(null);
-    onBeforeSaveLlm?.();
     try {
+      onBeforeSaveLlm?.();
       const res = await apiFetch(`/v1/llm/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -176,6 +214,7 @@ export function useModelConfigRuntime({
       const body = (await res.json()) as ApiResponse<{
         restart_required?: boolean;
       }>;
+      if (!isCurrent()) return;
       if (!res.ok || !body.ok) {
         throw new Error(body.error || `llm_config_save_http_${res.status}`);
       }
@@ -185,19 +224,25 @@ export function useModelConfigRuntime({
           "Model settings saved. Any entered API key was saved separately in the local environment file. Restart the service if prompted.",
         ),
       );
-      setLlmDraftApiKey("");
-      await fetchLlmConfig();
-      await fetchModelCatalog();
+      if (owner.llmEdit === renderedLlmEdit) { owner.llmDirty = false; setLlmDraftApiKey(""); }
+      await loadLlmConfig(true);
+      await loadModelCatalog(true);
     } catch (err) {
+      if (!isCurrent()) return;
       const message = formatUiError(err, t, "大模型设置保存失败，请稍后重试。", "LLM settings could not be saved. Try again shortly.");
       setLlmConfigError(message);
     } finally {
-      setLlmConfigSaving(false);
+      owner.llmSaving = false;
+      if (isCurrent()) setLlmConfigSaving(false);
     }
   };
 
   const testLlmConfig = async () => {
+    if (!isCurrent()) return;
+    const request = owner.llmTests.begin(false)!;
+    const ownsRequest = () => isCurrent() && owner.llmTests.isCurrent(request);
     if (!llmDraftVendor || !llmDraftModel || !llmDraftBaseUrl.trim()) {
+      owner.llmTests.finish(request); setLlmTestLoading(false);
       setLlmTestMessage(null);
       setLlmTestError(
         t(
@@ -223,6 +268,7 @@ export function useModelConfigRuntime({
         }),
       });
       const body = (await res.json()) as ApiResponse<LlmTestResponse>;
+      if (!ownsRequest()) return;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `llm_connection_test_http_${res.status}`);
       }
@@ -235,14 +281,19 @@ export function useModelConfigRuntime({
         : responseMessage;
       setLlmTestMessage(message);
     } catch (err) {
+      if (!ownsRequest()) return;
       const message = formatUiError(err, t, "大模型连接测试失败，请检查设置和网络。", "The LLM connection test failed. Check the settings and network.");
       setLlmTestError(message);
     } finally {
-      setLlmTestLoading(false);
+      if (ownsRequest() && owner.llmTests.finish(request)) setLlmTestLoading(false);
     }
   };
 
-  const fetchMultimodalConfig = async () => {
+  const loadMultimodalConfig = async (duringSave = false) => {
+    if (!isCurrent() || ((owner.multimodalSaving || owner.switchSaving) && !duringSave)) return;
+    const request = owner.multimodalReads.begin(false)!;
+    const ownsRead = () => isCurrent() && owner.multimodalReads.isCurrent(request)
+      && (!(owner.multimodalSaving || owner.switchSaving) || duringSave);
     setMultimodalConfigLoading(true);
     setMultimodalConfigError(null);
     try {
@@ -252,40 +303,50 @@ export function useModelConfigRuntime({
       ]);
       const modelBody = (await modelRes.json()) as ApiResponse<ModelConfigResponse>;
       const skillsBody = (await skillsRes.json()) as ApiResponse<SkillsConfigResponse>;
+      if (!ownsRead()) return;
       if (!modelRes.ok || !modelBody.ok || !modelBody.data) {
         throw new Error(modelBody.error || `model_config_fetch_http_${modelRes.status}`);
       }
-      if (!skillsRes.ok || !skillsBody.ok || !skillsBody.data) {
+      if (!skillsRes.ok || !skillsBody.ok || !skillsBody.data || !hasSkillSwitchBaseline(skillsBody.data)) {
         throw new Error(skillsBody.error || `skill_config_fetch_http_${skillsRes.status}`);
       }
       setMultimodalConfigData(modelBody.data);
-      setMultimodalDraft(buildMultimodalDraft(modelBody.data));
+      if (!owner.multimodalDirty) setMultimodalDraft(buildMultimodalDraft(modelBody.data));
       setMultimodalSkillEnabled(buildMultimodalSkillEnabledState(skillsBody.data));
     } catch (err) {
-      setMultimodalConfigError(formatUiError(err, t, "多模态设置暂时无法读取。", "Multimodal settings are temporarily unavailable."));
+      if (ownsRead()) setMultimodalConfigError(formatUiError(err, t, "多模态设置暂时无法读取。", "Multimodal settings are temporarily unavailable."));
     } finally {
-      setMultimodalConfigLoading(false);
+      if (ownsRead() && owner.multimodalReads.finish(request)) setMultimodalConfigLoading(false);
     }
   };
+  const fetchMultimodalConfig = () => loadMultimodalConfig();
 
-  const fetchModelCatalog = async () => {
+  const loadModelCatalog = async (duringSave = false) => {
+    if (!isCurrent() || ((owner.llmSaving || owner.multimodalSaving) && !duringSave)) return;
+    const request = owner.catalogReads.begin(false)!;
+    const ownsRead = () => isCurrent() && owner.catalogReads.isCurrent(request);
     setModelCatalogLoading(true);
     setModelCatalogError(null);
     try {
       const res = await apiFetch("/v1/models/catalog");
       const body = (await res.json()) as ApiResponse<ModelCatalogResponse>;
+      if (!ownsRead()) return;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `model_catalog_fetch_http_${res.status}`);
       }
       setModelCatalogData(body.data);
     } catch (err) {
-      setModelCatalogError(formatUiError(err, t, "模型列表暂时无法读取。", "The model catalog is temporarily unavailable."));
+      if (ownsRead()) setModelCatalogError(formatUiError(err, t, "模型列表暂时无法读取。", "The model catalog is temporarily unavailable."));
     } finally {
-      setModelCatalogLoading(false);
+      if (ownsRead() && owner.catalogReads.finish(request)) setModelCatalogLoading(false);
     }
   };
+  const fetchModelCatalog = () => loadModelCatalog();
 
   const saveMultimodalConfig = async () => {
+    if (!isCurrent() || owner.multimodalSaving) return;
+    owner.multimodalSaving = true; owner.multimodalReads.invalidate(); owner.catalogReads.invalidate();
+    setMultimodalConfigLoading(false); setModelCatalogLoading(false);
     setMultimodalConfigSaving(true);
     setMultimodalConfigSaveMessage(null);
     setMultimodalConfigError(null);
@@ -297,20 +358,25 @@ export function useModelConfigRuntime({
         body: JSON.stringify(payload),
       });
       const body = (await res.json()) as ApiResponse<{ restart_required?: boolean }>;
+      if (!isCurrent()) return;
       if (!res.ok || !body.ok) {
         throw new Error(body.error || `model_config_save_http_${res.status}`);
       }
       setMultimodalConfigSaveMessage(t("多模态模块配置已保存，需重启 clawd 生效。", "Multimodal config saved. Restart clawd to apply."));
-      await fetchMultimodalConfig();
-      await fetchModelCatalog();
+      if (owner.multimodalEdit === renderedMultimodalEdit) owner.multimodalDirty = false;
+      await loadMultimodalConfig(true);
+      await loadModelCatalog(true);
     } catch (err) {
-      setMultimodalConfigError(formatUiError(err, t, "多模态设置保存失败，请稍后重试。", "Multimodal settings could not be saved. Try again shortly."));
+      if (isCurrent()) setMultimodalConfigError(formatUiError(err, t, "多模态设置保存失败，请稍后重试。", "Multimodal settings could not be saved. Try again shortly."));
     } finally {
-      setMultimodalConfigSaving(false);
+      owner.multimodalSaving = false;
+      if (isCurrent()) setMultimodalConfigSaving(false);
     }
   };
 
   const setMultimodalSkillEnabledNow = async (key: MultimodalKey, enabled: boolean) => {
+    if (!isCurrent() || owner.switchSaving) return;
+    owner.switchSaving = true; owner.multimodalReads.invalidate(); setMultimodalConfigLoading(false);
     const skillName = MULTIMODAL_SKILL_BY_KEY[key];
     setMultimodalSkillSwitchSaving(key);
     setMultimodalSkillSwitchMessage(null);
@@ -318,43 +384,47 @@ export function useModelConfigRuntime({
     try {
       const currentRes = await apiFetch("/v1/skills/config");
       const currentBody = (await currentRes.json()) as ApiResponse<SkillsConfigResponse>;
-      if (!currentRes.ok || !currentBody.ok || !currentBody.data) {
+      if (!isCurrent()) return;
+      if (!currentRes.ok || !currentBody.ok || !currentBody.data || !hasSkillSwitchBaseline(currentBody.data)) {
         throw new Error(currentBody.error || `skill_config_fetch_http_${currentRes.status}`);
       }
-      const skillSwitches = {
-        ...(currentBody.data.skill_switches ?? {}),
-        [skillName]: enabled,
-      };
+      const skillSwitches = { [skillName]: enabled };
       const saveRes = await apiFetch("/v1/skills/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ skill_switches: skillSwitches }),
+        body: JSON.stringify({ skill_switches: skillSwitches, expected_revision: currentBody.data.revision }),
       });
-      const saveBody = (await saveRes.json()) as ApiResponse<{
-        effective_enabled_skills_preview?: string[];
-        restart_required?: boolean;
-      }>;
+      const saveBody = (await saveRes.json()) as ApiResponse<unknown>;
+      if (!isCurrent()) return;
       if (!saveRes.ok || !saveBody.ok) {
         throw new Error(saveBody.error || `skill_config_save_http_${saveRes.status}`);
       }
+      const ack = readSkillSwitchAcknowledgement(saveBody.data, skillSwitches);
       setMultimodalSkillEnabled((previous) => ({ ...previous, [key]: enabled }));
       setMultimodalSkillSwitchMessage(
-        enabled
+        ack.restart_required
+          ? t("开关修改已保存，重启服务后生效。", "The switch change was saved and will apply after a service restart.")
+          : enabled
           ? t("这个多模态技能已开启，现在可以接收新调用。", "This multimodal skill is enabled and can receive new calls.")
           : t("这个多模态技能已关闭，已有模型设置会保留。", "This multimodal skill is disabled; its model settings are preserved."),
       );
     } catch (err) {
-      setMultimodalConfigError(formatUiError(err, t, "多模态技能状态修改失败，请稍后重试。", "The multimodal skill state could not be changed. Try again shortly."));
+      if (isCurrent()) setMultimodalConfigError(skillSwitchErrorMessage(err, t));
     } finally {
-      setMultimodalSkillSwitchSaving(null);
+      owner.switchSaving = false;
+      if (isCurrent()) setMultimodalSkillSwitchSaving(null);
     }
   };
 
   const setMultimodalDraftKey = (key: MultimodalKey, field: keyof ModelConfigItem, value: string) => {
+    if (!isCurrent()) return;
+    owner.multimodalEdit += 1; owner.multimodalDirty = true;
     setMultimodalDraft((prev) => updateMultimodalDraftField(prev, key, field, value));
   };
 
   const applyLlmVendorDraft = (nextVendor: string) => {
+    if (!isCurrent()) return;
+    editLlm();
     const vendorInfo = llmConfigData?.vendors.find((vendor) => vendor.name === nextVendor);
     setLlmDraftVendor(nextVendor);
     setLlmDraftApiKey("");
@@ -371,8 +441,10 @@ export function useModelConfigRuntime({
   };
 
   const applyHostedRelayDraft = () => {
+    if (!isCurrent()) return;
     const preset = llmConfigData?.hosted_relay;
     if (!preset) return;
+    editLlm();
     const draft = hostedRelayDraft(preset);
     setLlmDraftVendor(draft.vendor);
     setLlmDraftModel(draft.model);
@@ -381,7 +453,7 @@ export function useModelConfigRuntime({
     setLlmDraftApiKey("");
   };
 
-  const clearLlmConfigError = () => setLlmConfigError(null);
+  const clearLlmConfigError = () => { if (isCurrent()) setLlmConfigError(null); };
 
   return {
     llmConfigLoading,
@@ -416,11 +488,11 @@ export function useModelConfigRuntime({
     llmConfigured,
     llmStepStatus,
     hasUnsavedMultimodalChanges,
-    setLlmDraftModel,
-    setLlmDraftBaseUrl,
-    setLlmDraftApiFormat,
-    setLlmDraftApiKey,
-    setModelsAdvancedOpen,
+    setLlmDraftModel: (value: string) => { if (isCurrent()) { editLlm(); setLlmDraftModel(value); } },
+    setLlmDraftBaseUrl: (value: string) => { if (isCurrent()) { editLlm(); setLlmDraftBaseUrl(value); } },
+    setLlmDraftApiFormat: (value: string) => { if (isCurrent()) { editLlm(); setLlmDraftApiFormat(value); } },
+    setLlmDraftApiKey: (value: string) => { if (isCurrent()) { editLlm(); setLlmDraftApiKey(value); } },
+    setModelsAdvancedOpen: (value: SetStateAction<boolean>) => { if (isCurrent()) setModelsAdvancedOpen(value); },
     fetchLlmConfig,
     saveLlmConfig,
     testLlmConfig,

@@ -1292,6 +1292,8 @@ async fn import_external_skill_upload(
 struct UpdateSkillsConfigRequest {
     #[serde(default)]
     skill_switches: HashMap<String, bool>,
+    #[serde(default)]
+    expected_revision: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

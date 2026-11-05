@@ -13,6 +13,7 @@ const t = (_zh: string, en: string) => en;
 
 function configuration(switches: Record<string, boolean> = {}): SkillsConfigResponse {
   return {
+    revision: "a".repeat(64),
     config_path: "configs/config.toml",
     skills_list: [ALPHA, BETA, LOCKED],
     skill_switches: { [ALPHA]: true, [BETA]: true, [LOCKED]: true, ...switches },
@@ -49,7 +50,7 @@ async function harness(initial = configuration(), load = true) {
     if (path === "/v1/skills") return new Response(JSON.stringify({ ok: true, data: { skills: [], skill_items: [] } }));
     throw new Error(`unexpected fixture request: ${path}`);
   };
-  function Probe() { current = useSkillsRuntime({ apiFetch, t }); return null; }
+  function Probe() { current = useSkillsRuntime({ apiFetch, t, requestScope: "fixture" }); return null; }
   let renderer!: ReactTestRenderer;
   await act(async () => { renderer = create(React.createElement(UiDialogProvider, null, React.createElement(Probe))); });
   if (load) await act(async () => { await current.fetchSkillsConfig(); });

@@ -1,7 +1,11 @@
 use super::*;
 
 impl Fixture {
-    async fn config_request(&self, method: Method, payload: Value) -> (StatusCode, Value) {
+    pub(super) async fn config_request(
+        &self,
+        method: Method,
+        payload: Value,
+    ) -> (StatusCode, Value) {
         let response = axum::Router::new()
             .nest("/v1", build_ui_router())
             .with_state(self.state.clone())
@@ -21,7 +25,7 @@ impl Fixture {
         (status, serde_json::from_slice(&bytes).unwrap())
     }
 
-    async fn observed_revision(&self) -> Value {
+    pub(super) async fn observed_revision(&self) -> Value {
         let response = self.config_request(Method::GET, Value::Null).await;
         assert_eq!(response.0, StatusCode::OK, "{}", response.1);
         response.1["data"]["revision"].clone()
@@ -38,6 +42,41 @@ async fn switch_revision_read_is_an_opaque_stable_token() {
     assert_eq!(token.len(), 64);
     assert!(token.bytes().all(|byte| byte.is_ascii_hexdigit()));
     assert_eq!(fixture.observed_revision().await, revision);
+}
+
+#[tokio::test]
+async fn switch_revision_noop_preserves_the_runtime_view_and_admission_pointer() {
+    let fixture = Fixture::new().await;
+    let revision = fixture.observed_revision().await;
+    let view = fixture
+        .state
+        .core
+        .skill_views_snapshot
+        .read()
+        .unwrap()
+        .clone();
+    let pointer = std::fs::read(fixture.service_root().join("current-generation.json")).unwrap();
+    let config = fixture.config();
+    let response = fixture
+        .config_request(
+            Method::POST,
+            serde_json::json!({
+                "skill_switches": {}, "expected_revision":revision,
+            }),
+        )
+        .await;
+    assert_eq!(response.0, StatusCode::OK, "{}", response.1);
+    assert_eq!(response.1["data"]["revision"], revision);
+    assert_eq!(response.1["data"]["restart_required"], false);
+    assert!(Arc::ptr_eq(
+        &view,
+        &fixture.state.core.skill_views_snapshot.read().unwrap()
+    ));
+    assert_eq!(
+        std::fs::read(fixture.service_root().join("current-generation.json")).unwrap(),
+        pointer
+    );
+    assert_eq!(fixture.config(), config);
 }
 
 #[tokio::test]

@@ -17,7 +17,7 @@ import {
   restoreNniNavigationVisible,
 } from "./lib/dashboard-home";
 import { formatDuration, toLocalTime } from "./lib/display-format";
-import { runCoalescedResponseRead } from "./lib/resilient-read";
+import { runCoalescedResponseRead, runInvalidatingWrite } from "./lib/resilient-read";
 import { runtimeApiFetch } from "./lib/runtime-api-transport";
 import { withSessionArtifactStreaming } from "./lib/artifact-session-stream";
 import { formatUiError } from "./lib/ui-error";
@@ -186,7 +186,6 @@ export default function App() {
   const authFlowEpochRef = useRef(0);
   const webdRestoreAttemptRef = useRef<string | null>(null);
   const logoutPendingRef = useRef(false);
-  const sharedApiReadsRef = useRef(new Map<string, Promise<Response>>());
   const [pollingSeconds, setPollingSeconds] = useState(() => {
     return readNumber(STORAGE_KEYS.polling, 5);
   });
@@ -270,6 +269,7 @@ export default function App() {
   const activeUiRequestScope = activeConversationHistoryScope ? JSON.stringify([activeConversationHistoryScope, authFlowEpochRef.current, authIdentity?.role]) : "";
   const isCurrentChannelSetup = useRequestOwner(activeUiRequestScope);
   const isCurrentApiRequest = useRequestOwner(apiBase, JSON.stringify([authMode, uiKey, authFlowEpochRef.current]));
+  const sharedApiReads = useMemo(() => new Map<string, Promise<Response>>(), [isCurrentApiRequest, activeUiRequestScope]);
   const safeFetch = async (path: string, init?: RequestInit, withAuth = true) => {
     const requestAuthEpoch = authFlowEpochRef.current;
     const targetUrl = `${apiBase.replace(/\/$/, "")}${path}`;
@@ -319,12 +319,13 @@ export default function App() {
 
   const apiFetch = withSessionArtifactStreaming((path: string, init?: RequestInit) => {
     const method = (init?.method || "GET").toUpperCase();
-    if (path !== "/v1/skills/config" || method !== "GET") {
+    if (path !== "/v1/skills/config" || (method !== "GET" && method !== "POST")) {
       return safeFetch(path, init, true);
     }
 
     const key = `${authFlowEpochRef.current}:${authMode || "none"}:${apiBase}:${path}`;
-    return runCoalescedResponseRead(sharedApiReadsRef.current, key, () =>
+    if (method === "POST") return runInvalidatingWrite(sharedApiReads, key, () => safeFetch(path, init, true));
+    return runCoalescedResponseRead(sharedApiReads, key, () =>
       safeFetch(path, init, true),
     );
   }, { authMode: uiAuthReady ? authMode : null, apiBase, pageUrl: window.location.href, isCurrent: isCurrentApiRequest });
@@ -637,6 +638,7 @@ export default function App() {
   } = useModelConfigRuntime({
     apiFetch,
     t,
+    requestScope: activeUiRequestScope,
     onBeforeSaveLlm: () => {},
   });
   const {
@@ -720,7 +722,7 @@ export default function App() {
     cancelSkillStoreOperation,
     toggleSkillEnabled,
     clearSkillsConfigError,
-  } = useSkillsRuntime({ apiFetch, t });
+  } = useSkillsRuntime({ apiFetch, t, requestScope: activeUiRequestScope });
   const {
     wechatConfigLoading,
     wechatConfigSaving,

@@ -454,16 +454,14 @@ async fn set_managed_skill_enabled(router: axum::Router, skill_name: &str, enabl
     let (status, current) =
         call_skill_store_api(router.clone(), Method::GET, "/v1/skills/config", None).await;
     assert_eq!(status, StatusCode::OK, "read config for {skill_name}");
-    let mut switches = current["data"]["skill_switches"]
-        .as_object()
-        .expect("skill switches object")
-        .clone();
-    switches.insert(skill_name.to_string(), Value::Bool(enabled));
+    let switches = serde_json::json!({(skill_name):enabled});
     let (status, updated) = call_skill_store_api(
         router,
         Method::POST,
         "/v1/skills/config",
-        Some(serde_json::json!({"skill_switches": switches})),
+        Some(serde_json::json!({
+            "skill_switches": switches, "expected_revision":current["data"]["revision"],
+        })),
     )
     .await;
     assert_eq!(
@@ -695,16 +693,14 @@ async fn imported_external_skill_can_be_disabled_removed_and_reinstalled() {
         skill_name
     ));
 
-    let mut switches = initial_config["data"]["skill_switches"]
-        .as_object()
-        .expect("skill switches object")
-        .clone();
-    switches.insert(skill_name.to_string(), Value::Bool(false));
+    let switches = serde_json::json!({(skill_name):false});
     let (status, disabled) = call_skill_store_api(
         router.clone(),
         Method::POST,
         "/v1/skills/config",
-        Some(serde_json::json!({"skill_switches": switches})),
+        Some(serde_json::json!({
+            "skill_switches": switches, "expected_revision":initial_config["data"]["revision"],
+        })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);

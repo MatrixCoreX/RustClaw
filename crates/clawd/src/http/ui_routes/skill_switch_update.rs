@@ -22,3 +22,15 @@ async fn update_skills_config(
         }
     }
 }
+
+/// Bind only public switch semantics, never unrelated private configuration.
+/// A client observation is not an execution grant: real mutations still pass
+/// the admission lock, receipt/artifact validation and generation CAS.
+fn skill_switch_revision(public: &SkillSwitchRevisionState) -> String {
+    let public = json!(public);
+    let encoded = format!("agent-skill-switch-revision-v1\0{public}");
+    format!(
+        "{:x}",
+        <sha2::Sha256 as sha2::Digest>::digest(encoded.as_bytes())
+    )
+}
