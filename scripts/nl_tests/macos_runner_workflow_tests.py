@@ -28,8 +28,8 @@ def valid_job(job, runner, target):
     )
 
 
-def required_reload_gate(job):
-    command = "cargo test --locked -p clawd --bin clawd skill_reload_tests -- --test-threads=1 --nocapture"
+def required_reload_gate(job, selector="skill_reload_tests"):
+    command = f"cargo test --locked -p clawd --bin clawd {selector} -- --test-threads=1 --nocapture"
     selected = [step for step in job["steps"] if command in step.get("run", "")]
     return len(selected) == 1 and (
         "if" not in selected[0] and not selected[0].get("continue-on-error", False)
@@ -39,6 +39,29 @@ def required_reload_gate(job):
 
 
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_shared_configuration_and_retained_credentials_gate_both_native_systems(self):
+        jobs = load("macos-polyglot-skill-ci.yml")["jobs"]
+        for name in ["runtime-read-linux", "polyglot-skill-macos"]:
+            for selector in ["configuration_write_tests", "runtime_config_write_", "llm_credentials_"]:
+                self.assertTrue(required_reload_gate(jobs[name], selector), (name, selector))
+        build = next(step for step in jobs["runtime-read-linux"]["steps"]
+                     if step.get("name") == "Build the exact verified Linux core without publishing a release")
+        self.assertIn("configuration_publication", build["run"])
+
+    def test_configuration_write_gate_cannot_skip_or_discard_a_failure(self):
+        jobs = load("macos-polyglot-skill-ci.yml")["jobs"]
+        for name in ["runtime-read-linux", "polyglot-skill-macos"]:
+            for selector in ["configuration_write_tests", "runtime_config_write_", "llm_credentials_"]:
+                for mutation in ["remove", "ignore", "continue", "conditional"]:
+                    with self.subTest(job=name, selector=selector, mutation=mutation):
+                        job = deepcopy(jobs[name])
+                        step = next(step for step in job["steps"] if f"--bin clawd {selector} --" in step.get("run", ""))
+                        if mutation == "remove": step["run"] = step["run"].replace(f"--bin clawd {selector} --", "--bin clawd absent_fixture --")
+                        elif mutation == "ignore": step["run"] = step["run"].replace(f"{selector} -- --test-threads=1", f"{selector} -- --ignored --test-threads=1")
+                        elif mutation == "continue": step["continue-on-error"] = True
+                        else: step["if"] = "${{ always() }}"
+                        self.assertFalse(required_reload_gate(job, selector))
+
     def test_runtime_reload_cases_gate_both_native_systems_and_the_signed_core(self):
         jobs = load("macos-polyglot-skill-ci.yml")["jobs"]
         for name in ["runtime-read-linux", "polyglot-skill-macos"]:
