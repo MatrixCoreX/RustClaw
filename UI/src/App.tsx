@@ -1133,6 +1133,7 @@ export default function App() {
     } catch (err) {
       if (authEpoch !== authFlowEpochRef.current) return;
       setUiAuthReady(false);
+      setWebdCsrfToken("");
       setAuthIdentity(null);
       setInteractionUserId(null);
       setInteractionChatId(null);
