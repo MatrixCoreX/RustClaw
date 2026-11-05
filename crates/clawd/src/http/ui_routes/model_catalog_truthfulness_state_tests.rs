@@ -257,10 +257,39 @@ async fn catalog_truthfulness_genuine_loopback_remains_available_without_a_key()
         "http://localhost:12345/v1",
         "http://127.0.0.1:12345/v1",
         "http://[::1]:12345/v1",
+        "https://localhost:12345/v1",
+        "http://127.1:12345/v1",
     ] {
         let root = temp_workspace_root();
         write_text(&root, "", base);
         assert_eq!(text_state(&root), "not_required_local");
+    }
+}
+
+#[tokio::test]
+async fn catalog_truthfulness_vendor_hints_use_the_real_url_authority() {
+    if in_child(
+        "catalog_truthfulness_vendor_hints_use_the_real_url_authority",
+        &[],
+    ) {
+        return;
+    }
+    for base in [
+        "https://api.openai.com.fixture.invalid/v1",
+        "https://fixture.invalid/v1?url=https://api.minimaxi.com",
+        "https://api.minimaxi.com@fixture.invalid/v1",
+        "file://api.openai.com/v1",
+    ] {
+        let root = temp_workspace_root();
+        write_text(&root, "", base);
+        let catalog = build_model_catalog_from_workspace(&root).unwrap();
+        let entry = catalog
+            .entries
+            .iter()
+            .find(|entry| entry.provider == "minimax")
+            .unwrap();
+        assert_eq!(entry.base_url_kind, "custom_or_unknown", "{base}");
+        assert_eq!(entry.credential_state, "missing", "{base}");
     }
 }
 

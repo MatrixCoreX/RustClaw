@@ -357,14 +357,14 @@ mod task_debug_trace_tests {
         path
     }
 
-    fn write_minimax_debug_catalog(root: &PathBuf, selected_model: &str) {
+    fn write_minimax_debug_catalog(root: &PathBuf, selected_vendor: &str, selected_model: &str) {
         std::fs::create_dir_all(root.join("configs")).expect("configs dir");
         std::fs::write(
             root.join("configs/config.toml"),
             format!(
                 r#"
 [llm]
-selected_vendor = "minimax"
+selected_vendor = "{selected_vendor}"
 selected_model = "{selected_model}"
 
 [llm.minimax]
@@ -388,12 +388,14 @@ minimax_models = ["MiniMax-M3"]
 "#,
         )
         .expect("write image config");
+        claw_core::secrets::model_environment::save(root, "minimax", "catalog-secret")
+            .expect("write effective text credential");
     }
 
     #[test]
     fn task_debug_model_catalog_trace_projects_secret_free_capabilities() {
         let root = temp_debug_workspace_root();
-        write_minimax_debug_catalog(&root, "MiniMax-M3");
+        write_minimax_debug_catalog(&root, "minimax", "MiniMax-M3");
         let mut state = crate::AppState::test_default_with_fixture_provider();
         state.skill_rt.workspace_root = root;
         let entries = vec![TaskDebugEntry {
@@ -444,14 +446,14 @@ minimax_models = ["MiniMax-M3"]
         assert_eq!(trace["entries"][0]["supports_image_understanding"], true);
         assert_eq!(trace["entries"][0]["supports_audio_transcription"], false);
         assert_eq!(trace["entries"][0]["active_text_provider"], true);
-        assert_eq!(trace["entries"][0]["credential_state"], "configured_inline");
+        assert_eq!(trace["entries"][0]["credential_state"], "configured_env");
         assert_eq!(trace["readiness"]["schema_version"], 2);
         assert_eq!(trace["readiness"]["selected_provider"], "minimax");
         assert_eq!(trace["readiness"]["selected_model"], "MiniMax-M3");
         assert_eq!(trace["readiness"]["selected_entry_status"], "found");
         assert_eq!(trace["readiness"]["entry_count"], 1);
         assert_eq!(trace["readiness"]["matched_entry_count"], 1);
-        assert_eq!(trace["readiness"]["credential_state"], "configured_inline");
+        assert_eq!(trace["readiness"]["credential_state"], "configured_env");
         assert_eq!(trace["readiness"]["ready"], true);
         assert_eq!(trace["readiness"]["text_generation"], true);
         assert_eq!(trace["readiness"]["image_input"], true);
@@ -466,7 +468,7 @@ minimax_models = ["MiniMax-M3"]
     #[test]
     fn task_debug_model_catalog_trace_marks_missing_selected_model_not_ready() {
         let root = temp_debug_workspace_root();
-        write_minimax_debug_catalog(&root, "missing-model");
+        write_minimax_debug_catalog(&root, "fixture-missing-provider", "missing-model");
         let mut state = crate::AppState::test_default_with_fixture_provider();
         state.skill_rt.workspace_root = root;
         let entries = vec![TaskDebugEntry {

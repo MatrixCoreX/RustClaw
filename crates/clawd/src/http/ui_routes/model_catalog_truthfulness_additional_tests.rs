@@ -1,5 +1,44 @@
 use super::*;
 
+#[cfg(unix)]
+#[tokio::test]
+async fn model_catalog_truthfulness_special_files_and_final_symlinks_are_rejected() {
+    let fixture = Fixture::new();
+    let path = fixture.root.join("configs/config.toml");
+    fs::remove_file(&path).unwrap();
+    assert!(std::process::Command::new("mkfifo")
+        .arg(&path)
+        .status()
+        .unwrap()
+        .success());
+    let response = tokio::time::timeout(Duration::from_secs(3), fixture.catalog(ADMIN))
+        .await
+        .unwrap();
+    assert_error(
+        &response,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "model_catalog_unavailable",
+    );
+    assert_eq!(
+        response.1["data"]["failure_code"],
+        "model_catalog_read_failed"
+    );
+    fixture.assert_private(&response.1);
+    fs::remove_file(&path).unwrap();
+    fixture.write(
+        "configs/source.toml",
+        &selected_main("fixture-symlink-model"),
+    );
+    std::os::unix::fs::symlink(fixture.root.join("configs/source.toml"), &path).unwrap();
+    let response = fixture.catalog(ADMIN).await;
+    assert_error(
+        &response,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "model_catalog_unavailable",
+    );
+    fixture.assert_private(&response.1);
+}
+
 #[tokio::test]
 async fn model_catalog_truthfulness_task_model_selection_uses_the_same_selected_path() {
     let mut fixture = Fixture::new();

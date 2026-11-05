@@ -98,43 +98,33 @@ async fn model_catalog_missing_credentials_do_not_wait_for_a_database_connection
     }
 }
 
-// A FIFO makes the filesystem wait deterministic on both native Unix targets.
-// The writer has a bounded connect loop so an early route failure cannot leave
-// a fixture thread hanging forever. These deadlines are test-only.
+// The secure snapshot rejects FIFO/special files. Coordinate on the real
+// configuration-file lock instead: both inline negative controls and async
+// reads must reach the exact blocking snapshot boundary. These are test-only
+// deadlines, not runtime task limits. Special-file rejection is tested separately.
 #[cfg(unix)]
 async fn observe_config_read_wait(debug: bool, inline_control: bool) {
-    use std::{io::Write, os::unix::fs::OpenOptionsExt};
     let fixture = Fixture::new();
     let path = fixture.root.join("configs/config.toml");
-    let contents = fs::read_to_string(&path).unwrap();
-    fs::remove_file(&path).unwrap();
-    assert!(std::process::Command::new("mkfifo")
-        .arg(&path)
-        .status()
-        .unwrap()
-        .success());
     let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     let writer = std::thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let mut file = loop {
-            match fs::OpenOptions::new()
-                .write(true)
-                .custom_flags(libc::O_NONBLOCK)
-                .open(&path)
-            {
-                Ok(file) => break file,
-                Err(error)
-                    if error.raw_os_error() == Some(libc::ENXIO) && Instant::now() < deadline =>
-                {
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                Err(error) => panic!("fixture FIFO writer failed: {error}"),
+        crate::configuration_files::with_locked_files(std::slice::from_ref(&path), || {
+            ready_tx.send(()).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !crate::configuration_files::has_contender(&path) {
+                assert!(
+                    Instant::now() < deadline,
+                    "snapshot did not reach the file lock"
+                );
+                std::thread::yield_now();
             }
-        };
-        let _ = started_tx.send(Instant::now());
-        std::thread::sleep(Duration::from_millis(500));
-        file.write_all(contents.as_bytes()).unwrap();
+            let _ = started_tx.send(Instant::now());
+            std::thread::sleep(Duration::from_millis(500));
+        })
+        .unwrap();
     });
+    ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
     let (response, timer_delay) = tokio::join!(
         async {
             if inline_control {

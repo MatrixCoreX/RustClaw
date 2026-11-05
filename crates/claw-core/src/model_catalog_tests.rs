@@ -233,6 +233,9 @@ minimax_models = ["MiniMax-Hailuo-2.3"]
 default_vendor = "minimax"
 default_model = "music-2.6"
 minimax_models = ["music-2.6"]
+
+[music_generation.providers.minimax]
+api_key = "secret-music-minimax"
 "#,
     )
     .expect("write music");
@@ -482,6 +485,7 @@ fn catalog_output_does_not_serialize_secret_values() {
 
     assert!(!serialized.contains("secret-minimax"));
     assert!(!serialized.contains("secret-qwen"));
+    assert!(!serialized.contains("secret-music-minimax"));
     assert!(serialized.contains("configured_inline"));
     assert!(serialized.contains("qwen_dashscope_openai_compat"));
 }
