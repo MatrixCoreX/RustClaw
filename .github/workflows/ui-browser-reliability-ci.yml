@@ -2,6 +2,12 @@ name: UI and signed browser reliability
 
 "on":
   workflow_call:
+    inputs:
+      full_runtime_validation:
+        description: "Internal full-workflow mode; every runtime and UI check must pass before any deployment."
+        type: boolean
+        required: false
+        default: false
   workflow_dispatch:
   pull_request:
     paths:
@@ -42,7 +48,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Require unchanged runtime sources for manual UI-only verification
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.full_runtime_validation }}
         shell: bash
         run: |
           set -euo pipefail

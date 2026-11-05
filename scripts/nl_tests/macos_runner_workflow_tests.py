@@ -66,9 +66,35 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
         self.assertEqual(focused["uses"], "./.github/workflows/ui-browser-reliability-ci.yml")
         lightweight = load("ui-browser-reliability-ci.yml")["jobs"]["ui-and-browser"]["steps"]
         guard = next(step for step in lightweight if step.get("name") == "Require unchanged runtime sources for manual UI-only verification")
-        self.assertEqual(guard["if"], "${{ github.event_name == 'workflow_dispatch' }}")
+        self.assertEqual(guard["if"], "${{ github.event_name == 'workflow_dispatch' && !inputs.full_runtime_validation }}")
         self.assertIn("git diff --quiet origin/main HEAD -- Cargo.toml Cargo.lock .cargo crates optional_skills external_skills configs docker prompts pi_app services", guard["run"])
         self.assertIn("exit 1", guard["run"])
+
+    def test_full_mode_runs_both_ui_platforms_alongside_every_runtime_gate(self):
+        workflow = load("macos-polyglot-skill-ci.yml")
+        jobs = workflow["jobs"]
+        full = jobs["full-ui-browser-reliability"]
+        self.assertEqual(full["uses"], "./.github/workflows/ui-browser-reliability-ci.yml")
+        self.assertEqual(full["with"], {"full_runtime_validation": True})
+        for job_id in ["skill-sdk-linux", "runtime-read-linux", "media-session-portability", "polyglot-skill-macos"]:
+            self.assertEqual(full["if"], jobs[job_id]["if"])
+        self.assertNotIn("continue-on-error", full)
+        native = load("ui-browser-reliability-ci.yml")["jobs"]["ui-and-browser"]
+        self.assertEqual(native["strategy"]["matrix"]["os"], ["ubuntu-22.04", "macos-15"])
+        self.assertFalse(native["strategy"]["fail-fast"])
+
+    def test_lightweight_entry_points_cannot_select_the_internal_full_runtime_mode(self):
+        lightweight = load("ui-browser-reliability-ci.yml")
+        self.assertIsNone(lightweight["on"]["workflow_dispatch"])
+        option = lightweight["on"]["workflow_call"]["inputs"]["full_runtime_validation"]
+        self.assertEqual(option["type"], "boolean")
+        self.assertIs(option["default"], False)
+        self.assertIs(option["required"], False)
+        jobs = load("macos-polyglot-skill-ci.yml")["jobs"]
+        self.assertNotIn("with", jobs["ui-browser-reliability"])
+        self.assertEqual([name for name, job in jobs.items()
+                          if job.get("with", {}).get("full_runtime_validation") is True],
+                         ["full-ui-browser-reliability"])
 
     def test_browser_preparation_is_followed_by_the_runtime_signature_selector(self):
         steps = load("macos-arm64-release-artifact.yml")["jobs"]["build-macos"]["steps"]

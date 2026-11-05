@@ -299,6 +299,14 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.verification_scope == 'ui' }}
     uses: ./.github/workflows/ui-browser-reliability-ci.yml
 
+  # Mixed changes need UI feedback in parallel with all existing native gates.
+  # A green UI job alone never authorizes a mixed runtime/UI deployment.
+  full-ui-browser-reliability:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.verification_scope != 'ui' }}
+    uses: ./.github/workflows/ui-browser-reliability-ci.yml
+    with:
+      full_runtime_validation: true
+
   polyglot-skill-macos:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.verification_scope != 'ui' }}
     name: Resolver, installer, and process supervision
