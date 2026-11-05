@@ -39,8 +39,9 @@ pub(crate) fn validate_and_stamp_task_model_selection(
     let provider = bounded_token(requested.get("provider"), "task_model_provider_invalid")?;
     let model = bounded_token(requested.get("model"), "task_model_id_invalid")?;
     validate_catalog_selection(state, provider, model)?;
-    let config = AppConfig::load(&state.reload_ctx.config_path_for_reload)
-        .map_err(|_| "task_model_runtime_config_unavailable")?;
+    let config =
+        AppConfig::load(&crate::runtime::active_runtime_config_path(state).to_string_lossy())
+            .map_err(|_| "task_model_runtime_config_unavailable")?;
     let providers =
         crate::llm_gateway::build_providers_for_selection(&config, Some(provider), Some(model));
     if providers.is_empty()
@@ -76,10 +77,12 @@ pub(crate) fn providers_for_task_model_selection(
     if let Some(cached) = cached_task_selection(state, &task.task_id, provider, model) {
         return Some(cached);
     }
-    let config = match AppConfig::load(&state.reload_ctx.config_path_for_reload) {
-        Ok(config) => config,
-        Err(_) => return Some(Vec::new()),
-    };
+    let config =
+        match AppConfig::load(&crate::runtime::active_runtime_config_path(state).to_string_lossy())
+        {
+            Ok(config) => config,
+            Err(_) => return Some(Vec::new()),
+        };
     let providers =
         crate::llm_gateway::build_providers_for_selection(&config, Some(provider), Some(model));
     let providers = providers
@@ -166,10 +169,8 @@ fn validate_catalog_selection(
     provider: &str,
     model: &str,
 ) -> Result<(), &'static str> {
-    let catalog = claw_core::model_catalog::build_model_catalog_from_workspace(
-        &state.skill_rt.workspace_root,
-    )
-    .map_err(|_| "task_model_catalog_unavailable")?;
+    let catalog = crate::configuration_files::read_model_catalog(state)
+        .map_err(|_| "task_model_catalog_unavailable")?;
     let entry = catalog
         .entries
         .iter()
@@ -181,7 +182,7 @@ fn validate_catalog_selection(
     if !entry.supports_text {
         return Err("task_model_text_unsupported");
     }
-    if entry.credential_state == "missing" || entry.credential_state.trim().is_empty() {
+    if !claw_core::model_catalog::credential_state_is_ready(&entry.credential_state) {
         return Err("task_model_credential_missing");
     }
     Ok(())

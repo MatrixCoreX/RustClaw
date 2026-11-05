@@ -6,9 +6,11 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 mod locks;
+mod model_catalog;
 #[cfg(test)]
 pub(crate) use locks::has_contender;
 pub(crate) use locks::with_locked_files;
+pub(crate) use model_catalog::read_model_catalog;
 
 #[derive(Clone)]
 pub(crate) struct Target {

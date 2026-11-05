@@ -25,9 +25,7 @@ fn read_task_result_json_for_debug(
 }
 
 fn build_model_catalog_trace_for_debug(state: &AppState, entries: &[TaskDebugEntry]) -> Value {
-    let catalog = match claw_core::model_catalog::build_model_catalog_from_workspace(
-        &state.skill_rt.workspace_root,
-    ) {
+    let catalog = match crate::configuration_files::read_model_catalog(state) {
         Ok(catalog) => catalog,
         Err(error) => {
             let mut failure = model_catalog_failure_data(&error);
@@ -140,7 +138,7 @@ fn build_model_readiness_trace_for_debug(
         .unwrap_or(false);
     let ready = selected_entry.is_some()
         && text_generation
-        && !matches!(credential_state, "missing" | "null" | "");
+        && claw_core::model_catalog::credential_state_is_ready(credential_state);
     json!({
         "schema_version": catalog.schema_version,
         "selected_provider": catalog.selected_provider,
@@ -179,7 +177,8 @@ fn task_debug_entry_provider_token(entry: &TaskDebugEntry) -> Option<String> {
 fn extract_resume_trace_for_debug(db_status: &str, result_json: &Value) -> Option<Value> {
     let lifecycle =
         crate::task_lifecycle::task_query_lifecycle_projection(db_status, Some(result_json), None);
-    if !resume_trace_has_signal(&lifecycle) && extract_task_checkpoint_for_debug(result_json).is_none()
+    if !resume_trace_has_signal(&lifecycle)
+        && extract_task_checkpoint_for_debug(result_json).is_none()
     {
         return None;
     }
@@ -239,10 +238,16 @@ fn copy_checkpoint_fallback_fields(trace: &mut serde_json::Map<String, Value>, c
             .and_then(Value::as_array)
         {
             trace.insert("completed_side_effect_count".to_string(), json!(refs.len()));
-            trace.insert("requires_idempotency_guard".to_string(), json!(!refs.is_empty()));
+            trace.insert(
+                "requires_idempotency_guard".to_string(),
+                json!(!refs.is_empty()),
+            );
         }
     }
-    let Some(signal) = checkpoint.get("repair_signal").filter(|value| value.is_object()) else {
+    let Some(signal) = checkpoint
+        .get("repair_signal")
+        .filter(|value| value.is_object())
+    else {
         return;
     };
     let external_provider_blocked = signal
@@ -260,7 +265,10 @@ fn copy_checkpoint_fallback_fields(trace: &mut serde_json::Map<String, Value>, c
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            trace.insert("provider_blocker_status_code".to_string(), json!(status_code));
+            trace.insert(
+                "provider_blocker_status_code".to_string(),
+                json!(status_code),
+            );
         }
     }
     if !trace.contains_key("provider_blocker_retry_after_seconds") {
@@ -309,11 +317,7 @@ fn resume_trace_has_signal(lifecycle: &Value) -> bool {
             > 0
 }
 
-fn copy_lifecycle_field(
-    trace: &mut serde_json::Map<String, Value>,
-    lifecycle: &Value,
-    key: &str,
-) {
+fn copy_lifecycle_field(trace: &mut serde_json::Map<String, Value>, lifecycle: &Value, key: &str) {
     if let Some(value) = lifecycle.get(key).filter(|value| !value.is_null()) {
         trace.insert(key.to_string(), value.clone());
     }

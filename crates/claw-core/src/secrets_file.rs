@@ -64,6 +64,25 @@ impl EnvFileSecretsBroker {
         &self.path
     }
 
+    /// Control-plane projection of the ordinary text-provider credential chain.
+    /// A broker failure is not a miss; never conceal corrupt storage here.
+    /// Runtime-owned resolved and enrolled providers use their own contracts.
+    pub fn lookup_text_vendor_with_source(
+        &self,
+        vendor: &str,
+    ) -> Result<Option<(SecretValue, SecretProtectionSource)>, SecretsError> {
+        if let Some(found) = self
+            .lookup_with_source(&super::text_secret_name_for_vendor(vendor))?
+            .filter(|(secret, _)| !secret.is_empty())
+        {
+            return Ok(Some(found));
+        }
+        let key = crate::config::llm_vendor_api_key_from_env_with(vendor, &|name| {
+            std::env::var(name).ok()
+        });
+        Ok((!key.is_empty()).then(|| (SecretValue::new(key), SecretProtectionSource::Environment)))
+    }
+
     pub fn lookup_with_source(
         &self,
         name: &str,

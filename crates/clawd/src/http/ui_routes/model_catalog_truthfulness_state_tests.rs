@@ -192,6 +192,37 @@ async fn catalog_truthfulness_canonical_environment_matches_the_actual_broker() 
 }
 
 #[tokio::test]
+async fn catalog_truthfulness_private_broker_is_visible_without_secret_exposure() {
+    if in_child(
+        "catalog_truthfulness_private_broker_is_visible_without_secret_exposure",
+        &[],
+    ) {
+        return;
+    }
+    let root = temp_workspace_root();
+    write_text(&root, "", "https://fixture.invalid/v1");
+    let path = claw_core::git_remote_config::git_credential_store_path(&root);
+    claw_core::secrets::set_file_secret(&path, "text_minimax_api_key", SECRET).unwrap();
+    assert_eq!(text_state(&root), "configured_env");
+}
+
+#[tokio::test]
+async fn catalog_truthfulness_corrupt_broker_is_not_ready_or_a_missing_key() {
+    if in_child(
+        "catalog_truthfulness_corrupt_broker_is_not_ready_or_a_missing_key",
+        &[("MINIMAX_API_KEY", SECRET)],
+    ) {
+        return;
+    }
+    let root = temp_workspace_root();
+    write_text(&root, "", "https://fixture.invalid/v1");
+    let path = claw_core::secrets::model_environment::path(&root);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, "invalid managed credential document").unwrap();
+    assert_eq!(text_state(&root), "unavailable");
+}
+
+#[tokio::test]
 async fn catalog_truthfulness_remote_hosts_cannot_impersonate_loopback_prefixes() {
     if in_child(
         "catalog_truthfulness_remote_hosts_cannot_impersonate_loopback_prefixes",

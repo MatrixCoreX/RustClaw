@@ -27,9 +27,7 @@ fn read_model_catalog(
     if let Err(resp) = require_ui_identity(state, headers) {
         return resp;
     }
-    match claw_core::model_catalog::build_model_catalog_from_workspace(
-        &state.skill_rt.workspace_root,
-    ) {
+    match crate::configuration_files::read_model_catalog(state) {
         Ok(catalog) => {
             let mut data = serde_json::to_value(catalog).unwrap_or_else(|_| json!({}));
             if let Some(object) = data.as_object_mut() {

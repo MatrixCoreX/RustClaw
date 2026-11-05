@@ -43,6 +43,35 @@ def required_command_gate(job, command):
 
 
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_catalogue_selection_and_cli_contracts_gate_both_systems_and_signed_artifact(self):
+        jobs = load("macos-polyglot-skill-ci.yml")["jobs"]
+        commands = [
+            "cargo test --locked -p clawd --bin clawd model_catalog -- --test-threads=1 --nocapture",
+            "cargo test --locked -p clawd --bin clawd task_model_selection -- --test-threads=1 --nocapture",
+            "cargo test --locked -p clawcli commands::models_tests -- --test-threads=1 --nocapture",
+        ]
+        for name in ["runtime-read-linux", "polyglot-skill-macos"]:
+            for command in commands:
+                self.assertTrue(required_command_gate(jobs[name], command))
+                for mutation in ["remove", "ignore", "continue", "conditional"]:
+                    with self.subTest(job=name, command=command, mutation=mutation):
+                        job = deepcopy(jobs[name])
+                        step = next(step for step in job["steps"] if command in step.get("run", ""))
+                        if mutation == "remove": step["run"] = step["run"].replace(command, "true")
+                        elif mutation == "ignore": step["run"] = step["run"].replace(command, command + " || true")
+                        elif mutation == "continue": step["continue-on-error"] = True
+                        else: step["if"] = "${{ always() }}"
+                        self.assertFalse(required_command_gate(job, command))
+        build = next(step for step in jobs["runtime-read-linux"]["steps"]
+                     if step.get("name") == "Build the exact verified Linux core without publishing a release")
+        for fragment in [
+            "cargo build --locked --release -p clawd --bin clawd -p clawcli --bin clawcli",
+            'install -m 755 target/release/clawcli "$artifact_root/runtime-read/clawcli"',
+            "sha256sum clawd clawcli source-commit verified-gates",
+            "model_catalog_truthfulness task_model_selection cli_model_readiness",
+        ]:
+            self.assertIn(fragment, build["run"])
+
     def test_effective_provider_credentials_gate_both_systems_without_skipping_or_ignoring_failures(self):
         jobs = load("macos-polyglot-skill-ci.yml")["jobs"]
         selector = "provider_credential_tests"

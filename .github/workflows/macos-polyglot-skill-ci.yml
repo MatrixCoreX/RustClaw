@@ -252,6 +252,8 @@ jobs:
           cargo test --locked -p clawd --bin clawd task_event_transport -- --test-threads=1
           cargo test --locked -p clawd --bin clawd auth_contract_tests -- --test-threads=1
           cargo test --locked -p clawd --bin clawd model_catalog -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd task_model_selection -- --test-threads=1 --nocapture
+          cargo test --locked -p clawcli commands::models_tests -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd model_settings_integrity_tests -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd configuration_read_tests -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd secure_workspace_fs -- --test-threads=1 --nocapture
@@ -278,13 +280,14 @@ jobs:
       - name: Build the exact verified Linux core without publishing a release
         run: |
           set -euo pipefail
-          cargo build --locked --release -p clawd --bin clawd
+          cargo build --locked --release -p clawd --bin clawd -p clawcli --bin clawcli
           artifact_root="$RUNNER_TEMP/runtime-read-artifact"
           mkdir -p "$artifact_root/runtime-read"
           install -m 755 target/release/clawd "$artifact_root/runtime-read/clawd"
+          install -m 755 target/release/clawcli "$artifact_root/runtime-read/clawcli"
           printf '%s\n' "$GITHUB_SHA" > "$artifact_root/runtime-read/source-commit"
-          printf '%s\n' 'task_event_transport_and_archive ui_auth_error_contract model_catalog_fixture_isolation model_catalog_read model_settings_integrity secure_workspace_metadata configuration_reads skill_state_mutations skill_switch_updates skill_reload_publication configuration_publication provider_credentials aipp aipp_read_surfaces aipp_generation run_skill product_identity storage_ownership aipp_decoupling cross_platform task_lifecycle' > "$artifact_root/runtime-read/verified-gates"
-          (cd "$artifact_root/runtime-read" && sha256sum clawd source-commit verified-gates > SHA256SUMS)
+          printf '%s\n' 'task_event_transport_and_archive ui_auth_error_contract model_catalog_fixture_isolation model_catalog_read model_settings_integrity secure_workspace_metadata configuration_reads skill_state_mutations skill_switch_updates skill_reload_publication configuration_publication provider_credentials aipp aipp_read_surfaces aipp_generation run_skill product_identity storage_ownership aipp_decoupling cross_platform task_lifecycle model_catalog_truthfulness task_model_selection cli_model_readiness' > "$artifact_root/runtime-read/verified-gates"
+          (cd "$artifact_root/runtime-read" && sha256sum clawd clawcli source-commit verified-gates > SHA256SUMS)
           tar -czf "$artifact_root/runtime-read-${GITHUB_SHA}.tar.gz" -C "$artifact_root" runtime-read
           (cd "$artifact_root" && sha256sum "runtime-read-${GITHUB_SHA}.tar.gz" > "runtime-read-${GITHUB_SHA}.tar.gz.sha256")
       - name: Attest the exact Linux core provenance
@@ -425,6 +428,8 @@ jobs:
           cargo test --locked -p clawd --bin clawd task_event_transport -- --test-threads=1
           cargo test --locked -p clawd --bin clawd auth_contract_tests -- --test-threads=1
           cargo test --locked -p clawd --bin clawd model_catalog -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd task_model_selection -- --test-threads=1 --nocapture
+          cargo test --locked -p clawcli commands::models_tests -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd model_settings_integrity_tests -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd configuration_read_tests -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd secure_workspace_fs -- --test-threads=1 --nocapture

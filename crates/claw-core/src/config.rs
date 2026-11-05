@@ -7,7 +7,7 @@ mod model_vendors;
 mod runtime;
 
 use defaults::*;
-pub use model_vendors::llm_vendor_api_key_env_names;
+pub use model_vendors::{llm_vendor_api_key_env_names, llm_vendor_api_key_from_env_with};
 
 pub const CLAWD_INTERNAL_LISTEN: &str = "127.0.0.1:8787";
 pub const CLAWD_INTERNAL_BASE_URL: &str = "http://127.0.0.1:8787";

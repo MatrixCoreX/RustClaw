@@ -68,10 +68,10 @@ pub(super) fn resolve_model_override_from_catalog(
         {
             return false;
         }
-        if entry
+        if !entry
             .get("credential_state")
             .and_then(serde_json::Value::as_str)
-            .is_some_and(|state| matches!(state, "missing" | ""))
+            .is_some_and(claw_core::model_catalog::credential_state_is_ready)
         {
             return false;
         }
@@ -105,14 +105,16 @@ pub(super) fn resolve_model_override_from_catalog(
     let Some(entry) = matches.next() else {
         anyhow::bail!("chat_model_not_allowed");
     };
-    if matches.next().is_some() {
-        anyhow::bail!("chat_model_id_ambiguous");
-    }
     let provider = entry
         .get("provider")
         .and_then(serde_json::Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| anyhow::anyhow!("chat_model_provider_missing"))?;
+    if matches
+        .any(|other| other.get("provider").and_then(serde_json::Value::as_str) != Some(provider))
+    {
+        anyhow::bail!("chat_model_id_ambiguous");
+    }
     let model = explicit.map(|(_, model)| model).unwrap_or(requested).trim();
     Ok(ModelOverride {
         provider: provider.to_string(),
@@ -234,7 +236,7 @@ pub(super) fn model_readiness_json(body: &serde_json::Value) -> serde_json::Valu
     let text_generation = bool_value(entry, "supports_text");
     let ready = selected_entry.is_some()
         && text_generation
-        && !matches!(credential_state.as_str(), "missing" | "null" | "");
+        && claw_core::model_catalog::credential_state_is_ready(&credential_state);
     serde_json::json!({
         "schema_version": data.get("schema_version").cloned().unwrap_or(serde_json::Value::Null),
         "selected_provider": selected_provider,

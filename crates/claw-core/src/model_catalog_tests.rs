@@ -189,6 +189,7 @@ minimax_models = ["image-01"]
 
 [image_generation.providers.minimax]
 base_url = "https://api.minimaxi.com/v1"
+api_key = "secret-image-minimax"
 model = "image-01"
 "#,
     )
@@ -235,6 +236,8 @@ minimax_models = ["music-2.6"]
 "#,
     )
     .expect("write music");
+    crate::secrets::model_environment::save(root, "minimax", "secret-minimax")
+        .expect("write effective text credential");
 }
 
 #[test]
@@ -268,7 +271,7 @@ fn catalog_separates_selected_model_inputs_from_media_skill_support() {
     assert!(!minimax.supports_video_generation);
     assert!(!minimax.supports_music_generation);
     assert!(!minimax.async_required);
-    assert_eq!(minimax.credential_state, "configured_inline");
+    assert_eq!(minimax.credential_state, "configured_env");
     assert_eq!(minimax.context_window_tokens, Some(1_000_000));
     assert_eq!(
         minimax.base_url_kind,
@@ -423,7 +426,6 @@ fn catalog_reports_env_credential_state_without_secret_values() {
 #[test]
 fn catalog_reports_env_file_credential_state_without_secret_values() {
     let _guard = ENV_LOCK.lock().expect("env lock");
-    let _restore_catalog_env = EnvRestore::capture("CHINESE_PROVIDER_ENV_FILE");
     let _restore_mimo = EnvRestore::capture("MIMO_API_KEY");
     let _restore_xiaomi = EnvRestore::capture("XIAOMI_API_KEY");
     unsafe {
@@ -433,18 +435,8 @@ fn catalog_reports_env_file_credential_state_without_secret_values() {
 
     let root = temp_workspace_root();
     write_fixture(&root);
-    let env_file = root.join("runtime_env_filled.sh");
-    std::fs::write(
-        &env_file,
-        r#"
-# comment
-export MIMO_API_KEY='secret-env-file-mimo'
-"#,
-    )
-    .expect("write env file");
-    unsafe {
-        std::env::set_var("CHINESE_PROVIDER_ENV_FILE", env_file.as_os_str());
-    }
+    crate::secrets::model_environment::save(&root, "mimo", "secret-env-file-mimo")
+        .expect("write managed environment file");
 
     let catalog = build_model_catalog_from_workspace(&root).expect("catalog");
     let mimo = catalog

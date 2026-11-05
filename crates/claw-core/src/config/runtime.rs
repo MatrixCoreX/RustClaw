@@ -289,17 +289,7 @@ pub(super) fn apply_llm_vendor_api_key_envs_with<F>(
     // Text-model credentials are runtime secrets. Ignore legacy TOML values so
     // a copied configuration cannot silently carry a working credential.
     if let Some(cfg) = target.as_mut() {
-        cfg.api_key.clear();
-    }
-    for key in super::llm_vendor_api_key_env_names(vendor) {
-        if let (Some(value), Some(cfg)) = (
-            env_value(key)
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty() && !value.starts_with("REPLACE_ME")),
-            target.as_mut(),
-        ) {
-            cfg.api_key = value;
-        }
+        cfg.api_key = super::llm_vendor_api_key_from_env_with(vendor, &env_value);
     }
 }
 

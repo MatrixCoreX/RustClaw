@@ -1,6 +1,8 @@
 //! Selected main/split path tests; no live LLM calls or persisted task execution.
 use super::*;
 
+#[path = "model_catalog_truthfulness_additional_tests.rs"]
+mod additional;
 #[path = "model_catalog_truthfulness_state_tests.rs"]
 mod state_contracts;
 

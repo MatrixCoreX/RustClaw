@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use thiserror::Error;
+
+#[path = "model_catalog_credentials.rs"]
+mod credentials;
+use credentials::{is_loopback, CredentialSnapshot};
 
 #[derive(Debug, Error)]
 pub enum ModelCatalogError {
@@ -58,31 +62,49 @@ pub struct ModelCatalogEntry {
 }
 
 #[derive(Debug, Clone)]
-struct CatalogInputs {
-    config: toml::Value,
-    image: toml::Value,
-    audio: toml::Value,
-    video: toml::Value,
-    music: toml::Value,
-    env_values: BTreeMap<String, String>,
+pub struct ModelCatalogDocuments {
+    pub config: toml::Value,
+    pub image: toml::Value,
+    pub audio: toml::Value,
+    pub video: toml::Value,
+    pub music: toml::Value,
+}
+
+impl ModelCatalogDocuments {
+    /// A request-owned projection. Callers coordinate the document snapshot;
+    /// credentials belong to the runtime workspace, not the selected file's parent.
+    pub fn build(&self, workspace_root: &Path) -> ModelCatalog {
+        build_model_catalog(self, &mut CredentialSnapshot::new(workspace_root))
+    }
+}
+
+/// Only closed, known credential states may imply readiness. This is metadata,
+/// not a connection probe or a grant of runtime authorization.
+pub fn credential_state_is_ready(state: &str) -> bool {
+    matches!(
+        state,
+        "configured_inline" | "configured_env" | "not_required_local" | "device_enrollment"
+    )
 }
 
 pub fn build_model_catalog_from_workspace(
     workspace_root: impl AsRef<Path>,
 ) -> Result<ModelCatalog, ModelCatalogError> {
     let root = workspace_root.as_ref();
-    let inputs = CatalogInputs {
+    let inputs = ModelCatalogDocuments {
         config: read_required_toml(&root.join("configs/config.toml"))?,
         image: read_optional_toml(&root.join("configs/image.toml"))?,
         audio: read_optional_toml(&root.join("configs/audio.toml"))?,
         video: read_optional_toml(&root.join("configs/video.toml"))?,
         music: read_optional_toml(&root.join("configs/music.toml"))?,
-        env_values: read_runtime_env_values(root),
     };
-    Ok(build_model_catalog(&inputs))
+    Ok(inputs.build(root))
 }
 
-fn build_model_catalog(inputs: &CatalogInputs) -> ModelCatalog {
+fn build_model_catalog(
+    inputs: &ModelCatalogDocuments,
+    credentials: &mut CredentialSnapshot,
+) -> ModelCatalog {
     let llm = inputs.config.get("llm").and_then(toml::Value::as_table);
     let selected_provider = llm
         .and_then(|table| table.get("selected_vendor"))
@@ -100,6 +122,10 @@ fn build_model_catalog(inputs: &CatalogInputs) -> ModelCatalog {
     let mut provider_tables = BTreeMap::new();
     if let Some(llm) = llm {
         for (provider, value) in llm {
+            // Enrollment policy is not an independently runnable text provider.
+            if provider == "hosted_relay" {
+                continue;
+            }
             let Some(table) = value.as_table() else {
                 continue;
             };
@@ -107,6 +133,13 @@ fn build_model_catalog(inputs: &CatalogInputs) -> ModelCatalog {
                 let model = string_field(table, "model");
                 if !model.is_empty() {
                     provider_tables.insert((provider.trim().to_string(), model), table.clone());
+                    if provider == &selected_provider && !selected_model.is_empty() {
+                        let mut selected = table.clone();
+                        selected
+                            .insert("model".into(), toml::Value::String(selected_model.clone()));
+                        provider_tables
+                            .insert((provider.clone(), selected_model.clone()), selected);
+                    }
                 }
             }
         }
@@ -122,6 +155,7 @@ fn build_model_catalog(inputs: &CatalogInputs) -> ModelCatalog {
                 inputs,
                 &selected_provider,
                 &selected_model,
+                credentials,
             )
         })
         .collect();
@@ -135,7 +169,7 @@ fn build_model_catalog(inputs: &CatalogInputs) -> ModelCatalog {
 }
 
 fn collect_module_targets(
-    inputs: &CatalogInputs,
+    inputs: &ModelCatalogDocuments,
     targets: &mut BTreeMap<(String, String), toml::map::Map<String, toml::Value>>,
 ) {
     for (config, section_name) in [
@@ -163,6 +197,9 @@ fn collect_module_targets(
             .and_then(toml::Value::as_table)
             .cloned()
             .unwrap_or_default();
+        // A copied legacy text key is not a real multimedia fallback either.
+        // A module's explicit credential remains valid under its own contract.
+        target.remove("api_key");
         if let Some(provider_table) = section
             .get("providers")
             .and_then(toml::Value::as_table)
@@ -183,16 +220,19 @@ fn collect_module_targets(
                 toml::Value::Array(models.into_iter().map(toml::Value::String).collect()),
             );
         }
-        targets.insert((provider, model), target);
+        // A media configuration must not replace a text entry's transport or
+        // credential metadata when both happen to use the same model ID.
+        targets.entry((provider, model)).or_insert(target);
     }
 }
 
 fn catalog_entry(
     provider: &str,
     llm_table: &toml::map::Map<String, toml::Value>,
-    inputs: &CatalogInputs,
+    inputs: &ModelCatalogDocuments,
     selected_provider: &str,
     selected_model: &str,
+    credentials: &mut CredentialSnapshot,
 ) -> ModelCatalogEntry {
     let model = string_field(llm_table, "model");
     let models = string_list_field(llm_table, "models");
@@ -218,7 +258,13 @@ fn catalog_entry(
     let supports_text = text_table.is_some_and(|table| {
         string_field(table, "model") == model
             || contains_model(&string_list_field(table, "models"), &model)
+            || (provider == selected_provider && model == selected_model)
     });
+    let transport = if supports_text {
+        text_table.unwrap_or(llm_table)
+    } else {
+        llm_table
+    };
     let supports_image_understanding = contains_model(&image_vision_models, &model);
     let supports_audio_transcription = contains_model(&audio_transcribe_models, &model);
     let supports_image_generation = contains_model(&image_generation_models, &model);
@@ -253,16 +299,16 @@ fn catalog_entry(
         provider: provider.to_string(),
         model: model.clone(),
         models,
-        api_style: api_style_token(llm_table.get("api_format").and_then(toml::Value::as_str)),
-        base_url_kind: base_url_kind(&string_field(llm_table, "base_url")),
-        context_window_tokens: usize_field(llm_table, "context_window_tokens"),
-        timeout_seconds: u64_field(llm_table, "timeout_seconds"),
-        credential_state: credential_state(
-            llm_table,
+        api_style: api_style_token(transport.get("api_format").and_then(toml::Value::as_str)),
+        base_url_kind: base_url_kind(&string_field(transport, "base_url")),
+        context_window_tokens: usize_field(transport, "context_window_tokens"),
+        timeout_seconds: u64_field(transport, "timeout_seconds"),
+        credential_state: credentials.state(
+            transport,
             provider,
             &model,
             &inputs.config,
-            &inputs.env_values,
+            supports_text,
         ),
         input_modalities,
         output_modalities,
@@ -451,7 +497,28 @@ fn provider_models(
     let Some(section) = section else {
         return Vec::new();
     };
-    string_list_field(section, &format!("{provider}_models"))
+    let mut models = string_list_field(section, &format!("{provider}_models"));
+    if string_field(section, "default_vendor") == provider {
+        let selected = string_field(section, "default_model");
+        if !selected.is_empty() {
+            push_unique(&mut models, &selected);
+        }
+    }
+    if let Some(table) = section
+        .get("providers")
+        .and_then(toml::Value::as_table)
+        .and_then(|providers| providers.get(provider))
+        .and_then(toml::Value::as_table)
+    {
+        for model in string_list_field(table, "models").into_iter().chain(
+            [string_field(table, "model")]
+                .into_iter()
+                .filter(|model| !model.is_empty()),
+        ) {
+            push_unique(&mut models, &model);
+        }
+    }
+    models
 }
 
 fn contains_model(models: &[String], model: &str) -> bool {
@@ -517,37 +584,6 @@ fn u64_field(table: &toml::map::Map<String, toml::Value>, key: &str) -> Option<u
         .filter(|value| *value > 0)
 }
 
-fn credential_state(
-    table: &toml::map::Map<String, toml::Value>,
-    provider: &str,
-    model: &str,
-    config: &toml::Value,
-    env_values: &BTreeMap<String, String>,
-) -> String {
-    let base_url = string_field(table, "base_url");
-    if base_url.starts_with("http://127.0.0.1")
-        || base_url.starts_with("http://localhost")
-        || base_url.starts_with("http://[::1]")
-    {
-        return "not_required_local".to_string();
-    }
-    if matches_hosted_relay(config, provider, model, &base_url) {
-        return "device_enrollment".to_string();
-    }
-    if !string_field(table, "api_key").is_empty() {
-        return "configured_inline".to_string();
-    }
-    if provider_credential_env_vars(provider).iter().any(|name| {
-        std::env::var(name).is_ok_and(|value| !value.trim().is_empty())
-            || env_values
-                .get(*name)
-                .is_some_and(|value| !value.trim().is_empty())
-    }) {
-        return "configured_env".to_string();
-    }
-    "missing".to_string()
-}
-
 fn matches_hosted_relay(config: &toml::Value, provider: &str, model: &str, base_url: &str) -> bool {
     let Some(relay) = config
         .get("llm")
@@ -567,80 +603,6 @@ fn matches_hosted_relay(config: &toml::Value, provider: &str, model: &str, base_
         && base_url.starts_with("https://")
 }
 
-fn read_runtime_env_values(workspace_root: &Path) -> BTreeMap<String, String> {
-    runtime_env_file_candidates(workspace_root)
-        .into_iter()
-        .find_map(|path| {
-            let raw = std::fs::read_to_string(path).ok()?;
-            Some(parse_runtime_env_file(&raw))
-        })
-        .unwrap_or_default()
-}
-
-fn runtime_env_file_candidates(workspace_root: &Path) -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Ok(path) = std::env::var("CHINESE_PROVIDER_ENV_FILE") {
-        let trimmed = path.trim();
-        if !trimmed.is_empty() {
-            candidates.push(PathBuf::from(trimmed));
-        }
-    }
-    candidates.push(workspace_root.join("../runtime_env_filled.sh"));
-    candidates.push(PathBuf::from("/home/guagua/runtime_env_filled.sh"));
-    candidates
-}
-
-fn parse_runtime_env_file(raw: &str) -> BTreeMap<String, String> {
-    raw.lines()
-        .filter_map(parse_runtime_env_line)
-        .collect::<BTreeMap<_, _>>()
-}
-
-fn parse_runtime_env_line(raw: &str) -> Option<(String, String)> {
-    let line = raw.trim();
-    if line.is_empty() || line.starts_with('#') {
-        return None;
-    }
-    let line = line.strip_prefix("export ").unwrap_or(line).trim();
-    let (key, value) = line.split_once('=')?;
-    let key = key.trim();
-    if key.is_empty()
-        || !key
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-    {
-        return None;
-    }
-    Some((key.to_string(), unquote_env_value(value.trim()).to_string()))
-}
-
-fn unquote_env_value(value: &str) -> &str {
-    if value.len() >= 2 {
-        let bytes = value.as_bytes();
-        let first = bytes[0];
-        let last = bytes[value.len() - 1];
-        if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
-            return &value[1..value.len() - 1];
-        }
-    }
-    value
-}
-
-fn provider_credential_env_vars(provider: &str) -> &'static [&'static str] {
-    match provider {
-        "anthropic" => &["ANTHROPIC_API_KEY"],
-        "custom" => &["CUSTOM_API_KEY"],
-        "deepseek" => &["DEEPSEEK_API_KEY"],
-        "google" => &["GOOGLE_API_KEY"],
-        "grok" => &["GROK_API_KEY"],
-        "minimax" => &["MINIMAX_API_KEY"],
-        "mimo" => &["MIMO_API_KEY", "XIAOMI_API_KEY"],
-        "openai" => &["OPENAI_API_KEY"],
-        "qwen" => &["QWEN_API_KEY", "DASHSCOPE_API_KEY"],
-        _ => &[],
-    }
-}
-
 fn api_style_token(raw: Option<&str>) -> String {
     match raw.unwrap_or_default().trim() {
         "" | "openai_compat" | "openai_compatible" => "openai_compatible",
@@ -652,28 +614,32 @@ fn api_style_token(raw: Option<&str>) -> String {
 }
 
 fn base_url_kind(base_url: &str) -> String {
-    let token = if base_url.contains("api.minimaxi.com") {
-        "minimax_official_openai_compat"
-    } else if base_url.starts_with("http://127.0.0.1")
-        || base_url.starts_with("http://localhost")
-        || base_url.starts_with("http://[::1]")
-    {
+    let Ok(url) = url::Url::parse(base_url) else {
+        return "custom_or_unknown".into();
+    };
+    if !matches!(url.scheme(), "http" | "https") {
+        return "custom_or_unknown".into();
+    }
+    let host = url.host_str().unwrap_or_default();
+    let token = if is_loopback(base_url) {
         "local_loopback"
-    } else if base_url.contains("xiaomimimo.com") {
+    } else if host == "api.minimaxi.com" {
+        "minimax_official_openai_compat"
+    } else if host == "xiaomimimo.com" || host.ends_with(".xiaomimimo.com") {
         "mimo_token_plan_openai_compat"
-    } else if base_url.contains("dashscope.aliyuncs.com/compatible-mode") {
+    } else if host == "dashscope.aliyuncs.com" && url.path().starts_with("/compatible-mode/") {
         "qwen_dashscope_openai_compat"
-    } else if base_url.contains("api.deepseek.com") {
+    } else if host == "api.deepseek.com" {
         "deepseek_official_openai_compat"
-    } else if base_url.contains("api.openai.com") {
+    } else if host == "api.openai.com" {
         "openai_official"
-    } else if base_url.contains("generativelanguage.googleapis.com") {
+    } else if host == "generativelanguage.googleapis.com" {
         "google_gemini_official"
-    } else if base_url.contains("api.anthropic.com") {
+    } else if host == "api.anthropic.com" {
         "anthropic_official"
-    } else if base_url.contains("api.x.ai") {
+    } else if host == "api.x.ai" {
         "grok_official"
-    } else if base_url.contains("dashscope.aliyuncs.com/api/v1") {
+    } else if host == "dashscope.aliyuncs.com" && url.path().starts_with("/api/v1") {
         "qwen_dashscope_native"
     } else {
         "custom_or_unknown"

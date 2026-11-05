@@ -179,3 +179,50 @@ fn chat_model_override_is_catalog_validated_and_provider_scoped() {
     assert!(resolve_model_override_from_catalog(&body, "qwen-max-latest").is_err());
     assert!(resolve_model_override_from_catalog(&body, "unknown-model").is_err());
 }
+
+#[test]
+fn models_readiness_and_override_reject_unknown_or_unavailable_credentials() {
+    for (state, ready) in [
+        ("configured_inline", true),
+        ("configured_env", true),
+        ("device_enrollment", true),
+        ("not_required_local", true),
+        ("missing", false),
+        ("unavailable", false),
+        ("future_unknown", false),
+        ("null", false),
+        ("", false),
+    ] {
+        let mut body = model_catalog_fixture();
+        body["data"]["entries"][0]["credential_state"] = serde_json::json!(state);
+        assert_eq!(model_readiness_json(&body)["ready"], ready, "{state}");
+        assert_eq!(
+            resolve_model_override_from_catalog(&body, "minimax/MiniMax-M3").is_ok(),
+            ready,
+            "{state}"
+        );
+    }
+    let mut body = model_catalog_fixture();
+    body["data"]["entries"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("credential_state");
+    assert_eq!(model_readiness_json(&body)["ready"], false);
+    assert!(resolve_model_override_from_catalog(&body, "minimax/MiniMax-M3").is_err());
+}
+
+#[test]
+fn chat_model_override_deduplicates_one_provider_but_not_distinct_providers() {
+    let mut body = model_catalog_fixture();
+    let duplicate = body["data"]["entries"][0].clone();
+    body["data"]["entries"]
+        .as_array_mut()
+        .unwrap()
+        .push(duplicate.clone());
+    assert!(resolve_model_override_from_catalog(&body, "MiniMax-M3").is_ok());
+    let mut other = duplicate;
+    other["provider"] = serde_json::json!("different-provider");
+    body["data"]["entries"].as_array_mut().unwrap().push(other);
+    assert!(resolve_model_override_from_catalog(&body, "MiniMax-M3").is_err());
+    assert!(resolve_model_override_from_catalog(&body, "minimax/MiniMax-M3").is_ok());
+}
