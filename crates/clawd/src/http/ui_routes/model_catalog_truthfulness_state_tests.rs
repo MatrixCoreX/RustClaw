@@ -67,7 +67,10 @@ fn write_text(root: &Path, key: &str, base_url: &str) {
     std::fs::write(
         root.join("configs/config.toml"),
         format!(
-            "[llm]\nselected_vendor='minimax'\nselected_model='fixture-text'\n\
+            "[server]\nrequest_timeout_seconds=30\n\
+         [database]\nsqlite_path='data/fixture.db'\nbusy_timeout_ms=2000\n\
+         [worker]\n\
+         [llm]\nselected_vendor='minimax'\nselected_model='fixture-text'\n\
          [llm.minimax]\nbase_url='{base_url}'\napi_key='{key}'\nmodel='fixture-text'\n"
         ),
     )
