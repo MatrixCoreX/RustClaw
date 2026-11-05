@@ -43,6 +43,24 @@ def required_command_gate(job, command):
 
 
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_effective_provider_credentials_gate_both_systems_without_skipping_or_ignoring_failures(self):
+        jobs = load("macos-polyglot-skill-ci.yml")["jobs"]
+        selector = "provider_credential_tests"
+        for name in ["runtime-read-linux", "polyglot-skill-macos"]:
+            self.assertTrue(required_reload_gate(jobs[name], selector))
+            for mutation in ["remove", "ignore", "continue", "conditional"]:
+                with self.subTest(job=name, mutation=mutation):
+                    job = deepcopy(jobs[name])
+                    step = next(step for step in job["steps"] if f"--bin clawd {selector} --" in step.get("run", ""))
+                    if mutation == "remove": step["run"] = step["run"].replace(f"--bin clawd {selector} --", "--bin clawd absent_fixture --")
+                    elif mutation == "ignore": step["run"] = step["run"].replace(f"{selector} -- --test-threads=1", f"{selector} -- --ignored --test-threads=1")
+                    elif mutation == "continue": step["continue-on-error"] = True
+                    else: step["if"] = "${{ always() }}"
+                    self.assertFalse(required_reload_gate(job, selector))
+        build = next(step for step in jobs["runtime-read-linux"]["steps"]
+                     if step.get("name") == "Build the exact verified Linux core without publishing a release")
+        self.assertIn("provider_credentials", build["run"])
+
     def test_configuration_lock_and_credential_transaction_suites_gate_both_systems(self):
         jobs = load("macos-polyglot-skill-ci.yml")["jobs"]
         for name in ["runtime-read-linux", "polyglot-skill-macos"]:

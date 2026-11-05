@@ -592,6 +592,10 @@ mod model_settings_integrity_tests;
 mod configuration_write_tests;
 
 #[cfg(test)]
+#[path = "ui_routes/provider_credential_tests.rs"]
+mod provider_credential_tests;
+
+#[cfg(test)]
 #[path = "ui_routes/configuration_read_tests.rs"]
 mod configuration_read_tests;
 

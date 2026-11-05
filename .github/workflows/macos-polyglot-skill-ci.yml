@@ -270,6 +270,7 @@ jobs:
           cargo test --locked -p clawd --bin clawd configuration_files::tests -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd channel_registration_race_tests::application_tests -- --test-threads=1 --nocapture
           cargo test --locked -p claw-core secrets::model_environment::tests -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd provider_credential_tests -- --test-threads=1 --nocapture
       - name: Verify both product identities with the shared UI
         run: |
           npm ci --ignore-scripts --prefix UI
@@ -282,7 +283,7 @@ jobs:
           mkdir -p "$artifact_root/runtime-read"
           install -m 755 target/release/clawd "$artifact_root/runtime-read/clawd"
           printf '%s\n' "$GITHUB_SHA" > "$artifact_root/runtime-read/source-commit"
-          printf '%s\n' 'task_event_transport_and_archive ui_auth_error_contract model_catalog_fixture_isolation model_catalog_read model_settings_integrity secure_workspace_metadata configuration_reads skill_state_mutations skill_switch_updates skill_reload_publication configuration_publication aipp aipp_read_surfaces aipp_generation run_skill product_identity storage_ownership aipp_decoupling cross_platform task_lifecycle' > "$artifact_root/runtime-read/verified-gates"
+          printf '%s\n' 'task_event_transport_and_archive ui_auth_error_contract model_catalog_fixture_isolation model_catalog_read model_settings_integrity secure_workspace_metadata configuration_reads skill_state_mutations skill_switch_updates skill_reload_publication configuration_publication provider_credentials aipp aipp_read_surfaces aipp_generation run_skill product_identity storage_ownership aipp_decoupling cross_platform task_lifecycle' > "$artifact_root/runtime-read/verified-gates"
           (cd "$artifact_root/runtime-read" && sha256sum clawd source-commit verified-gates > SHA256SUMS)
           tar -czf "$artifact_root/runtime-read-${GITHUB_SHA}.tar.gz" -C "$artifact_root" runtime-read
           (cd "$artifact_root" && sha256sum "runtime-read-${GITHUB_SHA}.tar.gz" > "runtime-read-${GITHUB_SHA}.tar.gz.sha256")
@@ -440,6 +441,7 @@ jobs:
           cargo test --locked -p clawd --bin clawd configuration_files::tests -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd channel_registration_race_tests::application_tests -- --test-threads=1 --nocapture
           cargo test --locked -p claw-core secrets::model_environment::tests -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd provider_credential_tests -- --test-threads=1 --nocapture
 
       - name: Test browser API authentication boundaries
         shell: bash
