@@ -13,7 +13,9 @@ class PrivilegedFilesystemCaseTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix='agent-secure-fs-runner-')
         self.addCleanup(self.directory.cleanup)
-        self.workspace = Path(self.directory.name)
+        # macOS temp paths can start with /var while their canonical location
+        # is /private/var. Compare filesystem identities, not spelling aliases.
+        self.workspace = Path(self.directory.name).resolve(strict=True)
         self.executable = self.workspace / 'target/debug/deps/fixture-clawd'
         self.executable.parent.mkdir(parents=True)
         self.executable.write_bytes(b'fixture executable, never run')
@@ -27,6 +29,26 @@ class PrivilegedFilesystemCaseTests(unittest.TestCase):
     def test_exact_cargo_test_binary_required(self):
         self.assertEqual(self.resolve(),self.executable)
         self.assertEqual(resolve_executable(json.dumps(self.item)+'\n'+json.dumps(self.item), self.workspace),self.executable)
+
+    def test_parent_directory_alias_returns_the_canonical_executable(self):
+        alias = self.workspace / 'workspace-alias'
+        alias.symlink_to(self.workspace, target_is_directory=True)
+        item = copy.deepcopy(self.item)
+        item['executable'] = str(alias / self.executable.relative_to(self.workspace))
+        self.assertEqual(resolve_executable(json.dumps(item), alias), self.executable)
+
+    def test_parent_directory_alias_cannot_escape_target(self):
+        outside = self.workspace / 'outside'
+        outside.mkdir()
+        executable = outside / 'fixture-clawd'
+        executable.write_bytes(b'fixture executable, never run')
+        executable.chmod(0o700)
+        alias = self.workspace / 'target/outside-alias'
+        alias.symlink_to(outside, target_is_directory=True)
+        item = copy.deepcopy(self.item)
+        item['executable'] = str(alias / executable.name)
+        with self.assertRaises(ValueError):
+            self.resolve(item)
 
     def test_wrong_target_profile_and_missing_executable_rejected(self):
         for path,value in [('name','other'),('kind',['lib']),('test',False),('test','true'),('executable',None)]:
