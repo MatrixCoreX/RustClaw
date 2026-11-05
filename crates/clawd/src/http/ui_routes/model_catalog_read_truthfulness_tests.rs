@@ -5,6 +5,8 @@ use super::*;
 mod additional;
 #[path = "model_catalog_truthfulness_state_tests.rs"]
 mod state_contracts;
+#[path = "model_catalog_runtime_descriptor_tests.rs"]
+mod runtime_contracts;
 
 fn selected_main(model: &str) -> String {
     format!(
