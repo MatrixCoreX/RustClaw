@@ -237,8 +237,11 @@ fn saved_llm_vendor_runtime_fields_for_state(
     parsed: &toml::Value,
     selected_vendor: &str,
 ) -> (String, String, String) {
-    let (base_url, _, provider_type) =
-        saved_llm_vendor_runtime_fields_with_env(parsed, selected_vendor, |_| None);
+    let (base_url, _, provider_type) = saved_llm_vendor_runtime_fields_with_env(
+        parsed,
+        selected_vendor,
+        |_| None,
+    );
     let (api_key, _) = llm_vendor_api_key_for_state(state, selected_vendor);
     (base_url, api_key, provider_type)
 }
@@ -630,10 +633,7 @@ fn skill_switch_response(
     public: &SkillSwitchRevisionState,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
     let mut effective = compute_effective_enabled(
-        &public.baseline,
-        &public.switches,
-        &public.uninstalled,
-        state,
+        &public.baseline, &public.switches, &public.uninstalled, state,
     );
     effective.retain(|name| !hide_skill_in_ui(state, name));
     let runtime = state
@@ -681,7 +681,8 @@ fn read_skills_config(
         service
             .catalog_snapshot()
             .map_err(|error| error.to_string())
-    }) {
+    })
+    {
         Ok(snapshot) => snapshot,
         Err(_) => {
             return crate::api_err(
@@ -795,7 +796,10 @@ fn read_llm_config(
     let parsed = match read_skill_config_file(&state) {
         Ok((_, v)) => v,
         Err(_) => {
-            return crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "llm_config_read_failed");
+            return crate::api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "llm_config_read_failed",
+            );
         }
     };
     let llm = parsed.get("llm").and_then(|v| v.as_table());
@@ -831,6 +835,7 @@ fn read_llm_config(
         }),
     )
 }
+
 
 async fn test_llm_config(
     State(state): State<AppState>,
@@ -910,8 +915,12 @@ async fn test_llm_config(
     } else {
         inline_api_key.to_string()
     };
-    let device_key_enrollment =
-        matches_hosted_relay_preset(&parsed, &selected_vendor, &selected_model, vendor_base_url);
+    let device_key_enrollment = matches_hosted_relay_preset(
+        &parsed,
+        &selected_vendor,
+        &selected_model,
+        vendor_base_url,
+    );
     if device_key_enrollment && !inline_api_key.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -1006,30 +1015,21 @@ fn write_skills_config(
         Ok(v) => v,
         Err(err) => {
             tracing::warn!(error = %err, "skill_switch_config_read_failed");
-            return crate::api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "skills_config_read_failed",
-            );
+            return crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "skills_config_read_failed");
         }
     };
     let service = match admission_service(&state) {
         Ok(service) => service,
         Err(error) => {
             tracing::warn!(%error, "skill_switch_admission_initialization_failed");
-            return crate::api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "skills_config_read_failed",
-            );
+            return crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "skills_config_read_failed");
         }
     };
     let original_admission = match service.catalog_snapshot() {
         Ok(snapshot) => snapshot,
         Err(error) => {
             tracing::warn!(%error, "skill_switch_admission_read_failed");
-            return crate::api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "skills_config_read_failed",
-            );
+            return crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "skills_config_read_failed");
         }
     };
     let public = skill_switch_state(&parsed, &state, &original_admission);
@@ -1047,11 +1047,7 @@ fn write_skills_config(
         if skill.is_empty() || hide_skill_in_ui(&state, &skill) {
             continue;
         }
-        let requested = if public.locked.contains(&skill) {
-            true
-        } else {
-            v
-        };
+        let requested = if public.locked.contains(&skill) { true } else { v };
         if let Some(current) = original_admission.state(&skill) {
             let target = match (current, requested) {
                 (skill_sdk::AdmissionState::Enabled, false) => {
@@ -1078,8 +1074,7 @@ fn write_skills_config(
     if admission_updates.is_empty() {
         return skill_switch_response(&state, &public);
     }
-    let committed = match service.set_states(admission_updates, Some(original_admission.generation))
-    {
+    let committed = match service.set_states(admission_updates, Some(original_admission.generation)) {
         Ok(snapshot) => snapshot,
         Err(error) => {
             tracing::warn!(%error, "skill_switch_batch_failed");
@@ -1109,16 +1104,10 @@ fn write_skills_config(
         Ok(snapshot) => snapshot,
         Err(error) => {
             tracing::warn!(%error, "skill_switch_updated_admission_read_failed");
-            return crate::api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "skills_config_read_failed",
-            );
+            return crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "skills_config_read_failed");
         }
     };
-    skill_switch_response(
-        &state,
-        &skill_switch_state(&parsed, &state, &current_admission),
-    )
+    skill_switch_response(&state, &skill_switch_state(&parsed, &state, &current_admission))
 }
 
 async fn uninstall_external_skill(
@@ -1196,20 +1185,23 @@ async fn uninstall_external_skill(
             );
         }
     };
-    let tombstone =
-        match service.set_state(&skill_name, skill_sdk::AdmissionState::Tombstoned, None) {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                return (
-                    StatusCode::CONFLICT,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some(format!("tombstone external skill failed: {error}")),
-                    }),
-                );
-            }
-        };
+    let tombstone = match service.set_state(
+        &skill_name,
+        skill_sdk::AdmissionState::Tombstoned,
+        None,
+    ) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("tombstone external skill failed: {error}")),
+                }),
+            );
+        }
+    };
     let reload = match reload_skill_views(&state) {
         Ok(result) => result,
         Err(error) => {
