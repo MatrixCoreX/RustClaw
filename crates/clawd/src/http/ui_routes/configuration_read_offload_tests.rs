@@ -72,7 +72,7 @@ async fn configuration_reads_missing_credentials_do_not_wait_for_the_database() 
         )
         .await
         .unwrap();
-        assert_error(&response, StatusCode::UNAUTHORIZED, "auth_key_required");
+        assert_auth_error(&response, "auth_key_required");
     }
 }
 

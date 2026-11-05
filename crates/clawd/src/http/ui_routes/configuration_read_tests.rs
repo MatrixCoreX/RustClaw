@@ -10,6 +10,20 @@ const ROUTES: [(&str, &str); 2] = [
     ("/v1/skills/config", "skills_config_read_failed"),
 ];
 
+fn assert_auth_error(response: &(StatusCode, Value), code: &str) {
+    assert_eq!(response.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response.1,
+        json!({
+            "ok": false, "error": code,
+            "data": {
+                "owner_layer": "ui_auth", "error_code": code, "status_code": code,
+                "message_key": format!("clawd.ui.auth.{code}")
+            }
+        })
+    );
+}
+
 fn read_fixture() -> Fixture {
     let fixture = Fixture::new();
     let path = fixture.root.join("configs/config.toml");
@@ -68,7 +82,7 @@ async fn configuration_reads_authorize_before_parsing_private_files() {
             ("fixture-unknown", "auth_key_invalid"),
         ] {
             let response = fixture.api(key, Method::GET, path, None).await;
-            assert_error(&response, StatusCode::UNAUTHORIZED, code);
+            assert_auth_error(&response, code);
             fixture.assert_private(&response.1);
         }
     }
@@ -180,9 +194,8 @@ async fn configuration_reads_do_not_cache_revoked_credentials_or_hide_database_f
     }
     fixture.sql("UPDATE auth_keys SET enabled=0 WHERE user_key='fixture-settings-admin'");
     for (path, _) in ROUTES {
-        assert_error(
+        assert_auth_error(
             &fixture.api(ADMIN, Method::GET, path, None).await,
-            StatusCode::UNAUTHORIZED,
             "auth_key_invalid",
         );
     }
