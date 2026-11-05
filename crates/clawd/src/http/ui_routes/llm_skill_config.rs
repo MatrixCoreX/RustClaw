@@ -40,27 +40,8 @@ fn llm_vendor_api_key_from_env(vendor_name: &str) -> String {
 }
 
 fn llm_vendor_api_key_for_state(state: &AppState, vendor_name: &str) -> (String, &'static str) {
-    let path = claw_core::secrets::model_environment::path(&state.skill_rt.workspace_root);
-    match claw_core::secrets::model_environment::lookup_at(&path, vendor_name) {
-        Ok(Some(value)) => return (value.expose().to_string(), "environment_file"),
-        Err(_) => return (String::new(), "none"),
-        Ok(None) => (),
-    }
-    let environment_value = llm_vendor_api_key_from_env(vendor_name);
-    if !environment_value.is_empty() {
-        return (environment_value, "environment");
-    }
-    let secret_name = claw_core::secrets::text_secret_name_for_vendor(vendor_name);
-    let credential_path = claw_core::git_remote_config::git_credential_store_path(
-        &state.skill_rt.workspace_root,
-    );
-    let broker = claw_core::secrets::EnvFileSecretsBroker::new(credential_path);
-    match broker.lookup_with_source(&secret_name) {
-        Ok(Some((secret, source))) if !secret.is_empty() => {
-            (secret.expose().to_string(), source.machine_name())
-        }
-        _ => (String::new(), "none"),
-    }
+    effective_model_provider_credential(state, vendor_name)
+        .unwrap_or_else(|_| (String::new(), "none"))
 }
 
 fn collect_llm_vendor_info(value: &toml::Value) -> Vec<Value> {

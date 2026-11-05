@@ -1,16 +1,31 @@
 fn effective_model_provider_key(state: &AppState, vendor: &str) -> anyhow::Result<String> {
-    use claw_core::secrets::{EnvFileSecretsBroker, SecretsBroker};
-    let broker = EnvFileSecretsBroker::new(
+    effective_model_provider_credential(state, vendor).map(|(key, _)| key)
+}
+
+fn effective_model_provider_credential(
+    state: &AppState,
+    vendor: &str,
+) -> anyhow::Result<(String, &'static str)> {
+    let broker = claw_core::secrets::EnvFileSecretsBroker::new(
         claw_core::git_remote_config::git_credential_store_path(&state.skill_rt.workspace_root),
     );
-    broker
-        .lookup(&claw_core::secrets::text_secret_name_for_vendor(vendor))
-        .map(|value| {
-            value
-                .map(|secret| secret.expose().to_string())
-                .unwrap_or_default()
-        })
-        .map_err(|_| model_settings_failure("credentials", "provider_keys_read_failed"))
+    if let Some((secret, source)) = broker
+        .lookup_with_source(&claw_core::secrets::text_secret_name_for_vendor(vendor))
+        .map_err(|_| model_settings_failure("credentials", "provider_keys_read_failed"))?
+        .filter(|(secret, _)| !secret.is_empty())
+    {
+        return Ok((secret.expose().to_string(), source.machine_name()));
+    }
+    // Ordinary runtime providers resolve the broker first, then the config key
+    // populated from deployment environment aliases. Legacy TOML keys remain
+    // deliberately ignored, and corrupt broker storage still fails closed here.
+    let key = llm_vendor_api_key_from_env(vendor);
+    let source = if key.is_empty() {
+        "none"
+    } else {
+        "environment"
+    };
+    Ok((key, source))
 }
 
 fn model_provider_display_mask(value: &str) -> bool {
