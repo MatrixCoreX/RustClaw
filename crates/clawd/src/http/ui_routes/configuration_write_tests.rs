@@ -301,6 +301,14 @@ async fn configuration_write_model_saves_do_not_rewrite_the_workspace_default() 
 #[tokio::test]
 async fn configuration_write_provider_keys_follow_the_selected_files() {
     let (fixture, main) = selected_fixture();
+    claw_core::secrets::model_environment::save(&fixture.root, "custom", SELECTED_SECRET).unwrap();
+    let mut selected: toml::Value = toml::from_str(&fs::read_to_string(&main).unwrap()).unwrap();
+    selected["llm"].as_table_mut().unwrap().insert(
+        "mimo".into(),
+        toml::Value::Table(toml::toml! { api_key = "" }),
+    );
+    fs::write(&main, toml::to_string(&selected).unwrap()).unwrap();
+    claw_core::secrets::model_environment::save(&fixture.root, "mimo", SELECTED_SECRET).unwrap();
     let defaults = fixture.files();
     let response = fixture
         .api(ADMIN, Method::GET, "/v1/admin/provider-keys", None)
@@ -309,7 +317,20 @@ async fn configuration_write_provider_keys_follow_the_selected_files() {
     assert_eq!(
         response.1["data"]["llm"]["custom"],
         json!(mask_secret(SELECTED_SECRET)),
-        "key reads must use the active configuration"
+        "key reads must report the selected provider's effective broker credential"
+    );
+    assert_eq!(
+        response.1["data"]["llm"]["mimo"],
+        json!(mask_secret(SELECTED_SECRET))
+    );
+    let default_config: toml::Value =
+        toml::from_str(&fs::read_to_string(fixture.root.join("configs/config.toml")).unwrap())
+            .unwrap();
+    assert!(
+        !read_llm_provider_keys(&fixture.state, &default_config)
+            .unwrap()
+            .contains_key("mimo"),
+        "the provider inventory must still come from the selected configuration"
     );
     let response = fixture
         .api(
@@ -324,7 +345,11 @@ async fn configuration_write_provider_keys_follow_the_selected_files() {
     assert_eq!(response.0, StatusCode::OK);
     assert_eq!(fixture.files(), defaults);
     let main: toml::Value = toml::from_str(&fs::read_to_string(main).unwrap()).unwrap();
-    assert_eq!(main["llm"]["custom"]["api_key"].as_str(), Some(REPLACEMENT));
+    assert_eq!(main["llm"]["custom"]["api_key"].as_str(), Some(""));
+    assert_eq!(
+        effective_model_provider_key(&fixture.state, "custom").unwrap(),
+        REPLACEMENT
+    );
 }
 
 #[test]

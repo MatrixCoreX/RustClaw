@@ -35,26 +35,7 @@ fn write_model_config(state: &AppState, req: &ModelConfigUpdateRequest) -> anyho
 
 fn write_provider_keys(state: &AppState, req: &ProviderKeysResponse) -> anyhow::Result<()> {
     let mut files = load_model_settings_files(state, !req.llm.is_empty())?;
-    if !req.llm.is_empty() {
-        let file = &mut files[0];
-        let llm = file
-            .value
-            .get_mut("llm")
-            .and_then(toml::Value::as_table_mut)
-            .ok_or_else(|| anyhow::anyhow!("model_settings_llm_section_required"))?;
-        for (vendor, key) in &req.llm {
-            if key.is_empty() {
-                continue;
-            }
-            let provider = llm
-                .entry(vendor.clone())
-                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
-            let provider = provider
-                .as_table_mut()
-                .ok_or_else(|| anyhow::anyhow!("model_settings_provider_not_table"))?;
-            file.changed |= update_model_provider_key(provider, key);
-        }
-    }
+    let updates = prepare_text_provider_keys(state, &mut files[0], &req.llm)?;
     for (index, sections) in [
         (1, &req.image),
         (2, &req.audio),
@@ -99,5 +80,10 @@ fn write_provider_keys(state: &AppState, req: &ProviderKeysResponse) -> anyhow::
             }
         }
     }
-    save_model_settings_files(state, files)
+    publish_model_provider_keys(
+        state,
+        files,
+        &updates,
+        crate::configuration_files::persistence_path(&state.skill_rt.workspace_root),
+    )
 }

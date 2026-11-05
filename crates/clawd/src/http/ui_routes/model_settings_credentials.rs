@@ -1,0 +1,92 @@
+fn effective_model_provider_key(state: &AppState, vendor: &str) -> anyhow::Result<String> {
+    use claw_core::secrets::{EnvFileSecretsBroker, SecretsBroker};
+    let broker = EnvFileSecretsBroker::new(
+        claw_core::git_remote_config::git_credential_store_path(&state.skill_rt.workspace_root),
+    );
+    broker
+        .lookup(&claw_core::secrets::text_secret_name_for_vendor(vendor))
+        .map(|value| {
+            value
+                .map(|secret| secret.expose().to_string())
+                .unwrap_or_default()
+        })
+        .map_err(|_| model_settings_failure("credentials", "provider_keys_read_failed"))
+}
+
+fn model_provider_display_mask(value: &str) -> bool {
+    let chars = value.chars().collect::<Vec<_>>();
+    ((4..=8).contains(&chars.len()) && chars.iter().all(|value| *value == '*'))
+        || (chars.len() == 12 && chars[4..8].iter().all(|value| *value == '*'))
+}
+
+fn prepare_text_provider_keys(
+    state: &AppState,
+    file: &mut ModelSettingsFile,
+    requested: &HashMap<String, String>,
+) -> anyhow::Result<Vec<(String, String)>> {
+    if requested.is_empty() {
+        return Ok(Vec::new());
+    }
+    let llm = file
+        .value
+        .get_mut("llm")
+        .and_then(toml::Value::as_table_mut)
+        .ok_or_else(|| anyhow::anyhow!("model_settings_llm_section_required"))?;
+    let mut updates = Vec::new();
+    for (vendor, raw) in requested {
+        if vendor != &vendor.trim().to_ascii_lowercase()
+            || claw_core::config::llm_vendor_api_key_env_names(vendor).is_empty()
+        {
+            return Err(model_settings_input_failure("provider_keys_vendor_invalid"));
+        }
+        let key = raw.trim();
+        if key.is_empty() {
+            continue;
+        }
+        claw_core::secrets::model_environment::validate_update(vendor, key)
+            .map_err(|_| model_settings_input_failure("provider_keys_value_invalid"))?;
+        let effective = effective_model_provider_key(state, vendor)?;
+        if key == effective || key == mask_secret(&effective) {
+            continue;
+        }
+        if model_provider_display_mask(key) {
+            return Err(model_settings_input_failure("provider_keys_mask_invalid"));
+        }
+        let provider = llm
+            .entry(vendor.clone())
+            .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+            .as_table_mut()
+            .ok_or_else(|| anyhow::anyhow!("model_settings_provider_not_table"))?;
+        // Text-model credentials are deliberately ignored in TOML at runtime.
+        // Publish only an empty reference here; the actual key goes to the broker.
+        provider.insert("api_key".into(), toml::Value::String(String::new()));
+        file.changed = true;
+        updates.push((vendor.clone(), key.to_string()));
+    }
+    Ok(updates)
+}
+
+fn publish_model_provider_keys(
+    state: &AppState,
+    files: [ModelSettingsFile; 5],
+    updates: &[(String, String)],
+    persistence: Option<PathBuf>,
+) -> anyhow::Result<()> {
+    use claw_core::secrets::model_environment::{with_saved_many, PublicationError};
+    let values = updates
+        .iter()
+        .map(|(vendor, key)| (vendor.as_str(), key.as_str()))
+        .collect::<Vec<_>>();
+    with_saved_many(&state.skill_rt.workspace_root, &values, || {
+        save_model_settings_files_with_persistence(state, files, persistence)
+    })
+    .map_err(|error| match error {
+        PublicationError::Operation(error) => error,
+        PublicationError::Environment(_) => {
+            model_settings_failure("credentials", "provider_keys_environment_write_failed")
+        }
+        PublicationError::Recovery(_) => {
+            model_settings_failure("credentials", "provider_keys_environment_rollback_failed")
+        }
+    })
+}

@@ -81,7 +81,12 @@ where
                         config_file = failure.map(|failure| failure.file),
                         "model_settings_operation_failed"
                     );
-                    crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, code)
+                    crate::api_err(
+                        failure
+                            .map(|value| value.status)
+                            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                        code,
+                    )
                 }
             }
         })

@@ -42,7 +42,7 @@ impl Fixture {
         fs::create_dir(fixture.root.join("configs")).unwrap();
         fixture.state.seed_test_auth_identity(ADMIN, "admin");
         fixture.state.seed_test_auth_identity(USER, "user");
-        fixture.write("config.toml",&format!("# fixture sentinel\n[llm]\nselected_vendor='fixture'\nselected_model='fixture-model'\n[llm.fixture]\nmodel='fixture-model'\napi_key='{SECRET}'\n[sentinel]\nkeep='main'\n"));
+        fixture.write("config.toml",&format!("# fixture sentinel\n[llm]\nselected_vendor='custom'\nselected_model='fixture-model'\n[llm.custom]\nmodel='fixture-model'\napi_key='{SECRET}'\n[sentinel]\nkeep='main'\n"));
         for (name, section) in [
             ("image.toml", "image_vision"),
             ("audio.toml", "audio_transcribe"),
@@ -117,7 +117,7 @@ impl Drop for Fixture {
 }
 
 pub(super) fn model_payload() -> Value {
-    let mut payload = json!({"llm":{"vendor":"fixture","model":"fixture-next"}});
+    let mut payload = json!({"llm":{"vendor":"custom","model":"fixture-next"}});
     for section in [
         "image_vision",
         "audio_transcribe",
@@ -129,7 +129,7 @@ pub(super) fn model_payload() -> Value {
     payload
 }
 pub(super) fn key_payload() -> Value {
-    json!({"llm":{"fixture":NEW_SECRET},"image":{"image_vision":{"fixture":NEW_SECRET}},
+    json!({"llm":{"custom":NEW_SECRET},"image":{"image_vision":{"fixture":NEW_SECRET}},
         "audio":{"audio_transcribe":{"fixture":NEW_SECRET}},"video":{"video_generation":{"fixture":NEW_SECRET}},
         "music":{"music_generation":{"fixture":NEW_SECRET}}})
 }

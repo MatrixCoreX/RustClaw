@@ -552,6 +552,7 @@ include!("ui_routes/workspace_webd.rs");
 include!("ui_routes/health_skills_import.rs");
 include!("ui_routes/model_provider_config.rs");
 include!("ui_routes/model_settings_files.rs");
+include!("ui_routes/model_settings_credentials.rs");
 include!("ui_routes/model_settings_mutations.rs");
 include!("ui_routes/model_settings_api.rs");
 include!("ui_routes/model_catalog_read.rs");

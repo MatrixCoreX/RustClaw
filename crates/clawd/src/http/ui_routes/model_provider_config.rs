@@ -135,7 +135,6 @@ fn default_model_item() -> ModelConfigItem {
     }
 }
 
-
 fn read_model_section(value: &toml::Value, section: &str) -> ModelConfigItem {
     let Some(table) = value.get(section).and_then(|t| t.as_table()) else {
         return model_item_with_capability_metadata(default_model_item(), section);
@@ -221,7 +220,10 @@ fn audio_transcription_runtime_enabled(
 }
 
 fn local_whisper_effectively_enabled(configured: bool, runtime_override: Option<&str>) -> bool {
-    match runtime_override.map(str::trim).filter(|value| !value.is_empty()) {
+    match runtime_override
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         None | Some("auto") => configured,
         Some("1" | "true" | "yes") => true,
         Some("0" | "false" | "no") => false,
@@ -476,7 +478,10 @@ fn provider_support_status(item: &ModelConfigItem) -> (Option<bool>, Option<Stri
             .iter()
             .any(|model| model.trim() == item.model.trim())
     {
-        return (Some(false), Some("model_not_in_available_models".to_string()));
+        return (
+            Some(false),
+            Some("model_not_in_available_models".to_string()),
+        );
     }
     (Some(true), None)
 }
@@ -642,20 +647,23 @@ fn read_model_config(state: &AppState) -> anyhow::Result<ModelConfigResponse> {
     })
 }
 
-
-fn read_llm_provider_keys(config: &toml::Value) -> HashMap<String, String> {
+fn read_llm_provider_keys(
+    state: &AppState,
+    config: &toml::Value,
+) -> anyhow::Result<HashMap<String, String>> {
     let mut out = HashMap::new();
     let Some(llm) = config.get("llm").and_then(|v| v.as_table()) else {
-        return out;
+        return Ok(out);
     };
-    for (k, v) in llm {
-        if let Some(tbl) = v.as_table() {
-            if let Some(ak) = tbl.get("api_key").and_then(|a| a.as_str()) {
-                out.insert(k.clone(), mask_secret(ak));
-            }
+    for (vendor, value) in llm {
+        if value.is_table() && !claw_core::config::llm_vendor_api_key_env_names(vendor).is_empty() {
+            out.insert(
+                vendor.clone(),
+                mask_secret(&effective_model_provider_key(state, vendor)?),
+            );
         }
     }
-    out
+    Ok(out)
 }
 
 fn read_module_provider_keys(
@@ -694,14 +702,13 @@ fn read_audio_provider_keys(audio: &toml::Value) -> HashMap<String, HashMap<Stri
 fn read_provider_keys(state: &AppState) -> anyhow::Result<ProviderKeysResponse> {
     let files = load_model_settings_files(state, false)?;
     Ok(ProviderKeysResponse {
-        llm: read_llm_provider_keys(&files[0].value),
+        llm: read_llm_provider_keys(state, &files[0].value)?,
         image: read_image_provider_keys(&files[1].value),
         audio: read_audio_provider_keys(&files[2].value),
         video: read_module_provider_keys(&files[3].value, &["video_generation"]),
         music: read_module_provider_keys(&files[4].value, &["music_generation"]),
     })
 }
-
 
 async fn restart_clawd(
     State(state): State<AppState>,

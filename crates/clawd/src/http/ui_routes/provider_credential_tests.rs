@@ -4,6 +4,9 @@ use super::*;
 use axum::http::Method;
 use claw_core::secrets::{model_environment, EnvFileSecretsBroker, SecretsBroker};
 
+#[path = "provider_credential_mutation_tests.rs"]
+mod mutations;
+
 const OLD_KEY: &str = "fixture-effective-credential-original-73519";
 const NEW_KEY: &str = "fixture-effective-credential-replacement-84620";
 const ENDPOINT: &str = "/v1/admin/provider-keys";

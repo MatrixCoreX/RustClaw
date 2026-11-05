@@ -4,14 +4,7 @@ pub(super) const REPLACEMENT: &str = "fixture-shared-settings-replacement-91357"
 pub(super) const SELECTED_SECRET: &str = "fixture-selected-settings-secret-82468";
 
 pub(super) fn custom_fixture() -> Fixture {
-    let fixture = Fixture::new();
-    let raw = fs::read_to_string(fixture.root.join("configs/config.toml")).unwrap();
-    fixture.write(
-        "config.toml",
-        &raw.replace("selected_vendor='fixture'", "selected_vendor='custom'")
-            .replace("[llm.fixture]", "[llm.custom]"),
-    );
-    fixture
+    Fixture::new()
 }
 
 pub(super) fn selected_fixture() -> (Fixture, PathBuf) {

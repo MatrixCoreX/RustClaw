@@ -2,6 +2,7 @@
 struct ModelSettingsFailure {
     file: &'static str,
     error_code: &'static str,
+    status: StatusCode,
 }
 
 impl std::fmt::Display for ModelSettingsFailure {
@@ -13,7 +14,19 @@ impl std::fmt::Display for ModelSettingsFailure {
 impl std::error::Error for ModelSettingsFailure {}
 
 fn model_settings_failure(file: &'static str, error_code: &'static str) -> anyhow::Error {
-    anyhow::Error::new(ModelSettingsFailure { file, error_code })
+    anyhow::Error::new(ModelSettingsFailure {
+        file,
+        error_code,
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+    })
+}
+
+fn model_settings_input_failure(error_code: &'static str) -> anyhow::Error {
+    anyhow::Error::new(ModelSettingsFailure {
+        file: "credentials",
+        error_code,
+        status: StatusCode::BAD_REQUEST,
+    })
 }
 
 struct ModelSettingsFile {

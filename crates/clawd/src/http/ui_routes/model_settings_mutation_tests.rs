@@ -105,9 +105,22 @@ async fn model_settings_masked_key_round_trip_is_a_byte_preserving_noop() {
         .await;
     assert_eq!(response.0, StatusCode::OK);
     fixture.assert_private(&response.1);
-    for (_, raw) in fixture.files() {
+    for (name, raw) in fixture.files() {
         let raw = String::from_utf8(raw.unwrap()).unwrap();
-        assert!(raw.contains(NEW_SECRET));
+        if name == "config.toml" {
+            assert!(
+                !raw.contains(NEW_SECRET),
+                "text keys must remain write-only broker secrets"
+            );
+            let parsed: toml::Value = toml::from_str(&raw).unwrap();
+            assert_eq!(parsed["llm"]["custom"]["api_key"].as_str(), Some(""));
+            assert_eq!(
+                effective_model_provider_key(&fixture.state, "custom").unwrap(),
+                NEW_SECRET
+            );
+        } else {
+            assert!(raw.contains(NEW_SECRET));
+        }
         assert!(!raw.contains(SECRET));
         assert!(toml::from_str::<toml::Value>(&raw)
             .unwrap()

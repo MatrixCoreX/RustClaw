@@ -55,6 +55,15 @@ fn valid_value(value: &str) -> bool {
         && !value.starts_with("REPLACE_ME")
 }
 
+/// Validate a write without reading credentials or modifying the filesystem.
+pub fn validate_update(vendor: &str, value: &str) -> Result<(), SecretsError> {
+    environment_name(vendor).ok_or_else(|| failure("model_environment_vendor_invalid"))?;
+    if !valid_value(value) {
+        return Err(failure("model_environment_value_invalid"));
+    }
+    Ok(())
+}
+
 fn read(path: &Path) -> Result<BTreeMap<String, String>, SecretsError> {
     let raw = read_bytes(path)?.unwrap_or_default();
     parse(&raw)
@@ -147,12 +156,56 @@ pub fn with_saved<T, E>(
     value: &str,
     publish: impl FnOnce() -> Result<T, E>,
 ) -> Result<T, PublicationError<E>> {
+    with_saved_many(workspace, &[(vendor, value)], publish)
+}
+
+/// Publish a complete vendor batch under one document lock. The callback must
+/// not call another writer of this same document. Empty/unchanged updates run
+/// the associated operation without rewriting existing credential bytes.
+pub fn with_saved_many<T, E>(
+    workspace: &Path,
+    updates: &[(&str, &str)],
+    publish: impl FnOnce() -> Result<T, E>,
+) -> Result<T, PublicationError<E>> {
+    if updates.is_empty() {
+        return publish().map_err(PublicationError::Operation);
+    }
+    let mut validated = BTreeMap::new();
+    for (vendor, value) in updates {
+        validate_update(vendor, value).map_err(PublicationError::Environment)?;
+        let name = environment_name(vendor).expect("vendor validated");
+        if validated.insert(name, *value).is_some() {
+            return Err(PublicationError::Environment(failure(
+                "model_environment_duplicate_vendor",
+            )));
+        }
+    }
     let path = path(workspace);
     validate_path(&path).map_err(PublicationError::Environment)?;
     let _lock = super::file::lock_document(&path, "model_environment")
         .map_err(PublicationError::Environment)?;
-    let (original, payload) =
-        prepare(&path, vendor, value).map_err(PublicationError::Environment)?;
+    let original = read_bytes(&path).map_err(PublicationError::Environment)?;
+    let mut entries =
+        parse(original.as_deref().unwrap_or_default()).map_err(PublicationError::Environment)?;
+    if validated
+        .iter()
+        .all(|(name, value)| entries.get(*name).map(String::as_str) == Some(*value))
+    {
+        return publish().map_err(PublicationError::Operation);
+    }
+    for (name, value) in validated {
+        entries.insert(name.into(), value.into());
+    }
+    let mut payload =
+        String::from("# Managed model credentials. Literal assignments; do not source as shell.\n");
+    for (key, value) in entries {
+        payload.push_str(&format!("{key}={value}\n"));
+    }
+    if payload.len() as u64 > MAX_FILE_BYTES {
+        return Err(PublicationError::Environment(failure(
+            "model_environment_file_too_large",
+        )));
+    }
     replace(&path, payload.as_bytes()).map_err(PublicationError::Environment)?;
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(publish)) {
         Ok(Ok(result)) => Ok(result),
@@ -168,27 +221,6 @@ pub fn with_saved<T, E>(
             std::panic::resume_unwind(panic)
         }
     }
-}
-
-fn prepare(
-    path: &Path,
-    vendor: &str,
-    value: &str,
-) -> Result<(Option<Vec<u8>>, String), SecretsError> {
-    let name =
-        environment_name(vendor).ok_or_else(|| failure("model_environment_vendor_invalid"))?;
-    if !valid_value(value) {
-        return Err(failure("model_environment_value_invalid"));
-    }
-    let original = read_bytes(path)?;
-    let mut entries = parse(original.as_deref().unwrap_or_default())?;
-    entries.insert(name.into(), value.into());
-    let mut payload =
-        String::from("# Managed model credentials. Literal assignments; do not source as shell.\n");
-    for (key, value) in entries {
-        payload.push_str(&format!("{key}={value}\n"));
-    }
-    Ok((original, payload))
 }
 
 fn restore(path: &Path, original: Option<&[u8]>, updated: &[u8]) -> Result<(), SecretsError> {

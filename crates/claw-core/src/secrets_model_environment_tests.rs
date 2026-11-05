@@ -1,6 +1,9 @@
 use super::*;
 use crate::secrets::{EnvFileSecretsBroker, SecretsBroker};
 
+#[path = "secrets_model_environment_batch_tests.rs"]
+mod batch;
+
 struct OwnedFixture(PathBuf);
 impl Drop for OwnedFixture {
     fn drop(&mut self) {
