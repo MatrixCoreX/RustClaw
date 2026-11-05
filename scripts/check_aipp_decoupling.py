@@ -8,12 +8,14 @@ import re
 import sys
 import tomllib
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_ROOTS = ("crates/skills", "optional_skills", "external_skills")
 HOST_FILES = (
     "crates/clawd/src/http/ui_routes/aipp.rs",
+    "crates/clawd/src/http/ui_routes/aipp_assets.rs",
     "crates/clawd/src/http/ui_routes/aipp_activity_query.rs",
     "UI/src/components/AippPage.tsx",
 )
@@ -112,6 +114,7 @@ def inspect(root: Path) -> tuple[list[str], int, int]:
 
 
 def self_test() -> int:
+    assert "crates/clawd/src/http/ui_routes/aipp_assets.rs" in HOST_FILES
     assert "crates/clawd/src/http/ui_routes/aipp_activity_query.rs" in HOST_FILES
     assert safe_skill_name("sample_app") == "sample_app"
     assert safe_skill_name("../escape") is None
@@ -119,6 +122,28 @@ def self_test() -> int:
     assert re.search(r"(?<![a-z0-9_-])sample_app(?![a-z0-9_-])", source)
     assert ("task_activity_v1", "skill_task_activity_v1") in SUPPORTED_HOST_PAIRS
     assert "capability_bridge_v1" in SUPPORTED_SANDBOX_CONTRACTS
+    with TemporaryDirectory(prefix="aipp-decoupling-self-test-") as temporary:
+        root = Path(temporary)
+        manifest = root / "optional_skills/sample_app/skill.toml"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(
+            '[package]\nname = "sample_app"\n[aipp]\nrenderer = "task_activity_v1"\n'
+            'data_contract = "skill_task_activity_v1"\ntask_channel_scope = "all"\n',
+            encoding="utf-8",
+        )
+        for relative in HOST_FILES:
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("", encoding="utf-8")
+        assert inspect(root) == ([], 1, 0)
+        for relative in HOST_FILES:
+            path = root / relative
+            path.write_text('if skill == "sample_app" {}', encoding="utf-8")
+            assert inspect(root)[0] == [f"aipp_host_skill_branch path={relative} skill=sample_app"]
+            path.unlink()
+            assert len(inspect(root)[0]) == 1
+            assert inspect(root)[0][0].startswith(f"aipp_host_source_unreadable path={relative}")
+            path.write_text("", encoding="utf-8")
     print("AIPP_DECOUPLING_SELF_TEST ok")
     return 0
 

@@ -114,6 +114,7 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
         self.assertIn("aipp_decoupling", build["run"])
         self.assertIn("ui_auth_error_contract", build["run"])
         self.assertIn("model_catalog_fixture_isolation", build["run"])
+        self.assertIn("aipp_read_surfaces", build["run"])
         self.assertIn("attest-build-provenance@", attest["uses"])
         self.assertIn("${{ github.sha }}", upload["with"]["name"])
         self.assertEqual(runtime["permissions"]["id-token"], "write")

@@ -4,6 +4,9 @@ use std::sync::Arc;
 #[path = "aipp_items_runtime_tests.rs"]
 mod runtime;
 
+#[path = "aipp_read_surfaces_tests.rs"]
+mod read_surfaces;
+
 struct Workspace(PathBuf);
 
 impl Drop for Workspace {
