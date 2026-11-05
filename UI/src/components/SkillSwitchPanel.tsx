@@ -13,6 +13,7 @@ import {
 } from "../lib/skill-display";
 import type { SkillListItem, SkillStoreResponse, SkillsConfigResponse } from "../types/api";
 import { SkillRemovalDialog } from "./SkillRemovalDialog";
+import { skillSwitchIsChanged } from "../lib/skill-switches";
 
 type Translate = (zh: string, en: string) => string;
 type TranslateSlash = (text: string) => string;
@@ -108,9 +109,7 @@ export function SkillSwitchPanel({
     const visibleCapabilities = (skillItem?.capabilities ?? []).slice(0, 3);
     const visibleIsolationLabels = skillIsolationLabels(skillItem, lang).slice(0, 2);
     const configuredEnabled = configuredEnabledSkills.has(name);
-    const persistedSwitchValue = skillsConfigData?.skill_switches?.[name];
-    const draftSwitchValue = skillSwitchDraft[name];
-    const pendingApply = persistedSwitchValue !== draftSwitchValue;
+    const pendingApply = skillSwitchIsChanged(skillsConfigData, skillSwitchDraft, name, lockedSkillNamesSet);
     const isRecentImport = recentImportedSkillName === name;
     const isExternalSkill = externalSkillNamesSet.has(name);
     const isLockedSkill = lockedSkillNamesSet.has(name);

@@ -24,11 +24,13 @@ function configuration(switches: Record<string, boolean> = {}): SkillsConfigResp
   };
 }
 
-async function harness(initial = configuration()) {
+async function harness(initial = configuration(), load = true) {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   let current!: ReturnType<typeof useSkillsRuntime>;
   let server = initial;
   let failSave = false;
+  let readOverride: { data: unknown } | null = null;
+  let saveOverride: { data: unknown } | null = null;
   const posts: Array<Record<string, unknown>> = [];
   const apiFetch = async (path: string, init?: RequestInit) => {
     if (path === "/v1/skills/config") {
@@ -38,10 +40,11 @@ async function harness(initial = configuration()) {
         if (failSave) {
           return new Response(JSON.stringify({ ok: false, data: null, error: "skill_admission_generation_changed" }), { status: 409 });
         }
+        if (saveOverride) return new Response(JSON.stringify({ ok: true, data: saveOverride.data }));
         server = { ...server, skill_switches: { ...server.skill_switches, ...(request.skill_switches as Record<string, boolean>) } };
         return new Response(JSON.stringify({ ok: true, data: server }));
       }
-      return new Response(JSON.stringify({ ok: true, data: server }));
+      return new Response(JSON.stringify({ ok: true, data: readOverride ? readOverride.data : server }));
     }
     if (path === "/v1/skills") return new Response(JSON.stringify({ ok: true, data: { skills: [], skill_items: [] } }));
     throw new Error(`unexpected fixture request: ${path}`);
@@ -49,10 +52,14 @@ async function harness(initial = configuration()) {
   function Probe() { current = useSkillsRuntime({ apiFetch, t }); return null; }
   let renderer!: ReactTestRenderer;
   await act(async () => { renderer = create(React.createElement(UiDialogProvider, null, React.createElement(Probe))); });
-  await act(async () => { await current.fetchSkillsConfig(); });
+  if (load) await act(async () => { await current.fetchSkillsConfig(); });
   return {
     get current() { return current; }, posts,
     failSave() { failSave = true; },
+    overrideRead(data: unknown) { readOverride = { data }; },
+    overrideSave(data: unknown) { saveOverride = { data }; },
+    async refresh() { await act(async () => { await current.fetchSkillsConfig(); }); },
+    async saveTwice() { await act(async () => { await Promise.all([current.saveSkillSwitches(), current.saveSkillSwitches()]); }); },
     async toggle(name: string, enabled: boolean) { await act(async () => { current.toggleSkillEnabled(name, enabled); }); },
     async save() { await act(async () => { await current.saveSkillSwitches(); }); },
     async dispose() { await act(async () => { renderer.unmount(); }); },
@@ -124,5 +131,73 @@ test("a failed update keeps the unsaved intent and never reports success or retr
     assert.equal(h.current.skillSwitchSaveMessage, null);
     assert.ok(h.current.skillsConfigError);
     assert.equal(h.current.skillSwitchSaving, false);
+  } finally { await h.dispose(); }
+});
+
+test("duplicate save callbacks in the same render issue only one mutation", async () => {
+  const h = await harness();
+  try {
+    await h.toggle(ALPHA, false);
+    await h.saveTwice();
+    assert.equal(h.posts.length, 1);
+    assert.equal(h.current.skillSwitchSaving, false);
+    assert.equal(h.current.hasUnsavedSkillSwitchChanges, false);
+  } finally { await h.dispose(); }
+});
+
+test("saving before the settings are loaded issues no mutation", async () => {
+  const h = await harness(configuration(), false);
+  try {
+    await h.save();
+    assert.equal(h.posts.length, 0);
+    assert.equal(h.current.skillSwitchSaveMessage, null);
+    assert.ok(h.current.skillsConfigError);
+  } finally { await h.dispose(); }
+});
+
+test("a malformed success response retains the edit without a restart dialog or success message", async () => {
+  const h = await harness();
+  try {
+    await h.toggle(ALPHA, false);
+    h.overrideSave({ skill_switches: { [ALPHA]: false } });
+    await h.save();
+    assert.equal(h.posts.length, 1);
+    assert.equal(h.current.skillSwitchSaveMessage, null);
+    assert.equal(h.current.hasUnsavedSkillSwitchChanges, true);
+    assert.ok(h.current.skillsConfigError);
+    assert.equal(h.current.skillSwitchSaving, false);
+  } finally { await h.dispose(); }
+});
+
+test("an unapplied success acknowledgement retains the edit and explains the next action", async () => {
+  const h = await harness();
+  try {
+    await h.toggle(ALPHA, false);
+    h.overrideSave(configuration());
+    await h.save();
+    assert.equal(h.posts.length, 1);
+    assert.equal(h.current.skillSwitchSaveMessage, null);
+    assert.equal(h.current.hasUnsavedSkillSwitchChanges, true);
+    assert.equal(h.current.configuredEnabledSkills.has(ALPHA), false);
+    assert.match(h.current.skillsConfigError ?? "", /not applied/);
+  } finally { await h.dispose(); }
+});
+
+test("malformed configuration reads do not replace an established baseline or pending intent", async () => {
+  const h = await harness();
+  try {
+    const baseline = h.current.skillsConfigData;
+    await h.toggle(ALPHA, false);
+    h.overrideRead({ ...configuration(), skill_switches: { [ALPHA]: "false" } });
+    await h.refresh();
+    assert.equal(h.current.skillsConfigData, baseline);
+    assert.equal(h.current.configuredEnabledSkills.has(ALPHA), false);
+    assert.equal(h.current.hasUnsavedSkillSwitchChanges, true);
+    assert.ok(h.current.skillsConfigError);
+    h.overrideRead({ ...configuration(), locked_skill_names: {} });
+    await h.refresh();
+    assert.equal(h.current.skillsConfigData, baseline);
+    assert.equal(h.current.hasUnsavedSkillSwitchChanges, true);
+    assert.equal(h.current.skillsConfigLoading, false);
   } finally { await h.dispose(); }
 });

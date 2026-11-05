@@ -12,6 +12,7 @@ import {
 } from "../lib/skill-display";
 import { removableSkillNames, resolveSkillStoreActionName, skillStoreErrorMessage } from "../lib/skill-store";
 import { formatUiError } from "../lib/ui-error";
+import { confirmSkillSwitchUpdate, hasSkillSwitchBaseline, skillSwitchChanges, skillSwitchErrorMessage } from "../lib/skill-switches";
 import type {
   ApiResponse,
   BrowserFileWithPath,
@@ -41,6 +42,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
   const [skillsConfigData, setSkillsConfigData] = useState<SkillsConfigResponse | null>(null);
   const [skillSwitchDraft, setSkillSwitchDraft] = useState<Record<string, boolean>>({});
   const [skillSwitchSaving, setSkillSwitchSaving] = useState(false);
+  const skillSwitchSaveInFlight = useRef(false);
   const [skillStoreData, setSkillStoreData] = useState<SkillStoreResponse | null>(null);
   const [skillStoreLoading, setSkillStoreLoading] = useState(false);
   const [skillStoreError, setSkillStoreError] = useState<string | null>(null);
@@ -83,8 +85,8 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     try {
       const res = await apiFetch(`/v1/skills/config`);
       const body = (await res.json()) as ApiResponse<SkillsConfigResponse>;
-      if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `skill_config_fetch_http_${res.status}`);
+      if (!res.ok || !body?.ok || !body.data || !hasSkillSwitchBaseline(body.data)) {
+        throw new Error(body?.error || `skill_config_fetch_http_${res.status}`);
       }
       setSkillsConfigData(body.data);
       const nextSwitchDraft = { ...(body.data.skill_switches || {}) };
@@ -254,19 +256,11 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
     return set;
   }, [lockedSkillNamesSet, skillsConfigData, skillSwitchDraft]);
 
-  const hasUnsavedSkillSwitchChanges = useMemo(() => {
-    const persisted = skillsConfigData?.skill_switches ?? {};
-    const keys = new Set<string>([
-      ...Object.keys(persisted).filter(isVisibleSkillName),
-      ...Object.keys(skillSwitchDraft).filter(isVisibleSkillName),
-    ]);
-    for (const key of keys) {
-      if (persisted[key] !== skillSwitchDraft[key]) {
-        return true;
-      }
-    }
-    return false;
-  }, [skillsConfigData, skillSwitchDraft]);
+  const pendingSkillSwitchChanges = useMemo(
+    () => skillSwitchChanges(skillsConfigData, skillSwitchDraft, lockedSkillNamesSet),
+    [skillsConfigData, skillSwitchDraft, lockedSkillNamesSet],
+  );
+  const hasUnsavedSkillSwitchChanges = Object.keys(pendingSkillSwitchChanges).length > 0;
 
   const normalizedSkillsSearchQuery = useMemo(() => normalizeSkillSearchQuery(skillsSearchQuery), [skillsSearchQuery]);
   const filteredManagedSkills = useMemo(
@@ -337,25 +331,33 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
   ]);
 
   const saveSkillSwitches = async (restartSystem?: RestartSystem) => {
-    setSkillSwitchSaving(true);
+    if (skillSwitchSaveInFlight.current) return;
     setSkillSwitchSaveMessage(null);
     setSkillsConfigError(null);
+    if (!skillsConfigData) {
+      setSkillsConfigError(t("技能设置尚未加载，请先刷新。", "Load the skill settings before saving."));
+      return;
+    }
+    if (!hasUnsavedSkillSwitchChanges) {
+      setSkillSwitchSaveMessage(t("当前没有需要保存的修改。", "There are no changes to save."));
+      return;
+    }
+    skillSwitchSaveInFlight.current = true;
+    setSkillSwitchSaving(true);
     try {
       const res = await apiFetch(`/v1/skills/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ skill_switches: skillSwitchDraft }),
+        body: JSON.stringify({ skill_switches: pendingSkillSwitchChanges }),
       });
-      const body = (await res.json()) as ApiResponse<{
-        restart_required?: boolean;
-      }>;
-      if (!res.ok || !body.ok) {
-        throw new Error(body.error || `skill_config_save_http_${res.status}`);
+      const body = (await res.json()) as ApiResponse<unknown>;
+      if (!res.ok || !body?.ok) {
+        throw new Error(body?.error || `skill_config_save_http_${res.status}`);
       }
-      const restartRequired = body.data?.restart_required ?? true;
+      const restartRequired = confirmSkillSwitchUpdate(body.data, pendingSkillSwitchChanges);
       let savedMessage = t(
-        "技能开关已保存到 config.toml。",
-        "Skill switches were saved to config.toml.",
+        "技能开关已生效。",
+        "Skill switches are active.",
       );
       if (restartRequired) {
         const confirmed = await showConfirm({
@@ -394,9 +396,10 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       await fetchSkillsConfig();
       await fetchSkills();
     } catch (err) {
-      const message = formatUiError(err, t, "技能设置保存失败，请稍后重试。", "Skill settings could not be saved. Try again shortly.");
+      const message = skillSwitchErrorMessage(err, t);
       setSkillsConfigError(message);
     } finally {
+      skillSwitchSaveInFlight.current = false;
       setSkillSwitchSaving(false);
     }
   };
@@ -613,7 +616,7 @@ export function useSkillsRuntime({ apiFetch, t }: UseSkillsRuntimeParams) {
       if (nextEnabled === baseEnabled) {
         delete next[name];
       } else {
-        next[name] = nextEnabled;
+        return { ...prev, [name]: nextEnabled };
       }
       return next;
     });
