@@ -1,7 +1,6 @@
 use super::*;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -30,14 +29,95 @@ impl Drop for EnvRestore {
     }
 }
 
-fn temp_workspace_root() -> PathBuf {
-    let unique = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock")
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("agent-runtime-model-catalog-{unique}"));
-    std::fs::create_dir_all(root.join("configs")).expect("create configs");
-    root
+struct FixtureWorkspace(PathBuf);
+
+impl AsRef<Path> for FixtureWorkspace {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for FixtureWorkspace {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for FixtureWorkspace {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn claim_workspace_root(path: PathBuf) -> std::io::Result<FixtureWorkspace> {
+    std::fs::create_dir(&path)?;
+    let root = FixtureWorkspace(path);
+    std::fs::create_dir(root.join("configs"))?;
+    Ok(root)
+}
+
+fn temp_workspace_root() -> FixtureWorkspace {
+    let root = std::env::temp_dir().join(format!(
+        "agent-runtime-model-catalog-{}",
+        uuid::Uuid::new_v4()
+    ));
+    claim_workspace_root(root).expect("claim private workspace")
+}
+
+#[test]
+fn catalog_fixture_collision_never_reuses_or_removes_existing_workspace() {
+    let root = temp_workspace_root();
+    let config = root.join("configs/config.toml");
+    std::fs::write(&config, "original fixture").expect("write original");
+    let result = claim_workspace_root(root.to_path_buf());
+    assert_eq!(
+        result.err().expect("collision").kind(),
+        std::io::ErrorKind::AlreadyExists
+    );
+    assert_eq!(
+        std::fs::read_to_string(config).expect("original preserved"),
+        "original fixture"
+    );
+}
+
+#[test]
+fn catalog_fixture_parallel_workspaces_keep_independent_content() {
+    let workers: Vec<_> = (0..32)
+        .map(|index| {
+            std::thread::spawn(move || {
+                let root = temp_workspace_root();
+                std::fs::write(root.join("owner"), index.to_string()).expect("write owner");
+                (index, root)
+            })
+        })
+        .collect();
+    let workspaces: Vec<_> = workers
+        .into_iter()
+        .map(|worker| worker.join().expect("worker"))
+        .collect();
+    let paths: std::collections::BTreeSet<_> = workspaces
+        .iter()
+        .map(|(_, root)| root.to_path_buf())
+        .collect();
+    assert_eq!(paths.len(), workspaces.len());
+    for (index, root) in workspaces {
+        assert_eq!(
+            std::fs::read_to_string(root.join("owner")).expect("read owner"),
+            index.to_string()
+        );
+    }
+}
+
+#[test]
+fn catalog_fixture_drop_removes_only_its_owned_workspace() {
+    let root = temp_workspace_root();
+    let neighbor = temp_workspace_root();
+    let path = root.to_path_buf();
+    drop(root);
+    assert!(!path.exists());
+    assert!(neighbor.join("configs").is_dir());
 }
 
 fn write_fixture(root: &Path) {

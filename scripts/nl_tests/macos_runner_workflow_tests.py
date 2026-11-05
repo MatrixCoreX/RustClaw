@@ -89,6 +89,12 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
         for selector in ["task_event_transport", "auth_contract_tests", "aipp", "run_skill"]:
             self.assertIn(f"cargo test --locked -p clawd --bin clawd {selector}", gate["run"])
         native_steps = jobs["polyglot-skill-macos"]["steps"]
+        stress_command = "cargo test --locked -p claw-core model_catalog::tests -- --test-threads=16"
+        self.assertIn(stress_command, gate["run"])
+        self.assertIn("for attempt in 1 2 3 4 5; do", gate["run"])
+        native_stress = [step for step in native_steps if stress_command in step.get("run", "")]
+        self.assertEqual(len(native_stress), 1)
+        self.assertIn("for attempt in 1 2 3 4 5; do", native_stress[0]["run"])
         auth_command = "cargo test --locked -p clawd --bin clawd auth_contract_tests"
         self.assertEqual(sum(auth_command in step.get("run", "") for step in native_steps), 1)
         self.assertNotIn("--bin clawd task_event_archive", gate["run"])
@@ -107,6 +113,7 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
         self.assertIn("source-commit", build["run"])
         self.assertIn("aipp_decoupling", build["run"])
         self.assertIn("ui_auth_error_contract", build["run"])
+        self.assertIn("model_catalog_fixture_isolation", build["run"])
         self.assertIn("attest-build-provenance@", attest["uses"])
         self.assertIn("${{ github.sha }}", upload["with"]["name"])
         self.assertEqual(runtime["permissions"]["id-token"], "write")
