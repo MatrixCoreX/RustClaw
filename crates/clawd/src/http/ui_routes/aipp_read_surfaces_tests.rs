@@ -58,15 +58,23 @@ async fn error_body(
         .await
         .unwrap();
     let body: Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(
-        body,
-        json!({
-            "ok": false, "error": code,
-            "data": if auth { Value::Null } else { json!({
-                "error_code": code, "message_key": format!("clawd.ui.aipp.{code}"),
-            }) },
-        })
-    );
+    // Pin the existing auth boundary's distinct response contracts, not an empty payload.
+    let data = if auth {
+        match code {
+            "auth_key_required" | "auth_key_invalid" => json!({
+                "owner_layer": "ui_auth", "error_code": code, "status_code": code,
+                "message_key": format!("clawd.ui.auth.{code}"),
+            }),
+            "admin_required" => json!({
+                "error_code": code, "message_key": "clawd.ui.auth.admin_required",
+            }),
+            "auth_lookup_failed" => Value::Null,
+            _ => panic!("unexpected auth contract: {code}"),
+        }
+    } else {
+        json!({"error_code": code, "message_key": format!("clawd.ui.aipp.{code}")})
+    };
+    assert_eq!(body, json!({"ok": false, "error": code, "data": data}));
 }
 
 async fn pool_wait(key: &'static str, status: StatusCode, code: Option<&str>) {
