@@ -1,5 +1,82 @@
 use super::*;
 
+fn relay_config(fixture: &Fixture) -> toml::Value {
+    let mut config: toml::Value =
+        toml::from_str(&fs::read_to_string(fixture.root.join("configs/config.toml")).unwrap())
+            .unwrap();
+    config["llm"].as_table_mut().unwrap().insert(
+        "hosted_relay".into(),
+        toml::Value::Table(toml::toml! {
+            enabled = true
+            vendor = "custom"
+            model = "fixture-model"
+            base_url = "https://fixture.invalid/v1"
+        }),
+    );
+    config
+}
+
+#[tokio::test]
+async fn provider_credentials_current_non_relay_model_is_not_blocked_by_a_stale_relay_default_model(
+) {
+    let fixture = fixture(&["custom"]);
+    let mut config = relay_config(&fixture);
+    config["llm"]["selected_model"] = toml::Value::String("fixture-non-relay-model".into());
+    fs::write(
+        fixture.root.join("configs/config.toml"),
+        toml::to_string(&config).unwrap(),
+    )
+    .unwrap();
+    let read = fixture.api(ADMIN, Method::GET, ENDPOINT, None).await;
+    assert_eq!(read.0, StatusCode::OK);
+    assert_eq!(read.1["data"]["llm"]["custom"], mask_secret(OLD_KEY));
+    let saved = fixture
+        .api(
+            ADMIN,
+            Method::POST,
+            ENDPOINT,
+            Some(json!({"llm":{"custom":NEW_KEY}})),
+        )
+        .await;
+    assert_eq!(saved.0, StatusCode::OK);
+    assert_eq!(effective(&fixture, "custom").as_deref(), Some(NEW_KEY));
+}
+
+#[tokio::test]
+async fn provider_credentials_hosted_relay_keeps_device_authorization_separate_from_manual_vendor_keys(
+) {
+    let fixture = fixture(&["custom"]);
+    let main = fixture.root.join("configs/config.toml");
+    let config = relay_config(&fixture);
+    fs::write(&main, toml::to_string(&config).unwrap()).unwrap();
+    let before = fixture.files();
+    let credentials = credential_bytes(&fixture);
+    let read = fixture.api(ADMIN, Method::GET, ENDPOINT, None).await;
+    assert_eq!(read.0, StatusCode::OK);
+    assert_eq!(read.1["data"]["llm"]["custom"], mask_secret(""));
+    let rejected = fixture
+        .api(
+            ADMIN,
+            Method::POST,
+            ENDPOINT,
+            Some(json!({"llm":{"custom":NEW_KEY}})),
+        )
+        .await;
+    assert_eq!(rejected.0, StatusCode::BAD_REQUEST);
+    assert_eq!(rejected.1["error"], "hosted_relay_manual_key_not_allowed");
+    let noop = fixture
+        .api(ADMIN, Method::POST, ENDPOINT, Some(read.1["data"].clone()))
+        .await;
+    assert_eq!(noop, read);
+    assert_eq!(fixture.files(), before);
+    assert_eq!(credential_bytes(&fixture), credentials);
+    assert_eq!(
+        effective(&fixture, "custom").as_deref(),
+        Some(OLD_KEY),
+        "unrelated saved keys are preserved, not deleted"
+    );
+}
+
 fn prepared(
     fixture: &Fixture,
     values: &[(&str, &str)],

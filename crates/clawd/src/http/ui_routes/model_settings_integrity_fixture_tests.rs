@@ -42,7 +42,7 @@ impl Fixture {
         fs::create_dir(fixture.root.join("configs")).unwrap();
         fixture.state.seed_test_auth_identity(ADMIN, "admin");
         fixture.state.seed_test_auth_identity(USER, "user");
-        fixture.write("config.toml",&format!("# fixture sentinel\n[llm]\nselected_vendor='custom'\nselected_model='fixture-model'\n[llm.custom]\nmodel='fixture-model'\napi_key='{SECRET}'\n[sentinel]\nkeep='main'\n"));
+        fixture.write("config.toml",&format!("# fixture sentinel\n[llm]\nselected_vendor='custom'\nselected_model='fixture-model'\n[llm.custom]\nmodel='fixture-model'\nbase_url='https://fixture.invalid/v1'\napi_key='{SECRET}'\n[sentinel]\nkeep='main'\n"));
         for (name, section) in [
             ("image.toml", "image_vision"),
             ("audio.toml", "audio_transcribe"),

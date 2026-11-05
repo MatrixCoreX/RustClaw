@@ -19,6 +19,34 @@ fn model_provider_display_mask(value: &str) -> bool {
         || (chars.len() == 12 && chars[4..8].iter().all(|value| *value == '*'))
 }
 
+fn model_provider_uses_device_enrollment(config: &toml::Value, vendor: &str) -> bool {
+    let llm = config.get("llm");
+    let provider = llm.and_then(|value| value.get(vendor));
+    let selected = llm
+        .and_then(|value| value.get("selected_vendor"))
+        .and_then(toml::Value::as_str)
+        .is_some_and(|value| value.eq_ignore_ascii_case(vendor));
+    let model = selected
+        .then(|| {
+            llm.and_then(|value| value.get("selected_model"))
+                .and_then(toml::Value::as_str)
+        })
+        .flatten()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            provider
+                .and_then(|value| value.get("model"))
+                .and_then(toml::Value::as_str)
+        })
+        .unwrap_or("");
+    let base = provider
+        .and_then(|value| value.get("base_url"))
+        .and_then(toml::Value::as_str)
+        .unwrap_or("");
+    matches_hosted_relay_preset(config, vendor, model, base)
+}
+
 fn prepare_text_provider_keys(
     state: &AppState,
     file: &mut ModelSettingsFile,
@@ -27,10 +55,9 @@ fn prepare_text_provider_keys(
     if requested.is_empty() {
         return Ok(Vec::new());
     }
-    let llm = file
-        .value
-        .get_mut("llm")
-        .and_then(toml::Value::as_table_mut)
+    file.value
+        .get("llm")
+        .and_then(toml::Value::as_table)
         .ok_or_else(|| anyhow::anyhow!("model_settings_llm_section_required"))?;
     let mut updates = Vec::new();
     for (vendor, raw) in requested {
@@ -43,6 +70,14 @@ fn prepare_text_provider_keys(
         if key.is_empty() {
             continue;
         }
+        if model_provider_uses_device_enrollment(&file.value, vendor) {
+            if key == mask_secret("") {
+                continue;
+            }
+            return Err(model_settings_input_failure(
+                "hosted_relay_manual_key_not_allowed",
+            ));
+        }
         claw_core::secrets::model_environment::validate_update(vendor, key)
             .map_err(|_| model_settings_input_failure("provider_keys_value_invalid"))?;
         let effective = effective_model_provider_key(state, vendor)?;
@@ -52,6 +87,14 @@ fn prepare_text_provider_keys(
         if model_provider_display_mask(key) {
             return Err(model_settings_input_failure("provider_keys_mask_invalid"));
         }
+        updates.push((vendor.clone(), key.to_string()));
+    }
+    let llm = file
+        .value
+        .get_mut("llm")
+        .and_then(toml::Value::as_table_mut)
+        .expect("llm table validated");
+    for (vendor, _) in &updates {
         let provider = llm
             .entry(vendor.clone())
             .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
@@ -61,7 +104,6 @@ fn prepare_text_provider_keys(
         // Publish only an empty reference here; the actual key goes to the broker.
         provider.insert("api_key".into(), toml::Value::String(String::new()));
         file.changed = true;
-        updates.push((vendor.clone(), key.to_string()));
     }
     Ok(updates)
 }

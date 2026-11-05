@@ -657,10 +657,14 @@ fn read_llm_provider_keys(
     };
     for (vendor, value) in llm {
         if value.is_table() && !claw_core::config::llm_vendor_api_key_env_names(vendor).is_empty() {
-            out.insert(
-                vendor.clone(),
-                mask_secret(&effective_model_provider_key(state, vendor)?),
-            );
+            // Enrolled bearer tokens are not editable vendor credentials. Do
+            // not expose or suggest use of an unrelated CUSTOM_API_KEY here.
+            let key = if model_provider_uses_device_enrollment(config, vendor) {
+                String::new()
+            } else {
+                effective_model_provider_key(state, vendor)?
+            };
+            out.insert(vendor.clone(), mask_secret(&key));
         }
     }
     Ok(out)
