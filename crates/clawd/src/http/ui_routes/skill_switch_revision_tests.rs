@@ -68,7 +68,7 @@ async fn switch_revision_noop_preserves_the_runtime_view_and_admission_pointer()
     assert_eq!(response.0, StatusCode::OK, "{}", response.1);
     assert_eq!(response.1["data"]["revision"], revision);
     assert_eq!(response.1["data"]["restart_required"], false);
-    assert!(Arc::ptr_eq(
+    assert!(std::sync::Arc::ptr_eq(
         &view,
         &fixture.state.core.skill_views_snapshot.read().unwrap()
     ));
