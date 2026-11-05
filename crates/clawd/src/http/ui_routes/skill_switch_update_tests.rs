@@ -4,6 +4,9 @@ use skill_sdk::AdmissionState;
 #[path = "skill_switch_update_offload_tests.rs"]
 mod offload;
 
+#[path = "skill_switch_revision_tests.rs"]
+mod revision;
+
 const ALPHA: &str = "switch_api_alpha";
 const BETA: &str = "switch_api_beta";
 const USER: &str = "switch-api-user";
