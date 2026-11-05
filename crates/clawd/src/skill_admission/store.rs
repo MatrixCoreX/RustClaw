@@ -318,6 +318,17 @@ impl SkillAdmissionService {
         self.validate_generation(&pointer, &record, &generation_root, true)
     }
 
+    /// Keep full execution verification and its publication in the same
+    /// boundary as admission mutations. A verified but superseded snapshot
+    /// must not be published after a later disable, removal, or rollback.
+    /// The callback must not start another mutation on this admission root.
+    pub(crate) fn with_verified_snapshot<T>(
+        &self,
+        publish: impl FnOnce(OverlaySnapshot) -> T,
+    ) -> Result<T> {
+        self.with_mutation_lock(|| self.snapshot().map(publish))
+    }
+
     /// Read the signed admission state for control-plane display without
     /// re-hashing every installed package artifact.
     ///

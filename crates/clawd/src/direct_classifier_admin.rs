@@ -129,27 +129,46 @@ struct TaskHistoryItem {
     duration_seconds: i64,
 }
 
-/// Phase 4: 重载 skill 视图。POST /v1/admin/reload-skills。与现有管理接口一致：需 x-agent-key 鉴权。
 async fn reload_skills_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
-    if let Err((status, json)) = http::ui_routes::require_ui_identity(&state, &headers) {
-        return (status, json);
-    }
-    match reload_skill_views(&state) {
-        Ok(result) => api_ok(serde_json::to_value(&result).unwrap_or_default()),
-        Err(e) => {
-            warn!("reload_skill_views failed: {}", e);
-            api_err::<serde_json::Value>(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                i18n_t_with_default_vars(
-                    &state,
-                    "clawd.msg.reload_failed",
-                    "reload failed: {err}",
-                    &[("err", &e.to_string())],
-                ),
-            )
+    skill_reload_request(state, headers, |state| {
+        reload_skill_views(state).map(|result| serde_json::to_value(result).unwrap_or_default())
+    })
+    .await
+}
+
+async fn skill_reload_request<F>(
+    state: AppState,
+    headers: HeaderMap,
+    reload: F,
+) -> (StatusCode, Json<ApiResponse<serde_json::Value>>)
+where
+    F: FnOnce(&AppState) -> Result<serde_json::Value, String> + Send + 'static,
+{
+    match tokio::task::spawn_blocking(move || {
+        if let Err(response) = http::ui_routes::require_ui_admin(&state, &headers) {
+            return response;
+        }
+        match reload(&state) {
+            Ok(result) => api_ok(result),
+            Err(error) => {
+                warn!(%error, "skill_runtime_reload_failed");
+                api_err(StatusCode::INTERNAL_SERVER_ERROR, "skill_runtime_reload_failed")
+            }
+        }
+    })
+    .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            warn!(%error, "skill_runtime_reload_worker_failed");
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, "skill_runtime_reload_worker_failed")
         }
     }
 }
+
+#[cfg(test)]
+#[path = "runtime/admin_skill_reload_tests.rs"]
+mod admin_skill_reload_tests;

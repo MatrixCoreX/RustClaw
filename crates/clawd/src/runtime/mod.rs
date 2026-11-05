@@ -1,4 +1,5 @@
 pub(crate) mod ask_state;
+mod config_path;
 mod llm_cost;
 mod llm_cost_ledger;
 pub(crate) mod policy;
@@ -13,6 +14,7 @@ pub(crate) mod types;
 mod policy_tests;
 
 pub(crate) use ask_state::{log_ask_transition, AskState, AskTransition};
+pub(crate) use config_path::active_runtime_config_path;
 pub(crate) use llm_cost::LlmCostBudgetSnapshot;
 pub(crate) use policy::{llm_model_kind, llm_vendor_name, RateLimiter, ToolsPolicy};
 #[cfg(test)]

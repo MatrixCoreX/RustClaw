@@ -27,7 +27,7 @@
     "receipt_resolution_or_pin|crates/skills/extension_manager/src/main.rs": 3,
     "registration_write_or_reload|crates/clawd/src/contract_matrix_runtime.rs": 1,
     "registration_write_or_reload|crates/clawd/src/contract_matrix_runtime_validation.rs": 1,
-    "registration_write_or_reload|crates/clawd/src/direct_classifier_admin.rs": 2,
+    "registration_write_or_reload|crates/clawd/src/direct_classifier_admin.rs": 1,
     "registration_write_or_reload|crates/clawd/src/execution_recipe.rs": 1,
     "registration_write_or_reload|crates/clawd/src/http/ui_routes.rs": 1,
     "registration_write_or_reload|crates/clawd/src/http/ui_routes/health_skills_import.rs": 1,

@@ -1,15 +1,4 @@
-fn active_runtime_config_path(state: &AppState) -> PathBuf {
-    let configured = state.reload_ctx.config_path_for_reload.trim();
-    if configured.is_empty() {
-        return state.skill_rt.workspace_root.join("configs/config.toml");
-    }
-    let path = Path::new(configured);
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        state.skill_rt.workspace_root.join(path)
-    }
-}
+use crate::runtime::active_runtime_config_path;
 
 fn read_skill_config_file(state: &AppState) -> anyhow::Result<(String, toml::Value)> {
     let path = active_runtime_config_path(state);

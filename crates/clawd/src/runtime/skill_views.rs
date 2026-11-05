@@ -7,6 +7,7 @@ use claw_core::skill_registry::SkillsRegistry;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use super::active_runtime_config_path;
 use super::state::{
     AppState, PromptTemplateCache, SkillViews, SkillViewsBinding, SkillViewsSnapshot,
 };
@@ -134,15 +135,33 @@ fn prepare_and_publish_views(
     state: &AppState,
     before_publish: impl FnOnce(),
 ) -> Result<ReloadSkillViewsResult, String> {
+    let config_path = active_runtime_config_path(state);
     tracing::info!(
         "reload_skill_views: started config_path={}",
-        state.reload_ctx.config_path_for_reload
+        config_path.display()
     );
-    let config = AppConfig::load(&state.reload_ctx.config_path_for_reload)
+    let config_path = config_path
+        .to_str()
+        .ok_or_else(|| "runtime_config_path_not_utf8".to_string())?;
+    let config = AppConfig::load(config_path)
         .map_err(|e| format!("reload_skill_views: load config failed: {}", e))?;
+    let publish = |overlay| publish_verified_views(state, &config, overlay, before_publish);
+    if config.skills.registry_path.is_none() {
+        return publish(OverlaySnapshot::default());
+    }
+    SkillAdmissionService::from_config(&state.skill_rt.workspace_root, &config)
+        .and_then(|service| service.with_verified_snapshot(publish))
+        .map_err(|error| error.to_string())?
+}
+
+fn publish_verified_views(
+    state: &AppState,
+    config: &AppConfig,
+    overlay: OverlaySnapshot,
+    before_publish: impl FnOnce(),
+) -> Result<ReloadSkillViewsResult, String> {
     let registry_path = config.skills.registry_path.as_deref();
     let path_display = registry_path.unwrap_or("(none)");
-    let overlay = load_skill_admission_snapshot(&state.skill_rt.workspace_root, &config)?;
     let views = build_skill_views_with_overlay(
         &state.skill_rt.workspace_root,
         registry_path,
