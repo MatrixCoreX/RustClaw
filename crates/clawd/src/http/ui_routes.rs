@@ -566,6 +566,7 @@ include!("ui_routes/aipp_assets.rs");
 mod aipp_accounts;
 use aipp_accounts::{control_aipp_account, public_account_use, task_account_use};
 include!("ui_routes/llm_skill_config.rs");
+include!("ui_routes/configuration_reads.rs");
 include!("ui_routes/messaging_login.rs");
 
 #[cfg(test)]
@@ -583,6 +584,10 @@ mod model_catalog_read_tests;
 #[cfg(test)]
 #[path = "ui_routes/model_settings_integrity_tests.rs"]
 mod model_settings_integrity_tests;
+
+#[cfg(test)]
+#[path = "ui_routes/configuration_read_tests.rs"]
+mod configuration_read_tests;
 
 #[cfg(test)]
 #[path = "ui_routes/llm_credentials_tests.rs"]

@@ -1,7 +1,7 @@
 use super::*;
 use axum::http::Method;
 #[path = "model_settings_integrity_fixture_tests.rs"]
-mod support;
+pub(super) mod support;
 use support::*;
 #[path = "model_settings_mutation_tests.rs"]
 mod mutations;

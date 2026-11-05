@@ -6,9 +6,9 @@ use axum::{
 };
 use tower::ServiceExt;
 
-pub(super) const ADMIN: &str = "fixture-settings-admin";
-pub(super) const USER: &str = "fixture-settings-user";
-pub(super) const SECRET: &str = "fixture_settings_original_secret_123456789";
+pub(in crate::http::ui_routes) const ADMIN: &str = "fixture-settings-admin";
+pub(in crate::http::ui_routes) const USER: &str = "fixture-settings-user";
+pub(in crate::http::ui_routes) const SECRET: &str = "fixture_settings_original_secret_123456789";
 pub(super) const NEW_SECRET: &str = "fixture_settings_replacement_secret_987654321";
 pub(super) const FILES: [&str; 5] = [
     "config.toml",
@@ -20,7 +20,7 @@ pub(super) const FILES: [&str; 5] = [
 pub(super) const MODELS: &str = "/v1/admin/model-config";
 pub(super) const KEYS: &str = "/v1/admin/provider-keys";
 
-pub(super) struct Fixture {
+pub(in crate::http::ui_routes) struct Fixture {
     pub state: AppState,
     pub root: PathBuf,
 }
@@ -133,7 +133,11 @@ pub(super) fn key_payload() -> Value {
         "audio":{"audio_transcribe":{"fixture":NEW_SECRET}},"video":{"video_generation":{"fixture":NEW_SECRET}},
         "music":{"music_generation":{"fixture":NEW_SECRET}}})
 }
-pub(super) fn assert_error(response: &(StatusCode, Value), status: StatusCode, code: &str) {
+pub(in crate::http::ui_routes) fn assert_error(
+    response: &(StatusCode, Value),
+    status: StatusCode,
+    code: &str,
+) {
     assert_eq!(response.0, status);
     assert_eq!(response.1, json!({"ok":false,"data":null,"error":code}));
 }

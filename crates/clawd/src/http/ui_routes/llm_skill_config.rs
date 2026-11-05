@@ -620,7 +620,7 @@ fn ensure_string_array_contains_in_section(
     out
 }
 
-async fn get_skills_config(
+fn read_skills_config(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
@@ -629,14 +629,10 @@ async fn get_skills_config(
     }
     let parsed = match read_skill_config_file(&state) {
         Ok((_, v)) => v,
-        Err(err) => {
-            return (
+        Err(_) => {
+            return crate::api_err(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("read skills config failed: {err}")),
-                }),
+                "skills_config_read_failed",
             );
         }
     };
@@ -650,14 +646,10 @@ async fn get_skills_config(
     })
     {
         Ok(snapshot) => snapshot,
-        Err(error) => {
-            return (
+        Err(_) => {
+            return crate::api_err(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("read skill admission state failed: {error}")),
-                }),
+                "skill_admission_read_failed",
             );
         }
     };
@@ -767,7 +759,7 @@ async fn get_skills_config(
     )
 }
 
-async fn get_llm_config(
+fn read_llm_config(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
@@ -776,14 +768,10 @@ async fn get_llm_config(
     }
     let parsed = match read_skill_config_file(&state) {
         Ok((_, v)) => v,
-        Err(err) => {
-            return (
+        Err(_) => {
+            return crate::api_err(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("read llm config failed: {err}")),
-                }),
+                "llm_config_read_failed",
             );
         }
     };
