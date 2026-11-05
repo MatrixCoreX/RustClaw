@@ -1176,7 +1176,7 @@ async fn test_llm_config(
     }
 }
 
-async fn update_skills_config(
+fn write_skills_config(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(req): Json<UpdateSkillsConfigRequest>,
@@ -1198,14 +1198,8 @@ async fn update_skills_config(
     let (raw, parsed) = match read_skill_config_file(&state) {
         Ok(v) => v,
         Err(err) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("read skills config failed: {err}")),
-                }),
-            );
+            tracing::warn!(error = %err, "skill_switch_config_read_failed");
+            return crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "skills_config_read_failed");
         }
     };
     let mut uninstalled = collect_uninstalled_skills(&parsed, &state);
@@ -1213,27 +1207,15 @@ async fn update_skills_config(
     let service = match admission_service(&state) {
         Ok(service) => service,
         Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("initialize skill admission failed: {error}")),
-                }),
-            );
+            tracing::warn!(%error, "skill_switch_admission_initialization_failed");
+            return crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "skills_config_read_failed");
         }
     };
     let original_admission = match service.snapshot() {
         Ok(snapshot) => snapshot,
         Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("read skill admission state failed: {error}")),
-                }),
-            );
+            tracing::warn!(%error, "skill_switch_admission_read_failed");
+            return crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "skills_config_read_failed");
         }
     };
     let fixed_on_skills = state
@@ -1243,7 +1225,7 @@ async fn update_skills_config(
     let tool_skill_names = registry_tool_capability_names(&state)
         .into_iter()
         .collect::<BTreeSet<_>>();
-    let mut persisted_switches = BTreeMap::new();
+    let mut persisted_switches = existing_switches.clone();
     let mut admission_updates = Vec::new();
     for (k, v) in req.skill_switches {
         let skill = state.resolve_canonical_skill_name(k.trim());
@@ -1264,72 +1246,72 @@ async fn update_skills_config(
                 _ => None,
             };
             if let Some(target) = target {
-                admission_updates.push((skill.clone(), target));
-            }
-            if let Some(existing) = existing_switches.get(&skill) {
-                persisted_switches.insert(skill, *existing);
+                admission_updates.push(crate::skill_admission::AdmissionStateChange {
+                    skill_name: skill.clone(),
+                    state: target,
+                    grant: None,
+                });
             }
         } else {
             persisted_switches.insert(skill, requested);
         }
     }
-    for (skill, target) in admission_updates {
-        if let Err(error) = service.set_state(&skill, target, None) {
-            let rollback = service.rollback_to_generation(original_admission.generation);
+    let committed = match service.set_states(admission_updates, Some(original_admission.generation)) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            tracing::warn!(%error, "skill_switch_batch_failed");
             return (
                 StatusCode::CONFLICT,
                 Json(ApiResponse {
                     ok: false,
                     data: None,
-                    error: Some(format!(
-                        "update skill admission state failed: {error}; rollback={rollback:?}"
-                    )),
+                    error: Some(error.code.to_string()),
                 }),
             );
         }
-    }
-    let rendered = render_switches_inline_table(&persisted_switches);
-    let updated = upsert_skill_switches_line(&raw, &rendered);
+    };
+    let committed_generation =
+        (committed.generation != original_admission.generation).then_some(committed.generation);
+    let updated = if persisted_switches == existing_switches {
+        raw.clone()
+    } else {
+        let rendered = render_switches_inline_table(&persisted_switches);
+        upsert_skill_switches_line(&raw, &rendered)
+    };
     if updated != raw {
         if let Err(err) = write_runtime_config_file(&state, &updated) {
-            let rollback = service.rollback_to_generation(original_admission.generation);
+            let rollback =
+                committed_generation.map(|generation| service.rollback_generation(generation));
+            tracing::warn!(error = %err, ?rollback, "skill_switch_config_write_failed");
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiResponse {
                     ok: false,
                     data: None,
-                    error: Some(format!(
-                        "write skills config failed: {err}; admission_rollback={rollback:?}"
-                    )),
+                    error: Some("skills_config_write_failed".to_string()),
                 }),
             );
         }
     }
     if let Err(error) = reload_skill_views(&state) {
         let config_rollback = (updated != raw).then(|| write_runtime_config_file(&state, &raw));
-        let admission_rollback = service.rollback_to_generation(original_admission.generation);
+        let admission_rollback =
+            committed_generation.map(|generation| service.rollback_generation(generation));
+        tracing::warn!(%error, ?config_rollback, ?admission_rollback, "skill_switch_reload_failed");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some(format!(
-                    "reload skill state failed: {error}; config_rollback={config_rollback:?}; admission_rollback={admission_rollback:?}"
-                )),
+                error: Some("skills_config_reload_failed".to_string()),
             }),
         );
     }
     let current_admission = match service.snapshot() {
         Ok(snapshot) => snapshot,
         Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("read updated skill admission state failed: {error}")),
-                }),
-            );
+            tracing::warn!(%error, "skill_switch_updated_admission_read_failed");
+            return crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "skills_config_read_failed");
         }
     };
     let mut switches = persisted_switches;

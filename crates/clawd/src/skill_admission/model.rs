@@ -70,6 +70,13 @@ pub(crate) struct AdmissionMutation {
     pub(crate) grant: Option<HostPolicyGrant>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct AdmissionStateChange {
+    pub(crate) skill_name: String,
+    pub(crate) state: AdmissionState,
+    pub(crate) grant: Option<HostPolicyGrant>,
+}
+
 /// Request-owned presentation state; not an execution grant or a persistent cache.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct AippViewState {

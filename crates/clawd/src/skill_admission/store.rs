@@ -22,6 +22,9 @@ use super::model::{
 use super::registry::render_registry_fragment;
 use super::AippViewState;
 
+#[path = "state_mutations.rs"]
+mod state_mutations;
+
 const OVERLAY_DIRECTORY: &str = ".runtime-admission";
 const AIPP_INSTALL_STATE_SCHEMA_VERSION: u32 = 1;
 const AIPP_HIDDEN_TASK_IDS_LIMIT: usize = 10_000;
@@ -391,45 +394,6 @@ impl SkillAdmissionService {
         self.commit_mutations(mutations, false, resource_skips)
     }
 
-    pub(crate) fn set_state(
-        &self,
-        skill_name: &str,
-        state: AdmissionState,
-        grant: Option<HostPolicyGrant>,
-    ) -> Result<OverlaySnapshot> {
-        let (_, record, generation_root) = self
-            .read_current_generation()?
-            .ok_or_else(|| error("skill_admission_missing", format!("skill={skill_name}")))?;
-        if !record.skills.contains_key(skill_name) {
-            return Err(error(
-                "skill_admission_missing",
-                format!("skill={skill_name}"),
-            ));
-        }
-        let metadata = read_json(
-            &generation_root
-                .join("metadata")
-                .join(format!("{skill_name}.json")),
-        )?;
-        let prompt = fs::read_to_string(
-            generation_root
-                .join("prompts")
-                .join(format!("{skill_name}.md")),
-        )
-        .map_err(|source| {
-            error(
-                "skill_admission_prompt_read_failed",
-                format!("skill={skill_name} error={source}"),
-            )
-        })?;
-        self.commit_mutation(AdmissionMutation {
-            metadata,
-            prompt,
-            state,
-            grant,
-        })
-    }
-
     pub(crate) fn current_repair_inputs(&self) -> Result<Vec<AdmissionMutation>> {
         let Some((_, record, generation_root)) = self.read_current_generation()? else {
             return Err(error(
@@ -492,15 +456,7 @@ impl SkillAdmissionService {
     }
 
     pub(crate) fn rollback_generation(&self, expected_generation: u64) -> Result<OverlaySnapshot> {
-        fs::create_dir_all(&self.root).map_err(io_error("skill_admission_root_create_failed"))?;
-        let lock = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .open(self.root.join("mutation.lock"))
-            .map_err(io_error("skill_admission_lock_open_failed"))?;
-        FileExt::lock_exclusive(&lock).map_err(io_error("skill_admission_lock_failed"))?;
-        let result = (|| {
+        self.with_mutation_lock(|| {
             let (current, record, _) = self.read_current_generation()?.ok_or_else(|| {
                 error(
                     "skill_admission_generation_missing",
@@ -536,25 +492,7 @@ impl SkillAdmissionService {
             self.validate_generation(&pointer, &previous_record, &previous_root, true)?;
             atomic_write_json(&self.root.join("current-generation.json"), &pointer)?;
             self.snapshot()
-        })();
-        let _ = FileExt::unlock(&lock);
-        result
-    }
-
-    pub(crate) fn rollback_to_generation(&self, target_generation: u64) -> Result<OverlaySnapshot> {
-        loop {
-            let snapshot = self.snapshot()?;
-            if snapshot.generation == target_generation {
-                return Ok(snapshot);
-            }
-            if snapshot.generation < target_generation {
-                return Err(error(
-                    "skill_admission_rollback_target_invalid",
-                    format!("target={target_generation} current={}", snapshot.generation),
-                ));
-            }
-            self.rollback_generation(snapshot.generation)?;
-        }
+        })
     }
 
     fn commit_mutation(&self, mutation: AdmissionMutation) -> Result<OverlaySnapshot> {
@@ -567,6 +505,16 @@ impl SkillAdmissionService {
         require_complete_current_generation: bool,
         removed_bundled_skills: &BTreeSet<String>,
     ) -> Result<OverlaySnapshot> {
+        self.with_mutation_lock(|| {
+            self.commit_mutations_locked(
+                mutations,
+                require_complete_current_generation,
+                removed_bundled_skills,
+            )
+        })
+    }
+
+    fn with_mutation_lock<T>(&self, operation: impl FnOnce() -> Result<T>) -> Result<T> {
         fs::create_dir_all(&self.root).map_err(io_error("skill_admission_root_create_failed"))?;
         secure_directory(&self.root)?;
         let lock_path = self.root.join("mutation.lock");
@@ -577,11 +525,7 @@ impl SkillAdmissionService {
             .open(&lock_path)
             .map_err(io_error("skill_admission_lock_open_failed"))?;
         FileExt::lock_exclusive(&lock).map_err(io_error("skill_admission_lock_failed"))?;
-        let result = self.commit_mutations_locked(
-            mutations,
-            require_complete_current_generation,
-            removed_bundled_skills,
-        );
+        let result = operation();
         let _ = FileExt::unlock(&lock);
         result
     }

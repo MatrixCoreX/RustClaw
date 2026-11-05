@@ -20,6 +20,9 @@ use crate::{reload_skill_views, AppState};
 
 const STORE_TEST_KEY: &str = "skill-store-test-admin";
 
+#[path = "skill_switch_update_tests.rs"]
+mod skill_switch_update_tests;
+
 #[tokio::test]
 async fn skill_store_catalog_paginates_and_filters_before_metadata_projection() {
     let (state, workspace) = isolated_skill_store_state();

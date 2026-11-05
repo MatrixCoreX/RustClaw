@@ -3,8 +3,8 @@ mod registry;
 mod store;
 
 pub(crate) use model::{
-    AdmissionExecutionBinding, AdmissionMutation, AippViewState, ExternalSkillMetadata,
-    OverlaySnapshot, SkillAdmissionSource,
+    AdmissionExecutionBinding, AdmissionMutation, AdmissionStateChange, AippViewState,
+    ExternalSkillMetadata, OverlaySnapshot, SkillAdmissionSource,
 };
 pub(crate) use store::SkillAdmissionService;
 

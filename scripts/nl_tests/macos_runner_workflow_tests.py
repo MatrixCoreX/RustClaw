@@ -133,6 +133,11 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
         self.assertIn(mutation_command, gate["run"])
         self.assertEqual(sum(mutation_command in step.get("run", "") for step in native_steps), 1)
         self.assertIn("skill_state_mutations", build["run"])
+        for selector in ["skill_admission::tests", "skill_switch_update_tests"]:
+            command = f"cargo test --locked -p clawd --bin clawd {selector} -- --test-threads=1"
+            self.assertIn(command, gate["run"])
+            self.assertEqual(sum(command in step.get("run", "") for step in native_steps), 1)
+        self.assertIn("skill_switch_updates", build["run"])
         self.assertIn("attest-build-provenance@", attest["uses"])
         self.assertIn("${{ github.sha }}", upload["with"]["name"])
         self.assertEqual(runtime["permissions"]["id-token"], "write")

@@ -567,6 +567,7 @@ mod aipp_accounts;
 use aipp_accounts::{control_aipp_account, public_account_use, task_account_use};
 include!("ui_routes/llm_skill_config.rs");
 include!("ui_routes/configuration_reads.rs");
+include!("ui_routes/skill_switch_update.rs");
 include!("ui_routes/messaging_login.rs");
 
 #[cfg(test)]
