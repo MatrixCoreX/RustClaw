@@ -28,7 +28,38 @@ def valid_job(job, runner, target):
     )
 
 
+def required_reload_gate(job):
+    command = "cargo test --locked -p clawd --bin clawd skill_reload_tests -- --test-threads=1 --nocapture"
+    selected = [step for step in job["steps"] if command in step.get("run", "")]
+    return len(selected) == 1 and (
+        "if" not in selected[0] and not selected[0].get("continue-on-error", False)
+        and "set -euo pipefail" in selected[0]["run"]
+        and sum(line.strip() == command for line in selected[0]["run"].splitlines()) == 1
+    )
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_runtime_reload_cases_gate_both_native_systems_and_the_signed_core(self):
+        jobs = load("macos-polyglot-skill-ci.yml")["jobs"]
+        for name in ["runtime-read-linux", "polyglot-skill-macos"]:
+            self.assertTrue(required_reload_gate(jobs[name]), name)
+        build = next(step for step in jobs["runtime-read-linux"]["steps"]
+                     if step.get("name") == "Build the exact verified Linux core without publishing a release")
+        self.assertIn("skill_reload_publication", build["run"])
+
+    def test_runtime_reload_gate_cannot_skip_ignore_or_discard_failures(self):
+        jobs = load("macos-polyglot-skill-ci.yml")["jobs"]
+        for name in ["runtime-read-linux", "polyglot-skill-macos"]:
+            for mode in ["remove", "ignore", "continue", "conditional"]:
+                with self.subTest(job=name, mutation=mode):
+                    job = deepcopy(jobs[name])
+                    step = next(step for step in job["steps"] if "--bin clawd skill_reload_tests" in step.get("run", ""))
+                    if mode == "remove": step["run"] = step["run"].replace("--bin clawd skill_reload_tests", "--bin clawd absent_fixture")
+                    elif mode == "ignore": step["run"] = step["run"].replace("skill_reload_tests -- --test-threads=1 --nocapture", "skill_reload_tests -- --ignored --test-threads=1 --nocapture")
+                    elif mode == "continue": step["continue-on-error"] = True
+                    else: step["if"] = "${{ always() }}"
+                    self.assertFalse(required_reload_gate(job))
+
     def test_supported_runners_preserve_architecture_and_deployment_floor(self):
         for name, job_id, runner, target in EXPECTED:
             with self.subTest(workflow=name, job=job_id):

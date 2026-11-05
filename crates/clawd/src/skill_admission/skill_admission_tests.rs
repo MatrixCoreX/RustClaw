@@ -609,7 +609,7 @@ fn generation_validation_resolves_its_pinned_receipt_after_current_install_chang
     fs::remove_dir_all(root).expect("remove fixture");
 }
 
-fn install_fixture(root: &Path, skill_name: &str) -> skill_sdk::PackageManifest {
+pub(crate) fn install_fixture(root: &Path, skill_name: &str) -> skill_sdk::PackageManifest {
     let source = root.join("sources").join(skill_name);
     scaffold_skill(&ScaffoldRequest {
         destination: source.clone(),
@@ -687,7 +687,7 @@ fn install_fixture(root: &Path, skill_name: &str) -> skill_sdk::PackageManifest 
     manifest
 }
 
-fn fixture_grant(
+pub(crate) fn fixture_grant(
     manifest: &skill_sdk::PackageManifest,
     approval_source: ApprovalSource,
 ) -> HostPolicyGrant {

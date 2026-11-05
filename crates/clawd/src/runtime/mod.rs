@@ -4,6 +4,7 @@ mod llm_cost_ledger;
 pub(crate) mod policy;
 mod provider_outcome;
 pub(crate) mod provider_runtime;
+mod skill_views;
 pub(crate) mod state;
 pub(crate) mod types;
 
@@ -17,11 +18,14 @@ pub(crate) use policy::{llm_model_kind, llm_vendor_name, RateLimiter, ToolsPolic
 #[cfg(test)]
 pub(crate) use provider_runtime::AgentRuntimeConfig;
 pub(crate) use provider_runtime::LlmProviderRuntime;
-pub(crate) use state::{
+pub(crate) use skill_views::{
     assemble_skill_views_snapshot, build_skill_views_with_overlay, load_skill_admission_snapshot,
-    reload_skill_views, AppState, AskStateRegistry, ChannelConfig, ClaimedTask, CoreServices,
-    LlmCallSequenceEntry, LlmPromptBucket, PolicyConfig, ReloadContext, SkillRuntime,
-    SkillViewsSnapshot, TaskCostBlocker, TaskMetricsRegistry, TaskProviderBlocker, WorkerConfig,
+    reload_skill_views,
+};
+pub(crate) use state::{
+    AppState, AskStateRegistry, ChannelConfig, ClaimedTask, CoreServices, LlmCallSequenceEntry,
+    LlmPromptBucket, PolicyConfig, ReloadContext, SkillRuntime, SkillViewsSnapshot,
+    TaskCostBlocker, TaskMetricsRegistry, TaskProviderBlocker, WorkerConfig,
 };
 pub(crate) use types::{
     AgentAction, AskReply, CommandIntentRuntime, LocalInteractionContext, MemoryConfigFileWrapper,

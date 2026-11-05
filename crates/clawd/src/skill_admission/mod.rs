@@ -13,5 +13,8 @@ pub(crate) use store::SkillAdmissionService;
 mod tests;
 
 #[cfg(test)]
+pub(crate) use tests::{fixture_grant as test_policy_grant, install_fixture as install_test_fixture};
+
+#[cfg(test)]
 #[path = "aipp_view_state_tests.rs"]
 mod aipp_view_state_tests;
