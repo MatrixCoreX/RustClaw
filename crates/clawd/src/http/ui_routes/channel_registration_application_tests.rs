@@ -147,9 +147,13 @@ async fn channel_registration_partial_config_failure_is_not_automatically_replay
             fixture.latest_session(),
             startup_request(starts.clone()),
             |state, platform, client_id, client_secret| {
-                std::fs::remove_file(&mounted)?;
-                std::fs::create_dir(&mounted)?;
-                write_generated_credentials(state, platform, client_id, client_secret)
+                // The normal publisher now preflights and restores its own
+                // writes. Explicitly simulate a post-publication interruption
+                // that leaves only the active copy updated; retain the actual
+                // partial-effect/no-replay coverage instead of weakening it.
+                write_generated_credentials(state, platform, client_id, client_secret)?;
+                std::fs::write(&mounted, &original)?;
+                anyhow::bail!("fixture interruption with partially committed credentials")
             },
         )
         .await
@@ -182,8 +186,7 @@ async fn channel_registration_partial_config_failure_is_not_automatically_replay
             }
         };
         assert!(!ready);
-        std::fs::remove_dir(&mounted).unwrap();
-        std::fs::write(&mounted, original).unwrap();
+        assert_eq!(std::fs::read(&mounted).unwrap(), original);
         let _ = controlled_poll(&fixture, starts.clone()).await;
         let detail = serde_json::json!({"platform":platform.channel(),
             "startup_requests":starts.load(Ordering::SeqCst),"upstream_requests":fixture.requests(),
@@ -197,4 +200,50 @@ async fn channel_registration_partial_config_failure_is_not_automatically_replay
         failures.is_empty(),
         "uncertain_registration_replayed={failures:?}"
     );
+}
+
+#[tokio::test]
+async fn channel_registration_preflight_failure_preserves_active_config_without_replay() {
+    let _env_lock = crate::fixture_replay_e2e::fixture_env_lock();
+    for platform in [AgentAppChannel::Feishu, AgentAppChannel::Lark] {
+        let fixture = Fixture::new(platform, false).await;
+        let starts = Arc::new(AtomicUsize::new(0));
+        let active = fixture
+            .root
+            .join("configs/channels")
+            .join(format!("{}.toml", platform.channel()));
+        let mounted = fixture
+            .root
+            .join("docker/config/channels")
+            .join(format!("{}.toml", platform.channel()));
+        let before = fixture.snapshot();
+        let original = std::fs::read(&mounted).unwrap();
+        let active_before = std::fs::read(&active).unwrap();
+        fixture.release_response();
+        assert!(maybe_complete_official_scan_with_effects(
+            &fixture.state,
+            platform,
+            fixture.latest_session(),
+            startup_request(starts.clone()),
+            |state, platform, client_id, client_secret| {
+                std::fs::remove_file(&mounted)?;
+                std::fs::create_dir(&mounted)?;
+                write_generated_credentials(state, platform, client_id, client_secret)
+            },
+        )
+        .await
+        .is_err());
+        assert_eq!(starts.load(Ordering::SeqCst), 0);
+        assert_eq!(std::fs::read(&active).unwrap(), active_before);
+        assert!(mounted.is_dir());
+        // Restore only the test's injected bad destination. No registration
+        // effect may be retried automatically after its one-shot claim failed.
+        std::fs::remove_dir(&mounted).unwrap();
+        std::fs::write(&mounted, original).unwrap();
+        assert_eq!(fixture.snapshot(), before);
+        assert!(controlled_poll(&fixture, starts.clone()).await.is_err());
+        assert_eq!(starts.load(Ordering::SeqCst), 0);
+        assert_eq!(fixture.requests(), 1);
+        assert_eq!(fixture.snapshot(), before);
+    }
 }

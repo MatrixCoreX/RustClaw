@@ -48,6 +48,7 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
         for name in ["runtime-read-linux", "polyglot-skill-macos"]:
             for command in [
                 "cargo test --locked -p clawd --bin clawd configuration_files::tests -- --test-threads=1 --nocapture",
+                "cargo test --locked -p clawd --bin clawd channel_registration_race_tests::application_tests -- --test-threads=1 --nocapture",
                 "cargo test --locked -p claw-core secrets::model_environment::tests -- --test-threads=1 --nocapture",
             ]:
                 self.assertTrue(required_command_gate(jobs[name], command))
