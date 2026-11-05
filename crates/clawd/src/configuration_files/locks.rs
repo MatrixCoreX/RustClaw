@@ -28,30 +28,35 @@ pub(super) fn key(path: &Path) -> io::Result<PathBuf> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => (),
         Err(error) => return Err(error),
     }
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => (),
-            Component::ParentDir => {
-                if !normalized.pop() {
-                    return Err(io::Error::other("configuration_path_invalid"));
-                }
-            }
-            other => normalized.push(other.as_os_str()),
-        }
-    }
-    let mut ancestor = normalized.as_path();
+    let mut ancestor = path;
     let mut tail = Vec::new();
     loop {
         match ancestor.canonicalize() {
             Ok(mut resolved) => {
-                for name in tail.iter().rev() {
-                    resolved.push(name);
+                if !resolved.is_dir() {
+                    return Err(io::Error::other("configuration_parent_not_directory"));
+                }
+                for component in tail.iter().rev() {
+                    match component {
+                        Component::ParentDir => {
+                            if !resolved.pop() {
+                                return Err(io::Error::other("configuration_path_invalid"));
+                            }
+                        }
+                        Component::Normal(part) => resolved.push(part),
+                        _ => return Err(io::Error::other("configuration_path_invalid")),
+                    }
                 }
                 return Ok(resolved);
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                tail.push(ancestor.file_name().ok_or(error)?.to_os_string());
+                // Resolve the existing prefix before collapsing missing tail
+                // components. Lexically removing `..` first changes the
+                // meaning of `directory-symlink/../missing-file`.
+                tail.push(match ancestor.components().next_back() {
+                    Some(component @ (Component::Normal(_) | Component::ParentDir)) => component,
+                    _ => return Err(error),
+                });
                 ancestor = ancestor
                     .parent()
                     .ok_or_else(|| io::Error::other("configuration_path_parent_missing"))?;

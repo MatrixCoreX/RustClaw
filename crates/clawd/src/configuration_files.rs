@@ -27,6 +27,23 @@ impl Target {
     // Only for explicit host-configured paths, not untrusted request paths.
     // A selected configuration/persistence file may live outside the workspace.
     pub(crate) fn configured(root: &Path, path: PathBuf) -> io::Result<Self> {
+        // Host-selected paths may contain parent components. Resolve their
+        // directory exactly as the loader does, but never follow a final-file
+        // symlink. Untrusted workspace targets still use workspace() directly.
+        let path = if path
+            .components()
+            .any(|part| part == std::path::Component::ParentDir)
+        {
+            let parent = path
+                .parent()
+                .ok_or_else(|| io::Error::other("configuration_parent_missing"))?;
+            let filename = path
+                .file_name()
+                .ok_or_else(|| io::Error::other("configuration_filename_missing"))?;
+            locks::key(parent)?.join(filename)
+        } else {
+            path
+        };
         if path.starts_with(root) {
             return Ok(Self::workspace(root, path));
         }

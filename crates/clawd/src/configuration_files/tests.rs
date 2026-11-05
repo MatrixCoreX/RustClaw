@@ -20,6 +20,44 @@ impl Drop for Fixture {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn configuration_files_missing_target_alias_resolves_symlink_before_parent_component() {
+    let fixture = Fixture::new();
+    let outside = Fixture::new();
+    fs::create_dir(outside.0.join("child")).unwrap();
+    std::os::unix::fs::symlink(outside.0.join("child"), fixture.0.join("alias")).unwrap();
+    let alias = fixture.0.join("alias/../new.toml");
+    let physical = outside.0.join("new.toml");
+    assert_eq!(locks::key(&alias).unwrap(), locks::key(&physical).unwrap());
+    // Only the explicit trusted configured-path constructor can resolve this
+    // host choice; a request's workspace-relative path must remain rejected.
+    assert!(Target::workspace(&fixture.0, alias.clone())
+        .publish(b"rejected")
+        .is_err());
+    assert!(!physical.exists());
+    Target::configured(&fixture.0, alias)
+        .unwrap()
+        .publish(b"configured")
+        .unwrap();
+    assert_eq!(fs::read(physical).unwrap(), b"configured");
+    assert!(!fixture.0.join("new.toml").exists());
+}
+
+#[test]
+fn configuration_files_parent_normalization_does_not_treat_a_file_as_a_directory() {
+    let fixture = Fixture::new();
+    fs::write(fixture.0.join("not-directory"), b"untouched").unwrap();
+    let invalid = fixture.0.join("not-directory/../target");
+    assert!(locks::key(&invalid).is_err());
+    assert!(Target::configured(&fixture.0, invalid).is_err());
+    assert_eq!(
+        fs::read(fixture.0.join("not-directory")).unwrap(),
+        b"untouched"
+    );
+    assert!(!fixture.0.join("target").exists());
+}
+
 #[test]
 fn configuration_files_preflight_rejects_later_directory_without_publishing_first() {
     let fixture = Fixture::new();

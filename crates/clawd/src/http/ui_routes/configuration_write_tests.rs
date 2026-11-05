@@ -9,6 +9,39 @@ use std::task::{Context, Poll, Waker};
 mod fixture;
 use fixture::*;
 
+#[tokio::test]
+async fn configuration_write_parent_components_follow_the_selected_read_and_save_targets() {
+    let (mut fixture, main) = selected_fixture();
+    fixture.state.reload_ctx.config_path_for_reload = "selected/../selected/runtime.toml".into();
+    let defaults = fixture.files();
+    let read = fixture
+        .api(ADMIN, Method::GET, "/v1/admin/model-config", None)
+        .await;
+    assert_eq!(read.0, StatusCode::OK);
+    assert_eq!(read.1["data"]["llm"]["model"], "selected-model");
+    let saved = fixture
+        .api(
+            ADMIN,
+            Method::POST,
+            "/v1/admin/model-config",
+            Some(json!({
+                "llm":{"vendor":"custom","model":"parent-components-saved"},
+                "image_vision":{"vendor":"fixture","model":"parent-components-image"}
+            })),
+        )
+        .await;
+    assert_eq!(saved.0, StatusCode::OK);
+    assert_eq!(saved.1["data"]["llm"]["model"], "parent-components-saved");
+    assert_eq!(
+        saved.1["data"]["image_vision"]["model"],
+        "parent-components-image"
+    );
+    assert!(fs::read_to_string(main)
+        .unwrap()
+        .contains("parent-components-saved"));
+    assert_eq!(fixture.files(), defaults);
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn configuration_write_both_model_apis_recheck_revoked_authority_after_waiting() {
     for legacy in [false, true] {
