@@ -86,7 +86,7 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
         steps = runtime["steps"]
         named = {step.get("name"): step for step in steps}
         gate = named["Verify Linux indexed history reads and startup upgrades"]
-        for selector in ["task_event_transport", "auth_contract_tests", "model_catalog", "model_settings_integrity_tests", "configuration_read_tests", "secure_workspace_fs", "aipp", "run_skill"]:
+        for selector in ["task_event_transport", "auth_contract_tests", "model_catalog", "model_settings_integrity_tests", "configuration_read_tests", "secure_workspace_fs", "aipp", "run_skill", "skill_admission::tests::state_mutations"]:
             self.assertIn(f"cargo test --locked -p clawd --bin clawd {selector}", gate["run"])
         native_steps = jobs["polyglot-skill-macos"]["steps"]
         stress_command = "cargo test --locked -p claw-core model_catalog::tests -- --test-threads=16"
@@ -129,6 +129,10 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
         self.assertIn("model_settings_integrity", build["run"])
         self.assertIn("secure_workspace_metadata", build["run"])
         self.assertIn("configuration_reads", build["run"])
+        mutation_command = "cargo test --locked -p clawd --bin clawd skill_admission::tests::state_mutations -- --test-threads=1 --nocapture"
+        self.assertIn(mutation_command, gate["run"])
+        self.assertEqual(sum(mutation_command in step.get("run", "") for step in native_steps), 1)
+        self.assertIn("skill_state_mutations", build["run"])
         self.assertIn("attest-build-provenance@", attest["uses"])
         self.assertIn("${{ github.sha }}", upload["with"]["name"])
         self.assertEqual(runtime["permissions"]["id-token"], "write")

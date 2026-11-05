@@ -16,6 +16,9 @@ use super::{
     AdmissionMutation, ExternalSkillMetadata, SkillAdmissionService, SkillAdmissionSource,
 };
 
+#[path = "state_mutation_tests.rs"]
+mod state_mutations;
+
 #[test]
 fn bundled_batch_admission_commits_one_generation() {
     let root = std::env::temp_dir().join(format!(
