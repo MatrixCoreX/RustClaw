@@ -111,26 +111,33 @@ struct ActiveAippPackage {
     manifest: skill_sdk::PackageManifest,
     aipp: skill_sdk::AippSpec,
     package_root: PathBuf,
+    // Request-owned verification evidence, never an execution grant or shared cache.
+    admission_binding: Option<crate::skill_admission::AdmissionExecutionBinding>,
 }
 
 fn active_aipp_package(
     state: &AppState,
     skill_name: &str,
 ) -> Result<Option<ActiveAippPackage>, String> {
-    let registry = state
-        .get_skills_registry()
+    let view = state.get_skill_views_snapshot();
+    active_aipp_package_in_view(state, skill_name, &view)
+}
+
+fn active_aipp_package_in_view(
+    state: &AppState,
+    skill_name: &str,
+    view: &crate::SkillViewsSnapshot,
+) -> Result<Option<ActiveAippPackage>, String> {
+    let registry = view
+        .registry
+        .as_ref()
         .ok_or_else(|| "aipp_registry_unavailable".to_string())?;
-    if !state.get_skills_list().contains(skill_name) || registry.get(skill_name).is_none() {
+    if !view.skills_list.contains(skill_name) || registry.get(skill_name).is_none() {
         return Ok(None);
     }
 
-    let binding = state
-        .get_skill_views_snapshot()
-        .binding
-        .admission_bindings
-        .get(skill_name)
-        .cloned();
-    let (manifest, package_root) = if let Some(binding) = binding {
+    let admission_binding = view.binding.admission_bindings.get(skill_name).cloned();
+    let (manifest, package_root) = if let Some(binding) = admission_binding.as_ref() {
         let store = skill_sdk::InstallReceiptStore::new(skill_package_root(state));
         let pointer = store
             .current_pointer(skill_name)
@@ -184,6 +191,7 @@ fn active_aipp_package(
         manifest,
         aipp,
         package_root,
+        admission_binding,
     }))
 }
 
@@ -228,12 +236,20 @@ fn read_aipp_catalog(
     if let Err(response) = require_ui_admin(state, headers) {
         return response;
     }
+    let view = state.get_skill_views_snapshot();
+    crate::api_ok(json!({ "schema_version": 1, "apps": project_aipp_catalog(state, &view) }))
+}
+
+fn project_aipp_catalog(
+    state: &AppState,
+    view: &crate::SkillViewsSnapshot,
+) -> Vec<AippCatalogItem> {
     let mut apps = Vec::new();
     let admission = aipp_admission_service(state).ok();
-    let mut names = state.get_skills_list().iter().cloned().collect::<Vec<_>>();
+    let mut names = view.skills_list.iter().cloned().collect::<Vec<_>>();
     names.sort_unstable();
     for name in names {
-        match active_aipp_package(state, &name) {
+        match active_aipp_package_in_view(state, &name, view) {
             Ok(Some(active)) => {
                 let installed = admission
                     .as_ref()
@@ -263,7 +279,7 @@ fn read_aipp_catalog(
             }
         }
     }
-    crate::api_ok(json!({ "schema_version": 1, "apps": apps }))
+    apps
 }
 
 async fn set_aipp_install_state(

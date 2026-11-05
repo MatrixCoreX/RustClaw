@@ -1059,6 +1059,7 @@ fn sandbox_bundle_assets_are_confined_to_the_declared_package_root() {
         aipp: manifest.aipp.clone().expect("Ai APP declaration"),
         manifest,
         package_root: root.clone(),
+        admission_binding: None,
     };
 
     let (path, content_type) =

@@ -250,3 +250,6 @@ mod state_and_streams;
 
 #[path = "aipp_read_surfaces_tests/security.rs"]
 mod security;
+
+#[path = "aipp_read_surfaces_tests/generation.rs"]
+mod generation;

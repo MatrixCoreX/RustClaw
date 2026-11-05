@@ -216,15 +216,10 @@ fn verify_aipp_bundle_artifacts(
     skill_name: &str,
     active: &ActiveAippPackage,
 ) -> Result<(), String> {
-    let Some(binding) = state
-        .get_skill_views_snapshot()
-        .binding
-        .admission_bindings
-        .get(skill_name)
-        .cloned()
-    else {
+    let Some(binding) = active.admission_binding.as_ref() else {
         // Repository-maintained base packages are trusted source artifacts and have no
-        // admission receipt. Path confinement is still enforced by resolve_aipp_bundle_asset.
+        // admission receipt in the captured view. A later view change must not turn an
+        // admitted package into this trusted-source case. Path confinement still applies.
         return Ok(());
     };
     let verified = skill_sdk::InstallReceiptStore::new(skill_package_root(state))
