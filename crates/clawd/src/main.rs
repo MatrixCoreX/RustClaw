@@ -39,6 +39,7 @@ mod channel_send;
 mod child_task_contract;
 mod clarify_state;
 mod communication_preferences;
+mod configuration_files;
 mod contract_matrix;
 mod conversation_input_event_transport;
 mod conversation_state;

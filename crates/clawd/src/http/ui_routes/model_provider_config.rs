@@ -566,9 +566,7 @@ fn upsert_model_section(
 }
 
 fn read_model_config(state: &AppState) -> anyhow::Result<ModelConfigResponse> {
-    let root = &state.skill_rt.workspace_root;
-
-    let files = load_model_settings_files(root, false)?;
+    let files = load_model_settings_files(state, false)?;
     let config = &files[0].value;
     let llm = config
         .get("llm")
@@ -694,7 +692,7 @@ fn read_audio_provider_keys(audio: &toml::Value) -> HashMap<String, HashMap<Stri
 }
 
 fn read_provider_keys(state: &AppState) -> anyhow::Result<ProviderKeysResponse> {
-    let files = load_model_settings_files(&state.skill_rt.workspace_root, false)?;
+    let files = load_model_settings_files(state, false)?;
     Ok(ProviderKeysResponse {
         llm: read_llm_provider_keys(&files[0].value),
         image: read_image_provider_keys(&files[1].value),

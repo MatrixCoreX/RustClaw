@@ -9,6 +9,169 @@ use std::task::{Context, Poll, Waker};
 mod fixture;
 use fixture::*;
 
+#[tokio::test(flavor = "current_thread")]
+async fn configuration_write_both_model_apis_recheck_revoked_authority_after_waiting() {
+    for legacy in [false, true] {
+        for disabled in [false, true] {
+            let fixture = custom_fixture();
+            let before = fixture.files();
+            let paths = model_settings_lock_paths(&fixture.state);
+            let (held_tx, held_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let mut release = ReleaseGate(Some(release_tx));
+            let owner = std::thread::spawn(move || {
+                crate::configuration_files::with_locked_files(&paths, || {
+                    held_tx.send(()).unwrap();
+                    release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+                })
+                .unwrap()
+            });
+            tokio::task::spawn_blocking(move || held_rx.recv_timeout(Duration::from_secs(10)))
+                .await
+                .unwrap()
+                .unwrap();
+            let state = fixture.state.clone();
+            let request = tokio::spawn(async move {
+                if legacy {
+                    update_llm_config(
+                        State(state),
+                        headers(),
+                        Json(legacy_request(Some(REPLACEMENT))),
+                    )
+                    .await
+                    .0
+                } else {
+                    model_settings_request(
+                        state,
+                        headers(),
+                        ModelSettingsOperation::SaveModels,
+                        |_| Ok(json!({"unexpected":true})),
+                    )
+                    .await
+                    .0
+                }
+            });
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while !crate::configuration_files::has_contender(&active_runtime_config_path(
+                &fixture.state,
+            )) {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "fixture request did not reach shared configuration lock"
+                );
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            fixture.sql(if disabled {
+                "UPDATE auth_keys SET enabled=0 WHERE user_key='fixture-settings-admin'"
+            } else {
+                "UPDATE auth_keys SET role='user' WHERE user_key='fixture-settings-admin'"
+            });
+            release.release();
+            let status = request.await.unwrap();
+            owner.join().unwrap();
+            assert_eq!(
+                status,
+                if disabled {
+                    StatusCode::UNAUTHORIZED
+                } else {
+                    StatusCode::FORBIDDEN
+                }
+            );
+            assert_eq!(fixture.files(), before);
+            assert!(!claw_core::secrets::model_environment::path(&fixture.root).exists());
+        }
+    }
+}
+
+#[tokio::test]
+async fn configuration_write_selected_absolute_files_outside_workspace_remain_supported() {
+    let (outside, main) = selected_fixture();
+    let mut fixture = custom_fixture();
+    fixture.state.reload_ctx.config_path_for_reload = main.to_string_lossy().into_owned();
+    let defaults = fixture.files();
+    let response = fixture
+        .api(
+            ADMIN,
+            Method::POST,
+            "/v1/admin/model-config",
+            Some(json!({
+                "llm":{"vendor":"custom","model":"outside-after-save"},
+                "image_vision":{"vendor":"fixture","model":"outside-image-after-save"}
+            })),
+        )
+        .await;
+    assert_eq!(response.0, StatusCode::OK);
+    assert_eq!(response.1["data"]["llm"]["model"], "outside-after-save");
+    assert_eq!(fixture.files(), defaults);
+    assert!(fs::read_to_string(main)
+        .unwrap()
+        .contains("outside-after-save"));
+    assert!(fs::read_to_string(outside.root.join("selected/image.toml"))
+        .unwrap()
+        .contains("outside-image-after-save"));
+}
+
+#[test]
+fn configuration_write_modern_main_persistence_saves_or_restores_both_destinations() {
+    for failed in [false, true] {
+        let (fixture, main) = selected_fixture();
+        let mirror_fixture = Fixture::new();
+        let mirror = mirror_fixture.root.join("mirror.toml");
+        if failed {
+            fs::create_dir(&mirror).unwrap();
+        } else {
+            fs::write(&mirror, b"# old mirror\n").unwrap();
+        }
+        let before = fs::read(&main).unwrap();
+        let defaults = fixture.files();
+        let mut files = load_model_settings_files(&fixture.state, true).unwrap();
+        files[0].changed = true;
+        files[0].value["llm"]["selected_model"] =
+            toml::Value::String("mirrored-selected-model".into());
+        let result =
+            save_model_settings_files_with_persistence(&fixture.state, files, Some(mirror.clone()));
+        if failed {
+            assert!(result.is_err());
+            assert_eq!(fs::read(&main).unwrap(), before);
+            assert!(mirror.is_dir());
+        } else {
+            result.unwrap();
+            assert_eq!(fs::read(&main).unwrap(), fs::read(mirror).unwrap());
+            assert_ne!(fs::read(&main).unwrap(), before);
+        }
+        assert_eq!(fixture.files(), defaults);
+    }
+}
+
+#[tokio::test]
+async fn configuration_write_invalid_legacy_toml_never_publishes_or_rotates_credentials() {
+    let fixture = custom_fixture();
+    let before = fixture.files();
+    let mut request = legacy_request(Some(REPLACEMENT));
+    request.selected_model = "fixture\0not-toml".into();
+    let (status, body) =
+        update_llm_config(State(fixture.state.clone()), headers(), Json(request)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body.0.error.as_deref(), Some("llm_config_invalid"));
+    assert_eq!(fixture.files(), before);
+    assert!(!claw_core::secrets::model_environment::path(&fixture.root).exists());
+}
+
+#[tokio::test]
+async fn configuration_write_legacy_failures_do_not_expose_configuration_contents_or_paths() {
+    let fixture = custom_fixture();
+    fixture.write("config.toml", &format!("api_key = {SECRET}\n"));
+    let (status, Json(body)) = update_llm_config(
+        State(fixture.state.clone()),
+        headers(),
+        Json(legacy_request(None)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(body.error.as_deref(), Some("llm_config_read_failed"));
+    fixture.assert_private(&serde_json::to_value(body).unwrap());
+}
+
 #[test]
 fn configuration_write_persistence_failure_does_not_modify_the_active_config() {
     let fixture = Fixture::new();
@@ -221,7 +384,7 @@ async fn configuration_write_legacy_and_modern_requests_share_the_write_boundary
         headers(),
         ModelSettingsOperation::SaveModels,
         move |state| {
-            let mut files = load_model_settings_files(&state.skill_rt.workspace_root, true)?;
+            let mut files = load_model_settings_files(state, true)?;
             files[0]
                 .value
                 .get_mut("sentinel")
@@ -235,7 +398,7 @@ async fn configuration_write_legacy_and_modern_requests_share_the_write_boundary
             files[0].changed = true;
             ready.send(()).unwrap();
             gate.recv_timeout(Duration::from_secs(30))?;
-            save_model_settings_files(&state.skill_rt.workspace_root, files)?;
+            save_model_settings_files(state, files)?;
             Ok(json!({"saved":true}))
         },
     ));
@@ -251,6 +414,15 @@ async fn configuration_write_legacy_and_modern_requests_share_the_write_boundary
     let waker = Waker::from(Arc::new(NoopWake));
     let first = legacy.as_mut().poll(&mut Context::from_waker(&waker));
     let pending = first.is_pending();
+    if pending {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !crate::configuration_files::has_contender(&active_runtime_config_path(
+            &fixture.state,
+        )) {
+            assert!(std::time::Instant::now() < deadline, "legacy request must actually contend for the modern request's lock, not only yield to a worker");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
     release.release();
     let modern = modern.await.unwrap();
     let legacy = match first {

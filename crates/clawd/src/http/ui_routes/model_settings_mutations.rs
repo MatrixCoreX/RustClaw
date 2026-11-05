@@ -1,6 +1,5 @@
 fn write_model_config(state: &AppState, req: &ModelConfigUpdateRequest) -> anyhow::Result<()> {
-    let root = &state.skill_rt.workspace_root;
-    let mut files = load_model_settings_files(root, req.llm.is_some())?;
+    let mut files = load_model_settings_files(state, req.llm.is_some())?;
     if let Some(llm) = req.llm.as_ref() {
         let config = &mut files[0];
         let table = config
@@ -31,12 +30,11 @@ fn write_model_config(state: &AppState, req: &ModelConfigUpdateRequest) -> anyho
             files[index].changed = true;
         }
     }
-    save_model_settings_files(root, files)
+    save_model_settings_files(state, files)
 }
 
 fn write_provider_keys(state: &AppState, req: &ProviderKeysResponse) -> anyhow::Result<()> {
-    let root = &state.skill_rt.workspace_root;
-    let mut files = load_model_settings_files(root, !req.llm.is_empty())?;
+    let mut files = load_model_settings_files(state, !req.llm.is_empty())?;
     if !req.llm.is_empty() {
         let file = &mut files[0];
         let llm = file
@@ -101,5 +99,5 @@ fn write_provider_keys(state: &AppState, req: &ProviderKeysResponse) -> anyhow::
             }
         }
     }
-    save_model_settings_files(root, files)
+    save_model_settings_files(state, files)
 }

@@ -1,6 +1,109 @@
 use super::*;
 use crate::secrets::{EnvFileSecretsBroker, SecretsBroker};
 
+struct OwnedFixture(PathBuf);
+impl Drop for OwnedFixture {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn model_environment_panicked_publication_restores_credentials_and_unlocks_next_save() {
+    let fixture = OwnedFixture(fixture());
+    save(&fixture.0, "custom", "fixture-original").unwrap();
+    let original = fs::read(path(&fixture.0)).unwrap();
+    let result = std::panic::catch_unwind(|| {
+        with_saved(
+            &fixture.0,
+            "custom",
+            "fixture-replacement",
+            || -> Result<(), ()> {
+                panic!("fixture-only publication panic");
+            },
+        )
+    });
+    assert!(result.is_err());
+    assert_eq!(fs::read(path(&fixture.0)).unwrap(), original);
+    save(&fixture.0, "custom", "fixture-after-panic").unwrap();
+    assert_eq!(
+        lookup_at(&path(&fixture.0), "custom")
+            .unwrap()
+            .unwrap()
+            .expose(),
+        "fixture-after-panic"
+    );
+}
+
+#[test]
+fn model_environment_failed_associated_publication_restores_exact_original_bytes() {
+    let fixture = OwnedFixture(fixture());
+    save(&fixture.0, "custom", "fixture-original").unwrap();
+    let original = fs::read(path(&fixture.0)).unwrap();
+    let result = with_saved(&fixture.0, "custom", "fixture-replacement", || {
+        Err::<(), _>("fixture config failure")
+    });
+    assert!(matches!(
+        result,
+        Err(PublicationError::Operation("fixture config failure"))
+    ));
+    assert_eq!(fs::read(path(&fixture.0)).unwrap(), original);
+}
+
+#[test]
+fn model_environment_failed_first_publication_removes_only_its_own_new_file() {
+    let fixture = OwnedFixture(fixture());
+    let result = with_saved(&fixture.0, "custom", "fixture-replacement", || {
+        Err::<(), _>(())
+    });
+    assert!(matches!(result, Err(PublicationError::Operation(()))));
+    assert!(!path(&fixture.0).exists());
+}
+
+#[test]
+fn model_environment_recovery_does_not_clobber_independent_credentials() {
+    let fixture = OwnedFixture(fixture());
+    let independent = b"CUSTOM_API_KEY=fixture-independent\n";
+    let result = with_saved(&fixture.0, "custom", "fixture-replacement", || {
+        fs::write(path(&fixture.0), independent).unwrap();
+        Err::<(), _>(())
+    });
+    assert!(matches!(result, Err(PublicationError::Recovery(_))));
+    assert_eq!(fs::read(path(&fixture.0)).unwrap(), independent);
+}
+
+#[test]
+fn model_environment_success_keeps_credentials_and_callback_result() {
+    let fixture = OwnedFixture(fixture());
+    assert_eq!(
+        with_saved(&fixture.0, "custom", "fixture-replacement", || Ok::<_, ()>(
+            42
+        ))
+        .unwrap(),
+        42
+    );
+    assert_eq!(
+        lookup_at(&path(&fixture.0), "custom")
+            .unwrap()
+            .unwrap()
+            .expose(),
+        "fixture-replacement"
+    );
+}
+
+#[test]
+fn model_environment_invalid_credential_never_runs_associated_publication() {
+    let fixture = OwnedFixture(fixture());
+    let mut called = false;
+    let result = with_saved(&fixture.0, "custom", "invalid\nvalue", || {
+        called = true;
+        Ok::<_, ()>(())
+    });
+    assert!(matches!(result, Err(PublicationError::Environment(_))));
+    assert!(!called);
+    assert!(!path(&fixture.0).exists());
+}
+
 const VENDORS: [&str; 9] = [
     "openai",
     "google",

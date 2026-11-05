@@ -267,6 +267,8 @@ jobs:
           cargo test --locked -p clawd --bin clawd runtime_config_write_ -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd llm_credentials_ -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd configuration_write_tests -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd configuration_files::tests -- --test-threads=1 --nocapture
+          cargo test --locked -p claw-core secrets::model_environment::tests -- --test-threads=1 --nocapture
       - name: Verify both product identities with the shared UI
         run: |
           npm ci --ignore-scripts --prefix UI
@@ -434,6 +436,8 @@ jobs:
           cargo test --locked -p clawd --bin clawd runtime_config_write_ -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd llm_credentials_ -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd configuration_write_tests -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd configuration_files::tests -- --test-threads=1 --nocapture
+          cargo test --locked -p claw-core secrets::model_environment::tests -- --test-threads=1 --nocapture
 
       - name: Test browser API authentication boundaries
         shell: bash

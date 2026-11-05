@@ -3,7 +3,14 @@ async fn update_llm_config(
     headers: HeaderMap,
     Json(req): Json<UpdateLlmConfigRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    update_llm_config_with_writer(state, headers, req, write_runtime_config_file)
+    match tokio::task::spawn_blocking(move || {
+        update_llm_config_with_writer(state, headers, req, write_runtime_config_file)
+    })
+    .await
+    {
+        Ok(response) => response,
+        Err(_) => crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "llm_config_write_failed"),
+    }
 }
 
 // Private publication seam for isolated transaction-failure controls.
@@ -16,6 +23,26 @@ fn update_llm_config_with_writer(
     if let Err(resp) = require_ui_admin(&state, &headers) {
         return resp;
     }
+    crate::configuration_files::with_locked_files(&model_settings_lock_paths(&state), || {
+        // A role/key can be revoked while this request waits for another save.
+        if let Err(response) = require_ui_admin(&state, &headers) {
+            return response;
+        }
+        update_llm_config_locked(&state, req, publish)
+    })
+    .unwrap_or_else(|_| {
+        crate::api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "model_settings_lock_unavailable",
+        )
+    })
+}
+
+fn update_llm_config_locked(
+    state: &AppState,
+    req: UpdateLlmConfigRequest,
+    publish: impl FnOnce(&AppState, &str) -> std::io::Result<()>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
     let inline_api_key = req.vendor_api_key.as_deref().map(str::trim).unwrap_or("");
     let selected_vendor = req.selected_vendor.trim().to_ascii_lowercase();
     let selected_model = req.selected_model.trim().to_string();
@@ -42,13 +69,13 @@ fn update_llm_config_with_writer(
 
     let (raw, parsed) = match read_skill_config_file(&state) {
         Ok(v) => v,
-        Err(err) => {
+        Err(_) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiResponse {
                     ok: false,
                     data: None,
-                    error: Some(format!("read llm config failed: {err}")),
+                    error: Some("llm_config_read_failed".into()),
                 }),
             );
         }
@@ -137,12 +164,16 @@ fn update_llm_config_with_writer(
         &allowed_models,
         &selected_model,
     );
-    let updated_api_key = upsert_string_key_in_section(
-        &updated_vendor_models,
-        &format!("llm.{selected_vendor}"),
-        "api_key",
-        "api_key = \"\"",
-    );
+    let updated_api_key = if !inline_api_key.is_empty() || device_key_enrollment {
+        upsert_string_key_in_section(
+            &updated_vendor_models,
+            &format!("llm.{selected_vendor}"),
+            "api_key",
+            "api_key = \"\"",
+        )
+    } else {
+        updated_vendor_models
+    };
     let mut final_updated = if llm_vendor_supports_api_format(&selected_vendor) {
         let vendor_api_format = normalize_llm_api_format(req.vendor_api_format.as_deref());
         upsert_string_key_in_section(
@@ -170,35 +201,29 @@ fn update_llm_config_with_writer(
             );
         }
     }
-    if !inline_api_key.is_empty() {
-        if claw_core::secrets::model_environment::save(
+    let updated_parsed = match toml::from_str::<toml::Value>(&final_updated) {
+        Ok(parsed) => parsed,
+        Err(_) => return crate::api_err(StatusCode::BAD_REQUEST, "llm_config_invalid"),
+    };
+    let publication = if !inline_api_key.is_empty() {
+        use claw_core::secrets::model_environment::{with_saved, PublicationError};
+        with_saved(
             &state.skill_rt.workspace_root,
             &selected_vendor,
             inline_api_key,
+            || publish(state, &final_updated),
         )
-        .is_err()
-        {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some("llm_api_key_environment_write_failed".to_string()),
-                }),
-            );
-        }
+        .map_err(|error| match error {
+            PublicationError::Environment(_) => "llm_api_key_environment_write_failed",
+            PublicationError::Operation(_) => "llm_config_write_failed",
+            PublicationError::Recovery(_) => "llm_api_key_environment_rollback_failed",
+        })
+    } else {
+        publish(state, &final_updated).map_err(|_| "llm_config_write_failed")
+    };
+    if let Err(code) = publication {
+        return crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, code);
     }
-    if let Err(err) = publish(&state, &final_updated) {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(format!("write llm config failed: {err}")),
-            }),
-        );
-    }
-    let updated_parsed = toml::from_str::<toml::Value>(&final_updated).unwrap_or(parsed);
     let restart_required =
         llm_restart_required(&state, &updated_parsed, &selected_vendor, &selected_model);
 

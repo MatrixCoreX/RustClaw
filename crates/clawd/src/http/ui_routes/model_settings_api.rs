@@ -1,5 +1,3 @@
-static MODEL_SETTINGS_ACCESS_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
 #[derive(Clone, Copy)]
 enum ModelSettingsOperation {
     ReadModels,
@@ -58,42 +56,41 @@ where
         if let Err(response) = authorize_model_settings(&state, &headers, operation) {
             return response;
         }
-        let Ok(_guard) = MODEL_SETTINGS_ACCESS_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-        else {
-            return crate::api_err(
+        crate::configuration_files::with_locked_files(&model_settings_lock_paths(&state), || {
+            // Recheck after waiting for another request; never reuse an old role or
+            // enabled-key result as authorization for the actual filesystem work.
+            if let Err(response) = authorize_model_settings(&state, &headers, operation) {
+                return response;
+            }
+            match execute(&state) {
+                Ok(data) => (
+                    StatusCode::OK,
+                    Json(ApiResponse {
+                        ok: true,
+                        data: Some(data),
+                        error: None,
+                    }),
+                ),
+                Err(error) => {
+                    let failure = error.downcast_ref::<ModelSettingsFailure>();
+                    let code = failure
+                        .map(|failure| failure.error_code)
+                        .unwrap_or(operation.failure_code());
+                    tracing::warn!(
+                        error_code = code,
+                        config_file = failure.map(|failure| failure.file),
+                        "model_settings_operation_failed"
+                    );
+                    crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, code)
+                }
+            }
+        })
+        .unwrap_or_else(|_| {
+            crate::api_err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "model_settings_lock_unavailable",
-            );
-        };
-        // Recheck after waiting for another request; never reuse an old role or
-        // enabled-key result as authorization for the actual filesystem work.
-        if let Err(response) = authorize_model_settings(&state, &headers, operation) {
-            return response;
-        }
-        match execute(&state) {
-            Ok(data) => (
-                StatusCode::OK,
-                Json(ApiResponse {
-                    ok: true,
-                    data: Some(data),
-                    error: None,
-                }),
-            ),
-            Err(error) => {
-                let failure = error.downcast_ref::<ModelSettingsFailure>();
-                let code = failure
-                    .map(|failure| failure.error_code)
-                    .unwrap_or(operation.failure_code());
-                tracing::warn!(
-                    error_code = code,
-                    config_file = failure.map(|failure| failure.file),
-                    "model_settings_operation_failed"
-                );
-                crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, code)
-            }
-        }
+            )
+        })
     })
     .await
     {

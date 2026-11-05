@@ -13,53 +13,42 @@ fn write_workspace_and_mounted_file(
     raw: &str,
 ) -> std::io::Result<()> {
     let active_path = workspace_root.join(relative_path);
-    if let Some(parent) = active_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&active_path, raw)?;
-
     let mounted_relative = relative_path
         .strip_prefix("configs/")
         .unwrap_or(relative_path);
     let mounted_path = workspace_root.join("docker/config").join(mounted_relative);
-    if let Some(parent) = mounted_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&mounted_path, raw)?;
-    Ok(())
+    let paths = [active_path, mounted_path];
+    crate::configuration_files::with_locked_files(&paths, || {
+        let targets = paths.iter().map(|path| crate::configuration_files::Target::workspace(workspace_root, path.clone())).collect();
+        crate::configuration_files::publish_copies(targets, raw.as_bytes())
+    })?
 }
 
 fn write_runtime_config_file(state: &AppState, raw: &str) -> std::io::Result<()> {
     let active_path = active_runtime_config_path(state);
-    let persisted_path = claw_core::product_identity::env_os("CONFIG_PERSIST_PATH")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .map(|path| {
-            if path.is_absolute() {
-                path
-            } else {
-                state.skill_rt.workspace_root.join(path)
-            }
-        });
-    write_runtime_config_to_paths(&active_path, persisted_path.as_deref(), raw)
+    let root = &state.skill_rt.workspace_root;
+    let persisted_path = crate::configuration_files::persistence_path(root);
+    // The legacy request owns the same path locks as modern model settings.
+    publish_runtime_config_to_paths(root, &active_path, persisted_path.as_deref(), raw)
 }
 
+#[cfg(test)]
 fn write_runtime_config_to_paths(
     active_path: &Path,
     persisted_path: Option<&Path>,
     raw: &str,
 ) -> std::io::Result<()> {
-    if let Some(parent) = active_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(active_path, raw)?;
-    if let Some(path) = persisted_path.filter(|path| *path != active_path) {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(path, raw)?;
-    }
-    Ok(())
+    let paths = std::iter::once(active_path.to_path_buf()).chain(persisted_path.map(Path::to_path_buf)).collect::<Vec<_>>();
+    crate::configuration_files::with_locked_files(&paths, || {
+        publish_runtime_config_to_paths(active_path.parent().ok_or_else(|| std::io::Error::other("configuration_parent_missing"))?, active_path, persisted_path, raw)
+    })?
+}
+
+fn publish_runtime_config_to_paths(root: &Path, active: &Path, persisted: Option<&Path>, raw: &str) -> std::io::Result<()> {
+    let targets = std::iter::once(active).chain(persisted)
+        .map(|path| crate::configuration_files::Target::configured(root, path.to_path_buf()))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    crate::configuration_files::publish_copies(targets, raw.as_bytes())
 }
 
 #[derive(Debug, Default)]

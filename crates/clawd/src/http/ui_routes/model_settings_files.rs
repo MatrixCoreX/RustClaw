@@ -24,18 +24,21 @@ struct ModelSettingsFile {
 }
 
 fn load_model_settings_files(
-    root: &Path,
+    state: &AppState,
     require_main: bool,
 ) -> anyhow::Result<[ModelSettingsFile; 5]> {
     let mut files = Vec::new();
-    for filename in [
+    for (filename, path) in [
         "config.toml",
         "image.toml",
         "audio.toml",
         "video.toml",
         "music.toml",
-    ] {
-        let original = match fs::read(root.join("configs").join(filename)) {
+    ]
+    .into_iter()
+    .zip(model_settings_paths(state))
+    {
+        let original = match fs::read(path) {
             Ok(bytes) => Some(bytes),
             Err(error)
                 if error.kind() == std::io::ErrorKind::NotFound
@@ -73,95 +76,135 @@ fn load_model_settings_files(
         .map_err(|_| anyhow::anyhow!("model_settings_file_inventory_invalid"))
 }
 
+#[cfg(test)]
 struct ModelSettingsEdit {
     name: &'static str,
     original: Option<Vec<u8>>,
     updated: Vec<u8>,
 }
 
-fn save_model_settings_files(root: &Path, files: [ModelSettingsFile; 5]) -> anyhow::Result<()> {
-    // Finish all parsing, structural updates and serialization before touching
-    // any file. Validation failures therefore cannot leave a partial save.
-    let edits = files
-        .into_iter()
-        .filter(|file| file.changed)
-        .map(|file| {
-            let updated = toml::to_string_pretty(&file.value).map_err(|_| {
-                model_settings_failure(file.name, "model_settings_serialize_failed")
-            })?;
-            Ok(ModelSettingsEdit {
-                name: file.name,
-                original: file.original,
-                updated: updated.into_bytes(),
-            })
-        })
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    commit_model_settings_edits(root, &edits, |path, bytes| {
-        crate::secure_workspace_fs::atomic_write_workspace_file(root, path, bytes)
-    })
+fn model_settings_paths(state: &AppState) -> [PathBuf; 5] {
+    let main = active_runtime_config_path(state);
+    let parent = main.parent().expect("active configuration has a parent");
+    [
+        main.clone(),
+        parent.join("image.toml"),
+        parent.join("audio.toml"),
+        parent.join("video.toml"),
+        parent.join("music.toml"),
+    ]
 }
 
+fn model_settings_lock_paths(state: &AppState) -> Vec<PathBuf> {
+    let mut paths = model_settings_paths(state).to_vec();
+    paths.extend(crate::configuration_files::persistence_path(
+        &state.skill_rt.workspace_root,
+    ));
+    paths.push(claw_core::secrets::model_environment::path(
+        &state.skill_rt.workspace_root,
+    ));
+    paths
+}
+
+fn save_model_settings_files(
+    state: &AppState,
+    files: [ModelSettingsFile; 5],
+) -> anyhow::Result<()> {
+    save_model_settings_files_with_persistence(
+        state,
+        files,
+        crate::configuration_files::persistence_path(&state.skill_rt.workspace_root),
+    )
+}
+
+fn save_model_settings_files_with_persistence(
+    state: &AppState,
+    files: [ModelSettingsFile; 5],
+    persistence: Option<PathBuf>,
+) -> anyhow::Result<()> {
+    // Finish all parsing, structural updates and serialization before touching
+    // any file. Validation failures therefore cannot leave a partial save.
+    let root = &state.skill_rt.workspace_root;
+    let paths = model_settings_paths(state);
+    let mut changes = Vec::new();
+    let mut main_updated = None;
+    for (index, (file, path)) in files.into_iter().zip(paths).enumerate() {
+        if !file.changed {
+            continue;
+        }
+        let updated = toml::to_string_pretty(&file.value)
+            .map_err(|_| model_settings_failure(file.name, "model_settings_serialize_failed"))?
+            .into_bytes();
+        if index == 0 {
+            main_updated = Some(updated.clone());
+        }
+        let target = crate::configuration_files::Target::configured(root, path)
+            .map_err(|_| model_settings_failure(file.name, "model_settings_write_failed"))?;
+        changes.push(crate::configuration_files::Edit {
+            target,
+            original: file.original,
+            updated,
+        });
+    }
+    if let Some(updated) = main_updated {
+        if let Some(path) = persistence {
+            let target =
+                crate::configuration_files::Target::configured(root, path).map_err(|_| {
+                    model_settings_failure("config.toml", "model_settings_write_failed")
+                })?;
+            let original = target.read().map_err(|_| {
+                model_settings_failure("config.toml", "model_settings_write_failed")
+            })?;
+            if !target
+                .same_destination(&changes[0].target)
+                .map_err(|_| model_settings_failure("config.toml", "model_settings_write_failed"))?
+            {
+                changes.push(crate::configuration_files::Edit {
+                    target,
+                    original,
+                    updated,
+                });
+            }
+        }
+    }
+    commit_model_settings_changes(&changes, |target, bytes| target.publish(bytes))
+}
+
+#[cfg(test)]
 fn commit_model_settings_edits(
     root: &Path,
     edits: &[ModelSettingsEdit],
     mut publish: impl FnMut(&Path, &[u8]) -> std::io::Result<()>,
 ) -> anyhow::Result<()> {
-    // Detect edits made since this request read its inputs. The HTTP service
-    // serializes this family of requests; out-of-band editors are not locked.
-    for edit in edits {
-        let current = read_model_settings_bytes(root, edit.name)?;
-        if current != edit.original {
-            return Err(model_settings_failure(
-                edit.name,
-                "model_settings_changed_during_save",
-            ));
-        }
-    }
-    for (index, edit) in edits.iter().enumerate() {
-        let path = root.join("configs").join(edit.name);
-        if publish(&path, &edit.updated).is_err() {
-            // Atomic publication can report a directory-sync error after its
-            // rename. Include that file when restoring, not just earlier ones.
-            let mut restored = true;
-            for previous in edits[..=index].iter().rev() {
-                let current = read_model_settings_bytes(root, previous.name);
-                if matches!(current, Ok(ref bytes) if *bytes == previous.original) {
-                    continue;
-                }
-                let path = root.join("configs").join(previous.name);
-                let result = if let Some(original) = previous.original.as_deref() {
-                    publish(&path, original)
-                } else {
-                    crate::secure_workspace_fs::remove_workspace_file(root, &path)
-                };
-                restored &= result.is_ok()
-                    || previous.original.is_none()
-                        && result
-                            .as_ref()
-                            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound);
-            }
-            return Err(model_settings_failure(
-                edit.name,
-                if restored {
-                    "model_settings_write_failed"
-                } else {
-                    "model_settings_rollback_failed"
-                },
-            ));
-        }
-    }
-    // Each file is atomically replaced. This is not a crash-safe multi-file
-    // transaction. Other configuration endpoints and out-of-process writers
-    // do not share this request family's lock.
-    Ok(())
+    let changes = edits
+        .iter()
+        .map(|edit| crate::configuration_files::Edit {
+            target: crate::configuration_files::Target::workspace(
+                root,
+                root.join("configs").join(edit.name),
+            ),
+            original: edit.original.clone(),
+            updated: edit.updated.clone(),
+        })
+        .collect::<Vec<_>>();
+    commit_model_settings_changes(&changes, |target, bytes| publish(&target.path, bytes))
 }
 
-fn read_model_settings_bytes(root: &Path, name: &'static str) -> anyhow::Result<Option<Vec<u8>>> {
-    match fs::read(root.join("configs").join(name)) {
-        Ok(bytes) => Ok(Some(bytes)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(_) => Err(model_settings_failure(name, "model_settings_read_failed")),
-    }
+fn commit_model_settings_changes(
+    changes: &[crate::configuration_files::Edit],
+    publish: impl FnMut(&crate::configuration_files::Target, &[u8]) -> std::io::Result<()>,
+) -> anyhow::Result<()> {
+    use crate::configuration_files::{commit_with, FailureKind};
+    commit_with(changes, publish).map_err(|failure| {
+        model_settings_failure(
+            "configuration",
+            match failure.kind {
+                FailureKind::Changed => "model_settings_changed_during_save",
+                FailureKind::Write => "model_settings_write_failed",
+                FailureKind::Recovery => "model_settings_rollback_failed",
+            },
+        )
+    })
 }
 
 fn update_model_provider_key(

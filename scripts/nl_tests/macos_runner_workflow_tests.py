@@ -30,6 +30,10 @@ def valid_job(job, runner, target):
 
 def required_reload_gate(job, selector="skill_reload_tests"):
     command = f"cargo test --locked -p clawd --bin clawd {selector} -- --test-threads=1 --nocapture"
+    return required_command_gate(job, command)
+
+
+def required_command_gate(job, command):
     selected = [step for step in job["steps"] if command in step.get("run", "")]
     return len(selected) == 1 and (
         "if" not in selected[0] and not selected[0].get("continue-on-error", False)
@@ -39,6 +43,24 @@ def required_reload_gate(job, selector="skill_reload_tests"):
 
 
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_configuration_lock_and_credential_transaction_suites_gate_both_systems(self):
+        jobs = load("macos-polyglot-skill-ci.yml")["jobs"]
+        for name in ["runtime-read-linux", "polyglot-skill-macos"]:
+            for command in [
+                "cargo test --locked -p clawd --bin clawd configuration_files::tests -- --test-threads=1 --nocapture",
+                "cargo test --locked -p claw-core secrets::model_environment::tests -- --test-threads=1 --nocapture",
+            ]:
+                self.assertTrue(required_command_gate(jobs[name], command))
+                for mutation in ["remove", "ignore", "continue", "conditional"]:
+                    with self.subTest(job=name, command=command, mutation=mutation):
+                        job = deepcopy(jobs[name])
+                        step = next(step for step in job["steps"] if command in step.get("run", ""))
+                        if mutation == "remove": step["run"] = step["run"].replace(command, "true")
+                        elif mutation == "ignore": step["run"] = step["run"].replace(command, command + " || true")
+                        elif mutation == "continue": step["continue-on-error"] = True
+                        else: step["if"] = "${{ always() }}"
+                        self.assertFalse(required_command_gate(job, command))
+
     def test_shared_configuration_and_retained_credentials_gate_both_native_systems(self):
         jobs = load("macos-polyglot-skill-ci.yml")["jobs"]
         for name in ["runtime-read-linux", "polyglot-skill-macos"]:
