@@ -6,6 +6,8 @@ use support::*;
 mod http;
 #[path = "model_catalog_read_offload_tests.rs"]
 mod offload;
+#[path = "model_catalog_read_truthfulness_tests.rs"]
+mod truthfulness;
 
 #[tokio::test]
 async fn model_catalog_parse_failures_never_expose_required_or_optional_config_source() {
