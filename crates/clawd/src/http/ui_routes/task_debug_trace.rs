@@ -30,12 +30,10 @@ fn build_model_catalog_trace_for_debug(state: &AppState, entries: &[TaskDebugEnt
     ) {
         Ok(catalog) => catalog,
         Err(error) => {
-            return json!({
-                "trace_kind": "model_catalog_decision",
-                "status": "catalog_unavailable",
-                "error_code": "model_catalog_unavailable",
-                "error_detail": error.to_string(),
-            });
+            let mut failure = model_catalog_failure_data(&error);
+            failure["trace_kind"] = json!("model_catalog_decision");
+            failure["status"] = json!("catalog_unavailable");
+            return failure;
         }
     };
     let observed_providers = entries

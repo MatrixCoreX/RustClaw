@@ -541,6 +541,7 @@ include!("ui_routes/factory_reset.rs");
 include!("ui_routes/channel_config.rs");
 include!("ui_routes/teaching_trace_security.rs");
 include!("ui_routes/task_debug_trace.rs");
+include!("ui_routes/task_debug_read.rs");
 include!("ui_routes/logs_usage_debug.rs");
 include!("ui_routes/slo_metrics.rs");
 include!("ui_routes/service_control.rs");
@@ -550,6 +551,7 @@ include!("ui_routes/workspace_nginx.rs");
 include!("ui_routes/workspace_webd.rs");
 include!("ui_routes/health_skills_import.rs");
 include!("ui_routes/model_provider_config.rs");
+include!("ui_routes/model_catalog_read.rs");
 include!("ui_routes/skill_import_config.rs");
 include!("ui_routes/skill_store_installation.rs");
 include!("ui_routes/skill_store.rs");
@@ -570,6 +572,10 @@ mod tests;
 #[cfg(test)]
 #[path = "ui_routes/model_provider_config_tests.rs"]
 mod model_provider_config_tests;
+
+#[cfg(test)]
+#[path = "ui_routes/model_catalog_read_tests.rs"]
+mod model_catalog_read_tests;
 
 #[cfg(test)]
 #[path = "ui_routes/llm_credentials_tests.rs"]
