@@ -46,6 +46,7 @@ impl Fixture {
             .principal_id;
         {
             let db = state.core.db.get().expect("capacity fixture connection");
+            super::indexing::ensure_retrieval_schema(&db).expect("retrieval startup");
             super::jobs::ensure_memory_job_schema(&db).expect("capacity job schema");
             super::embedding_jobs::initialize_embedding_runtime(&db, &state.policy.memory)
                 .expect("capacity embedding schema");
