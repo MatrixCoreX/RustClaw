@@ -82,6 +82,7 @@ export function backend(owner: () => string): ApiFetch {
 export async function mount(apiFetch: ApiFetch, initialScope = "A", confirm = async () => true) {
   let runtime!: Runtime;
   let renderer!: ReactTestRenderer;
+  const renders: Array<{ scope: string; settings: Runtime["memorySettings"]; page: Runtime["memoryPage"] }> = [];
   function Probe({ scope }: { scope: string }) {
     // Only this fixture's provider service is replaced. No browser/portal or
     // production confirmation is touched, and pending approval is controllable.
@@ -89,6 +90,7 @@ export async function mount(apiFetch: ApiFetch, initialScope = "A", confirm = as
     dialog.confirm = confirm;
     const parameters = { apiFetch, t, requestScope: scope };
     runtime = useMemoryRuntime(parameters);
+    renders.push({ scope, settings: runtime.memorySettings, page: runtime.memoryPage });
     return null;
   }
   const tree = (scope: string) => React.createElement(UiDialogProvider, {
@@ -96,6 +98,7 @@ export async function mount(apiFetch: ApiFetch, initialScope = "A", confirm = as
   });
   await act(async () => { renderer = create(tree(initialScope)); });
   return {
+    renders,
     get runtime() { return runtime; },
     async scope(scope: string) { await act(async () => { renderer.update(tree(scope)); }); },
     async close() { await act(async () => { renderer.unmount(); }); },

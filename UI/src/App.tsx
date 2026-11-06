@@ -485,7 +485,7 @@ export default function App() {
     updateMemoryExternalPolicy,
     selectMemorySettingScope,
     controlMemoryVector,
-  } = useMemoryRuntime({ apiFetch, t });
+  } = useMemoryRuntime({ apiFetch, t, requestScope: activeUiRequestScope });
   const {
     selectedLogFile,
     setSelectedLogFile,
@@ -1917,7 +1917,7 @@ export default function App() {
     if (currentPage !== "memory") return;
     void fetchMemoryData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, apiBase, uiAuthReady]);
+  }, [currentPage, apiBase, uiAuthReady, activeUiRequestScope]);
 
   const maskedSavedUiKey = useMemo(() => {
     if (authMode === "webd") return "";
@@ -2660,6 +2660,7 @@ export default function App() {
 
           {currentPage === "memory" ? (
             <MemoryPage
+              key={activeUiRequestScope}
               lang={lang}
               t={t}
               memoryLoading={memoryLoading}
