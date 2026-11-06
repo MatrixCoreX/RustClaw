@@ -551,6 +551,11 @@ pub(crate) async fn run_one_memory_job(
         Ok(()) => complete_job(state, &job.job_id, worker_id)?,
         Err(error) => {
             warn!(job_id = job.job_id, error = %error, "memory_job_execution_failed");
+            #[cfg(test)]
+            eprintln!(
+                "memory_job_execution_fixture_error={}",
+                json!({"job_id": &job.job_id, "error_chain": format!("{error:#}")})
+            );
             fail_or_retry_job(
                 state,
                 &job.job_id,

@@ -248,7 +248,7 @@ impl GenerationFixture {
         match state {
             Ok((status, error_code, checkpoint, attempt)) => eprintln!(
                 "memory_completion_fixture_state={}",
-                json!({"status":status,
+                json!({"job_id":&self.job_id,"status":status,
                 "error_code":error_code,"checkpoint":checkpoint,"attempt":attempt,
                 "provider_requests":self.requests.load(Ordering::SeqCst)})
             ),
