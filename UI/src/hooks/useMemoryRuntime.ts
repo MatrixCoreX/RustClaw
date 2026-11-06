@@ -146,6 +146,11 @@ export function useMemoryRuntime({ apiFetch, t, requestScope }: UseMemoryRuntime
     }
   };
   const refreshPage = () => fetchMemoryPage(latest.current.memoryFilters, latest.current.requestedPage);
+  const refreshVectorStatus = async () => {
+    const current = requests.token("vector", ["vector"]);
+    const status = await read<MemoryVectorStatus>("/v1/memory/vector/status").catch(() => null);
+    update({ memoryVectorStatus: status }, current);
+  };
 
   const correctMemoryItem = (id: string, revision: number, content: string) => change("action", `correct:${id}`, ["items", "vector"],
     () => post<MemoryMutationResult>(`/v1/memory/${encodeURIComponent(id)}/correct`, { expected_revision: revision, content }),
@@ -282,19 +287,22 @@ export function useMemoryRuntime({ apiFetch, t, requestScope }: UseMemoryRuntime
     const state = latest.current;
     const domain = settingsDomain(state);
     const currentWrite = requests.token(`settingsWrite:${domain}`);
-    await change("settings", "settings", [domain], () => post<MemorySettingsResult>("/v1/memory/settings", {
+    const domains = state.memorySettingScope === "principal" ? [domain, "vector"] : [domain];
+    await change("settings", "settings", domains, () => post<MemorySettingsResult>("/v1/memory/settings", {
       scope: state.memorySettingScope,
       conversation_id: state.memorySettingScope === "conversation" ? state.settingsConversationId : undefined,
       expected_revision: state.memorySettings!.revision, ...body,
     }), async (settings) => {
-      if (settingsDomain(latest.current) !== domain) return;
-      if (!latest.current.memorySettings || latest.current.memorySettings.revision <= settings.revision) {
+      if (!currentWrite()) return;
+      if (settingsDomain(latest.current) === domain
+        && (!latest.current.memorySettings || latest.current.memorySettings.revision <= settings.revision)) {
         update(current => ({ memorySettings: settings,
           memoryOverview: current.memoryOverview ? { ...current.memoryOverview, long_term_enabled: settings.use_memory && settings.generate_memory } : null,
           memoryMessage: external ? t("远程处理范围已更新。", "Remote processing scope updated.")
             : t("记忆设置已立即生效。", "Memory setting is now active.") }), currentWrite);
       }
-      if (external) await fetchMemoryData(true);
+      if (state.memorySettingScope === "principal") await refreshVectorStatus();
+      if (external && currentWrite() && settingsDomain(latest.current) === domain) await fetchMemoryData(true);
     }, SETTINGS_FAILURE);
   };
   const updateMemorySetting = (kind: "use" | "generate", enabled: boolean) => saveSettings({
