@@ -2,16 +2,28 @@
 use super::*;
 use std::sync::Arc;
 
+#[path = "model_catalog_runtime_credential_tests.rs"]
+mod credentials;
+#[path = "model_catalog_runtime_projection_tests.rs"]
+mod projection;
+
+fn isolated(module: &str, name: &str, values: &[(&str, &str)]) -> bool {
+    let full_name = format!("http::ui_routes::model_catalog_read_tests::truthfulness::runtime_contracts::{module}::{name}");
+    isolated_process_case(&full_name, name, values)
+}
+
 fn configure(fixture: &Fixture, llm: &str) {
     fixture.write("configs/config.toml", &format!(
         "[server]\nrequest_timeout_seconds=30\n[database]\nsqlite_path='data/fixture.db'\nbusy_timeout_ms=2000\n[worker]\n{llm}"));
 }
 
+fn load_config(fixture: &Fixture) -> claw_core::config::AppConfig {
+    claw_core::config::AppConfig::load(fixture.root.join("configs/config.toml").to_str().unwrap())
+        .unwrap()
+}
+
 fn runtimes(fixture: &Fixture) -> Vec<Arc<crate::LlmProviderRuntime>> {
-    let config = claw_core::config::AppConfig::load(
-        fixture.root.join("configs/config.toml").to_str().unwrap(),
-    )
-    .unwrap();
+    let config = load_config(fixture);
     crate::llm_gateway::build_providers_for_selection(&config, None, None)
 }
 

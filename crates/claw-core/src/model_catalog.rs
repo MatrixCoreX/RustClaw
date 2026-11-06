@@ -1,11 +1,15 @@
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use thiserror::Error;
 
 #[path = "model_catalog_credentials.rs"]
 mod credentials;
 use credentials::{is_loopback, CredentialSnapshot};
+
+#[path = "model_catalog_providers.rs"]
+mod providers;
+use providers::ProviderSnapshot;
 
 #[derive(Debug, Error)]
 pub enum ModelCatalogError {
@@ -106,21 +110,11 @@ fn build_model_catalog(
     credentials: &mut CredentialSnapshot,
 ) -> ModelCatalog {
     let llm = inputs.config.get("llm").and_then(toml::Value::as_table);
-    let selected_provider = llm
-        .and_then(|table| table.get("selected_vendor"))
-        .and_then(toml::Value::as_str)
-        .unwrap_or_default()
-        .trim()
-        .to_string();
-    let selected_model = llm
-        .and_then(|table| table.get("selected_model"))
-        .and_then(toml::Value::as_str)
-        .unwrap_or_default()
-        .trim()
-        .to_string();
+    let providers = ProviderSnapshot::new(&inputs.config);
+    let (selected_provider, selected_model) = providers.selected().clone();
 
     let mut provider_tables = BTreeMap::new();
-    if let Some(llm) = llm {
+    if let Some(llm) = llm.filter(|_| !providers.explicit) {
         for (provider, value) in llm {
             // Enrollment policy is not an independently runnable text provider.
             if provider == "hosted_relay" {
@@ -144,7 +138,8 @@ fn build_model_catalog(
             }
         }
     }
-    collect_module_targets(inputs, &mut provider_tables);
+    providers.add_text_targets(&mut provider_tables);
+    collect_module_targets(inputs, &providers, &mut provider_tables);
 
     let entries = provider_tables
         .into_iter()
@@ -155,6 +150,7 @@ fn build_model_catalog(
                 inputs,
                 &selected_provider,
                 &selected_model,
+                &providers,
                 credentials,
             )
         })
@@ -170,8 +166,10 @@ fn build_model_catalog(
 
 fn collect_module_targets(
     inputs: &ModelCatalogDocuments,
+    providers: &ProviderSnapshot,
     targets: &mut BTreeMap<(String, String), toml::map::Map<String, toml::Value>>,
 ) {
+    let mut media_targets = BTreeSet::new();
     for (config, section_name) in [
         (&inputs.image, "image_edit"),
         (&inputs.image, "image_generation"),
@@ -222,7 +220,14 @@ fn collect_module_targets(
         }
         // A media configuration must not replace a text entry's transport or
         // credential metadata when both happen to use the same model ID.
-        targets.entry((provider, model)).or_insert(target);
+        let key = (provider, model);
+        if providers.for_model(&key.0, &key.1).is_none() && media_targets.insert(key.clone()) {
+            // A non-runnable text template cannot own an independent media
+            // transport. Preserve the first media declaration, as before.
+            targets.insert(key, target);
+        } else {
+            targets.entry(key).or_insert(target);
+        }
     }
 }
 
@@ -232,6 +237,7 @@ fn catalog_entry(
     inputs: &ModelCatalogDocuments,
     selected_provider: &str,
     selected_model: &str,
+    providers: &ProviderSnapshot,
     credentials: &mut CredentialSnapshot,
 ) -> ModelCatalogEntry {
     let model = string_field(llm_table, "model");
@@ -249,22 +255,10 @@ fn catalog_entry(
     let music_generation_models =
         provider_models(section(&inputs.music, "music_generation"), provider);
 
-    let text_table = inputs
-        .config
-        .get("llm")
-        .and_then(toml::Value::as_table)
-        .and_then(|llm| llm.get(provider))
-        .and_then(toml::Value::as_table);
-    let supports_text = text_table.is_some_and(|table| {
-        string_field(table, "model") == model
-            || contains_model(&string_list_field(table, "models"), &model)
-            || (provider == selected_provider && model == selected_model)
-    });
-    let transport = if supports_text {
-        text_table.unwrap_or(llm_table)
-    } else {
-        llm_table
-    };
+    let text_provider = providers.for_model(provider, &model);
+    let text_table = text_provider.as_ref().map(|provider| provider.table());
+    let supports_text = text_provider.is_some();
+    let transport = text_table.as_ref().unwrap_or(llm_table);
     let supports_image_understanding = contains_model(&image_vision_models, &model);
     let supports_audio_transcription = contains_model(&audio_transcribe_models, &model);
     let supports_image_generation = contains_model(&image_generation_models, &model);
@@ -275,7 +269,7 @@ fn catalog_entry(
     let (input_modalities, output_modalities) = model_modalities(
         provider,
         &model,
-        text_table,
+        text_table.as_ref(),
         supports_text,
         supports_image_understanding,
         supports_audio_transcription,
@@ -303,13 +297,22 @@ fn catalog_entry(
         base_url_kind: base_url_kind(&string_field(transport, "base_url")),
         context_window_tokens: usize_field(transport, "context_window_tokens"),
         timeout_seconds: u64_field(transport, "timeout_seconds"),
-        credential_state: credentials.state(
-            transport,
-            provider,
-            &model,
-            &inputs.config,
-            supports_text,
-        ),
+        credential_state: match text_provider.as_ref() {
+            Some(text) => credentials.text_state(text),
+            None => credentials.state(
+                transport,
+                provider,
+                &model,
+                &inputs.config,
+                !(supports_image_understanding
+                    || supports_audio_transcription
+                    || supports_image_generation
+                    || supports_image_edit
+                    || supports_audio_generation
+                    || supports_video_generation
+                    || supports_music_generation),
+            ),
+        },
         input_modalities,
         output_modalities,
         supports_text,
@@ -325,7 +328,9 @@ fn catalog_entry(
         supports_music_generation,
         async_required,
         dry_run_supported: async_required,
-        active_text_provider: provider == selected_provider && model == selected_model,
+        active_text_provider: supports_text
+            && provider == selected_provider
+            && model == selected_model,
         config_source: vec![
             "configs/config.toml".to_string(),
             "configs/image.toml".to_string(),

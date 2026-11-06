@@ -5,16 +5,15 @@ use std::sync::Mutex;
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 struct EnvRestore {
-    name: &'static str,
+    name: String,
     previous: Option<String>,
 }
 
 impl EnvRestore {
-    fn capture(name: &'static str) -> Self {
-        Self {
-            name,
-            previous: std::env::var(name).ok(),
-        }
+    fn capture(name: impl Into<String>) -> Self {
+        let name = name.into();
+        let previous = std::env::var(&name).ok();
+        Self { name, previous }
     }
 }
 
@@ -22,8 +21,8 @@ impl Drop for EnvRestore {
     fn drop(&mut self) {
         unsafe {
             match &self.previous {
-                Some(value) => std::env::set_var(self.name, value),
-                None => std::env::remove_var(self.name),
+                Some(value) => std::env::set_var(&self.name, value),
+                None => std::env::remove_var(&self.name),
             }
         }
     }
@@ -147,7 +146,7 @@ input_modalities = ["text"]
 output_modalities = ["text"]
 timeout_seconds = 60
 
-[llm.fixture_missing]
+[llm.anthropic]
 base_url = "https://fixture.invalid/v1"
 api_key = ""
 model = "fixture-model"
@@ -314,6 +313,14 @@ fn catalog_emits_distinct_entries_for_independent_multimodal_models() {
 
 #[test]
 fn catalog_reports_missing_credential_state_without_secret_values() {
+    let _guard = ENV_LOCK.lock().expect("env lock");
+    let canonical = crate::secrets::EnvSecretsBroker::new().env_var_name("text_anthropic_api_key");
+    let _restore_vendor = EnvRestore::capture("ANTHROPIC_API_KEY");
+    let _restore_canonical = EnvRestore::capture(&canonical);
+    unsafe {
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        std::env::remove_var(&canonical);
+    }
     let root = temp_workspace_root();
     write_fixture(&root);
 
@@ -321,11 +328,41 @@ fn catalog_reports_missing_credential_state_without_secret_values() {
     let missing = catalog
         .entries
         .iter()
-        .find(|entry| entry.provider == "fixture_missing")
+        .find(|entry| entry.provider == "anthropic")
         .expect("fixture missing entry");
 
     assert_eq!(missing.credential_state, "missing");
     assert!(missing.supports_text);
+}
+
+#[test]
+fn catalog_request_snapshot_reuses_canonical_presence_across_credential_contracts() {
+    let _guard = ENV_LOCK.lock().expect("env lock");
+    let canonical = crate::secrets::EnvSecretsBroker::new().env_var_name("text_custom_api_key");
+    let _restore_vendor = EnvRestore::capture("CUSTOM_API_KEY");
+    let _restore_canonical = EnvRestore::capture(&canonical);
+    unsafe {
+        std::env::remove_var("CUSTOM_API_KEY");
+        std::env::remove_var(&canonical);
+    }
+    let root = temp_workspace_root();
+    let config: toml::Value = toml::from_str("[llm]\n[[llm.providers]]\nname='vendor-custom'\ntype='openai_compat'\n\
+        base_url='https://fixture.invalid/v1'\napi_key=''\nmodel='fixture-model'\npriority=1\ntimeout_seconds=30\nmax_concurrency=1\n").unwrap();
+    let provider = providers::ProviderSnapshot::new(&config)
+        .for_model("custom", "fixture-model")
+        .unwrap();
+    let mut snapshot = CredentialSnapshot::new(&root);
+    assert_eq!(
+        snapshot.state(&provider.table(), "custom", "fixture-model", &config, false),
+        "missing"
+    );
+    crate::secrets::model_environment::save(&root, "custom", "fixture-owned-snapshot-secret")
+        .unwrap();
+    assert_eq!(snapshot.text_state(&provider), "missing");
+    assert_eq!(
+        CredentialSnapshot::new(&root).text_state(&provider),
+        "configured_env"
+    );
 }
 
 #[test]
@@ -457,8 +494,13 @@ fn catalog_reports_env_file_credential_state_without_secret_values() {
 #[test]
 fn catalog_ignores_missing_env_file_path() {
     let _guard = ENV_LOCK.lock().expect("env lock");
+    let canonical = crate::secrets::EnvSecretsBroker::new().env_var_name("text_anthropic_api_key");
+    let _restore_vendor = EnvRestore::capture("ANTHROPIC_API_KEY");
+    let _restore_canonical = EnvRestore::capture(&canonical);
     let _restore_catalog_env = EnvRestore::capture("CHINESE_PROVIDER_ENV_FILE");
     unsafe {
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        std::env::remove_var(&canonical);
         std::env::set_var(
             "CHINESE_PROVIDER_ENV_FILE",
             "/tmp/agent-runtime-definitely-missing-env-file.sh",
@@ -472,7 +514,7 @@ fn catalog_ignores_missing_env_file_path() {
     assert!(catalog
         .entries
         .iter()
-        .any(|entry| entry.provider == "fixture_missing" && entry.credential_state == "missing"));
+        .any(|entry| entry.provider == "anthropic" && entry.credential_state == "missing"));
 }
 
 #[test]

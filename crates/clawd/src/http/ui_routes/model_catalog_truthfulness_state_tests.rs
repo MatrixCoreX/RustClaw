@@ -19,47 +19,12 @@ fn temp_workspace_root() -> Workspace {
     Workspace(Fixture::new())
 }
 
-const CHILD: &str = "APP_MODEL_CATALOG_FIXTURE_CHILD";
 const SECRET: &str = "fixture-catalog-source-secret-53197";
 
 fn in_child(name: &str, values: &[(&str, &str)]) -> bool {
-    if std::env::var(CHILD).as_deref() == Ok(name) {
-        return false;
-    }
     let full_name =
         format!("http::ui_routes::model_catalog_read_tests::truthfulness::state_contracts::{name}");
-    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
-    command.env_clear().env(CHILD, name).args([
-        "--exact",
-        &full_name,
-        "--nocapture",
-        "--test-threads=1",
-    ]);
-    for name in [
-        "PATH",
-        "LD_LIBRARY_PATH",
-        "DYLD_LIBRARY_PATH",
-        "DYLD_FALLBACK_LIBRARY_PATH",
-        "SYSTEMROOT",
-        "TMPDIR",
-        "TEMP",
-        "APP_PRODUCT_IDENTITY_CONFIG",
-    ] {
-        if let Some(value) = std::env::var_os(name) {
-            command.env(name, value);
-        }
-    }
-    let output = command.envs(values.iter().copied()).output().unwrap();
-    assert!(
-        output.status.success(),
-        "isolated catalogue case {name} failed\n{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("running 1 test"));
-    assert!(stdout.contains("test result: ok. 1 passed; 0 failed; 0 ignored;"));
-    true
+    isolated_process_case(&full_name, name, values)
 }
 
 fn write_text(root: &Path, key: &str, base_url: &str) {

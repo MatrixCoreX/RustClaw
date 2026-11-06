@@ -114,3 +114,42 @@ pub(super) fn assert_error(response: &(StatusCode, Value), status: StatusCode, c
     assert_eq!(response.1["ok"], false);
     assert_eq!(response.1["error"], code);
 }
+
+pub(super) fn isolated_process_case(full_name: &str, name: &str, values: &[(&str, &str)]) -> bool {
+    const CHILD: &str = "APP_MODEL_CATALOG_FIXTURE_CHILD";
+    if std::env::var(CHILD).as_deref() == Ok(name) {
+        return false;
+    }
+    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+    command.env_clear().env(CHILD, name).args([
+        "--exact",
+        full_name,
+        "--nocapture",
+        "--test-threads=1",
+    ]);
+    for name in [
+        "PATH",
+        "LD_LIBRARY_PATH",
+        "DYLD_LIBRARY_PATH",
+        "DYLD_FALLBACK_LIBRARY_PATH",
+        "SYSTEMROOT",
+        "TMPDIR",
+        "TEMP",
+        "APP_PRODUCT_IDENTITY_CONFIG",
+    ] {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+    let output = command.envs(values.iter().copied()).output().unwrap();
+    assert!(
+        output.status.success(),
+        "isolated catalogue case {name} failed\n{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("running 1 test"));
+    assert!(stdout.contains("test result: ok. 1 passed; 0 failed; 0 ignored;"));
+    true
+}
