@@ -44,3 +44,41 @@ async fn normal_vendor_extract_job_resolves_after_cold_worker_restart() {
 async fn normal_vendor_consolidation_job_resolves_after_cold_worker_restart() {
     assert_cold_vendor_job("consolidate").await;
 }
+
+async fn assert_snapshot_denial(fixture: &GenerationFixture) {
+    let (ran, calls) = fixture.run_cold_first_request().await.unwrap();
+    assert!(ran);
+    assert_ne!(fixture.status(), "completed");
+    assert_eq!(calls, 0);
+    assert_eq!(fixture.provider_request_count(), 0);
+    for table in [
+        "user_preferences",
+        "long_term_memories",
+        "memory_facts",
+        "memory_generation_outputs",
+    ] {
+        assert_eq!(fixture.scalar(&format!("SELECT COUNT(*) FROM {table}")), 0);
+    }
+    assert_eq!(
+        fixture.scalar("SELECT used_background_cost_microunits FROM memory_principal_quotas"),
+        0
+    );
+}
+
+#[tokio::test]
+async fn pinned_job_protocol_mismatch_never_calls_provider_or_charges_work() {
+    let fixture = GenerationFixture::for_vendor_kind("extract").await;
+    fixture.sql("UPDATE memory_jobs SET provider_type='anthropic_claude' WHERE job_kind='extract'");
+    assert_snapshot_denial(&fixture).await;
+}
+
+#[tokio::test]
+async fn current_model_replacement_never_silently_retargets_a_queued_job() {
+    let mut fixture = GenerationFixture::for_vendor_kind("extract").await;
+    {
+        let provider =
+            std::sync::Arc::make_mut(&mut fixture.fixture.state_mut().core.llm_providers[0]);
+        provider.config.model = "replacement-model".into();
+    }
+    assert_snapshot_denial(&fixture).await;
+}

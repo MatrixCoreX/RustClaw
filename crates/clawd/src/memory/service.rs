@@ -661,7 +661,7 @@ pub(super) async fn maybe_refresh_long_term_summary_for_range(
     task: &ClaimedTask,
     force_refresh: bool,
     source_range: Option<(i64, i64)>,
-    generation: Option<super::job_completion::GenerationLease<'_>>,
+    generation: Option<&super::generation_response::GenerationCall<'_>>,
 ) -> Result<(), String> {
     if !state.policy.memory.long_term_enabled {
         return Ok(());
@@ -847,11 +847,12 @@ pub(super) async fn maybe_refresh_long_term_summary_for_range(
         latest_id,
         &parsed.fact_candidates,
         &parsed.knowledge_candidates,
-        generation.map(|lease| lease.job_id),
+        generation.map(|generation| generation.lease.job_id),
     )
     .map_err(|err| format!("write knowledge candidates failed: {err}"))?;
-    if let Some(lease) = generation {
-        super::job_completion::mark_committed(&tx, lease).map_err(|error| error.to_string())?;
+    if let Some(generation) = generation {
+        super::job_completion::mark_committed(&tx, generation.lease)
+            .map_err(|error| error.to_string())?;
     }
     tx.commit()
         .map_err(|error| format!("memory_job_commit_failed:{error}"))?;

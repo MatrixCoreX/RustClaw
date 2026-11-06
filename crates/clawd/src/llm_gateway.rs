@@ -380,6 +380,7 @@ pub(crate) async fn run_with_preacquired_resource(
     task: &ClaimedTask,
     prompt: &str,
     prompt_source: &str,
+    provider: Arc<LlmProviderRuntime>,
     resource: crate::resource_scheduler::ResourceLease,
 ) -> Result<String, String> {
     let mut hints = crate::ChatRequestHints::default();
@@ -390,7 +391,7 @@ pub(crate) async fn run_with_preacquired_resource(
         prompt,
         prompt_source,
         hints,
-        state.task_llm_providers(task),
+        vec![provider],
         Some(resource),
     )
     .await

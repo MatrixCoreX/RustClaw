@@ -1,6 +1,7 @@
 use tracing::warn;
 
-use super::job_completion::{mark_committed, GenerationLease};
+use super::generation_response::GenerationCall;
+use super::job_completion::mark_committed;
 use super::{apply, build_memory_intent_llm_prompt, effective_user_key, intent, settings};
 use crate::{AppState, ClaimedTask};
 
@@ -17,7 +18,7 @@ pub(super) async fn extract_for_job(
     state: &AppState,
     task: &ClaimedTask,
     content: &str,
-    generation: GenerationLease<'_>,
+    generation: &GenerationCall<'_>,
 ) -> anyhow::Result<()> {
     extract(state, task, content, Some(generation)).await
 }
@@ -26,7 +27,7 @@ async fn extract(
     state: &AppState,
     task: &ClaimedTask,
     content: &str,
-    generation: Option<GenerationLease<'_>>,
+    generation: Option<&GenerationCall<'_>>,
 ) -> anyhow::Result<()> {
     let cfg = &state.policy.memory;
     if !cfg.enable_preference_extraction
@@ -93,8 +94,8 @@ async fn extract(
         &crate::now_ts(),
         crate::now_ts_u64() as i64,
     )?;
-    if let Some(lease) = generation {
-        mark_committed(&tx, lease)?;
+    if let Some(generation) = generation {
+        mark_committed(&tx, generation.lease)?;
     }
     tx.commit()?;
     tracing::info!(

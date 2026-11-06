@@ -1,10 +1,17 @@
 //! Durable response staging for background memory generation. An interrupted
 //! provider request is uncertain, not permission to repeat the model call.
+use std::sync::Arc;
+
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use super::job_completion::{phase, GenerationLease, JobPhase};
+
+pub(super) struct GenerationCall<'a> {
+    pub(super) lease: GenerationLease<'a>,
+    pub(super) provider: Arc<crate::LlmProviderRuntime>,
+}
 
 fn digest(text: &str) -> String {
     format!("sha256:{:x}", Sha256::digest(text.as_bytes()))
@@ -15,9 +22,9 @@ pub(super) async fn run(
     task: &crate::ClaimedTask,
     prompt: &str,
     prompt_source: &str,
-    generation: Option<GenerationLease<'_>>,
+    generation: Option<&GenerationCall<'_>>,
 ) -> anyhow::Result<String> {
-    let Some(lease) = generation else {
+    let Some(generation) = generation else {
         return crate::llm_gateway::run_with_fallback_with_prompt_source(
             state,
             task,
@@ -27,6 +34,7 @@ pub(super) async fn run(
         .await
         .map_err(anyhow::Error::msg);
     };
+    let lease = generation.lease;
     let prompt_digest = digest(&serde_json::to_string(&(prompt_source, prompt))?);
     let resource;
     {
@@ -110,6 +118,7 @@ pub(super) async fn run(
         task,
         prompt,
         prompt_source,
+        generation.provider.clone(),
         resource,
     )
     .await

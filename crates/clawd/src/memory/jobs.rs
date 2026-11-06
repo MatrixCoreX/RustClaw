@@ -470,6 +470,17 @@ fn provider_snapshot_for_job(
     settings: &super::settings::MemoryEffectiveSettings,
     job_kind: &str,
 ) -> anyhow::Result<(String, String, String, String)> {
+    Ok(provider_snapshot(provider_for_job(
+        state, task, settings, job_kind,
+    )?))
+}
+
+fn provider_for_job(
+    state: &crate::AppState,
+    task: &crate::ClaimedTask,
+    settings: &super::settings::MemoryEffectiveSettings,
+    job_kind: &str,
+) -> anyhow::Result<Option<std::sync::Arc<crate::LlmProviderRuntime>>> {
     let (configured_provider, configured_model) = match job_kind {
         "extract" => (
             state.policy.memory.extract_provider.trim(),
@@ -482,9 +493,7 @@ fn provider_snapshot_for_job(
         _ => ("", ""),
     };
     if configured_provider.is_empty() && configured_model.is_empty() {
-        return Ok(provider_snapshot(
-            state.task_llm_providers(task).into_iter().next(),
-        ));
+        return Ok(state.task_llm_providers(task).into_iter().next());
     }
     anyhow::ensure!(
         !configured_provider.is_empty() && !configured_model.is_empty(),
@@ -504,7 +513,7 @@ fn provider_snapshot_for_job(
         })
         .cloned()
         .ok_or_else(|| anyhow!("memory_job_configured_provider_unavailable"))?;
-    Ok(provider_snapshot(Some(provider)))
+    Ok(Some(provider))
 }
 
 pub(crate) fn spawn_memory_job_workers(state: crate::AppState, concurrency: usize) {
@@ -724,19 +733,6 @@ async fn execute_claimed_job(
         anyhow::bail!("memory_job_cancelled");
     }
     let task = load_source_task(state, job)?;
-    let selected_provider = state
-        .task_llm_providers(&task)
-        .into_iter()
-        .next()
-        .ok_or_else(|| anyhow!("memory_job_provider_unavailable"))?;
-    let (_, _, selected_model, selected_capability_digest) =
-        provider_snapshot(Some(selected_provider.clone()));
-    anyhow::ensure!(
-        selected_provider.config.name == job.provider_name
-            && selected_model == job.model_name
-            && selected_capability_digest == job.model_capability_digest,
-        "memory_job_model_snapshot_mismatch"
-    );
     let current = super::settings::resolve_task_memory_settings(state, &task)?
         .ok_or_else(|| anyhow!("memory_job_settings_unavailable"))?;
     anyhow::ensure!(current.generate_memory, "memory_job_generation_revoked");
@@ -744,6 +740,21 @@ async fn execute_claimed_job(
         current.revision == job.settings_revision && current.policy_digest == job.policy_digest,
         "memory_job_settings_snapshot_changed"
     );
+    let selected_provider = provider_for_job(state, &task, &current, &job.job_kind)?
+        .ok_or_else(|| anyhow!("memory_job_provider_unavailable"))?;
+    let (selected_name, selected_protocol, selected_model, selected_capability_digest) =
+        provider_snapshot(Some(selected_provider.clone()));
+    anyhow::ensure!(
+        selected_name == job.provider_name
+            && selected_protocol == job.provider_type
+            && selected_model == job.model_name
+            && selected_capability_digest == job.model_capability_digest,
+        "memory_job_model_snapshot_mismatch"
+    );
+    let generation = super::generation_response::GenerationCall {
+        lease,
+        provider: selected_provider,
+    };
     let db = state
         .core
         .db
@@ -793,7 +804,8 @@ async fn execute_claimed_job(
         "extract" => {
             let content = load_user_source_bundle(state, job)?;
             if !content.trim().is_empty() {
-                super::intent_generation::extract_for_job(state, &task, &content, lease).await?;
+                super::intent_generation::extract_for_job(state, &task, &content, &generation)
+                    .await?;
             }
         }
         "consolidate" => {
@@ -802,7 +814,7 @@ async fn execute_claimed_job(
                 &task,
                 true,
                 Some((source_start, source_end)),
-                Some(lease),
+                Some(&generation),
             )
             .await
             .map_err(anyhow::Error::msg)?;
@@ -875,7 +887,7 @@ fn load_source_task(
         [source_task_id],
         |row| {
             let principal_id = row.get::<_, Option<String>>(9)?;
-            let mut task = crate::ClaimedTask {
+            let task = crate::ClaimedTask {
                 claim_attempt: 0,
                 task_id: row.get(0)?,
                 user_id: row.get(1)?,
@@ -887,20 +899,6 @@ fn load_source_task(
                 kind: row.get(7)?,
                 payload_json: row.get(8)?,
             };
-            let mut payload =
-                serde_json::from_str::<Value>(&task.payload_json).unwrap_or_else(|_| json!({}));
-            if let Some(object) = payload.as_object_mut() {
-                object.insert(
-                    "_agent_model_selection".to_string(),
-                    json!({
-                        "schema_version": 1,
-                        "provider": job.provider_type,
-                        "model": job.model_name,
-                        "authority": "server_validated_model_catalog",
-                    }),
-                );
-            }
-            task.payload_json = payload.to_string();
             Ok((task, principal_id))
         },
     )
