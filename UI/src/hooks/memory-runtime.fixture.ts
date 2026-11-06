@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
-import { UiDialogProvider, useUiDialog } from "../components/UiDialogProvider";
+import { UiDialogProvider, useUiDialog, type UiConfirmOptions } from "../components/UiDialogProvider";
 import { useMemoryRuntime, type MemoryListFilters } from "./useMemoryRuntime";
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -80,7 +80,9 @@ export function backend(owner: () => string): ApiFetch {
   return async (path) => json(data(path, owner()));
 }
 
-export async function mount(apiFetch: ApiFetch, initialScope = "A", confirm = async () => true) {
+export async function mount(apiFetch: ApiFetch, initialScope = "A",
+  confirm: (options: UiConfirmOptions) => Promise<boolean> = async () => true,
+  translate: (zh: string, en: string) => string = t) {
   let runtime!: Runtime;
   let renderer!: ReactTestRenderer;
   const renders: Array<{ scope: string; settings: Runtime["memorySettings"]; page: Runtime["memoryPage"] }> = [];
@@ -89,7 +91,7 @@ export async function mount(apiFetch: ApiFetch, initialScope = "A", confirm = as
     // production confirmation is touched, and pending approval is controllable.
     const dialog = useUiDialog();
     dialog.confirm = confirm;
-    const parameters = { apiFetch, t, requestScope: scope };
+    const parameters = { apiFetch, t: translate, requestScope: scope };
     runtime = useMemoryRuntime(parameters);
     renders.push({ scope, settings: runtime.memorySettings, page: runtime.memoryPage });
     return null;

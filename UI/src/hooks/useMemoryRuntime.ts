@@ -268,10 +268,11 @@ export function useMemoryRuntime({ apiFetch, t, requestScope }: UseMemoryRuntime
     const notice = requests.token("notice");
     try {
       const preview = await read<MemoryClearPreview>(`/v1/memory/clear/preview?mode=${mode}`);
-      const label = scope === "recent" ? t("近期记录", "recent memories") : t("全部记忆", "all memory data");
+      const warning = t("清空后无法撤销，相关待确认导入也会失效。需要保留的内容请先导出。",
+        "Clearing cannot be undone, and affected pending imports will be invalidated. Export anything you need to keep first.");
       if (!await confirm({ title: t("清空记忆", "Clear memory"), message: t(
-        `将删除 ${preview.transcript_rows} 条${label}、${preview.derived_rows} 条派生记忆，并停止 ${preview.pending_jobs} 个后台作业。确定继续吗？`,
-        `This removes ${preview.transcript_rows} ${label}, ${preview.derived_rows} derived memories, and stops ${preview.pending_jobs} background jobs. Continue?`),
+        `将删除 ${preview.transcript_rows} 条近期记录、${preview.derived_rows} 条派生记忆，并停止 ${preview.pending_jobs} 个后台作业。${warning}确定继续吗？`,
+        `This removes ${preview.transcript_rows} recent records, ${preview.derived_rows} derived memories, and stops ${preview.pending_jobs} background jobs. ${warning} Continue?`),
         confirmLabel: t("清空", "Clear"), tone: "danger" })) return;
       await change("action", `clear:${scope}`, ["items", "vector"], () => post<MemoryClearPreview>("/v1/memory/clear/scoped", {
         mode: preview.mode, expected_transcript_rows: preview.transcript_rows, expected_derived_rows: preview.derived_rows,
