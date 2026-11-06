@@ -1994,3 +1994,6 @@ fn unix_ts() -> u64 {
 #[cfg(test)]
 #[path = "main_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod credential_selection_tests;

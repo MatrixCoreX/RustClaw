@@ -229,6 +229,10 @@ jobs:
           cache-bin: "false"
           cache-on-failure: "false"
           save-if: ${{ github.event_name != 'pull_request' }}
+      - name: Test dedicated STT credentials and selected connection ownership
+        run: |
+          set -euo pipefail
+          cargo test --locked -p audio-transcribe-skill -- --test-threads=16 --nocapture
       - name: Prepare existing runtime verification helpers
         run: |
           cargo build --locked -p agent-skill-sdk --bin skillctl
@@ -374,6 +378,12 @@ jobs:
           cache-bin: "false"
           cache-on-failure: "false"
           save-if: ${{ github.event_name != 'pull_request' }}
+
+      - name: Test dedicated STT credentials and selected connection ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p audio-transcribe-skill -- --test-threads=16 --nocapture
 
       - name: Validate manifest and build inventory
         shell: bash
