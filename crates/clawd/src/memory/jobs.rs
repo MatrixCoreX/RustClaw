@@ -1117,3 +1117,11 @@ fn sha256_bytes(value: &[u8]) -> String {
 #[cfg(test)]
 #[path = "jobs_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "jobs_capacity_tests.rs"]
+mod capacity_tests;
+
+#[cfg(test)]
+#[path = "jobs_completion_tests.rs"]
+mod completion_tests;

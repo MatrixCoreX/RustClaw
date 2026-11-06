@@ -23,6 +23,11 @@ pub(crate) mod ux;
 pub(crate) mod vector_store;
 
 #[cfg(test)]
+mod capacity_test_fixtures;
+#[cfg(test)]
+mod capacity_availability_tests;
+
+#[cfg(test)]
 #[path = "memory/memory_wp0_baseline_tests.rs"]
 mod wp0_baseline_tests;
 

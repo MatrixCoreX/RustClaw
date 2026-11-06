@@ -1028,3 +1028,15 @@ fn ensure_embedding_control_schema(db: &Connection) -> anyhow::Result<()> {
 #[cfg(test)]
 #[path = "embedding_jobs_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "embedding_capacity_tests.rs"]
+mod capacity_tests;
+
+#[cfg(test)]
+#[path = "embedding_capacity_maintenance_tests.rs"]
+mod capacity_maintenance_tests;
+
+#[cfg(test)]
+#[path = "embedding_capacity_http_tests.rs"]
+mod capacity_http_tests;
