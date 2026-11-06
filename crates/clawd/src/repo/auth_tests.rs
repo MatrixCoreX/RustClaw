@@ -674,6 +674,30 @@ fn factory_reset_clears_skill_owned_data_and_recreates_one_admin() {
     .expect("seed crypto credential");
     seed_kb_user_data(&state, &user_key);
 
+    {
+        let db = state.core.db.get().expect("main db");
+        crate::memory::jobs::ensure_memory_job_schema(&db).expect("memory runtime schema");
+        db.execute(
+            "INSERT INTO memory_jobs(job_id, job_kind, principal_id, scope_kind,
+            scope_ref, source_digest, eligibility_json, settings_revision, policy_digest,
+            provider_name, provider_type, model_name, model_capability_digest, status,
+            not_before_ts, created_at_ts, updated_at_ts)
+            SELECT 'reset-output','extract',principal_id,'principal',principal_id,
+                'digest','{}',1,'policy','provider','type','model','capability','retry_wait',0,0,0
+            FROM auth_keys WHERE user_key = ?1",
+            [&user_key],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO memory_generation_outputs(job_id, principal_id, response_text,
+            response_digest, prompt_digest, created_at_ts)
+            SELECT job_id, principal_id, 'private staging fixture','digest','prompt',0
+            FROM memory_jobs WHERE job_id = 'reset-output'",
+            [],
+        )
+        .unwrap();
+    }
+
     let result = factory_reset_auth_state(&state).expect("factory reset");
 
     assert_eq!(result.exchange_credentials_deleted, 1);
@@ -684,6 +708,14 @@ fn factory_reset_clears_skill_owned_data_and_recreates_one_admin() {
     );
     assert_eq!(kb_user_row_counts(&state, &user_key), (0, 0));
     let db = state.core.db.get().expect("main db");
+    let staged: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM memory_generation_outputs",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(staged, 0);
     let (count, admin_key): (i64, String) = db
         .query_row(
             "SELECT COUNT(*), MAX(user_key) FROM auth_keys WHERE role = 'admin'",

@@ -110,6 +110,17 @@ pub(crate) fn cleanup_memory_data(
         [],
     );
 
+    // Successful commits remove staging immediately. Preserve live retries;
+    // closed-job remnants share the existing candidate retention policy.
+    transaction.execute(
+        "DELETE FROM memory_generation_outputs
+        WHERE created_at_ts < ?1 AND EXISTS (
+            SELECT 1 FROM memory_jobs WHERE memory_jobs.job_id = memory_generation_outputs.job_id
+              AND memory_jobs.status IN ('completed', 'cancelled', 'failed')
+        )",
+        [candidate_cutoff],
+    )?;
+
     refresh_principal_usage(&transaction, config, now_ts)?;
     let observed_bytes = sqlite_observed_bytes(&transaction)?;
     let state = pressure_state(observed_bytes, config.storage_soft_limit_bytes.max(1));

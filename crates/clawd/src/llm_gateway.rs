@@ -23,7 +23,7 @@ pub(crate) const CONVERSATION_INPUT_INTERRUPTED_ERR: &str = "conversation_input_
 const LLM_RESOURCE_ADMISSION_WAIT_ERR: &str = "llm_resource_admission_wait";
 const LLM_RESOURCE_ADMISSION_RETRY_SECONDS: u64 = 15;
 
-fn acquire_llm_resource_lease(
+pub(crate) fn acquire_llm_resource_lease(
     state: &AppState,
     task: &ClaimedTask,
 ) -> Result<crate::resource_scheduler::ResourceLease, String> {
@@ -372,6 +372,39 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
     hints: crate::ChatRequestHints,
     providers: Vec<Arc<LlmProviderRuntime>>,
 ) -> Result<String, String> {
+    run_with_provider_resource(state, task, prompt, prompt_source, hints, providers, None).await
+}
+
+pub(crate) async fn run_with_preacquired_resource(
+    state: &AppState,
+    task: &ClaimedTask,
+    prompt: &str,
+    prompt_source: &str,
+    resource: crate::resource_scheduler::ResourceLease,
+) -> Result<String, String> {
+    let mut hints = crate::ChatRequestHints::default();
+    crate::task_model_selection::apply_task_model_policy_hints(task, &mut hints);
+    run_with_provider_resource(
+        state,
+        task,
+        prompt,
+        prompt_source,
+        hints,
+        state.task_llm_providers(task),
+        Some(resource),
+    )
+    .await
+}
+
+async fn run_with_provider_resource(
+    state: &AppState,
+    task: &ClaimedTask,
+    prompt: &str,
+    prompt_source: &str,
+    hints: crate::ChatRequestHints,
+    providers: Vec<Arc<LlmProviderRuntime>>,
+    admitted: Option<crate::resource_scheduler::ResourceLease>,
+) -> Result<String, String> {
     if state.task_provider_quota_exhausted(&task.task_id).is_some() {
         return Err(PROVIDER_QUOTA_TERMINATED.to_string());
     }
@@ -381,7 +414,10 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
     }
     state.clear_task_provider_blocker(&task.task_id);
     state.clear_task_cost_blocker(&task.task_id);
-    let _resource_lease = acquire_llm_resource_lease(state, task)?;
+    let _resource_lease = match admitted {
+        Some(resource) => resource,
+        None => acquire_llm_resource_lease(state, task)?,
+    };
     state.restore_task_llm_call_count_from_cost_ledger(&task.task_id);
     if !llm_cost_policy_allows(state, task, None, prompt_source) {
         return Err(TASK_LLM_COST_POLICY_BLOCKED_ERR.to_string());

@@ -86,7 +86,11 @@ pub(super) fn principal_generation_availability(
     let quota = db
         .query_row(
             "SELECT used_rows, max_rows, used_bytes, max_bytes,
-                    used_background_cost_microunits, max_background_cost_microunits
+                    used_background_cost_microunits + COALESCE((
+                        SELECT SUM(background_cost_pending_microunits) FROM memory_jobs
+                        WHERE memory_jobs.principal_id = memory_principal_quotas.principal_id
+                          AND background_cost_pending_microunits > 0
+                    ), 0), max_background_cost_microunits
              FROM memory_principal_quotas WHERE principal_id = ?1",
             [principal_id],
             |row| {

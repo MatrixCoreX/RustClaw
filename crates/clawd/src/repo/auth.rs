@@ -321,6 +321,7 @@ pub(crate) fn factory_reset_auth_state(state: &AppState) -> anyhow::Result<Facto
     let memory_facts_deleted = delete_all_rows_if_exists(&tx, "memory_facts")?;
     let memory_retrieval_rows_deleted = delete_all_rows_if_exists(&tx, "memory_retrieval_index")?;
     let _ = delete_all_rows_if_exists(&tx, "memory_retrieval_index_fts")?;
+    let _ = delete_all_rows_if_exists(&tx, "memory_generation_outputs")?;
 
     let followup_frames_deleted = delete_all_rows_if_exists(&tx, "followup_frames")?;
     let clarify_states_deleted = delete_all_rows_if_exists(&tx, "clarify_states")?;

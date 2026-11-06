@@ -1,0 +1,224 @@
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
+
+use axum::{routing::post, Json, Router};
+use rusqlite::params;
+use serde_json::json;
+
+use super::capacity_test_fixtures::Fixture;
+
+const USER_CONTENT: &str =
+    "I prefer markdown for technical explanations. Please keep this preference for future answers.";
+
+pub(super) struct GenerationFixture {
+    pub(super) fixture: Fixture,
+    pub(super) task: crate::ClaimedTask,
+    pub(super) job_id: String,
+    requests: Arc<AtomicUsize>,
+    server: tokio::task::JoinHandle<()>,
+}
+
+impl GenerationFixture {
+    pub(super) async fn new() -> Self {
+        Self::for_kind("extract").await
+    }
+
+    pub(super) async fn for_kind(kind: &str) -> Self {
+        let mut fixture = Fixture::file();
+        let task = crate::ClaimedTask {
+            claim_attempt: 1,
+            task_id: format!("generation-test-{}", uuid::Uuid::new_v4().simple()),
+            user_id: 1,
+            chat_id: 7,
+            user_key: Some(fixture.key.clone()),
+            channel: "ui".into(),
+            external_user_id: None,
+            external_chat_id: None,
+            kind: "ask".into(),
+            payload_json: "{}".into(),
+        };
+        let output = if kind == "extract" {
+            json!({"memory_actions":[{
+            "action":"upsert","kind":"preference","scope":"user","key":"response_format",
+            "value":"markdown","normalized_value":"markdown","confidence":1.0,
+            "ttl_policy":"long_term","expires_at_ts":null,
+            "source":{"source_kind":"current_user_message","source_ref":format!("task:{}:user",task.task_id),
+                "source_text":USER_CONTENT,"memory_ids":[]},
+            "reason":"fixture","risk":{"sensitive":false,"injection_like":false}
+        }]}).to_string()
+        } else {
+            json!({
+            "summary":"The user prefers markdown for technical explanations and future answers.",
+            "fact_candidates":[{"should_persist":true,"kind":"user_profile_fact",
+                "namespace":"user_profile","fact":"The user prefers markdown for technical explanations.",
+                "confidence":1.0,"reason":"fixture","fact_key":"response_format",
+                "fact_value":"markdown","conflict_group":"","expires_at_ts":null}],
+            "knowledge_candidates":[]
+        }).to_string()
+        };
+        let response = json!({"choices":[{"message":{"role":"assistant","content":output},"finish_reason":"stop"}],
+            "usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}});
+        let requests = Arc::new(AtomicUsize::new(0));
+        let observed = requests.clone();
+        let app = Router::new().route(
+            "/chat/completions",
+            post(move || {
+                observed.fetch_add(1, Ordering::SeqCst);
+                let response = response.clone();
+                async move { Json(response) }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        {
+            let state = fixture.state_mut();
+            state.skill_rt.workspace_root =
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+            state.policy.memory.long_term_enabled = true;
+            state.policy.memory.enable_preference_extraction = true;
+            state.policy.memory.llm_preference_fallback_enabled = true;
+            let mut runtime = (*state.core.llm_providers[0]).clone();
+            runtime.config.name = "memory-generation-fixture".into();
+            runtime.config.provider_type = "openai_compat".into();
+            runtime.config.base_url = base_url;
+            runtime.config.params.stream = Some(false);
+            runtime.config.supports_tools = false;
+            runtime.client = reqwest::Client::builder().no_proxy().build().unwrap();
+            state.core.active_provider_type = Some("openai_compat".into());
+            state.core.llm_providers = vec![Arc::new(runtime)];
+        }
+        {
+            let db = fixture.state().core.db.get().unwrap();
+            db.execute(
+                "INSERT INTO tasks(task_id, user_id, chat_id, user_key, principal_id,
+                channel, kind, payload_json, status, created_at, updated_at)
+                VALUES (?1, 1, 7, ?2, ?3, 'ui', 'ask', '{}', 'succeeded', '1', '1')",
+                params![task.task_id, fixture.key, fixture.principal],
+            )
+            .unwrap();
+        }
+        let ids = super::jobs::persist_turn_and_enqueue(fixture.state(), &task, USER_CONTENT,
+            Some("Markdown output preserves code fences, nested lists, tables, and technical examples for later reference."),
+            false).expect("normal durable enqueue");
+        assert!(
+            !ids.is_empty(),
+            "real source-turn enqueue must create generation work"
+        );
+        let job_id = {
+            let db = fixture.state().core.db.get().unwrap();
+            // Select one existing job kind, still through the real enqueue/worker.
+            db.execute(
+                "UPDATE memory_jobs SET status = 'cancelled', cancel_requested = 1
+                WHERE job_kind != ?1",
+                [kind],
+            )
+            .unwrap();
+            db.execute(
+                "UPDATE memory_jobs SET not_before_ts = 1 WHERE job_kind = ?1",
+                [kind],
+            )
+            .unwrap();
+            db.query_row(
+                "SELECT job_id FROM memory_jobs WHERE job_kind = ?1",
+                [kind],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        Self {
+            fixture,
+            task,
+            job_id,
+            requests,
+            server,
+        }
+    }
+
+    pub(super) async fn run(&self) -> anyhow::Result<bool> {
+        super::jobs::run_one_memory_job(self.fixture.state(), "generation-worker").await
+    }
+
+    pub(super) async fn run_reopened(&self) -> anyhow::Result<bool> {
+        let path: String = self.fixture.state().core.db.get()?.query_row(
+            "SELECT file FROM pragma_database_list WHERE name = 'main'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert!(
+            !path.is_empty(),
+            "recovery must reopen an isolated SQLite file"
+        );
+        let manager = r2d2_sqlite::SqliteConnectionManager::file(path).with_init(
+            |db: &mut rusqlite::Connection| {
+                db.busy_timeout(std::time::Duration::from_millis(50))?;
+                db.pragma_update(None, "foreign_keys", "ON")?;
+                Ok(())
+            },
+        );
+        let mut state = self.fixture.state().clone();
+        state.core.db = r2d2::Pool::builder().max_size(2).build(manager)?;
+        state.metrics = Default::default();
+        let result = super::jobs::run_one_memory_job(&state, "reopened-worker").await;
+        assert_eq!(
+            state.task_llm_call_count(&self.task.task_id),
+            0,
+            "a new worker state must recover from SQLite, not call the provider again"
+        );
+        result
+    }
+
+    pub(super) fn sql(&self, sql: &str) {
+        self.fixture
+            .state()
+            .core
+            .db
+            .get()
+            .unwrap()
+            .execute_batch(sql)
+            .unwrap();
+    }
+
+    pub(super) fn status(&self) -> String {
+        self.fixture
+            .state()
+            .core
+            .db
+            .get()
+            .unwrap()
+            .query_row(
+                "SELECT status FROM memory_jobs WHERE job_id = ?1",
+                [&self.job_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    pub(super) fn scalar(&self, sql: &str) -> i64 {
+        super::capacity_test_fixtures::scalar(&self.fixture.state().core.db.get().unwrap(), sql)
+    }
+
+    pub(super) fn assert_one_provider_call(&self) {
+        assert_eq!(self.requests.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            self.fixture.state().task_llm_call_count(&self.task.task_id),
+            1
+        );
+    }
+
+    pub(super) fn assert_no_provider_call(&self) {
+        assert_eq!(self.requests.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            self.fixture.state().task_llm_call_count(&self.task.task_id),
+            0
+        );
+    }
+}
+
+impl Drop for GenerationFixture {
+    fn drop(&mut self) {
+        self.server.abort();
+    }
+}

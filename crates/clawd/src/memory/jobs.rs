@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use tracing::{error, info, warn};
+use tracing::{error, warn};
 
 use super::eligibility::{
     build_turn_eligibility, MemoryEligibilityDisposition, MemorySourceCategory,
@@ -123,6 +123,7 @@ fn apply_migration(db: &Connection) -> anyhow::Result<()> {
          VALUES (?1, ?2, ?3) ON CONFLICT(migration_id) DO NOTHING",
         params![MIGRATION_ID, migration_manifest_digest(), crate::now_ts()],
     )?;
+    super::job_completion::ensure_schema(db)?;
     Ok(())
 }
 
@@ -529,10 +530,11 @@ pub(crate) async fn run_one_memory_job(
     state: &crate::AppState,
     worker_id: &str,
 ) -> anyhow::Result<bool> {
+    let settled = super::job_completion::settle_due(state)?;
     let Some(job) = claim_next_job(state, worker_id)? else {
-        return Ok(false);
+        return Ok(settled);
     };
-    let execution = execute_claimed_job(state, &job);
+    let execution = execute_claimed_job(state, &job, worker_id);
     tokio::pin!(execution);
     let heartbeat_seconds = (state.policy.memory.background_lease_seconds.max(15) / 3).clamp(5, 30);
     let result = loop {
@@ -605,16 +607,7 @@ fn claim_next_job(
            AND lease_expires_at_ts <= ?1 AND cancel_requested = 0",
         [now],
     )?;
-    tx.execute(
-        "UPDATE memory_jobs
-         SET status = 'cancelled', lease_owner = NULL, lease_expires_at_ts = NULL,
-             error_code = 'cancel_requested', retryable = 0,
-             updated_at_ts = ?1, finished_at_ts = ?1
-         WHERE cancel_requested = 1
-           AND (status IN ('queued', 'retry_wait')
-                OR (status = 'running' AND lease_expires_at_ts <= ?1))",
-        [now],
-    )?;
+    super::job_completion::finalize_cancelled(&tx, now)?;
     // Preflight is only an optimization. Recheck after acquiring the writer
     // transaction so a policy update committed during the wait takes effect.
     let job_id = next_admitted_job(&tx, now)?;
@@ -663,11 +656,10 @@ fn next_admitted_job(db: &Connection, now: i64) -> anyhow::Result<Option<String>
     use super::capacity::{
         principal_generation_availability, GenerationAvailability, StoragePressure,
     };
-    if StoragePressure::load(db)?.generation_availability() != GenerationAvailability::Available {
-        return Ok(None);
-    }
+    let storage_available =
+        StoragePressure::load(db)?.generation_availability() == GenerationAvailability::Available;
     let mut statement = db.prepare(
-        "SELECT j.job_id, j.principal_id FROM memory_jobs j
+        "SELECT j.job_id, j.principal_id, j.checkpoint_json FROM memory_jobs j
          WHERE j.status IN ('queued', 'retry_wait')
            AND j.cancel_requested = 0 AND j.not_before_ts <= ?1
          ORDER BY (
@@ -676,14 +668,23 @@ fn next_admitted_job(db: &Connection, now: i64) -> anyhow::Result<Option<String>
          ) ASC, j.not_before_ts ASC, j.created_at_ts ASC, j.job_id ASC",
     )?;
     let candidates = statement.query_map([now], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
     })?;
     // This cache belongs only to this read/transaction, never to another poll.
     // Older blocked jobs must not hide another principal's eligible work.
     let mut blocked = HashSet::new();
     for candidate in candidates {
-        let (job_id, principal_id) = candidate?;
-        if blocked.contains(&principal_id) {
+        let (job_id, principal_id, checkpoint) = candidate?;
+        // Finalizing an already committed result is maintenance, not a new
+        // generation request. Capacity cannot force it to replay the provider.
+        if super::job_completion::phase(&checkpoint) == super::job_completion::JobPhase::Committed {
+            return Ok(Some(job_id));
+        }
+        if !storage_available || blocked.contains(&principal_id) {
             continue;
         }
         if principal_generation_availability(db, &principal_id)?
@@ -699,7 +700,21 @@ fn next_admitted_job(db: &Connection, now: i64) -> anyhow::Result<Option<String>
 async fn execute_claimed_job(
     state: &crate::AppState,
     job: &MemoryJobSnapshot,
+    worker_id: &str,
 ) -> anyhow::Result<()> {
+    use super::job_completion::{GenerationLease, JobPhase};
+    let phase = super::job_completion::phase(&job.checkpoint_json);
+    match phase {
+        JobPhase::Committed => return Ok(()),
+        JobPhase::ProviderStarted => anyhow::bail!("memory_job_provider_result_unknown"),
+        JobPhase::Invalid => anyhow::bail!("memory_job_checkpoint_invalid"),
+        _ => {}
+    }
+    let lease = GenerationLease {
+        job_id: &job.job_id,
+        worker_id,
+        principal_id: &job.principal_id,
+    };
     if job.cancel_requested {
         anyhow::bail!("memory_job_cancelled");
     }
@@ -741,30 +756,39 @@ async fn execute_claimed_job(
     let source_end = job
         .source_event_end
         .ok_or_else(|| anyhow!("memory_job_source_range_missing"))?;
-    db.execute(
-        "UPDATE memory_jobs
+    if matches!(
+        phase,
+        JobPhase::Unstarted | JobPhase::SourceVerified | JobPhase::ResourceWait
+    ) {
+        let changed = db.execute(
+            "UPDATE memory_jobs
          SET checkpoint_json = ?2, progress_current = 1, progress_total = 2,
              updated_at_ts = ?3
-         WHERE job_id = ?1 AND status = 'running'",
-        params![
-            job.job_id,
-            json!({
-                "schema_version": 1,
-                "phase": "source_range_verified",
-                "source_event_start": source_start,
-                "source_event_end": source_end,
-                "source_digest": job.source_digest,
-            })
-            .to_string(),
-            crate::now_ts_u64() as i64,
-        ],
-    )?;
+         WHERE job_id = ?1 AND status = 'running' AND lease_owner = ?4
+           AND principal_id = ?5 AND cancel_requested = 0",
+            params![
+                job.job_id,
+                json!({
+                    "schema_version": 1,
+                    "phase": "source_range_verified",
+                    "source_event_start": source_start,
+                    "source_event_end": source_end,
+                    "source_digest": job.source_digest,
+                })
+                .to_string(),
+                crate::now_ts_u64() as i64,
+                worker_id,
+                job.principal_id,
+            ],
+        )?;
+        anyhow::ensure!(changed == 1, "memory_job_source_checkpoint_lease_lost");
+    }
     drop(db);
     match job.job_kind.as_str() {
         "extract" => {
             let content = load_user_source_bundle(state, job)?;
             if !content.trim().is_empty() {
-                super::maybe_extract_memory_intent_with_llm(state, &task, &content).await?;
+                super::intent_generation::extract_for_job(state, &task, &content, lease).await?;
             }
         }
         "consolidate" => {
@@ -773,7 +797,7 @@ async fn execute_claimed_job(
                 &task,
                 true,
                 Some((source_start, source_end)),
-                Some(&job.job_id),
+                Some(lease),
             )
             .await
             .map_err(anyhow::Error::msg)?;
@@ -785,17 +809,9 @@ async fn execute_claimed_job(
         .db
         .get()
         .map_err(|error| anyhow!("memory_job_db_pool:{error}"))?;
-    db.execute(
-        "UPDATE memory_jobs
-         SET checkpoint_json = ?2, progress_current = 2, progress_total = 2,
-             updated_at_ts = ?3
-         WHERE job_id = ?1 AND status = 'running'",
-        params![
-            job.job_id,
-            json!({"schema_version": 1, "phase": "commit_verified"}).to_string(),
-            crate::now_ts_u64() as i64,
-        ],
-    )?;
+    let tx = db.unchecked_transaction()?;
+    super::job_completion::mark_committed(&tx, lease)?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -895,26 +911,7 @@ fn load_source_task(
 }
 
 fn complete_job(state: &crate::AppState, job_id: &str, worker_id: &str) -> anyhow::Result<()> {
-    let db = state.core.db.get().map_err(|error| anyhow!(error))?;
-    let now = crate::now_ts_u64() as i64;
-    let changed = db.execute(
-        "UPDATE memory_jobs
-         SET status = CASE WHEN cancel_requested = 1 THEN 'cancelled' ELSE 'completed' END,
-             lease_owner = NULL, lease_expires_at_ts = NULL, retryable = 0,
-             updated_at_ts = ?1, finished_at_ts = ?1
-         WHERE job_id = ?2 AND status = 'running' AND lease_owner = ?3",
-        params![now, job_id, worker_id],
-    )?;
-    anyhow::ensure!(changed == 1, "memory_job_completion_lease_lost");
-    db.execute(
-        "UPDATE memory_principal_quotas
-         SET used_background_cost_microunits = used_background_cost_microunits + 1000,
-             updated_at_ts = ?2
-         WHERE principal_id = (SELECT principal_id FROM memory_jobs WHERE job_id = ?1)",
-        params![job_id, now],
-    )?;
-    info!(job_id, "memory_job_completed");
-    Ok(())
+    super::job_completion::complete(state, job_id, worker_id)
 }
 
 fn fail_or_retry_job(
@@ -926,7 +923,28 @@ fn fail_or_retry_job(
 ) -> anyhow::Result<()> {
     let db = state.core.db.get().map_err(|error| anyhow!(error))?;
     let now = crate::now_ts_u64() as i64;
-    let retryable = attempt < state.policy.memory.background_max_attempts.max(1) as i64;
+    let checkpoint: String = db.query_row(
+        "SELECT checkpoint_json FROM memory_jobs
+        WHERE job_id = ?1 AND status = 'running' AND lease_owner = ?2",
+        params![job_id, worker_id],
+        |row| row.get(0),
+    )?;
+    let phase = super::job_completion::phase(&checkpoint);
+    if phase == super::job_completion::JobPhase::Committed {
+        drop(db);
+        return complete_job(state, job_id, worker_id);
+    }
+    let (retryable, error_code) = match phase {
+        super::job_completion::JobPhase::ProviderStarted => {
+            (false, "memory_job_provider_result_unknown")
+        }
+        super::job_completion::JobPhase::Invalid => (false, "memory_job_checkpoint_invalid"),
+        super::job_completion::JobPhase::ResourceWait => (true, "memory_job_resource_wait"),
+        _ => (
+            attempt < state.policy.memory.background_max_attempts.max(1) as i64,
+            error_code,
+        ),
+    };
     let backoff = 2_i64.saturating_pow(attempt.clamp(1, 8) as u32).min(300);
     let changed = db.execute(
         "UPDATE memory_jobs
@@ -935,6 +953,7 @@ fn fail_or_retry_job(
              lease_owner = NULL, lease_expires_at_ts = NULL,
              not_before_ts = ?2, error_code = ?3, retryable = ?1,
              updated_at_ts = ?4,
+             attempt = CASE WHEN ?7 THEN MAX(attempt - 1, 0) ELSE attempt END,
              finished_at_ts = CASE WHEN cancel_requested = 1 OR ?1 = 0 THEN ?4 ELSE NULL END
          WHERE job_id = ?5 AND status = 'running' AND lease_owner = ?6",
         params![
@@ -944,6 +963,7 @@ fn fail_or_retry_job(
             now,
             job_id,
             worker_id,
+            phase == super::job_completion::JobPhase::ResourceWait,
         ],
     )?;
     anyhow::ensure!(changed == 1, "memory_job_failure_lease_lost");
@@ -970,6 +990,12 @@ pub(crate) fn request_cancel_for_scope(
             params![principal_id, now],
         )?
     };
+    db.execute(
+        "DELETE FROM memory_generation_outputs WHERE principal_id = ?1
+        AND job_id IN (SELECT job_id FROM memory_jobs
+            WHERE principal_id = ?1 AND (?2 IS NULL OR scope_ref = ?2))",
+        params![principal_id, scope_ref],
+    )?;
     Ok(changed)
 }
 
@@ -1155,3 +1181,7 @@ mod completion_tests;
 #[cfg(test)]
 #[path = "jobs_capacity_race_tests.rs"]
 mod capacity_race_tests;
+
+#[cfg(test)]
+#[path = "completion_execution_tests.rs"]
+mod completion_execution_tests;

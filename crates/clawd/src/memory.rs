@@ -7,8 +7,11 @@ pub(crate) mod eligibility;
 pub(crate) mod embedding;
 pub(crate) mod embedding_jobs;
 pub(crate) mod facts;
+mod generation_response;
 pub(crate) mod indexing;
 pub(crate) mod intent;
+mod intent_generation;
+mod job_completion;
 pub(crate) mod jobs;
 #[path = "memory_recent.rs"]
 mod memory_recent;
@@ -24,11 +27,13 @@ pub(crate) mod ux;
 pub(crate) mod vector_store;
 
 #[cfg(test)]
-mod capacity_test_fixtures;
-#[cfg(test)]
 mod capacity_availability_tests;
 #[cfg(test)]
 mod capacity_race_test_fixtures;
+#[cfg(test)]
+mod capacity_test_fixtures;
+#[cfg(test)]
+mod completion_test_fixtures;
 
 #[cfg(test)]
 #[path = "memory/memory_wp0_baseline_tests.rs"]
@@ -53,9 +58,8 @@ use memory_recent::{
 use anyhow::anyhow;
 use claw_core::config::MemoryConfig;
 use rusqlite::{params, Connection, OptionalExtension};
-use tracing::warn;
 
-use super::{extract_delivery_file_tokens, now_ts, now_ts_u64, utf8_safe_prefix, AppState};
+use super::{extract_delivery_file_tokens, now_ts, now_ts_u64, AppState};
 
 pub(crate) const LLM_SHORT_TERM_MEMORY_PREFIX: &str = "[LLM_REPLY] ";
 pub(crate) const MEMORY_ROLE_USER: &str = "user";
@@ -547,102 +551,8 @@ const MEMORY_INTENT_EXTRACT_PROMPT_TEMPLATE: &str =
 const MEMORY_INTENT_SCHEMA_TEXT: &str =
     include_str!("../../../prompts/schemas/memory_intent.schema.json");
 
-pub(crate) async fn maybe_extract_memory_intent_with_llm(
-    state: &AppState,
-    task: &crate::ClaimedTask,
-    content: &str,
-) -> anyhow::Result<()> {
-    let cfg = &state.policy.memory;
-    if !cfg.enable_preference_extraction || !cfg.llm_preference_fallback_enabled {
-        return Ok(());
-    }
-    if !settings::task_memory_generation_enabled(state, task) {
-        return Ok(());
-    }
-    let trimmed = content.trim();
-    if trimmed.chars().count() < cfg.write_min_chars.max(8) {
-        return Ok(());
-    }
-
-    let prompt_text = utf8_safe_prefix(trimmed, cfg.llm_preference_max_chars.max(128));
-    let source_ref = format!("task:{}:user", task.task_id);
-    let prompt = build_memory_intent_llm_prompt(prompt_text, &source_ref);
-    let raw = match crate::llm_gateway::run_with_fallback_with_prompt_source(
-        state,
-        task,
-        &prompt,
-        "memory_intent_extract",
-    )
-    .await
-    {
-        Ok(raw) => raw,
-        Err(err) => {
-            warn!(
-                "memory intent llm extraction failed task_id={} err={}",
-                task.task_id, err
-            );
-            return Ok(());
-        }
-    };
-
-    let intent = match intent::parse_memory_intent_schema(&raw) {
-        Ok(intent) => intent,
-        Err(err) => {
-            warn!(
-                "memory intent schema validation failed task_id={} err={}",
-                task.task_id, err
-            );
-            return Ok(());
-        }
-    };
-    let validation =
-        intent::validate_memory_intent_actions(intent, cfg.llm_preference_min_confidence);
-    if !validation.rejected.is_empty() {
-        warn!(
-            "memory intent rejected actions task_id={} rejected_count={} first_reason={}",
-            task.task_id,
-            validation.rejected.len(),
-            validation
-                .rejected
-                .first()
-                .map(|item| item.reason.as_str())
-                .unwrap_or("unknown")
-        );
-    }
-    if validation.accepted.is_empty() {
-        return Ok(());
-    }
-
-    let user_key = effective_user_key(task.user_key.as_deref(), task.user_id, task.chat_id);
-    let now_text = now_ts();
-    let now_ts_i64 = now_ts_u64() as i64;
-    let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
-    let stats = apply::apply_memory_actions(
-        state,
-        &db,
-        task.user_id,
-        task.chat_id,
-        &user_key,
-        &validation.accepted,
-        &now_text,
-        now_ts_i64,
-    )?;
-    if stats.upserted_preferences > 0
-        || stats.deleted_preferences > 0
-        || stats.marked_safety_signals > 0
-        || stats.ignored_actions > 0
-    {
-        tracing::info!(
-            "memory intent applied task_id={} upserted_preferences={} deleted_preferences={} marked_safety_signals={} ignored_actions={}",
-            task.task_id,
-            stats.upserted_preferences,
-            stats.deleted_preferences,
-            stats.marked_safety_signals,
-            stats.ignored_actions
-        );
-    }
-    Ok(())
-}
+#[cfg(test)]
+pub(crate) use intent_generation::maybe_extract_memory_intent_with_llm;
 
 pub(crate) fn count_chat_memory_rounds(
     state: &AppState,
@@ -945,6 +855,7 @@ pub(crate) fn read_long_term_source_memory_id(
     Ok(legacy_source.unwrap_or(0))
 }
 
+#[cfg(test)]
 pub(crate) fn upsert_long_term_summary(
     state: &AppState,
     user_id: i64,
@@ -953,9 +864,27 @@ pub(crate) fn upsert_long_term_summary(
     summary: &str,
     source_memory_id: i64,
 ) -> anyhow::Result<()> {
-    let user_key = effective_user_key(user_key, user_id, chat_id);
     let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
-    let principal_id = crate::repo::auth::principal_id_for_user_key(&db, &user_key)?
+    upsert_long_term_summary_in_connection(
+        &db,
+        user_id,
+        chat_id,
+        user_key,
+        summary,
+        source_memory_id,
+    )
+}
+
+pub(super) fn upsert_long_term_summary_in_connection(
+    db: &Connection,
+    user_id: i64,
+    chat_id: i64,
+    user_key: Option<&str>,
+    summary: &str,
+    source_memory_id: i64,
+) -> anyhow::Result<()> {
+    let user_key = effective_user_key(user_key, user_id, chat_id);
+    let principal_id = crate::repo::auth::principal_id_for_user_key(db, &user_key)?
         .ok_or_else(|| anyhow!("memory_principal_not_found"))?;
     let now = now_ts();
     let now_ts_i64 = now_ts_u64() as i64;
