@@ -73,6 +73,11 @@ pub(super) fn ensure_schema(db: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub(super) fn require_schema(db: &Connection) -> anyhow::Result<()> {
+    let digest = format!("sha256:{:x}", Sha256::digest(MIGRATION_SQL.as_bytes()));
+    super::scope::require_applied_migration(db, MIGRATION_ID, &digest)
+}
+
 /// Called inside the same transaction as canonical writes. A later failed
 /// terminal/charge write cannot erase this marker or replay those effects.
 pub(super) fn mark_committed(db: &Connection, lease: GenerationLease<'_>) -> anyhow::Result<()> {

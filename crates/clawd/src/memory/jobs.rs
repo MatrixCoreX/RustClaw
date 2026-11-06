@@ -55,6 +55,12 @@ pub(crate) fn ensure_memory_job_schema(db: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub(crate) fn require_memory_job_schema(db: &Connection) -> anyhow::Result<()> {
+    super::scope::require_memory_scope_schema(db)?;
+    super::scope::require_applied_migration(db, MIGRATION_ID, &migration_manifest_digest())?;
+    super::job_completion::require_schema(db)
+}
+
 fn apply_migration(db: &Connection) -> anyhow::Result<()> {
     db.execute_batch(MIGRATION_SQL)?;
     for (table, columns) in [
@@ -139,7 +145,7 @@ pub(crate) fn enqueue_turn_memory_jobs(
         .db
         .get()
         .map_err(|error| anyhow!("memory_job_db_pool:{error}"))?;
-    ensure_memory_job_schema(&db)?;
+    require_memory_job_schema(&db)?;
     let settings = super::settings::resolve_task_memory_settings(state, task)?
         .ok_or_else(|| anyhow!("memory_job_settings_unavailable"))?;
     if !settings.generate_memory {
@@ -197,7 +203,7 @@ pub(crate) fn persist_turn_and_enqueue(
         .db
         .get()
         .map_err(|error| anyhow!("memory_job_db_pool:{error}"))?;
-    ensure_memory_job_schema(&db)?;
+    require_memory_job_schema(&db)?;
     let settings = super::settings::resolve_task_memory_settings(state, task)?;
     let tx = db.unchecked_transaction()?;
     let user_source_memory_id = super::insert_memory_with_id_in_connection(
@@ -1004,7 +1010,7 @@ pub(crate) fn request_cancel_for_scope(
 
 pub(crate) fn reconcile_missing_turn_jobs(state: &crate::AppState) -> anyhow::Result<usize> {
     let db = state.core.db.get().map_err(|error| anyhow!(error))?;
-    ensure_memory_job_schema(&db)?;
+    require_memory_job_schema(&db)?;
     let task_ids = missing_turn_task_ids(&db)?;
     drop(db);
     let mut repaired = 0usize;

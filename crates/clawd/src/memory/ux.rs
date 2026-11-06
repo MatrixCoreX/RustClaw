@@ -269,13 +269,18 @@ pub(crate) fn ensure_memory_ux_schema(db: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub(crate) fn require_memory_ux_schema(db: &Connection) -> anyhow::Result<()> {
+    super::jobs::require_memory_job_schema(db)?;
+    super::scope::require_applied_migration(db, MIGRATION_ID, &migration_digest())
+}
+
 pub(crate) fn list_memory_page(
     db: &Connection,
     principal_id: &str,
     filter: &MemoryListFilter,
     now_ts: i64,
 ) -> anyhow::Result<MemoryPageResult> {
-    ensure_memory_ux_schema(db)?;
+    require_memory_ux_schema(db)?;
     let page = filter.page.unwrap_or(1).max(1);
     let page_size = filter.page_size.unwrap_or(20).clamp(1, 100);
     let offset = (page - 1).saturating_mul(page_size);
@@ -378,7 +383,7 @@ pub(crate) fn correct_memory(
     request: &MemoryCorrectionRequest,
     now_ts: i64,
 ) -> anyhow::Result<MemoryMutationResult> {
-    ensure_memory_ux_schema(db)?;
+    require_memory_ux_schema(db)?;
     let content = request.content.trim();
     anyhow::ensure!(!content.is_empty(), "memory_correction_content_required");
     let transaction = db.unchecked_transaction()?;
@@ -469,7 +474,7 @@ pub(crate) fn record_feedback(
     request: &MemoryFeedbackRequest,
     now_ts: i64,
 ) -> anyhow::Result<MemoryMutationResult> {
-    ensure_memory_ux_schema(db)?;
+    require_memory_ux_schema(db)?;
     let current = load_mutable_memory(db, principal_id, memory_id)?
         .ok_or_else(|| anyhow!("memory_not_found"))?;
     anyhow::ensure!(
@@ -529,7 +534,7 @@ pub(crate) fn delete_memory_with_revision(
     request: &MemoryMutationRequest,
     now_ts: i64,
 ) -> anyhow::Result<MemoryMutationResult> {
-    ensure_memory_ux_schema(db)?;
+    require_memory_ux_schema(db)?;
     let transaction = db.unchecked_transaction()?;
     let current = load_mutable_memory(&transaction, principal_id, memory_id)?
         .ok_or_else(|| anyhow!("memory_not_found"))?;
@@ -644,7 +649,7 @@ pub(crate) fn undo_memory_mutation(
     request: &MemoryUndoRequest,
     now_ts: i64,
 ) -> anyhow::Result<MemoryMutationResult> {
-    ensure_memory_ux_schema(db)?;
+    require_memory_ux_schema(db)?;
     let transaction = db.unchecked_transaction()?;
     let revision = transaction
         .query_row(
@@ -911,7 +916,7 @@ fn restore_deleted_memory(
 }
 
 pub(crate) fn scrub_expired_deletion_grace(db: &Connection, now_ts: i64) -> anyhow::Result<usize> {
-    ensure_memory_ux_schema(db)?;
+    require_memory_ux_schema(db)?;
     let transaction = db.unchecked_transaction()?;
     let revision_ids = {
         let mut statement = transaction.prepare(
@@ -951,7 +956,7 @@ pub(crate) fn clear_preview(
     principal_id: &str,
     mode: &str,
 ) -> anyhow::Result<MemoryClearPreview> {
-    ensure_memory_ux_schema(db)?;
+    require_memory_ux_schema(db)?;
     anyhow::ensure!(
         matches!(mode, "transcript" | "transcript_and_derived"),
         "memory_clear_mode_invalid"
@@ -993,7 +998,7 @@ pub(crate) fn clear_with_mode(
     request: &MemoryBulkClearRequest,
     now_ts: i64,
 ) -> anyhow::Result<MemoryClearPreview> {
-    ensure_memory_ux_schema(db)?;
+    require_memory_ux_schema(db)?;
     let transaction = db.unchecked_transaction()?;
     let preview = clear_preview(&transaction, principal_id, &request.mode)?;
     anyhow::ensure!(
@@ -1077,7 +1082,7 @@ pub(crate) fn preview_memory_import(
     request: &MemoryImportPreviewRequest,
     now_ts: i64,
 ) -> anyhow::Result<MemoryImportPreview> {
-    ensure_memory_ux_schema(db)?;
+    require_memory_ux_schema(db)?;
     anyhow::ensure!(
         request.export.schema_version == 1,
         "memory_import_schema_unsupported"
@@ -1200,7 +1205,7 @@ pub(crate) fn confirm_memory_import(
     request: &MemoryImportConfirmRequest,
     now_ts: i64,
 ) -> anyhow::Result<MemoryImportResult> {
-    ensure_memory_ux_schema(db)?;
+    require_memory_ux_schema(db)?;
     let transaction = db.unchecked_transaction()?;
     let (payload_digest, preview_json, status) = transaction
         .query_row(
@@ -1340,7 +1345,7 @@ pub(crate) fn check_memory_consistency(
     repair: bool,
     now_ts: i64,
 ) -> anyhow::Result<MemoryConsistencyReport> {
-    ensure_memory_ux_schema(db)?;
+    require_memory_ux_schema(db)?;
     let deleted_canonical_rows = db.query_row(
         "SELECT COUNT(*) FROM memory_revisions r
          WHERE r.principal_id = ?1 AND r.operation = 'delete'
@@ -1665,3 +1670,7 @@ mod clear_scope_tests;
 #[cfg(test)]
 #[path = "ux_pressure_read_tests.rs"]
 mod pressure_read_tests;
+
+#[cfg(test)]
+#[path = "schema_readiness_tests.rs"]
+mod readiness_tests;

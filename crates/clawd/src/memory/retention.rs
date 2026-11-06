@@ -17,8 +17,7 @@ pub(crate) fn cleanup_memory_data(
     config: &MemoryConfig,
     now_ts: i64,
 ) -> anyhow::Result<MemoryRetentionReport> {
-    super::scope::ensure_memory_scope_schema(db)?;
-    super::jobs::ensure_memory_job_schema(db)?;
+    super::jobs::require_memory_job_schema(db)?;
     super::indexing::ensure_retrieval_schema(db)?;
     let transaction = db.unchecked_transaction()?;
     let source_cutoff = now_ts.saturating_sub(config.retention_days as i64 * 86_400);
@@ -122,24 +121,7 @@ pub(crate) fn cleanup_memory_data(
     )?;
 
     refresh_principal_usage(&transaction, config, now_ts)?;
-    let observed_bytes = sqlite_observed_bytes(&transaction)?;
-    let state = pressure_state(observed_bytes, config.storage_soft_limit_bytes.max(1));
-    transaction.execute(
-        "UPDATE memory_storage_pressure
-         SET state = ?1, reason_code = ?2, observed_bytes = ?3,
-             revision = revision + 1, updated_at_ts = ?4
-         WHERE singleton_id = 1",
-        params![
-            state,
-            if state == "normal" {
-                None::<&str>
-            } else {
-                Some("memory_storage_soft_limit")
-            },
-            observed_bytes.min(i64::MAX as u64) as i64,
-            now_ts,
-        ],
-    )?;
+    let (state, observed_bytes) = refresh_storage_pressure(&transaction, config, now_ts)?;
     record_retention_ledger(
         &transaction,
         "source_transcript",
@@ -168,9 +150,45 @@ pub(crate) fn cleanup_memory_data(
         deleted_long_term_rows,
         deleted_candidate_rows,
         deleted_index_rows,
-        storage_pressure_state: state.to_string(),
+        storage_pressure_state: state,
         observed_bytes,
     })
+}
+
+/// Explicit startup observation: no retention deletes or quota-policy repair.
+pub(crate) fn initialize_storage_pressure(
+    db: &Connection,
+    config: &MemoryConfig,
+    now_ts: i64,
+) -> anyhow::Result<()> {
+    super::jobs::require_memory_job_schema(db)?;
+    let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+    refresh_storage_pressure(&tx, config, now_ts)?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn refresh_storage_pressure(
+    db: &Connection,
+    config: &MemoryConfig,
+    now_ts: i64,
+) -> anyhow::Result<(String, u64)> {
+    anyhow::ensure!(
+        !db.is_autocommit(),
+        "memory_pressure_observation_requires_transaction"
+    );
+    let observed_bytes = sqlite_observed_bytes(db)?;
+    let state = pressure_state(observed_bytes, config.storage_soft_limit_bytes.max(1));
+    db.execute(
+        "INSERT INTO memory_storage_pressure(singleton_id,state,reason_code,observed_bytes,revision,updated_at_ts)
+         VALUES (1,?1,?2,?3,1,?4)
+         ON CONFLICT(singleton_id) DO UPDATE SET state=excluded.state,
+             reason_code=excluded.reason_code,observed_bytes=excluded.observed_bytes,
+             revision=memory_storage_pressure.revision+1,updated_at_ts=excluded.updated_at_ts",
+        params![state, if state == "normal" { None::<&str> } else { Some("memory_storage_soft_limit") },
+            observed_bytes.min(i64::MAX as u64) as i64, now_ts],
+    )?;
+    Ok((state.to_string(), observed_bytes))
 }
 
 pub(crate) fn automatic_generation_allowed(

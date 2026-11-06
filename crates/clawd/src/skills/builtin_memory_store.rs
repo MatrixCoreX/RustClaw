@@ -249,7 +249,7 @@ async fn execute_action(
 }
 
 fn ensure_schema(db: &Connection) -> anyhow::Result<()> {
-    crate::memory::ux::ensure_memory_ux_schema(db)?;
+    crate::memory::ux::require_memory_ux_schema(db)?;
     crate::memory::indexing::ensure_retrieval_schema(db)?;
     let applied: Option<String> = db
         .query_row(

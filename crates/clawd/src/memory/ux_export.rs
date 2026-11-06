@@ -2,7 +2,8 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 use super::{
-    ensure_memory_ux_schema, memory_list_item, memory_union_sql, MemoryExport, MemoryMarkdownExport,
+    memory_list_item, memory_union_sql, require_memory_ux_schema, MemoryExport,
+    MemoryMarkdownExport,
 };
 
 pub(crate) fn export_memory(
@@ -10,7 +11,7 @@ pub(crate) fn export_memory(
     principal_id: &str,
     now_ts: i64,
 ) -> anyhow::Result<MemoryExport> {
-    ensure_memory_ux_schema(db)?;
+    require_memory_ux_schema(db)?;
     // One statement gives all kinds the same SQLite read snapshot. List-page
     // limits and inter-page concurrent writes cannot silently truncate an export.
     let mut statement = db.prepare(&format!(

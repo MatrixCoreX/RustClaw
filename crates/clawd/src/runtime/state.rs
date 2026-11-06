@@ -1093,6 +1093,10 @@ impl AppState {
         crate::repo::child_task_graph::ensure_child_task_graph_schema(&conn)
             .expect("child_task_graph_schema_test");
         crate::repo::task_plan::ensure_task_plan_schema(&conn).expect("task_plan_schema_test");
+        crate::memory::jobs::ensure_memory_job_schema(&conn)
+            .expect("memory startup schema for test runtime");
+        crate::memory::ux::ensure_memory_ux_schema(&conn)
+            .expect("memory UX startup schema for test runtime");
         drop(conn);
         self
     }

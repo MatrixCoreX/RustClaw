@@ -795,6 +795,7 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         {
             memory::indexing::rebuild_retrieval_index(&db, &memory_runtime)?;
         }
+        memory::retention::initialize_storage_pressure(&db, &memory_runtime, now_ts_u64() as i64)?;
     }
     let bootstrap_admin = {
         let db = db_pool
