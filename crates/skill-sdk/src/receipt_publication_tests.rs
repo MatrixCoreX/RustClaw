@@ -76,11 +76,20 @@ fn sdk_publication_preserves_existing_owner_and_group() {
         eprintln!("sdk_publication_unpreservable_owner_rejected=true");
         return;
     }
-    let root = tempfile::tempdir().unwrap();
+    // CI's default TMPDIR and Cargo worktree can be inaccessible after dropping UID.
+    // Use an owned public-temp directory and a byte-verified copy of this exact test binary.
+    let privileged = unsafe { libc::geteuid() } == 0;
+    let root = if privileged {
+        tempfile::Builder::new()
+            .prefix("sdk-publication-owner-")
+            .tempdir_in(Path::new("/tmp").canonicalize().unwrap())
+            .unwrap()
+    } else {
+        tempfile::tempdir().unwrap()
+    };
     let target = root.path().join("current.json");
     fs::write(&target, b"old pointer").unwrap();
     // The same exact fixture also runs under native CI sudo; never run Cargo as root.
-    let privileged = unsafe { libc::geteuid() } == 0;
     if privileged {
         let file = fs::File::open(&target).unwrap();
         assert_eq!(unsafe { libc::fchown(file.as_raw_fd(), 65534, 65534) }, 0);
@@ -94,8 +103,18 @@ fn sdk_publication_preserves_existing_owner_and_group() {
         let foreign = root.path().join("foreign.json");
         fs::write(&foreign, b"root-owned original").unwrap();
         fs::set_permissions(&foreign, fs::Permissions::from_mode(0o644)).unwrap();
-        fs::set_permissions(root.path(), fs::Permissions::from_mode(0o777)).unwrap();
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
+        let source = std::env::current_exe().unwrap();
+        let executable = root.path().join("owner-child");
+        fs::copy(&source, &executable).unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            super::digest_file(&executable).unwrap(),
+            super::digest_file(&source).unwrap()
+        );
+        // Sticky permission prevents the child/other users from replacing root-owned files.
+        fs::set_permissions(root.path(), fs::Permissions::from_mode(0o1777)).unwrap();
+        eprintln!("sdk_publication_child_executable_verified=true");
+        let output = std::process::Command::new(&executable)
             .args([
                 "receipt::publication_tests::sdk_publication_preserves_existing_owner_and_group",
                 "--exact",
