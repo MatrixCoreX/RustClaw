@@ -29,6 +29,19 @@ fn setup_db() -> (Connection, String) {
     (db, principal_id)
 }
 
+fn target_principal(db: &Connection) -> String {
+    db.execute(
+        "INSERT INTO auth_keys(user_key, role, enabled, created_at)
+         VALUES ('import-target-key', 'user', 1, '1')",
+        [],
+    )
+    .expect("target key");
+    crate::repo::auth::ensure_principal_identity_schema(db).expect("target identity");
+    crate::repo::auth::principal_id_for_user_key(db, "import-target-key")
+        .expect("target credential lookup")
+        .expect("target credential has an active owner")
+}
+
 fn insert_fact(db: &Connection, principal_id: &str, id: &str, content: &str, ts: i64) {
     db.execute(
         "INSERT INTO memory_facts(
@@ -284,19 +297,8 @@ fn import_requires_checksum_preview_and_downgrades_scope_and_trust() {
     assert_eq!(preview.trust_tier, "imported_legacy");
     assert_eq!(preview.duplicate_items, 1);
 
-    let other_principal = "principal-import-target";
-    db.execute(
-        "INSERT INTO principals(principal_id, role, status, revision, created_at, updated_at)
-         VALUES (?1, 'user', 'active', 1, '1', '1')",
-        [other_principal],
-    )
-    .expect("target principal");
-    db.execute(
-        "INSERT INTO auth_keys(user_key, role, enabled, created_at, principal_id)
-         VALUES ('import-target-key', 'user', 1, '1', ?1)",
-        [other_principal],
-    )
-    .expect("target key");
+    let target = target_principal(&db);
+    let other_principal = target.as_str();
     let preview = preview_memory_import(
         &db,
         other_principal,
@@ -340,6 +342,44 @@ fn import_requires_checksum_preview_and_downgrades_scope_and_trust() {
     )
     .expect_err("checksum mismatch");
     assert!(error.to_string().contains("memory_import_checksum_invalid"));
+}
+
+#[test]
+fn import_preview_does_not_repair_a_missing_target_credential_binding() {
+    let (db, principal_id) = setup_db();
+    insert_fact(&db, &principal_id, "memory-exported", "safe fact", 100);
+    let export = export_memory(&db, &principal_id, 200).expect("export");
+    let target = target_principal(&db);
+    db.execute(
+        "DELETE FROM credential_bindings WHERE principal_id = ?1",
+        [&target],
+    )
+    .expect("remove target binding");
+    let counts = || -> (i64, i64, i64, i64) {
+        db.query_row(
+            "SELECT (SELECT COUNT(*) FROM principals),
+                    (SELECT COUNT(*) FROM credential_bindings),
+                    (SELECT COUNT(*) FROM memory_import_sessions),
+                    (SELECT COUNT(*) FROM memory_facts)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("identity and import counts")
+    };
+    let before = counts();
+    let error = preview_memory_import(&db, &target, &MemoryImportPreviewRequest { export }, 201)
+        .expect_err("missing credential binding remains denied");
+    assert_eq!(error.to_string(), "credential_binding_missing");
+    assert_eq!(counts(), before);
+    assert_eq!(
+        crate::repo::auth::principal_id_for_user_key(&db, "import-target-key")
+            .expect("target lookup"),
+        None
+    );
+    assert_eq!(
+        crate::repo::auth::principal_id_for_user_key(&db, "ux-key").expect("source lookup"),
+        Some(principal_id)
+    );
 }
 
 #[test]
