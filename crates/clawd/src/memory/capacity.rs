@@ -86,11 +86,7 @@ pub(super) fn principal_generation_availability(
     let quota = db
         .query_row(
             "SELECT used_rows, max_rows, used_bytes, max_bytes,
-                    used_background_cost_microunits + COALESCE((
-                        SELECT SUM(background_cost_pending_microunits) FROM memory_jobs
-                        WHERE memory_jobs.principal_id = memory_principal_quotas.principal_id
-                          AND background_cost_pending_microunits > 0
-                    ), 0), max_background_cost_microunits
+                    used_background_cost_microunits, max_background_cost_microunits
              FROM memory_principal_quotas WHERE principal_id = ?1",
             [principal_id],
             |row| {
@@ -105,25 +101,45 @@ pub(super) fn principal_generation_availability(
             },
         )
         .optional()?;
-    Ok(match quota {
-        None => GenerationAvailability::PrincipalQuotaMissing,
-        Some(None) => GenerationAvailability::PrincipalQuotaInvalid,
-        Some(Some(values)) if values.iter().any(|value| *value < 0) => {
-            GenerationAvailability::PrincipalQuotaInvalid
-        }
-        Some(Some([used, limit, ..])) if used >= limit => {
-            GenerationAvailability::PrincipalRowsExhausted
-        }
-        Some(Some([_, _, used, limit, ..])) if used >= limit => {
-            GenerationAvailability::PrincipalBytesExhausted
-        }
-        Some(Some([_, _, _, _, used, limit])) if used >= limit => {
+    let mut values = match quota {
+        None => return Ok(GenerationAvailability::PrincipalQuotaMissing),
+        Some(None) => return Ok(GenerationAvailability::PrincipalQuotaInvalid),
+        Some(Some(values)) => values,
+    };
+    if values.iter().any(|value| *value < 0) {
+        return Ok(GenerationAvailability::PrincipalQuotaInvalid);
+    }
+    // Validate persisted types before arithmetic: SQLite coerces invalid TEXT
+    // operands to zero and may promote overflowing integer sums to REAL.
+    // Stream only this owner's pending costs through the existing partial index.
+    let mut pending = db.prepare(
+        "SELECT background_cost_pending_microunits FROM memory_jobs
+         WHERE principal_id = ?1 AND background_cost_pending_microunits > 0",
+    )?;
+    let mut rows = pending.query([principal_id])?;
+    while let Some(row) = rows.next()? {
+        let ValueRef::Integer(cost) = row.get_ref(0)? else {
+            return Ok(GenerationAvailability::PrincipalQuotaInvalid);
+        };
+        let Some(total) = values[4].checked_add(cost) else {
+            return Ok(GenerationAvailability::PrincipalQuotaInvalid);
+        };
+        values[4] = total;
+    }
+    Ok(match values {
+        [used, limit, ..] if used >= limit => GenerationAvailability::PrincipalRowsExhausted,
+        [_, _, used, limit, ..] if used >= limit => GenerationAvailability::PrincipalBytesExhausted,
+        [_, _, _, _, used, limit] if used >= limit => {
             GenerationAvailability::PrincipalBackgroundCostExhausted
         }
-        Some(_) => GenerationAvailability::Available,
+        _ => GenerationAvailability::Available,
     })
 }
 
 #[cfg(test)]
 #[path = "capacity_decision_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "capacity_pending_cost_tests.rs"]
+mod pending_cost_tests;

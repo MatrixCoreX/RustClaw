@@ -100,13 +100,44 @@ impl GenerationFixture {
             )
             .unwrap();
         }
+        let settings = super::settings::resolve_task_memory_settings(fixture.state(), &task)
+            .expect("fixture settings lookup")
+            .expect("fixture settings identity");
+        assert!(
+            settings.generate_memory,
+            "fixture generation must be enabled: {settings:?}"
+        );
+        let capacity_before = {
+            let db = fixture.state().core.db.get().unwrap();
+            super::capacity::automatic_generation_availability(&db, &fixture.principal)
+                .expect("fixture initial capacity")
+        };
+        assert_eq!(
+            capacity_before,
+            super::capacity::GenerationAvailability::Available
+        );
+        assert!(
+            super::eligibility::build_turn_eligibility(&task, &json!({}), &settings)
+                .durable_candidate_allowed,
+            "fixture source must be eligible"
+        );
         let ids = super::jobs::persist_turn_and_enqueue(fixture.state(), &task, USER_CONTENT,
             Some("Markdown output preserves code fences, nested lists, tables, and technical examples for later reference."),
             false).expect("normal durable enqueue");
-        assert!(
-            !ids.is_empty(),
-            "real source-turn enqueue must create generation work"
-        );
+        if ids.is_empty() {
+            let db = fixture.state().core.db.get().unwrap();
+            let source_counts: (i64, i64) = db
+                .query_row(
+                    "SELECT COUNT(*), COUNT(DISTINCT principal_id) FROM memories",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            let capacity_after =
+                super::capacity::automatic_generation_availability(&db, &fixture.principal)
+                    .expect("fixture capacity after source persistence");
+            panic!("real source-turn enqueue must create generation work; sources={source_counts:?}; capacity={capacity_after:?}; settings={settings:?}");
+        }
         let job_id = {
             let db = fixture.state().core.db.get().unwrap();
             // Select one existing job kind, still through the real enqueue/worker.
