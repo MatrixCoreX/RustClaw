@@ -48,19 +48,21 @@ fn preview_rejects_an_inactive_principal_with_an_otherwise_live_binding() {
     let fixture = fixture(false);
     let db = fixture.state().core.db.get().unwrap();
     let request = request(&db, &fixture.principal);
-    db.execute(
-        "UPDATE principals SET status='revoked' WHERE principal_id=?1",
-        [&fixture.principal],
-    )
-    .unwrap();
-    let before = snapshot(&db, &fixture.principal);
-    assert_eq!(
-        preview_memory_import(&db, &fixture.principal, &request, 101)
-            .unwrap_err()
-            .to_string(),
-        "credential_binding_missing"
-    );
-    assert_eq!(snapshot(&db, &fixture.principal), before);
+    for status in ["frozen", "merged", "deleted"] {
+        db.execute(
+            "UPDATE principals SET status=?2 WHERE principal_id=?1",
+            params![fixture.principal, status],
+        )
+        .unwrap();
+        let before = snapshot(&db, &fixture.principal);
+        assert_eq!(
+            preview_memory_import(&db, &fixture.principal, &request, 101)
+                .unwrap_err()
+                .to_string(),
+            "credential_binding_missing"
+        );
+        assert_eq!(snapshot(&db, &fixture.principal), before);
+    }
 }
 
 #[test]
