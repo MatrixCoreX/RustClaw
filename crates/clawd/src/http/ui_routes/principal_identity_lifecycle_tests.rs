@@ -172,3 +172,73 @@ async fn password_login_cannot_authenticate_a_frozen_principal() {
     assert_eq!(rejected.1["error"], "invalid_credentials");
     fixture.assert_private(&rejected.1);
 }
+
+fn password_fixture() -> Fixture {
+    let fixture = Fixture::new();
+    {
+        let db = fixture.state.core.db.get().unwrap();
+        crate::repo::auth::upsert_webd_login_account(
+            &db,
+            "fixture-login",
+            "synthetic-password-1234",
+            USER,
+        )
+        .unwrap();
+    }
+    fixture
+}
+
+async fn password_login(fixture: &Fixture) -> (StatusCode, Value) {
+    fixture
+        .api(
+            "",
+            Method::POST,
+            "/v1/internal/webd/verify-login",
+            Some(json!({"username":"fixture-login", "password":"synthetic-password-1234"})),
+        )
+        .await
+}
+
+fn private_lookup_failure(response: &(StatusCode, Value)) {
+    assert_eq!(response.0, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        response.1,
+        json!({"ok":false,"data":null,"error":"auth_lookup_failed"})
+    );
+}
+
+#[tokio::test]
+async fn password_login_verifier_database_errors_do_not_expose_schema_or_sql() {
+    let fixture = password_fixture();
+    assert_eq!(password_login(&fixture).await.0, StatusCode::OK);
+    fixture.sql("ALTER TABLE auth_keys RENAME TO fixture_unavailable_auth_keys");
+    let response = password_login(&fixture).await;
+    private_lookup_failure(&response);
+    fixture.assert_private(&response.1);
+}
+
+#[tokio::test]
+async fn password_login_identity_database_errors_are_not_successes_or_private_error_leaks() {
+    let fixture = password_fixture();
+    assert_eq!(password_login(&fixture).await.0, StatusCode::OK);
+    fixture.sql("ALTER TABLE credential_bindings RENAME TO fixture_unavailable_bindings");
+    let response = password_login(&fixture).await;
+    private_lookup_failure(&response);
+    fixture.assert_private(&response.1);
+}
+
+#[tokio::test]
+async fn channel_identity_database_errors_are_private_and_cannot_be_misclassified_as_unbound() {
+    for table in ["channel_bindings", "credential_bindings"] {
+        let fixture = Fixture::new();
+        fixture.sql("INSERT INTO channel_bindings (channel, external_user_id, external_chat_id, user_key, principal_id, bound_at, updated_at) SELECT 'telegram','fixture-user','fixture-chat',user_key,principal_id,'1','1' FROM auth_keys WHERE role='user'");
+        fixture.sql(&format!(
+            "ALTER TABLE {table} RENAME TO fixture_unavailable_identity_table"
+        ));
+        let response = fixture.api("", Method::POST, "/v1/auth/channel/resolve",
+            Some(json!({"channel":"telegram", "external_user_id":"fixture-user", "external_chat_id":"fixture-chat"})),
+        ).await;
+        private_lookup_failure(&response);
+        fixture.assert_private(&response.1);
+    }
+}

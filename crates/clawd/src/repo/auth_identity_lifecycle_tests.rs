@@ -141,3 +141,47 @@ fn canonical_channel_identity_survives_authorized_key_rotation_and_bootstrap() {
     assert_eq!(after.chat_id, before.chat_id);
     assert_eq!(after.user_key, "synthetic-channel-rotated");
 }
+
+#[test]
+fn channel_identity_rejects_a_channel_row_owned_by_a_different_principal() {
+    let state = fixture();
+    state.seed_test_auth_identity("synthetic-other-channel-owner", "user");
+    let db = state.core.db.get().unwrap();
+    db.execute(
+        "UPDATE channel_bindings SET principal_id = (
+             SELECT principal_id FROM auth_keys WHERE user_key = 'synthetic-other-channel-owner'
+         ) WHERE user_key = ?1",
+        [KEY],
+    )
+    .unwrap();
+    drop(db);
+    assert!(resolve(&state, Some("fixture-user"), Some("fixture-chat")).is_none());
+}
+
+#[test]
+fn explicit_auth_key_role_updates_remain_live_without_changing_the_canonical_identity() {
+    let state = fixture();
+    let before = resolve(&state, Some("fixture-user"), Some("fixture-chat")).unwrap();
+    let key_id: i64 = state
+        .core
+        .db
+        .get()
+        .unwrap()
+        .query_row(
+            "SELECT rowid FROM auth_keys WHERE user_key = ?1",
+            [KEY],
+            |row| row.get(0),
+        )
+        .unwrap();
+    for role in ["guest", "finance_viewer", "user"] {
+        assert!(
+            update_auth_key_by_id(&state, key_id, Some(role), None, "synthetic-admin-actor")
+                .unwrap()
+        );
+        let after = resolve(&state, Some("fixture-user"), Some("fixture-chat")).unwrap();
+        assert_eq!(after.role, role);
+        assert_eq!(after.principal_id, before.principal_id);
+        assert_eq!(after.user_id, before.user_id);
+        assert_eq!(after.chat_id, before.chat_id);
+    }
+}
