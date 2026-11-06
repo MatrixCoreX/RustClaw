@@ -7,7 +7,9 @@ use support::{read_fifo, Fixture, SKILL};
 
 fn trusted_fixture() -> (Fixture, PathBuf) {
     let mut f = Fixture::new();
-    let runtime = f.install.join("selected-trusted-runtime");
+    // Keep Unix socket paths short even under long macOS temporary roots.
+    // A trusted runtime may intentionally live outside the installed package.
+    let runtime = f.store.root().join("rt");
     fs::copy(f.install.join(&f.receipt.launch.program), &runtime).unwrap();
     f.receipt.launch.program_scope = LaunchProgramScope::TrustedRuntime;
     f.receipt.launch.program = runtime.display().to_string();
