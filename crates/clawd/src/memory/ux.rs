@@ -8,6 +8,12 @@ const MIGRATION_ID: &str = "012_memory_ux_audit_v1";
 const MIGRATION_SQL: &str = include_str!("../../../../migrations/012_memory_ux_audit.sql");
 const UNDO_GRACE_SECONDS: i64 = 300;
 
+#[path = "ux_clear.rs"]
+mod clearing;
+#[path = "ux_export.rs"]
+mod exports;
+pub(crate) use exports::{export_memory, export_memory_markdown};
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub(crate) struct MemoryListFilter {
     pub(crate) search: Option<String>,
@@ -322,31 +328,7 @@ pub(crate) fn list_memory_page(
             page_size as i64,
             offset as i64,
         ],
-        |row| {
-            let updated_at_ts = row.get::<_, i64>(9)?;
-            let last_verified_at_ts = row.get::<_, Option<i64>>(13)?;
-            Ok(MemoryListItem {
-                id: row.get(0)?,
-                revision: row.get(1)?,
-                kind: row.get(2)?,
-                scope_kind: row.get(3)?,
-                origin: row.get(4)?,
-                status: row.get(5)?,
-                content: row.get(6)?,
-                source: row.get(7)?,
-                evidence_available: row.get::<_, i64>(8)? != 0,
-                trust_tier: row.get(14)?,
-                updated_at_ts,
-                expires_at_ts: row.get(10)?,
-                supersedes_memory_id: row.get(11)?,
-                last_recalled_at_ts: row.get(12)?,
-                freshness: if last_verified_at_ts.unwrap_or(updated_at_ts) < stale_cutoff {
-                    "stale".to_string()
-                } else {
-                    "fresh".to_string()
-                },
-            })
-        },
+        |row| memory_list_item(row, stale_cutoff),
     )?;
     let items = rows.collect::<Result<Vec<_>, _>>()?;
     Ok(MemoryPageResult {
@@ -356,6 +338,35 @@ pub(crate) fn list_memory_page(
         page_size,
         total,
         has_more: offset.saturating_add(page_size) < total,
+    })
+}
+
+fn memory_list_item(
+    row: &rusqlite::Row<'_>,
+    stale_cutoff: i64,
+) -> rusqlite::Result<MemoryListItem> {
+    let updated_at_ts = row.get::<_, i64>(9)?;
+    let last_verified_at_ts = row.get::<_, Option<i64>>(13)?;
+    Ok(MemoryListItem {
+        id: row.get(0)?,
+        revision: row.get(1)?,
+        kind: row.get(2)?,
+        scope_kind: row.get(3)?,
+        origin: row.get(4)?,
+        status: row.get(5)?,
+        content: row.get(6)?,
+        source: row.get(7)?,
+        evidence_available: row.get::<_, i64>(8)? != 0,
+        trust_tier: row.get(14)?,
+        updated_at_ts,
+        expires_at_ts: row.get(10)?,
+        supersedes_memory_id: row.get(11)?,
+        last_recalled_at_ts: row.get(12)?,
+        freshness: if last_verified_at_ts.unwrap_or(updated_at_ts) < stale_cutoff {
+            "stale".to_string()
+        } else {
+            "fresh".to_string()
+        },
     })
 }
 
@@ -983,17 +994,22 @@ pub(crate) fn clear_with_mode(
     now_ts: i64,
 ) -> anyhow::Result<MemoryClearPreview> {
     ensure_memory_ux_schema(db)?;
-    let preview = clear_preview(db, principal_id, &request.mode)?;
+    let transaction = db.unchecked_transaction()?;
+    let preview = clear_preview(&transaction, principal_id, &request.mode)?;
     anyhow::ensure!(
         preview.transcript_rows == request.expected_transcript_rows
             && preview.derived_rows == request.expected_derived_rows,
         "memory_clear_preview_conflict"
     );
-    let transaction = db.unchecked_transaction()?;
     super::jobs::request_cancel_for_scope(&transaction, principal_id, None)?;
     transaction.execute(
-        "DELETE FROM memory_retrieval_index WHERE principal_id = ?1",
-        [principal_id],
+        "DELETE FROM memory_retrieval_index WHERE principal_id = ?1
+         AND (?2 = 1 OR source_kind = ?3)",
+        params![
+            principal_id,
+            request.mode == "transcript_and_derived",
+            super::RETRIEVAL_SOURCE_MEMORY
+        ],
     )?;
     transaction.execute(
         "DELETE FROM memory_source_events WHERE principal_id = ?1",
@@ -1017,6 +1033,12 @@ pub(crate) fn clear_with_mode(
             )?;
         }
     }
+    clearing::purge_private_clear_state(
+        &transaction,
+        principal_id,
+        request.mode == "transcript_and_derived",
+        now_ts,
+    )?;
     let _ = transaction.execute(
         "DELETE FROM memory_retrieval_index_fts
          WHERE rowid NOT IN (SELECT id FROM memory_retrieval_index)",
@@ -1047,63 +1069,6 @@ pub(crate) fn clear_with_mode(
     )?;
     transaction.commit()?;
     Ok(preview)
-}
-
-pub(crate) fn export_memory(
-    db: &Connection,
-    principal_id: &str,
-    now_ts: i64,
-) -> anyhow::Result<MemoryExport> {
-    let page = list_memory_page(
-        db,
-        principal_id,
-        &MemoryListFilter {
-            page: Some(1),
-            page_size: Some(100),
-            ..MemoryListFilter::default()
-        },
-        now_ts,
-    )?;
-    let digest_input = serde_json::to_vec(&page.items)?;
-    Ok(MemoryExport {
-        schema_version: 1,
-        exported_at_ts: now_ts,
-        scope_kind: "principal".to_string(),
-        items: page.items,
-        checksum: format!("sha256:{:x}", Sha256::digest(digest_input)),
-    })
-}
-
-pub(crate) fn export_memory_markdown(
-    db: &Connection,
-    principal_id: &str,
-    now_ts: i64,
-) -> anyhow::Result<MemoryMarkdownExport> {
-    let export = export_memory(db, principal_id, now_ts)?;
-    let mut content = String::from("# memory_export_v1\n\n");
-    content.push_str(&format!("schema_version={}  \n", export.schema_version));
-    content.push_str(&format!("exported_at_unix={}\n\n", export.exported_at_ts));
-    for item in &export.items {
-        content.push_str(&format!(
-            "## {} · {}\n\n- scope_kind={}\n- origin={}\n- status={}\n- updated_at_unix={}\n- evidence_available={}\n\n{}\n\n",
-            item.kind,
-            item.id,
-            item.scope_kind,
-            item.origin,
-            item.status,
-            item.updated_at_ts,
-            item.evidence_available,
-            item.content.replace('\n', "  \n")
-        ));
-    }
-    let checksum = format!("sha256:{:x}", Sha256::digest(content.as_bytes()));
-    Ok(MemoryMarkdownExport {
-        schema_version: 1,
-        exported_at_ts: now_ts,
-        content_type: "text/markdown; charset=utf-8".to_string(),
-        content,
-        checksum,
-    })
 }
 
 pub(crate) fn preview_memory_import(
@@ -1688,3 +1653,11 @@ mod boundary_test_fixtures;
 #[cfg(test)]
 #[path = "ux_boundary_tests.rs"]
 mod boundary_tests;
+
+#[cfg(test)]
+#[path = "ux_clear_import_tests.rs"]
+mod clear_import_tests;
+
+#[cfg(test)]
+#[path = "ux_clear_scope_tests.rs"]
+mod clear_scope_tests;
