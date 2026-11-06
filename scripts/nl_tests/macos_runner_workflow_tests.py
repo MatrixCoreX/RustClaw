@@ -43,6 +43,25 @@ def required_command_gate(job, command):
 
 
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_memory_quota_accounting_gates_both_native_runtime_jobs(self):
+        jobs = load('macos-polyglot-skill-ci.yml')['jobs']
+        for name in ['runtime-read-linux', 'polyglot-skill-macos']:
+            for selector in ['memory::retention', 'memory::']:
+                command = f'cargo test --locked -p clawd --bin clawd {selector} -- --test-threads=1 --nocapture'
+                self.assertTrue(required_command_gate(jobs[name], command))
+                for mutation in ['remove', 'ignore', 'continue', 'conditional']:
+                    with self.subTest(job=name, selector=selector, mutation=mutation):
+                        job = deepcopy(jobs[name])
+                        step = next(step for step in job['steps'] if command in step.get('run', ''))
+                        if mutation == 'remove': step['run'] = step['run'].replace(command, 'true')
+                        elif mutation == 'ignore': step['run'] = step['run'].replace(command, command + ' || true')
+                        elif mutation == 'continue': step['continue-on-error'] = True
+                        else: step['if'] = '${{ always() }}'
+                        self.assertFalse(required_command_gate(job, command))
+        artifact = next(step for step in jobs['runtime-read-linux']['steps']
+                        if step.get('name') == 'Build the exact verified Linux core without publishing a release')
+        self.assertIn('memory_quota_accounting', artifact['run'])
+
     def test_principal_identity_lifecycle_gates_both_native_runtime_jobs(self):
         jobs = load('macos-polyglot-skill-ci.yml')['jobs']
         command = 'cargo test --locked -p clawd --bin clawd identity_lifecycle -- --test-threads=1 --nocapture'

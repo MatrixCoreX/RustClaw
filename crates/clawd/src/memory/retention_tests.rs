@@ -68,3 +68,6 @@ fn pressure_state_machine_is_monotonic_by_threshold() {
     assert_eq!(pressure_state(95, 100), "automatic_generation_paused");
     assert_eq!(pressure_state(100, 100), "explicit_write_blocked");
 }
+
+#[path = "retention_accounting_tests.rs"]
+mod accounting;
