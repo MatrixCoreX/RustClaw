@@ -12,7 +12,7 @@ test("memory a previous-owner post-save index read cannot replace a new owner's 
       revision++;
       return json({ ...settings(owner, revision), use_memory: false });
     }
-    if (path === "/v1/memory/vector/status" && owner === "A" && revision === 2) return pending.promise;
+    if (path === "/v1/memory/vector/status" && owner === "A" && revision === 2) return pending.promise.then(response => response.clone());
     return json(data(path, owner));
   });
   try {
@@ -42,7 +42,7 @@ test("memory an older post-save index read cannot overwrite a newer account poli
       return json({ ...settings("A", revision), use_memory: revision === 1 });
     }
     if (path === "/v1/memory/vector/status") {
-      if (revision === 2) return pending.promise;
+      if (revision === 2) return pending.promise.then(response => response.clone());
       return json({ ...data(path, "A"), policy_digest: settings("A", revision).policy_digest });
     }
     return json(data(path, "A"));
@@ -73,7 +73,7 @@ test("memory an index action during post-save refresh cannot submit an invalidat
       if (init?.method === "POST") revision++;
       return json({ ...settings("A", revision), use_memory: revision === 1 });
     }
-    if (path === "/v1/memory/vector/status" && revision > 1) return pending.promise;
+    if (path === "/v1/memory/vector/status" && revision > 1) return pending.promise.then(response => response.clone());
     if (init?.method === "POST") {
       const digest = JSON.parse(String(init.body)).expected_policy_digest;
       presented.push(digest);
