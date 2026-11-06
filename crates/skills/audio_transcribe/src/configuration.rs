@@ -38,8 +38,16 @@ fn env_non_empty(key: &str) -> Option<String> {
     claw_core::secrets::env_non_empty_resolved_or_none(key)
 }
 
+pub(super) fn configured_api_key(value: &str) -> Option<&str> {
+    let value = value.trim();
+    (!value.is_empty() && !value.starts_with("REPLACE_ME_")).then_some(value)
+}
+
 fn apply_vendor_api_key_env(target: &mut Option<VendorConfig>, key: &str) {
-    if let (Some(value), Some(cfg)) = (env_non_empty(key), target.as_mut()) {
+    if let (Some(value), Some(cfg)) = (
+        env_non_empty(key).filter(|value| configured_api_key(value).is_some()),
+        target.as_mut(),
+    ) {
         cfg.api_key = value;
     }
 }
@@ -54,7 +62,9 @@ pub(super) fn inherit_provider_connection_from_llm(
     if target.base_url.trim().is_empty() && !source.base_url.trim().is_empty() {
         target.base_url = source.base_url.clone();
     }
-    if target.api_key.trim().is_empty() && !source.api_key.trim().is_empty() {
+    if configured_api_key(&target.api_key).is_none()
+        && configured_api_key(&source.api_key).is_some()
+    {
         target.api_key = source.api_key.clone();
     }
 }

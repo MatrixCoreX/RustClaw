@@ -1764,7 +1764,7 @@ fn guess_audio_mime(path: &Path) -> &'static str {
 
 fn provider_auth_token(vendor: &str, cfg: &VendorConfig) -> Result<Option<String>, String> {
     let t = cfg.api_key.trim();
-    if t.is_empty() || t.starts_with("REPLACE_ME_") {
+    if configuration::configured_api_key(t).is_none() {
         if vendor == "custom" && is_loopback_base_url(&cfg.base_url) {
             return Ok(None);
         }
