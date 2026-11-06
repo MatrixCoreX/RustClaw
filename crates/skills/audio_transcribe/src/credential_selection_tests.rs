@@ -301,3 +301,42 @@ fn enrolled_relay_endpoint_matching_preserves_normalization() {
         },
     );
 }
+
+#[test]
+fn placeholder_dedicated_key_does_not_block_same_vendor_inheritance() {
+    isolated(
+        "placeholder_dedicated_key_does_not_block_same_vendor_inheritance",
+        &[],
+        || {
+            let mut cfg = config(ENDPOINT, "REPLACE_ME_MINIMAX_API_KEY");
+            apply_env_overrides(&mut cfg);
+            let provider = cfg.audio_transcribe.providers.minimax.as_ref().unwrap();
+            assert_eq!(provider.api_key, "main-fixture-key");
+            assert_eq!(
+                provider_auth_token("minimax", provider).unwrap().as_deref(),
+                Some("main-fixture-key")
+            );
+        },
+    );
+}
+
+#[test]
+fn placeholder_dedicated_environment_does_not_erase_valid_inline_key() {
+    isolated(
+        "placeholder_dedicated_environment_does_not_erase_valid_inline_key",
+        &[(
+            "AUDIO_TRANSCRIBE_MINIMAX_API_KEY",
+            "REPLACE_ME_MINIMAX_API_KEY",
+        )],
+        || {
+            let mut cfg = config(ENDPOINT, "dedicated-fixture-key");
+            apply_env_overrides(&mut cfg);
+            let provider = cfg.audio_transcribe.providers.minimax.as_ref().unwrap();
+            assert_eq!(provider.api_key, "dedicated-fixture-key");
+            assert_eq!(
+                provider_auth_token("minimax", provider).unwrap().as_deref(),
+                Some("dedicated-fixture-key")
+            );
+        },
+    );
+}
