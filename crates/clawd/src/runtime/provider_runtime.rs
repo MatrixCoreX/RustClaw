@@ -63,7 +63,7 @@ impl LlmProviderRuntime {
 
     /// §P4.4 E3.a：根据 vendor 从 `provider.config.name` 推断 secret name 形式。
     ///
-    /// 命名约定来自 [`crate::llm_gateway::synthesize_llm_providers`]：所有
+    /// 命名约定来自 [`claw_core::llm_provider_descriptors::synthesized_provider_configs`]：所有
     /// runtime provider 的 `config.name` 形如 `vendor-<vendor>`（vendor =
     /// `openai` / `google` / `anthropic` / `grok` / `xai` / `deepseek` / `qwen`
     /// / `minimax`）。strip `vendor-` 前缀后即得 vendor 名。
@@ -72,21 +72,8 @@ impl LlmProviderRuntime {
     /// 时返回 `None` —— 调用方应当 fallback 到 `config.api_key`，避免拼出诸如
     /// `text_my-llm_api_key`（含 `-`）这种通不过 `validate_secret_name` 的形态。
     fn vendor_name_for_secret_lookup(&self) -> Option<String> {
-        let raw = self.config.name.trim();
-        let vendor = raw.strip_prefix("vendor-")?.trim();
-        if vendor.is_empty() {
-            return None;
-        }
-        // §P4.4 E3.a: secret name 必须是 [a-z0-9_]，所以 vendor 名也必须满足。
-        // 不满足直接 None ⇒ fallback 到 config.api_key，避免在 broker 那边触发
-        // InvalidName 错误（那是上层 config 的责任，不是 broker 的）。
-        if !vendor
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-        {
-            return None;
-        }
-        Some(vendor.to_string())
+        claw_core::llm_provider_descriptors::credential_vendor_name(&self.config.name)
+            .map(str::to_string)
     }
 
     /// §P4.4 E3.a：拿 LLM 调用要用的 api_key —— **broker 优先，config 兜底**。
@@ -140,8 +127,7 @@ impl LlmProviderRuntime {
             return std::borrow::Cow::Borrowed(&self.config.api_key);
         }
 
-        if self.config.params.credential_source
-            == claw_core::config::LlmCredentialSource::Resolved
+        if self.config.params.credential_source == claw_core::config::LlmCredentialSource::Resolved
         {
             return std::borrow::Cow::Borrowed(&self.config.api_key);
         }

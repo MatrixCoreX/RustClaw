@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use claw_core::config::{AppConfig, LlmProviderConfig, LlmVendorConfig};
+use claw_core::config::AppConfig;
 use tokio::sync::{oneshot, Semaphore};
 use tracing::{info, warn};
 
@@ -262,22 +262,9 @@ pub(crate) fn classify_prompt_source(prompt_source: &str) -> &'static str {
     }
 }
 
-fn matches_provider_override(name: &str, provider_type: &str, override_name: &str) -> bool {
-    let wanted = override_name.trim().to_ascii_lowercase();
-    let provider_name = name.trim().to_ascii_lowercase();
-    let provider_type = provider_type.trim().to_ascii_lowercase();
-    let vendor_name = provider_name
-        .strip_prefix("vendor-")
-        .unwrap_or(provider_name.as_str());
-    wanted == provider_name
-        || wanted == provider_type
-        || wanted == vendor_name
-        || (wanted == "xiaomi" && vendor_name == "mimo")
-}
-
 pub(crate) fn build_providers(config: &AppConfig) -> Vec<Arc<LlmProviderRuntime>> {
-    let model_override = claw_core::product_identity::env_string("MODEL_OVERRIDE").ok();
-    let provider_override = claw_core::product_identity::env_string("PROVIDER_OVERRIDE").ok();
+    let (provider_override, model_override) =
+        claw_core::llm_provider_descriptors::process_overrides();
     build_providers_with_overrides(
         config,
         provider_override.as_deref(),
@@ -300,380 +287,45 @@ fn build_providers_with_overrides(
     model_override: Option<&str>,
     log_env_overrides: bool,
 ) -> Vec<Arc<LlmProviderRuntime>> {
-    if let Some(model) = &model_override {
-        if log_env_overrides {
+    if log_env_overrides {
+        if let Some(model) = model_override {
             info!("Model override enabled: {}", model);
         }
-    }
-    if let Some(name) = &provider_override {
-        if log_env_overrides {
+        if let Some(name) = provider_override {
             info!("Provider override enabled: {}", name);
         }
     }
-
-    let source_providers = if config.llm.providers.is_empty() {
-        synthesize_llm_providers(config, provider_override, model_override)
-    } else {
-        config.llm.providers.clone()
-    };
-
-    let mut providers: Vec<_> = source_providers
-        .iter()
-        .filter_map(|p| {
-            if let Some(name) = provider_override {
-                // Accept override by vendor alias (openai/google/anthropic/grok/deepseek/qwen/minimax/mimo/custom),
-                // provider runtime name (vendor-xxx), or provider type.
-                if !matches_provider_override(&p.name, &p.provider_type, name) {
-                    return None;
-                }
-            }
-
-            if !matches!(
-                p.provider_type.as_str(),
-                "openai_compat" | "google_gemini" | "anthropic_claude"
-            ) {
-                warn!(
-                    "Skip unsupported provider type={}, name={}",
-                    p.provider_type, p.name
-                );
-                return None;
-            }
-
-            let mut runtime_cfg = p.clone();
-            if let Some(model) = model_override {
-                runtime_cfg.model = model.to_string();
-            }
-            runtime_cfg.params.device_key_enrollment =
-                hosted_relay_matches_provider(config, &runtime_cfg);
-            let pricing = crate::providers::resolve_model_pricing(
-                &config.llm.pricing,
-                &runtime_cfg.name,
-                &runtime_cfg.provider_type,
-                &runtime_cfg.model,
-            );
-            let client = build_llm_http_client(runtime_cfg.timeout_seconds).ok()?;
-
-            Some(Arc::new(LlmProviderRuntime {
-                config: runtime_cfg.clone(),
-                pricing,
-                latency: Arc::new(crate::providers::LlmProviderLatencyTracker::default()),
-                client,
-                semaphore: Arc::new(Semaphore::new(runtime_cfg.max_concurrency.max(1))),
-                breaker: Arc::new(crate::providers::CircuitBreaker::new()),
-            }))
-        })
-        .collect();
-
+    let providers: Vec<_> = claw_core::llm_provider_descriptors::effective_provider_configs(
+        &config.llm,
+        provider_override,
+        model_override,
+    )
+    .into_iter()
+    .filter_map(|runtime_cfg| {
+        let pricing = crate::providers::resolve_model_pricing(
+            &config.llm.pricing,
+            &runtime_cfg.name,
+            &runtime_cfg.provider_type,
+            &runtime_cfg.model,
+        );
+        let client = build_llm_http_client(runtime_cfg.timeout_seconds).ok()?;
+        let semaphore = Arc::new(Semaphore::new(runtime_cfg.max_concurrency.max(1)));
+        Some(Arc::new(LlmProviderRuntime {
+            config: runtime_cfg,
+            pricing,
+            latency: Arc::new(crate::providers::LlmProviderLatencyTracker::default()),
+            client,
+            semaphore,
+            breaker: Arc::new(crate::providers::CircuitBreaker::new()),
+        }))
+    })
+    .collect();
     if providers.is_empty() {
         if let Some(name) = provider_override {
             warn!("Provider override not found in config: {}", name);
         }
     }
-
-    providers.sort_by_key(|p| p.config.priority);
     providers
-}
-
-fn hosted_relay_matches_provider(config: &AppConfig, provider: &LlmProviderConfig) -> bool {
-    let Some(relay) = config
-        .llm
-        .hosted_relay
-        .as_ref()
-        .filter(|relay| relay.enabled)
-    else {
-        return false;
-    };
-    provider.provider_type == "openai_compat"
-        && provider
-            .name
-            .strip_prefix("vendor-")
-            .is_some_and(|vendor| vendor == relay.vendor.trim())
-        && provider.model.trim() == relay.model.trim()
-        && provider.base_url.trim_end_matches('/') == relay.base_url.trim_end_matches('/')
-}
-
-/// 双协议 vendor 的 `api_format`：未配置或为空时默认 `openai_compat`；显式
-/// `anthropic_claude` 等则走 Anthropic Messages。
-fn api_format_synthesized_provider_type(vendor_name: &str, v: &LlmVendorConfig) -> &'static str {
-    let Some(raw) = v.api_format.as_ref() else {
-        return "openai_compat";
-    };
-    let fmt = raw.trim();
-    if fmt.is_empty() {
-        return "openai_compat";
-    }
-    if fmt.eq_ignore_ascii_case("anthropic") || fmt.eq_ignore_ascii_case("anthropic_claude") {
-        return "anthropic_claude";
-    }
-    if fmt.eq_ignore_ascii_case("openai") || fmt.eq_ignore_ascii_case("openai_compat") {
-        return "openai_compat";
-    }
-    warn!(
-        "llm.{} api_format={:?} is not recognized (expected openai_compat or anthropic_claude); defaulting to openai_compat",
-        vendor_name,
-        v.api_format
-    );
-    "openai_compat"
-}
-
-fn synthesize_llm_providers(
-    config: &AppConfig,
-    provider_override: Option<&str>,
-    model_override: Option<&str>,
-) -> Vec<LlmProviderConfig> {
-    let mut out = Vec::new();
-    let selected_vendor = provider_override.or(config.llm.selected_vendor.as_deref());
-    let selected_model = model_override
-        .or_else(|| {
-            let override_vendor = provider_override?.trim();
-            let configured_vendor = config.llm.selected_vendor.as_deref()?.trim();
-            if override_vendor.eq_ignore_ascii_case(configured_vendor)
-                || (override_vendor.eq_ignore_ascii_case("xiaomi")
-                    && configured_vendor.eq_ignore_ascii_case("mimo"))
-                || (override_vendor.eq_ignore_ascii_case("mimo")
-                    && configured_vendor.eq_ignore_ascii_case("xiaomi"))
-            {
-                config.llm.selected_model.as_deref()
-            } else {
-                None
-            }
-        })
-        .or_else(|| {
-            if provider_override.is_none() {
-                config.llm.selected_model.as_deref()
-            } else {
-                None
-            }
-        });
-
-    if let Some(v) = &config.llm.openai {
-        if selected_vendor.is_none() || selected_vendor == Some("openai") {
-            let model = if selected_vendor == Some("openai") {
-                selected_model.unwrap_or(&v.model)
-            } else {
-                &v.model
-            };
-            out.push(LlmProviderConfig {
-                name: "vendor-openai".to_string(),
-                provider_type: "openai_compat".to_string(),
-                base_url: v.base_url.clone(),
-                api_key: v.api_key.clone(),
-                model: model.to_string(),
-                context_window_tokens: v.context_window_tokens,
-                input_modalities: v.input_modalities.clone(),
-                supports_tools: v.supports_tools,
-                expected_latency_ms: v.expected_latency_ms,
-                priority: 1,
-                timeout_seconds: v.timeout_seconds,
-                max_concurrency: v.max_concurrency,
-                params: v.params.clone(),
-            });
-        }
-    }
-
-    if let Some(v) = &config.llm.google {
-        if selected_vendor.is_none() || selected_vendor == Some("google") {
-            let model = if selected_vendor == Some("google") {
-                selected_model.unwrap_or(&v.model)
-            } else {
-                &v.model
-            };
-            out.push(LlmProviderConfig {
-                name: "vendor-google".to_string(),
-                provider_type: "google_gemini".to_string(),
-                base_url: v.base_url.clone(),
-                api_key: v.api_key.clone(),
-                model: model.to_string(),
-                context_window_tokens: v.context_window_tokens,
-                input_modalities: v.input_modalities.clone(),
-                supports_tools: v.supports_tools,
-                expected_latency_ms: v.expected_latency_ms,
-                priority: 2,
-                timeout_seconds: v.timeout_seconds,
-                max_concurrency: v.max_concurrency,
-                params: v.params.clone(),
-            });
-        }
-    }
-
-    if let Some(v) = &config.llm.anthropic {
-        if selected_vendor.is_none() || selected_vendor == Some("anthropic") {
-            let model = if selected_vendor == Some("anthropic") {
-                selected_model.unwrap_or(&v.model)
-            } else {
-                &v.model
-            };
-            out.push(LlmProviderConfig {
-                name: "vendor-anthropic".to_string(),
-                provider_type: "anthropic_claude".to_string(),
-                base_url: v.base_url.clone(),
-                api_key: v.api_key.clone(),
-                model: model.to_string(),
-                context_window_tokens: v.context_window_tokens,
-                input_modalities: v.input_modalities.clone(),
-                supports_tools: v.supports_tools,
-                expected_latency_ms: v.expected_latency_ms,
-                priority: 3,
-                timeout_seconds: v.timeout_seconds,
-                max_concurrency: v.max_concurrency,
-                params: v.params.clone(),
-            });
-        }
-    }
-
-    if let Some(v) = &config.llm.grok {
-        if selected_vendor.is_none() || selected_vendor == Some("grok") {
-            let model = if selected_vendor == Some("grok") {
-                selected_model.unwrap_or(&v.model)
-            } else {
-                &v.model
-            };
-            out.push(LlmProviderConfig {
-                name: "vendor-grok".to_string(),
-                provider_type: "openai_compat".to_string(),
-                base_url: v.base_url.clone(),
-                api_key: v.api_key.clone(),
-                model: model.to_string(),
-                context_window_tokens: v.context_window_tokens,
-                input_modalities: v.input_modalities.clone(),
-                supports_tools: v.supports_tools,
-                expected_latency_ms: v.expected_latency_ms,
-                priority: 4,
-                timeout_seconds: v.timeout_seconds,
-                max_concurrency: v.max_concurrency,
-                params: v.params.clone(),
-            });
-        }
-    }
-
-    if let Some(v) = &config.llm.deepseek {
-        if selected_vendor.is_none() || selected_vendor == Some("deepseek") {
-            let model = if selected_vendor == Some("deepseek") {
-                selected_model.unwrap_or(&v.model)
-            } else {
-                &v.model
-            };
-            out.push(LlmProviderConfig {
-                name: "vendor-deepseek".to_string(),
-                provider_type: "openai_compat".to_string(),
-                base_url: v.base_url.clone(),
-                api_key: v.api_key.clone(),
-                model: model.to_string(),
-                context_window_tokens: v.context_window_tokens,
-                input_modalities: v.input_modalities.clone(),
-                supports_tools: v.supports_tools,
-                expected_latency_ms: v.expected_latency_ms,
-                priority: 5,
-                timeout_seconds: v.timeout_seconds,
-                max_concurrency: v.max_concurrency,
-                params: v.params.clone(),
-            });
-        }
-    }
-
-    if let Some(v) = &config.llm.qwen {
-        if selected_vendor.is_none() || selected_vendor == Some("qwen") {
-            let model = if selected_vendor == Some("qwen") {
-                selected_model.unwrap_or(&v.model)
-            } else {
-                &v.model
-            };
-            out.push(LlmProviderConfig {
-                name: "vendor-qwen".to_string(),
-                provider_type: "openai_compat".to_string(),
-                base_url: v.base_url.clone(),
-                api_key: v.api_key.clone(),
-                model: model.to_string(),
-                context_window_tokens: v.context_window_tokens,
-                input_modalities: v.input_modalities.clone(),
-                supports_tools: v.supports_tools,
-                expected_latency_ms: v.expected_latency_ms,
-                priority: 6,
-                timeout_seconds: v.timeout_seconds,
-                max_concurrency: v.max_concurrency,
-                params: v.params.clone(),
-            });
-        }
-    }
-
-    if let Some(v) = &config.llm.minimax {
-        if selected_vendor.is_none() || selected_vendor == Some("minimax") {
-            let model = if selected_vendor == Some("minimax") {
-                selected_model.unwrap_or(&v.model)
-            } else {
-                &v.model
-            };
-            let provider_type = api_format_synthesized_provider_type("minimax", v).to_string();
-            out.push(LlmProviderConfig {
-                name: "vendor-minimax".to_string(),
-                provider_type,
-                base_url: v.base_url.clone(),
-                api_key: v.api_key.clone(),
-                model: model.to_string(),
-                context_window_tokens: v.context_window_tokens,
-                input_modalities: v.input_modalities.clone(),
-                supports_tools: v.supports_tools,
-                expected_latency_ms: v.expected_latency_ms,
-                priority: 7,
-                timeout_seconds: v.timeout_seconds,
-                max_concurrency: v.max_concurrency,
-                params: v.params.clone(),
-            });
-        }
-    }
-
-    if let Some(v) = &config.llm.mimo {
-        if selected_vendor.is_none() || selected_vendor == Some("mimo") {
-            let model = if selected_vendor == Some("mimo") {
-                selected_model.unwrap_or(&v.model)
-            } else {
-                &v.model
-            };
-            let provider_type = api_format_synthesized_provider_type("mimo", v).to_string();
-            out.push(LlmProviderConfig {
-                name: "vendor-mimo".to_string(),
-                provider_type,
-                base_url: v.base_url.clone(),
-                api_key: v.api_key.clone(),
-                model: model.to_string(),
-                context_window_tokens: v.context_window_tokens,
-                input_modalities: v.input_modalities.clone(),
-                supports_tools: v.supports_tools,
-                expected_latency_ms: v.expected_latency_ms,
-                priority: 8,
-                timeout_seconds: v.timeout_seconds,
-                max_concurrency: v.max_concurrency,
-                params: v.params.clone(),
-            });
-        }
-    }
-
-    if let Some(v) = &config.llm.custom {
-        if selected_vendor.is_none() || selected_vendor == Some("custom") {
-            let model = if selected_vendor == Some("custom") {
-                selected_model.unwrap_or(&v.model)
-            } else {
-                &v.model
-            };
-            out.push(LlmProviderConfig {
-                name: "vendor-custom".to_string(),
-                provider_type: "openai_compat".to_string(),
-                base_url: v.base_url.clone(),
-                api_key: v.api_key.clone(),
-                model: model.to_string(),
-                context_window_tokens: v.context_window_tokens,
-                input_modalities: v.input_modalities.clone(),
-                supports_tools: v.supports_tools,
-                expected_latency_ms: v.expected_latency_ms,
-                priority: 9,
-                timeout_seconds: v.timeout_seconds,
-                max_concurrency: v.max_concurrency,
-                params: v.params.clone(),
-            });
-        }
-    }
-
-    out
 }
 
 pub(crate) async fn run_with_fallback_with_prompt_source(

@@ -4,8 +4,21 @@ use claw_core::config::AppConfig;
 
 use super::{
     acquire_llm_resource_lease, build_providers_for_selection, classify_prompt_source,
-    matches_provider_override, run_with_fallback_with_prompt_source, synthesize_llm_providers,
+    run_with_fallback_with_prompt_source,
 };
+use claw_core::llm_provider_descriptors::matches_provider_override;
+
+fn synthesize_llm_providers(
+    config: &AppConfig,
+    provider_override: Option<&str>,
+    model_override: Option<&str>,
+) -> Vec<claw_core::config::LlmProviderConfig> {
+    claw_core::llm_provider_descriptors::synthesized_provider_configs(
+        &config.llm,
+        provider_override,
+        model_override,
+    )
+}
 
 fn repo_config_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

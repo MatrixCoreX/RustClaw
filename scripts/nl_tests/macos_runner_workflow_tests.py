@@ -46,6 +46,9 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
     def test_catalogue_selection_and_cli_contracts_gate_both_systems_and_signed_artifact(self):
         jobs = load("macos-polyglot-skill-ci.yml")["jobs"]
         commands = [
+            'cargo test --locked -p claw-core llm_provider_descriptors::tests -- --test-threads=1 --nocapture',
+            'cargo test --locked -p clawd --bin clawd llm_gateway::tests -- --test-threads=1 --nocapture',
+            'cargo test --locked -p clawd --bin clawd llm_provider_runtime_tests -- --test-threads=1 --nocapture',
             "cargo test --locked -p clawd --bin clawd model_catalog -- --test-threads=1 --nocapture",
             "cargo test --locked -p clawd --bin clawd task_model_selection -- --test-threads=1 --nocapture",
             "cargo test --locked -p clawcli commands::models_tests -- --test-threads=1 --nocapture",
@@ -69,6 +72,7 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
             'install -m 755 target/release/clawcli "$artifact_root/runtime-read/clawcli"',
             "sha256sum clawd clawcli source-commit verified-gates",
             "model_catalog_truthfulness task_model_selection cli_model_readiness",
+            "provider_descriptors",
         ]:
             self.assertIn(fragment, build["run"])
 
