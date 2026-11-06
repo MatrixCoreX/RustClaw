@@ -12,6 +12,9 @@ use super::capacity_test_fixtures::Fixture;
 const USER_CONTENT: &str =
     "I prefer markdown for technical explanations. Please keep this preference for future answers.";
 
+#[path = "completion_provider_test_fixture.rs"]
+mod provider_config;
+
 pub(super) struct GenerationFixture {
     pub(super) fixture: Fixture,
     pub(super) task: crate::ClaimedTask,
@@ -87,6 +90,7 @@ impl GenerationFixture {
             runtime.config.params.stream = Some(false);
             runtime.config.supports_tools = false;
             runtime.client = reqwest::Client::builder().no_proxy().build().unwrap();
+            provider_config::install(state, &runtime);
             state.core.active_provider_type = Some("openai_compat".into());
             state.core.llm_providers = vec![Arc::new(runtime)];
         }
