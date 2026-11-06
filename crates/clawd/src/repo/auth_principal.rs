@@ -358,6 +358,25 @@ pub(super) fn active_auth_key_identity(
     .map_err(Into::into)
 }
 
+/// Validate this account through the same live key/binding/principal read used
+/// by authentication and return that validated key. This is not authorization
+/// to act for another account.
+pub(crate) fn require_active_principal_credential(
+    db: &Connection,
+    principal_id: &str,
+) -> anyhow::Result<String> {
+    let mut statement =
+        db.prepare("SELECT user_key FROM auth_keys WHERE principal_id = ?1 AND enabled = 1")?;
+    let mut keys = statement.query([principal_id])?;
+    while let Some(row) = keys.next()? {
+        let key: String = row.get(0)?;
+        if active_auth_key_identity(db, &key)?.is_some_and(|(_, owner)| owner == principal_id) {
+            return Ok(key);
+        }
+    }
+    anyhow::bail!("credential_binding_missing")
+}
+
 pub(crate) fn principal_id_for_user_key(
     db: &Connection,
     user_key: &str,

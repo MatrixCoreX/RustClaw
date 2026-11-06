@@ -14,7 +14,10 @@ mod auth_webd;
 mod schema;
 
 pub(super) use auth_principal::with_identity_transaction;
-pub(crate) use auth_principal::{ensure_principal_identity_schema, principal_id_for_user_key};
+pub(crate) use auth_principal::{
+    ensure_principal_identity_schema, principal_id_for_user_key,
+    require_active_principal_credential,
+};
 pub(crate) use auth_seed::seed_channel_bindings;
 pub(crate) use auth_webd::{upsert_webd_login_account, verify_webd_password_login};
 pub(crate) use schema::ensure_key_auth_schema;

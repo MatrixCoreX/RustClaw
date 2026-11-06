@@ -1083,6 +1083,7 @@ pub(crate) fn preview_memory_import(
     now_ts: i64,
 ) -> anyhow::Result<MemoryImportPreview> {
     require_memory_ux_schema(db)?;
+    crate::repo::auth::require_active_principal_credential(db, principal_id)?;
     anyhow::ensure!(
         request.export.schema_version == 1,
         "memory_import_schema_unsupported"
@@ -1152,7 +1153,10 @@ pub(crate) fn preview_memory_import(
         "scope_kind": "principal",
     });
     let payload_digest = format!("sha256:{:x}", Sha256::digest(serde_json::to_vec(&payload)?));
-    let existing = db
+    let transaction =
+        rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+    crate::repo::auth::require_active_principal_credential(&transaction, principal_id)?;
+    let existing = transaction
         .query_row(
             "SELECT import_id, preview_json, status
              FROM memory_import_sessions
@@ -1172,7 +1176,7 @@ pub(crate) fn preview_memory_import(
         import_id
     } else {
         let import_id = format!("memory_import_{}", uuid::Uuid::new_v4().simple());
-        db.execute(
+        transaction.execute(
             "INSERT INTO memory_import_sessions(
                 import_id, principal_id, scope_kind, scope_ref, payload_digest,
                 preview_json, status, created_at_ts
@@ -1187,6 +1191,7 @@ pub(crate) fn preview_memory_import(
         )?;
         import_id
     };
+    transaction.commit()?;
     Ok(MemoryImportPreview {
         schema_version: 1,
         import_id,
@@ -1206,7 +1211,10 @@ pub(crate) fn confirm_memory_import(
     now_ts: i64,
 ) -> anyhow::Result<MemoryImportResult> {
     require_memory_ux_schema(db)?;
-    let transaction = db.unchecked_transaction()?;
+    let transaction =
+        rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+    let user_key =
+        crate::repo::auth::require_active_principal_credential(&transaction, principal_id)?;
     let (payload_digest, preview_json, status) = transaction
         .query_row(
             "SELECT payload_digest, preview_json, status FROM memory_import_sessions
@@ -1233,15 +1241,6 @@ pub(crate) fn confirm_memory_import(
         computed_digest == payload_digest,
         "memory_import_preview_corrupt"
     );
-    let user_key = transaction
-        .query_row(
-            "SELECT user_key FROM auth_keys
-             WHERE principal_id = ?1 AND enabled = 1 ORDER BY created_at, user_key LIMIT 1",
-            [principal_id],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-        .unwrap_or_default();
     let items = payload["items"]
         .as_array()
         .ok_or_else(|| anyhow!("memory_import_preview_corrupt"))?;
@@ -1674,3 +1673,7 @@ mod pressure_read_tests;
 #[cfg(test)]
 #[path = "schema_readiness_tests.rs"]
 mod readiness_tests;
+
+#[cfg(test)]
+#[path = "ux_import_credential_tests.rs"]
+mod import_credential_tests;
