@@ -3,6 +3,7 @@
 
 pub mod adapter;
 pub mod admission;
+mod artifact_file;
 pub mod bounded_result;
 pub mod capability_request;
 pub mod error;
@@ -17,6 +18,7 @@ mod process;
 pub mod progress;
 pub mod protocol;
 pub mod receipt;
+mod regular_file;
 pub mod runtime;
 mod runtime_assets;
 pub mod safe_archive;
@@ -43,9 +45,9 @@ pub use installer::{
     InstallRequest, PrecompiledInstallRequest, SkillInstaller,
 };
 pub use manifest::{
-    validate_safe_name, AippAccountControls, AippSpec, ArchiveFormat, BuildAdapter, BuildNetworkPolicy,
-    ExecutionProfile, InstallResourceRequirements, InstallSpec, LauncherKind, PackageManifest,
-    SandboxProfile, AGENT_JSONL_PROTOCOL, AIPP_SCHEMA_VERSION,
+    validate_safe_name, AippAccountControls, AippSpec, ArchiveFormat, BuildAdapter,
+    BuildNetworkPolicy, ExecutionProfile, InstallResourceRequirements, InstallSpec, LauncherKind,
+    PackageManifest, SandboxProfile, AGENT_JSONL_PROTOCOL, AIPP_SCHEMA_VERSION,
     LEGACY_SKILL_MANIFEST_SCHEMA_VERSION, SKILL_MANIFEST_SCHEMA_VERSION,
 };
 pub use operation::{

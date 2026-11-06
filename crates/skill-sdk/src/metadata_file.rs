@@ -1,31 +1,17 @@
 //! Regular-file reads for host-owned metadata, not arbitrary ancestor confinement.
-use std::fs::{self, File, Metadata, OpenOptions};
+#[cfg(test)]
+use std::fs;
+use std::fs::File;
 use std::io::{self, BufReader, Read};
 use std::path::Path;
 
 use serde::de::DeserializeOwned;
 
+#[cfg(test)]
+use crate::regular_file::open_descriptor;
+pub(crate) use crate::regular_file::LeafLinks;
+use crate::regular_file::{checked_open, OpenFailure};
 use crate::{SkillSdkError, SkillSdkResult};
-
-#[derive(Clone, Copy)]
-pub(crate) enum LeafLinks {
-    Reject,
-    Follow,
-}
-
-#[derive(Debug)]
-enum OpenFailure {
-    Io(io::Error),
-    InvalidTarget,
-    #[cfg(not(any(unix, windows)))]
-    UnsupportedPlatform,
-}
-
-impl From<io::Error> for OpenFailure {
-    fn from(error: io::Error) -> Self {
-        Self::Io(error)
-    }
-}
 
 impl OpenFailure {
     fn sdk(self, path: &Path) -> SkillSdkError {
@@ -40,75 +26,6 @@ impl OpenFailure {
             }
         }
     }
-}
-
-fn regular(metadata: &Metadata, links: LeafLinks) -> bool {
-    if !metadata.is_file() {
-        return false;
-    }
-    #[cfg(windows)]
-    if matches!(links, LeafLinks::Reject) {
-        use std::os::windows::fs::MetadataExt;
-        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-        return metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0;
-    }
-    let _ = links;
-    true
-}
-
-fn open_descriptor(path: &Path, links: LeafLinks) -> Result<File, OpenFailure> {
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        let flags = libc::O_NONBLOCK
-            | if matches!(links, LeafLinks::Reject) {
-                libc::O_NOFOLLOW
-            } else {
-                0
-            };
-        options.custom_flags(flags);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        // Win32 CreateFileW: open the reparse point itself, never its target.
-        // https://learn.microsoft.com/windows/win32/api/fileapi/nf-fileapi-createfilew
-        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-        if matches!(links, LeafLinks::Reject) {
-            options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
-        }
-        // Rust's Windows documentation recommends explicit SQOS on arbitrary
-        // paths; anonymous identification does not delegate caller credentials.
-        options.security_qos_flags(0);
-    }
-    #[cfg(not(any(unix, windows)))]
-    return Err(OpenFailure::UnsupportedPlatform);
-    let file = options.open(path).map_err(|error| {
-        #[cfg(unix)]
-        if error.raw_os_error() == Some(libc::ELOOP) {
-            return OpenFailure::InvalidTarget;
-        }
-        OpenFailure::Io(error)
-    })?;
-    if !regular(&file.metadata()?, links) {
-        return Err(OpenFailure::InvalidTarget);
-    }
-    Ok(file)
-}
-
-fn checked_open(path: &Path, links: LeafLinks) -> Result<File, OpenFailure> {
-    let metadata = match links {
-        LeafLinks::Reject => fs::symlink_metadata(path)?,
-        LeafLinks::Follow => fs::metadata(path)?,
-    };
-    if !regular(&metadata, links) {
-        return Err(OpenFailure::InvalidTarget);
-    }
-    // The descriptor repeats the type check and Unix nonblocking/no-follow
-    // flags close the check/open FIFO and leaf-link races.
-    open_descriptor(path, links)
 }
 
 pub(crate) fn open(path: &Path) -> SkillSdkResult<File> {

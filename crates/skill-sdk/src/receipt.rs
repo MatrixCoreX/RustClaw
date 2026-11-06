@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufWriter, Read, Write};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -890,32 +890,13 @@ impl InstallReceiptStore {
     }
 }
 
+/// Hash a selected regular source file completely, retaining explicit source links.
 pub fn digest_file(path: &Path) -> SkillSdkResult<String> {
-    let mut file = File::open(path).map_err(|error| {
-        SkillSdkError::new(
-            "artifact_read_failed",
-            format!("path={} error={error}", path.display()),
-        )
-    })?;
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0_u8; 1024 * 1024];
-    loop {
-        let read = file.read(&mut buffer).map_err(|error| {
-            SkillSdkError::new(
-                "artifact_read_failed",
-                format!("path={} error={error}", path.display()),
-            )
-        })?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    Ok(hex::encode(hasher.finalize()))
+    crate::artifact_file::digest(path, crate::regular_file::LeafLinks::Follow)
 }
 
 pub(crate) fn digest_verified_file(path: &Path) -> SkillSdkResult<String> {
-    digest_file(path)
+    crate::artifact_file::digest(path, crate::regular_file::LeafLinks::Reject)
 }
 
 fn validate_pointer(pointer: &CurrentInstallPointer) -> SkillSdkResult<()> {
