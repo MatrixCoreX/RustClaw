@@ -8,6 +8,9 @@ use super::{
 #[path = "auth_principal_lifecycle_tests.rs"]
 mod identity_lifecycle;
 
+#[path = "auth_principal_atomicity_tests.rs"]
+mod atomicity;
+
 fn setup_db() -> Connection {
     let db = Connection::open_in_memory().expect("principal fixture db");
     db.execute_batch(crate::INIT_SQL).expect("base schema");

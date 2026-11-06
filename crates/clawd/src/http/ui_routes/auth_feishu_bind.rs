@@ -1203,15 +1203,9 @@ async fn webd_internal_verify_login(
     let verified = {
         let db = match state.core.db.get() {
             Ok(g) => g,
-            Err(_) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ApiResponse {
-                        ok: false,
-                        data: None,
-                        error: Some("db lock poisoned".to_string()),
-                    }),
-                );
+            Err(error) => {
+                tracing::warn!(%error, "webd_auth_database_unavailable");
+                return crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "auth_lookup_failed");
             }
         };
         verify_webd_password_login(&db, &req.username, &req.password)
@@ -1238,14 +1232,10 @@ async fn webd_internal_verify_login(
                     error: Some("invalid_credentials".to_string()),
                 }),
             ),
-            Err(err) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("identity resolution failed: {err}")),
-                }),
-            ),
+            Err(error) => {
+                tracing::warn!(%error, "webd_auth_identity_lookup_failed");
+                crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "auth_lookup_failed")
+            }
         },
         Ok(None) => (
             StatusCode::UNAUTHORIZED,
@@ -1260,14 +1250,10 @@ async fn webd_internal_verify_login(
                 error: Some("invalid_credentials".to_string()),
             }),
         ),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(format!("login failed: {err}")),
-            }),
-        ),
+        Err(error) => {
+            tracing::warn!(%error, "webd_auth_password_lookup_failed");
+            crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "auth_lookup_failed")
+        }
     }
 }
 
@@ -1436,14 +1422,10 @@ async fn resolve_channel_binding(
                 error: None,
             }),
         ),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(format!("resolve channel binding failed: {err}")),
-            }),
-        ),
+        Err(error) => {
+            tracing::warn!(%error, "channel_auth_identity_lookup_failed");
+            crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "auth_lookup_failed")
+        }
     }
 }
 

@@ -12,6 +12,9 @@ use rusqlite::{params, Connection};
 #[path = "auth_identity_lifecycle_tests.rs"]
 mod identity_lifecycle;
 
+#[path = "auth_key_atomicity_tests.rs"]
+mod atomicity;
+
 fn auth_lifecycle_test_state() -> AppState {
     let state = AppState::test_default_with_fixture_provider();
     let db = state.core.db.get().expect("main db");

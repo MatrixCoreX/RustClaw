@@ -27,22 +27,16 @@ const OWNER_PRINCIPAL_COLUMNS: &[(&str, &str)] = &[
 ];
 
 pub(crate) fn ensure_principal_ownership_schema(db: &Connection) -> anyhow::Result<()> {
-    super::auth::ensure_principal_identity_schema(db)?;
-    if let Some(applied_digest) = migration_digest(db)? {
-        anyhow::ensure!(
-            applied_digest == manifest_digest(),
-            "runtime_schema_migration_digest_mismatch:{MIGRATION_ID}"
-        );
-    }
-
-    if db.is_autocommit() {
-        let tx = db.unchecked_transaction()?;
-        apply_migration(&tx)?;
-        tx.commit()?;
-    } else {
-        apply_migration(db)?;
-    }
-    Ok(())
+    super::auth::with_identity_transaction(db, |db| {
+        if let Some(applied_digest) = migration_digest(db)? {
+            anyhow::ensure!(
+                applied_digest == manifest_digest(),
+                "runtime_schema_migration_digest_mismatch:{MIGRATION_ID}"
+            );
+        }
+        super::auth::ensure_principal_identity_schema(db)?;
+        apply_migration(db)
+    })
 }
 
 fn apply_migration(db: &Connection) -> anyhow::Result<()> {
@@ -150,6 +144,9 @@ fn column_exists(db: &Connection, table: &str, column: &str) -> anyhow::Result<b
 }
 
 fn migration_digest(db: &Connection) -> anyhow::Result<Option<String>> {
+    if !table_exists(db, "runtime_schema_migrations")? {
+        return Ok(None);
+    }
     db.query_row(
         "SELECT schema_digest FROM runtime_schema_migrations WHERE migration_id = ?1",
         [MIGRATION_ID],

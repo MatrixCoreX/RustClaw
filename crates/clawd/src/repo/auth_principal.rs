@@ -1,5 +1,6 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 
 const PRINCIPAL_MIGRATION_ID: &str = "008_memory_context_identity_settings_v1";
 const PRINCIPAL_SCHEMA_SQL: &str =
@@ -21,6 +22,26 @@ fn schema_digest() -> String {
 }
 
 pub(crate) fn ensure_principal_identity_schema(db: &Connection) -> anyhow::Result<()> {
+    with_identity_transaction(db, ensure_identity_schema_in_transaction)
+}
+
+// An existing transaction remains owned by its caller, which must propagate an
+// error and roll it back. Standalone calls commit only after the entire action.
+pub(crate) fn with_identity_transaction<T>(
+    db: &Connection,
+    action: impl FnOnce(&Connection) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    if db.is_autocommit() {
+        let tx = db.unchecked_transaction()?;
+        let result = action(&tx)?;
+        tx.commit()?;
+        Ok(result)
+    } else {
+        action(db)
+    }
+}
+
+fn ensure_identity_schema_in_transaction(db: &Connection) -> anyhow::Result<()> {
     let applied_digest = migration_digest(db, PRINCIPAL_MIGRATION_ID)?;
     if let Some(applied_digest) = applied_digest.as_ref() {
         anyhow::ensure!(
@@ -28,27 +49,29 @@ pub(crate) fn ensure_principal_identity_schema(db: &Connection) -> anyhow::Resul
             "runtime_schema_migration_digest_mismatch:{PRINCIPAL_MIGRATION_ID}"
         );
     }
-    db.execute_batch(PRINCIPAL_SCHEMA_SQL)?;
-    crate::ensure_column_exists(
-        db,
-        "auth_keys",
-        "principal_id",
-        "ALTER TABLE auth_keys ADD COLUMN principal_id TEXT",
-    )?;
-    db.execute_batch(
-        "CREATE INDEX IF NOT EXISTS idx_auth_keys_principal_id
-         ON auth_keys(principal_id) WHERE principal_id IS NOT NULL;",
-    )?;
-    backfill_principals(db)?;
+    if applied_digest.is_none() {
+        db.execute_batch(PRINCIPAL_SCHEMA_SQL)?;
+        crate::ensure_column_exists(
+            db,
+            "auth_keys",
+            "principal_id",
+            "ALTER TABLE auth_keys ADD COLUMN principal_id TEXT",
+        )?;
+        db.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_auth_keys_principal_id
+             ON auth_keys(principal_id) WHERE principal_id IS NOT NULL;",
+        )?;
+    }
+    backfill_principals(db, applied_digest.is_none())?;
     if applied_digest.is_none() {
         seed_memory_onboarding_state(db)?;
+        db.execute(
+            "INSERT INTO runtime_schema_migrations (migration_id, schema_digest, applied_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(migration_id) DO NOTHING",
+            params![PRINCIPAL_MIGRATION_ID, schema_digest(), crate::now_ts()],
+        )?;
     }
-    db.execute(
-        "INSERT INTO runtime_schema_migrations (migration_id, schema_digest, applied_at)
-         VALUES (?1, ?2, ?3)
-         ON CONFLICT(migration_id) DO NOTHING",
-        params![PRINCIPAL_MIGRATION_ID, schema_digest(), crate::now_ts()],
-    )?;
     Ok(())
 }
 
@@ -137,7 +160,18 @@ fn migration_digest(db: &Connection, migration_id: &str) -> anyhow::Result<Optio
     .map_err(Into::into)
 }
 
-fn backfill_principals(db: &Connection) -> anyhow::Result<()> {
+struct PrincipalBackfill {
+    user_key: String,
+    role: String,
+    previous_principal_id: Option<String>,
+    principal_id: String,
+    credential_digest: String,
+    create_principal: bool,
+    create_binding: bool,
+    assign_owner: bool,
+}
+
+fn backfill_principals(db: &Connection, first_migration: bool) -> anyhow::Result<()> {
     let rows = {
         let mut stmt = db.prepare(
             "SELECT user_key, role, principal_id
@@ -153,16 +187,90 @@ fn backfill_principals(db: &Connection) -> anyhow::Result<()> {
         })?;
         mapped.collect::<Result<Vec<_>, _>>()?
     };
-    for (user_key, role, existing_principal_id) in rows {
-        let principal_id = existing_principal_id
-            .filter(|value| !value.trim().is_empty())
+    let mut plans = Vec::new();
+    let mut seen_credentials = HashSet::new();
+    let mut new_principals = HashSet::new();
+    // Validate the complete batch before writing: an import must not repair
+    // another credential by reviving it, moving its owner or replacing state.
+    for (user_key, role, previous_principal_id) in rows {
+        let digest = credential_digest(&user_key);
+        anyhow::ensure!(
+            seen_credentials.insert(digest.clone()),
+            "identity_credential_collision"
+        );
+        let binding_owner = credential_binding_owner(db, &digest)?;
+        let existing_owner = previous_principal_id
+            .as_ref()
+            .filter(|value| !value.trim().is_empty());
+        if let (Some(owner), Some(bound)) = (existing_owner, binding_owner.as_ref()) {
+            anyhow::ensure!(owner == bound, "credential_binding_owner_conflict");
+        }
+        let known_owner = existing_owner.is_some() || binding_owner.is_some();
+        let principal_id = existing_owner
+            .cloned()
+            .or_else(|| binding_owner.clone())
             .unwrap_or_else(|| format!("principal_{}", uuid::Uuid::new_v4().simple()));
-        ensure_principal_row(db, &principal_id, &role)?;
-        db.execute(
-            "UPDATE auth_keys SET principal_id = ?2 WHERE user_key = ?1",
-            params![user_key, principal_id],
-        )?;
-        ensure_active_credential_binding(db, &user_key, &principal_id)?;
+        let exists = db
+            .query_row(
+                "SELECT 1 FROM principals WHERE principal_id = ?1",
+                [&principal_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        anyhow::ensure!(
+            exists || !known_owner || first_migration,
+            "principal_identity_missing"
+        );
+        let create_principal = !exists && new_principals.insert(principal_id.clone());
+        anyhow::ensure!(
+            known_owner || (!exists && create_principal),
+            "principal_identity_collision"
+        );
+        let create_binding = binding_owner.is_none();
+        anyhow::ensure!(
+            !create_binding || existing_owner.is_none() || first_migration,
+            "credential_binding_missing"
+        );
+        let assign_owner = existing_owner.is_none();
+        if create_principal || create_binding || assign_owner {
+            plans.push(PrincipalBackfill {
+                user_key,
+                role,
+                previous_principal_id,
+                principal_id,
+                credential_digest: digest,
+                create_principal,
+                create_binding,
+                assign_owner,
+            });
+        }
+    }
+    for plan in plans {
+        if plan.create_principal {
+            ensure_principal_row(db, &plan.principal_id, &plan.role)?;
+        }
+        if plan.create_binding {
+            db.execute(
+                "INSERT INTO credential_bindings
+                 (binding_id, credential_digest, principal_id, status, created_at, revoked_at)
+                 VALUES (?1, ?2, ?3, 'active', ?4, NULL)",
+                params![
+                    format!("binding_{}", uuid::Uuid::new_v4().simple()),
+                    plan.credential_digest,
+                    plan.principal_id,
+                    crate::now_ts()
+                ],
+            )?;
+        }
+        if plan.assign_owner {
+            let changed = db.execute(
+                "UPDATE auth_keys SET principal_id = ?2
+                 WHERE user_key = ?1 AND principal_id IS ?3",
+                params![plan.user_key, plan.principal_id, plan.previous_principal_id],
+            )?;
+            anyhow::ensure!(changed == 1, "principal_identity_owner_changed");
+        }
     }
     Ok(())
 }
@@ -172,18 +280,24 @@ pub(crate) fn create_principal_for_auth_key(
     user_key: &str,
     role: &str,
 ) -> anyhow::Result<String> {
-    ensure_principal_identity_schema(db)?;
-    if let Some(existing) = principal_id_for_user_key(db, user_key)? {
-        return Ok(existing);
-    }
-    let principal_id = format!("principal_{}", uuid::Uuid::new_v4().simple());
-    ensure_principal_row(db, &principal_id, role)?;
-    db.execute(
-        "UPDATE auth_keys SET principal_id = ?2 WHERE user_key = ?1",
-        params![user_key, principal_id],
-    )?;
-    ensure_active_credential_binding(db, user_key, &principal_id)?;
-    Ok(principal_id)
+    with_identity_transaction(db, |db| {
+        let stored_role = db
+            .query_row(
+                "SELECT role FROM auth_keys WHERE user_key = ?1",
+                [user_key],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .ok_or_else(|| anyhow::anyhow!("auth_key_missing"))?;
+        anyhow::ensure!(
+            super::normalize_auth_key_role(&stored_role)? == super::normalize_auth_key_role(role)?,
+            "auth_key_role_conflict"
+        );
+        ensure_principal_identity_schema(db)?;
+        active_auth_key_identity(db, user_key)?
+            .map(|(_, principal)| principal)
+            .ok_or_else(|| anyhow::anyhow!("auth_identity_inactive"))
+    })
 }
 
 fn ensure_principal_row(db: &Connection, principal_id: &str, role: &str) -> anyhow::Result<()> {
@@ -191,10 +305,7 @@ fn ensure_principal_row(db: &Connection, principal_id: &str, role: &str) -> anyh
     db.execute(
         "INSERT INTO principals (
             principal_id, role, status, revision, created_at, updated_at
-         ) VALUES (?1, ?2, 'active', 1, ?3, ?3)
-         ON CONFLICT(principal_id) DO UPDATE SET
-            role = excluded.role,
-            updated_at = excluded.updated_at",
+         ) VALUES (?1, ?2, 'active', 1, ?3, ?3)",
         params![principal_id, role, now],
     )?;
     Ok(())
@@ -207,17 +318,44 @@ fn ensure_active_credential_binding(
 ) -> anyhow::Result<()> {
     let digest = credential_digest(user_key);
     let binding_id = format!("binding_{}", uuid::Uuid::new_v4().simple());
-    db.execute(
+    let changed = db.execute(
         "INSERT INTO credential_bindings (
             binding_id, credential_digest, principal_id, status, created_at, revoked_at
          ) VALUES (?1, ?2, ?3, 'active', ?4, NULL)
          ON CONFLICT(credential_digest) DO UPDATE SET
-            principal_id = excluded.principal_id,
-            status = 'active',
-            revoked_at = NULL",
+            status = 'active', revoked_at = NULL
+         WHERE credential_bindings.principal_id = excluded.principal_id",
         params![binding_id, digest, principal_id, crate::now_ts()],
     )?;
+    anyhow::ensure!(changed == 1, "credential_binding_owner_changed");
     Ok(())
+}
+
+fn credential_binding_owner(db: &Connection, digest: &str) -> anyhow::Result<Option<String>> {
+    db.query_row(
+        "SELECT principal_id FROM credential_bindings WHERE credential_digest = ?1",
+        [digest],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+pub(super) fn active_auth_key_identity(
+    db: &Connection,
+    user_key: &str,
+) -> anyhow::Result<Option<(String, String)>> {
+    db.query_row(
+        "SELECT k.role, k.principal_id FROM auth_keys k
+         JOIN principals p ON p.principal_id = k.principal_id
+         JOIN credential_bindings b ON b.principal_id = k.principal_id
+         WHERE k.user_key = ?1 AND k.enabled = 1
+           AND b.credential_digest = ?2 AND b.status = 'active' AND p.status = 'active'",
+        params![user_key, credential_digest(user_key)],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()
+    .map_err(Into::into)
 }
 
 pub(crate) fn principal_id_for_user_key(
@@ -258,17 +396,29 @@ pub(crate) fn rotate_credential_binding(
     old_user_key: &str,
     new_user_key: &str,
 ) -> anyhow::Result<()> {
-    db.execute(
-        "UPDATE credential_bindings
-         SET status = 'revoked', revoked_at = ?2
-         WHERE credential_digest = ?1 AND principal_id = ?3",
-        params![
-            credential_digest(old_user_key),
-            crate::now_ts(),
-            principal_id
-        ],
-    )?;
-    ensure_active_credential_binding(db, new_user_key, principal_id)
+    with_identity_transaction(db, |db| {
+        let old_digest = credential_digest(old_user_key);
+        let new_digest = credential_digest(new_user_key);
+        anyhow::ensure!(
+            old_digest != new_digest && !new_user_key.trim().is_empty(),
+            "credential_rotation_requires_new_key"
+        );
+        if let Some(owner) = credential_binding_owner(db, &new_digest)? {
+            anyhow::ensure!(owner == principal_id, "credential_binding_owner_conflict");
+        }
+        let source_owner = credential_binding_owner(db, &old_digest)?;
+        anyhow::ensure!(
+            source_owner.as_deref() == Some(principal_id),
+            "credential_rotation_source_conflict"
+        );
+        let changed = db.execute(
+            "UPDATE credential_bindings SET status = 'revoked', revoked_at = ?2
+             WHERE credential_digest = ?1 AND principal_id = ?3 AND status = 'active'",
+            params![old_digest, crate::now_ts(), principal_id],
+        )?;
+        anyhow::ensure!(changed == 1, "credential_rotation_source_inactive");
+        ensure_active_credential_binding(db, new_user_key, principal_id)
+    })
 }
 
 #[cfg(test)]

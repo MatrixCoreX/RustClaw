@@ -13,6 +13,7 @@ mod auth_seed;
 mod auth_webd;
 mod schema;
 
+pub(super) use auth_principal::with_identity_transaction;
 pub(crate) use auth_principal::{ensure_principal_identity_schema, principal_id_for_user_key};
 pub(crate) use auth_seed::seed_channel_bindings;
 pub(crate) use auth_webd::{upsert_webd_login_account, verify_webd_password_login};
@@ -82,6 +83,12 @@ fn generate_webd_password() -> String {
 }
 
 pub(crate) fn ensure_bootstrap_admin_key(
+    db: &Connection,
+) -> anyhow::Result<Option<BootstrapAdminResult>> {
+    with_identity_transaction(db, bootstrap_admin_key_in_transaction)
+}
+
+fn bootstrap_admin_key_in_transaction(
     db: &Connection,
 ) -> anyhow::Result<Option<BootstrapAdminResult>> {
     super::principal_ownership::ensure_principal_ownership_schema(db)?;
@@ -566,12 +573,15 @@ pub(crate) fn create_auth_key(state: &AppState, role: &str) -> anyhow::Result<St
             return Ok(user_key);
         }
     }
-    db.execute(
-        "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
-         VALUES (?1, ?2, 1, ?3, NULL)",
-        params![user_key, role, now_ts()],
-    )?;
-    auth_principal::create_principal_for_auth_key(&db, &user_key, &role)?;
+    with_identity_transaction(&db, |db| {
+        db.execute(
+            "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+             VALUES (?1, ?2, 1, ?3, NULL)",
+            params![user_key, role, now_ts()],
+        )?;
+        auth_principal::create_principal_for_auth_key(db, &user_key, &role)?;
+        Ok(())
+    })?;
     Ok(user_key)
 }
 
@@ -1145,16 +1155,7 @@ pub(crate) fn resolve_auth_identity_by_key(
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    let row = db
-        .query_row(
-            "SELECT role, principal_id
-             FROM auth_keys
-             WHERE user_key = ?1 AND enabled = 1 AND principal_id IS NOT NULL
-             LIMIT 1",
-            params![user_key],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        )
-        .optional()?;
+    let row = auth_principal::active_auth_key_identity(&db, &user_key)?;
     Ok(row.map(|(role, principal_id)| {
         build_auth_identity(&user_key, &principal_id, &role, "ui", None, Some("console"))
     }))
@@ -1187,7 +1188,7 @@ pub(crate) fn resolve_channel_binding_identity(
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let mut row = if external_user_id.is_some() && external_chat_id.is_some() {
         db.query_row(
-            "SELECT k.user_key, k.principal_id, k.role
+            "SELECT k.user_key, b.principal_id
              FROM channel_bindings b
              JOIN auth_keys k ON k.user_key = b.user_key
              WHERE b.channel = ?1
@@ -1197,18 +1198,12 @@ pub(crate) fn resolve_channel_binding_identity(
              ORDER BY b.id DESC
              LIMIT 1",
             params![channel, external_user_id, external_chat_id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            },
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
         )
         .optional()?
-    } else if external_chat_id.is_some() {
+    } else {
         db.query_row(
-            "SELECT k.user_key, k.principal_id, k.role
+            "SELECT k.user_key, b.principal_id
              FROM channel_bindings b
              JOIN auth_keys k ON k.user_key = b.user_key
              WHERE b.channel = ?1
@@ -1217,40 +1212,14 @@ pub(crate) fn resolve_channel_binding_identity(
              ORDER BY b.id DESC
              LIMIT 1",
             params![channel, external_chat_id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            },
-        )
-        .optional()?
-    } else {
-        db.query_row(
-            "SELECT k.user_key, k.principal_id, k.role
-             FROM channel_bindings b
-             JOIN auth_keys k ON k.user_key = b.user_key
-             WHERE b.channel = ?1
-               AND k.enabled = 1
-               AND b.external_user_id = ?2
-             ORDER BY b.id DESC
-             LIMIT 1",
-            params![channel, external_user_id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            },
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
         )
         .optional()?
     };
     if row.is_none() && external_user_id.is_some() && external_chat_id.is_some() {
         row = db
             .query_row(
-                "SELECT k.user_key, k.principal_id, k.role
+                "SELECT k.user_key, b.principal_id
                  FROM channel_bindings b
                  JOIN auth_keys k ON k.user_key = b.user_key
                  WHERE b.channel = ?1
@@ -1259,17 +1228,18 @@ pub(crate) fn resolve_channel_binding_identity(
                  ORDER BY b.id DESC
                  LIMIT 1",
                 params![channel, external_user_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
-                },
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
             )
             .optional()?;
     }
-    if let Some((user_key, principal_id, role)) = row {
+    if let Some((user_key, channel_owner)) = row {
+        let Some((role, principal_id)) = auth_principal::active_auth_key_identity(&db, &user_key)?
+        else {
+            return Ok(None);
+        };
+        if channel_owner.as_deref() != Some(principal_id.as_str()) {
+            return Ok(None);
+        }
         touch_auth_key_usage(&db, &user_key)?;
         return Ok(Some(build_auth_identity(
             &user_key,
