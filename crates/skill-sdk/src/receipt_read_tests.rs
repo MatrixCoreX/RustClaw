@@ -1,7 +1,7 @@
 use super::*;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 
-#[path = "receipt_read_test_support.rs"]
+#[path = "receipt_read_support_tests.rs"]
 mod support;
 use support::{assert_rejected, read_fifo, Fixture, SKILL};
 

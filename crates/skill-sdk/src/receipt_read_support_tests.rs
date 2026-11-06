@@ -1,3 +1,4 @@
+//! Shared fixture for the public metadata-read regressions; never production code.
 use super::super::*;
 use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
