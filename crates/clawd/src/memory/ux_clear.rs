@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
@@ -36,16 +36,16 @@ fn purge_import_sessions(
     principal_id: &str,
     include_derived: bool,
 ) -> anyhow::Result<()> {
-    // Order by the immutable identity: updates change neither owner nor identity.
-    let mut statement = db.prepare(
-        "SELECT import_id, preview_json, payload_digest FROM memory_import_sessions
-         WHERE principal_id = ?1 ORDER BY import_id",
-    )?;
-    let mut rows = statement.query([principal_id])?;
-    while let Some(row) = rows.next()? {
-        let import_id: String = row.get(0)?;
-        let payload: String = row.get(1)?;
-        let previous_digest: String = row.get(2)?;
+    // Each SELECT finishes before its UPDATE; SQLite does not define visibility
+    // for a live SELECT cursor when the same connection changes its input table.
+    // The existing owner/digest index supports bounded-memory keyset reads. A
+    // moved row may be visited once more at its canonical tombstone digest;
+    // normalization is idempotent, and every original unvisited key stays put.
+    let mut after: Option<String> = None;
+    while let Some((import_id, payload, previous_digest)) =
+        next_import_session(db, principal_id, after.as_deref())?
+    {
+        after = Some(previous_digest.clone());
         let previous = serde_json::from_str::<Value>(&payload).ok();
         if !include_derived
             && !previous
@@ -90,8 +90,38 @@ fn purge_import_sessions(
     Ok(())
 }
 
+fn next_import_session(
+    db: &Connection,
+    principal_id: &str,
+    after: Option<&str>,
+) -> rusqlite::Result<Option<(String, String, String)>> {
+    let decode = |row: &rusqlite::Row<'_>| Ok((row.get(0)?, row.get(1)?, row.get(2)?));
+    match after {
+        Some(after) => db
+            .query_row(
+                "SELECT import_id, preview_json, payload_digest FROM memory_import_sessions
+             WHERE principal_id = ?1 AND payload_digest > ?2 ORDER BY payload_digest LIMIT 1",
+                params![principal_id, after],
+                decode,
+            )
+            .optional(),
+        None => db
+            .query_row(
+                "SELECT import_id, preview_json, payload_digest FROM memory_import_sessions
+             WHERE principal_id = ?1 ORDER BY payload_digest LIMIT 1",
+                [principal_id],
+                decode,
+            )
+            .optional(),
+    }
+}
+
 fn is_digest(value: &str) -> bool {
     value
         .strip_prefix("sha256:")
         .is_some_and(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
 }
+
+#[cfg(test)]
+#[path = "ux_clear_cursor_tests.rs"]
+mod cursor_tests;

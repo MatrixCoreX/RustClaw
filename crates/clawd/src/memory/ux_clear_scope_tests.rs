@@ -160,25 +160,36 @@ fn transcript_only_clear_preserves_derived_retrieval_entries() {
         100,
     )
     .unwrap();
-    assert_eq!(
-        db.query_row(
-            "SELECT COUNT(*) FROM memory_retrieval_index WHERE principal_id=?1",
-            [&fixture.principal],
-            |row| row.get::<_, i64>(0)
-        )
-        .unwrap(),
-        2
-    );
+    let snapshot = || {
+        let mut statement = db
+            .prepare(
+                "SELECT id,source_kind,search_text FROM memory_retrieval_index
+            WHERE principal_id=?1 ORDER BY id",
+            )
+            .unwrap();
+        let rows = statement
+            .query_map([&fixture.principal], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .unwrap();
+        rows.collect::<Result<Vec<_>, _>>().unwrap()
+    };
+    let before = snapshot();
+    assert!(before.iter().any(|(_, kind, _)| kind == "preference"));
+    assert!(before.iter().any(|(_, kind, _)| kind == "memory"));
+    let expected = before
+        .into_iter()
+        .filter(|(_, kind, _)| kind != "memory")
+        .collect::<Vec<_>>();
     setup::clear(&db, &fixture.principal, "transcript");
     assert_eq!(
-        db.query_row(
-            "SELECT COUNT(*) FROM memory_retrieval_index WHERE principal_id=?1
-        AND source_kind='preference'",
-            [&fixture.principal],
-            |row| row.get::<_, i64>(0)
-        )
-        .unwrap(),
-        1
+        snapshot(),
+        expected,
+        "every derived index keeps its identity and content"
     );
     assert_eq!(
         db.query_row(

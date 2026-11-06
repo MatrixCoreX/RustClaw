@@ -201,7 +201,10 @@ impl GenerationFixture {
     }
 
     pub(super) async fn run(&self) -> anyhow::Result<bool> {
-        super::jobs::run_one_memory_job(self.fixture.state(), "generation-worker").await
+        let result =
+            super::jobs::run_one_memory_job(self.fixture.state(), "generation-worker").await;
+        self.trace_job_state();
+        result
     }
 
     pub(super) async fn run_reopened(&self) -> anyhow::Result<bool> {
@@ -225,12 +228,32 @@ impl GenerationFixture {
         state.core.db = r2d2::Pool::builder().max_size(2).build(manager)?;
         state.metrics = Default::default();
         let result = super::jobs::run_one_memory_job(&state, "reopened-worker").await;
+        self.trace_job_state();
         assert_eq!(
             state.task_llm_call_count(&self.task.task_id),
             0,
             "a new worker state must recover from SQLite, not call the provider again"
         );
         result
+    }
+
+    fn trace_job_state(&self) {
+        let db = self.fixture.state().core.db.get().unwrap();
+        let state = db.query_row(
+            "SELECT status, error_code, checkpoint_json, attempt FROM memory_jobs WHERE job_id = ?1",
+            [&self.job_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?, row.get::<_, i64>(3)?)),
+        );
+        match state {
+            Ok((status, error_code, checkpoint, attempt)) => eprintln!(
+                "memory_completion_fixture_state={}",
+                json!({"status":status,
+                "error_code":error_code,"checkpoint":checkpoint,"attempt":attempt,
+                "provider_requests":self.requests.load(Ordering::SeqCst)})
+            ),
+            Err(error) => eprintln!("memory_completion_fixture_probe_error={error}"),
+        }
     }
 
     pub(super) fn sql(&self, sql: &str) {
