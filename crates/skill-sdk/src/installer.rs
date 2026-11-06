@@ -19,8 +19,8 @@ use crate::manifest::{
 use crate::process::run_command_controlled;
 use crate::protocol::{validate_response_line, ProtocolRequest};
 use crate::receipt::{
-    digest_file, is_sensitive_runtime_environment_name, ArtifactReceipt, InstallReceipt,
-    InstallReceiptStore, LaunchProgramScope, ProtocolSmokeReceipt, ReceiptLaunch,
+    digest_file, digest_verified_file, is_sensitive_runtime_environment_name, ArtifactReceipt,
+    InstallReceipt, InstallReceiptStore, LaunchProgramScope, ProtocolSmokeReceipt, ReceiptLaunch,
     INSTALL_RECEIPT_SCHEMA_VERSION,
 };
 use crate::sandbox::{prepare_sandboxed_command, SandboxNetwork};
@@ -498,7 +498,7 @@ impl SkillInstaller {
             if !source.starts_with(&source_install)
                 || !metadata.is_file()
                 || metadata.len() != artifact.size_bytes
-                || digest_file(&source)? != artifact.sha256
+                || digest_verified_file(&source)? != artifact.sha256
             {
                 return Err(SkillSdkError::new(
                     "precompiled_artifact_mismatch",

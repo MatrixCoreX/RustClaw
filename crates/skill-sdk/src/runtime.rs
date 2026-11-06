@@ -8,7 +8,7 @@ use crate::manifest::{
     BuildAdapter, ExecutionProfile, LauncherKind, PackageManifest, SandboxProfile,
 };
 use crate::receipt::{
-    digest_file, ArtifactReceipt, InstallReceipt, InstallReceiptStore, LaunchProgramScope,
+    digest_verified_file, ArtifactReceipt, InstallReceipt, InstallReceiptStore, LaunchProgramScope,
 };
 use crate::{SkillSdkError, SkillSdkResult};
 
@@ -462,7 +462,7 @@ fn verify_install_content(
         }
         LaunchProgramScope::TrustedRuntime => {
             let program = fs::canonicalize(&receipt.launch.program)?;
-            let actual = digest_file(&program)?;
+            let actual = digest_verified_file(&program)?;
             let expected = receipt
                 .launch
                 .trusted_runtime_sha256
@@ -589,7 +589,7 @@ fn verify_launch_artifact_metadata(
 fn verify_artifact(install_root: &Path, artifact: &ArtifactReceipt) -> SkillSdkResult<()> {
     let path = confined_existing_path(install_root, &artifact.path, true)?;
     let metadata = fs::metadata(&path)?;
-    if metadata.len() != artifact.size_bytes || digest_file(&path)? != artifact.sha256 {
+    if metadata.len() != artifact.size_bytes || digest_verified_file(&path)? != artifact.sha256 {
         return Err(SkillSdkError::new(
             "launch_artifact_digest_mismatch",
             format!("path={}", path.display()),

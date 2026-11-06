@@ -43,6 +43,40 @@ def required_command_gate(job, command):
 
 
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_artifact_digest_targets_gate_native_unix_and_signed_payloads(self):
+        jobs = load('macos-polyglot-skill-ci.yml')['jobs']
+        command = 'cargo test --locked -p agent-skill-sdk receipt::artifact_read_tests -- --test-threads=16 --nocapture'
+        for name in ['runtime-read-linux', 'polyglot-skill-macos']:
+            self.assertTrue(required_command_gate(jobs[name], command))
+            for mutation in ['remove', 'ignore', 'continue', 'conditional']:
+                with self.subTest(job=name, mutation=mutation):
+                    job = deepcopy(jobs[name])
+                    step = next(step for step in job['steps'] if command in step.get('run', ''))
+                    if mutation == 'remove': step['run'] = step['run'].replace(command, 'true')
+                    elif mutation == 'ignore': step['run'] = step['run'].replace(command, command + ' || true')
+                    elif mutation == 'continue': step['continue-on-error'] = True
+                    else: step['if'] = '${{ always() }}'
+                    self.assertFalse(required_command_gate(job, command))
+        for name in ['Build the exact verified Linux core without publishing a release',
+                     'Build exact Linux STT consumers and verified skill receipt']:
+            step = next(step for step in jobs['runtime-read-linux']['steps'] if step.get('name') == name)
+            self.assertIn('artifact_regular_file_reads', step['run'])
+
+    def test_windows_artifact_digest_gate_is_native_and_not_optional(self):
+        job = load('macos-polyglot-skill-ci.yml')['jobs']['skill-sdk-metadata-windows']
+        self.assertEqual(job['runs-on'], 'windows-2022')
+        command = 'cargo test --locked -p agent-skill-sdk --lib receipt::artifact_read_tests -- --test-threads=4 --nocapture'
+        self.assertTrue(required_command_gate(job, command))
+        for mutation in ['remove', 'ignore', 'continue', 'conditional']:
+            with self.subTest(mutation=mutation):
+                changed = deepcopy(job)
+                step = next(step for step in changed['steps'] if command in step.get('run', ''))
+                if mutation == 'remove': step['run'] = step['run'].replace(command, 'true')
+                elif mutation == 'ignore': step['run'] = step['run'].replace(command, command + ' || true')
+                elif mutation == 'continue': step['continue-on-error'] = True
+                else: step['if'] = '${{ always() }}'
+                self.assertFalse(required_command_gate(changed, command))
+
     def test_windows_metadata_descriptor_gate_is_native_and_not_optional(self):
         job = load("macos-polyglot-skill-ci.yml")["jobs"]["skill-sdk-metadata-windows"]
         self.assertEqual(job['runs-on'], 'windows-2022')

@@ -738,7 +738,7 @@ impl InstallReceiptStore {
             if !path.starts_with(&verified.install_dir)
                 || !metadata.is_file()
                 || metadata.len() != artifact.size_bytes
-                || digest_file(&path)? != artifact.sha256
+                || digest_verified_file(&path)? != artifact.sha256
             {
                 return Err(SkillSdkError::new(
                     "rollback_artifact_mismatch",
@@ -914,6 +914,10 @@ pub fn digest_file(path: &Path) -> SkillSdkResult<String> {
     Ok(hex::encode(hasher.finalize()))
 }
 
+pub(crate) fn digest_verified_file(path: &Path) -> SkillSdkResult<String> {
+    digest_file(path)
+}
+
 fn validate_pointer(pointer: &CurrentInstallPointer) -> SkillSdkResult<()> {
     if pointer.schema_version != CURRENT_INSTALL_POINTER_SCHEMA_VERSION {
         return Err(SkillSdkError::new(
@@ -982,6 +986,10 @@ mod publication_tests;
 #[cfg(all(test, unix))]
 #[path = "receipt_read_tests.rs"]
 mod read_tests;
+
+#[cfg(all(test, any(unix, windows)))]
+#[path = "receipt_artifact_read_tests.rs"]
+mod artifact_read_tests;
 
 #[cfg(test)]
 mod background_version_lease_tests {
