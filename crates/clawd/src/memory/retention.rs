@@ -200,7 +200,7 @@ pub(crate) fn ensure_principal_quota(
     now_ts: i64,
 ) -> anyhow::Result<()> {
     let (used_rows, used_bytes) = db.query_row(
-        "SELECT COUNT(*), COALESCE(SUM(LENGTH(content)), 0)
+        "SELECT COUNT(*), COALESCE(SUM(LENGTH(CAST(content AS BLOB))), 0)
          FROM memories WHERE principal_id = ?1",
         [principal_id],
         |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
@@ -238,7 +238,7 @@ fn refresh_principal_usage(
             principal_id, max_rows, max_bytes, max_background_cost_microunits,
             used_rows, used_bytes, used_background_cost_microunits, revision, updated_at_ts
          )
-         SELECT principal_id, ?1, ?2, ?3, COUNT(*), COALESCE(SUM(LENGTH(content)), 0), 0, 1, ?4
+         SELECT principal_id, ?1, ?2, ?3, COUNT(*), COALESCE(SUM(LENGTH(CAST(content AS BLOB))), 0), 0, 1, ?4
          FROM memories WHERE principal_id IS NOT NULL GROUP BY principal_id
          ON CONFLICT(principal_id) DO UPDATE SET
             used_rows = excluded.used_rows, used_bytes = excluded.used_bytes,
@@ -251,6 +251,18 @@ fn refresh_principal_usage(
                 .min(i64::MAX as u64) as i64,
             now_ts,
         ],
+    )?;
+    // GROUP BY has no row for an emptied principal. Clear only stale usage;
+    // configured policy, revision and already-spent background cost survive.
+    db.execute(
+        "UPDATE memory_principal_quotas
+         SET used_rows = 0, used_bytes = 0, updated_at_ts = ?1
+         WHERE (used_rows != 0 OR used_bytes != 0)
+           AND NOT EXISTS (
+             SELECT 1 FROM memories
+             WHERE memories.principal_id = memory_principal_quotas.principal_id
+           )",
+        [now_ts],
     )?;
     Ok(())
 }
