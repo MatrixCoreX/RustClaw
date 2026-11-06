@@ -26,6 +26,8 @@ pub(crate) mod vector_store;
 mod capacity_test_fixtures;
 #[cfg(test)]
 mod capacity_availability_tests;
+#[cfg(test)]
+mod capacity_race_test_fixtures;
 
 #[cfg(test)]
 #[path = "memory/memory_wp0_baseline_tests.rs"]

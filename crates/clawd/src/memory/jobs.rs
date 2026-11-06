@@ -1125,3 +1125,7 @@ mod capacity_tests;
 #[cfg(test)]
 #[path = "jobs_completion_tests.rs"]
 mod completion_tests;
+
+#[cfg(test)]
+#[path = "jobs_capacity_race_tests.rs"]
+mod capacity_race_tests;

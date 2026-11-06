@@ -1040,3 +1040,7 @@ mod capacity_maintenance_tests;
 #[cfg(test)]
 #[path = "embedding_capacity_http_tests.rs"]
 mod capacity_http_tests;
+
+#[cfg(test)]
+#[path = "embedding_capacity_race_tests.rs"]
+mod capacity_race_tests;
