@@ -20,12 +20,11 @@ use tokio::process::Command;
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 
 use super::super::{
-    active_running_task_count, active_running_task_count_for_user,
-    bind_channel_identity,
+    active_running_task_count, active_running_task_count_for_user, bind_channel_identity,
     channel_gateway_process_stats, create_auth_key, create_pending_channel_bind_session,
-    daemon_process_pids_by_name, delete_auth_key_by_id,
-    exchange_credential_status_for_user_key, factory_reset_auth_state, feishud_process_stats,
-    finalize_pending_channel_bind_session, finish_pending_channel_resume, get_auth_key_value_by_id,
+    daemon_process_pids_by_name, delete_auth_key_by_id, exchange_credential_status_for_user_key,
+    factory_reset_auth_state, feishud_process_stats, finalize_pending_channel_bind_session,
+    finish_pending_channel_resume, get_auth_key_value_by_id,
     get_pending_channel_bind_session_by_id, get_pending_channel_bind_session_by_token,
     has_channel_binding_for_user_key, larkd_process_stats, list_auth_keys,
     mark_pending_channel_bind_session_detected, mark_pending_channel_bind_session_expired,
@@ -233,7 +232,10 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             get(get_aipp_bundle_asset),
         )
         .route("/aipps/:skill_name/items", get(get_aipp_items))
-        .route("/aipps/:skill_name/account-control", post(control_aipp_account))
+        .route(
+            "/aipps/:skill_name/account-control",
+            post(control_aipp_account),
+        )
         .route("/aipps/:skill_name/items/clear", post(clear_aipp_items))
         .route("/aipps/:skill_name/items/remove", post(remove_aipp_items))
         .route(
@@ -579,6 +581,10 @@ mod tests;
 #[cfg(test)]
 #[path = "ui_routes/model_provider_config_tests.rs"]
 mod model_provider_config_tests;
+
+#[cfg(test)]
+#[path = "ui_routes/task_debug_trace_tests.rs"]
+mod task_debug_trace_tests;
 
 #[cfg(test)]
 #[path = "ui_routes/model_catalog_read_tests.rs"]

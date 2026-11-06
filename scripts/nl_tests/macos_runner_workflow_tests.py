@@ -50,6 +50,7 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
             'cargo test --locked -p clawd --bin clawd llm_gateway::tests -- --test-threads=1 --nocapture',
             'cargo test --locked -p clawd --bin clawd llm_provider_runtime_tests -- --test-threads=1 --nocapture',
             "cargo test --locked -p clawd --bin clawd model_catalog -- --test-threads=1 --nocapture",
+            "cargo test --locked -p clawd --bin clawd task_debug_trace_tests -- --test-threads=1 --nocapture",
             "cargo test --locked -p clawd --bin clawd task_model_selection -- --test-threads=1 --nocapture",
             "cargo test --locked -p clawcli commands::models_tests -- --test-threads=1 --nocapture",
         ]

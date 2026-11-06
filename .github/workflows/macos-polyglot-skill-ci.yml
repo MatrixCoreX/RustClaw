@@ -255,6 +255,7 @@ jobs:
           cargo test --locked -p clawd --bin clawd task_event_transport -- --test-threads=1
           cargo test --locked -p clawd --bin clawd auth_contract_tests -- --test-threads=1
           cargo test --locked -p clawd --bin clawd model_catalog -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd task_debug_trace_tests -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd task_model_selection -- --test-threads=1 --nocapture
           cargo test --locked -p clawcli commands::models_tests -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd model_settings_integrity_tests -- --test-threads=1 --nocapture
@@ -434,6 +435,7 @@ jobs:
           cargo test --locked -p clawd --bin clawd task_event_transport -- --test-threads=1
           cargo test --locked -p clawd --bin clawd auth_contract_tests -- --test-threads=1
           cargo test --locked -p clawd --bin clawd model_catalog -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd task_debug_trace_tests -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd task_model_selection -- --test-threads=1 --nocapture
           cargo test --locked -p clawcli commands::models_tests -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd model_settings_integrity_tests -- --test-threads=1 --nocapture
