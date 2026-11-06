@@ -1677,3 +1677,7 @@ mod readiness_tests;
 #[cfg(test)]
 #[path = "ux_import_credential_tests.rs"]
 mod import_credential_tests;
+
+#[cfg(test)]
+#[path = "ux_admission_contract_tests.rs"]
+mod admission_contract_tests;
