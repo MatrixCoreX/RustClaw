@@ -5,6 +5,9 @@ use super::{
     rotate_credential_binding,
 };
 
+#[path = "auth_principal_lifecycle_tests.rs"]
+mod identity_lifecycle;
+
 fn setup_db() -> Connection {
     let db = Connection::open_in_memory().expect("principal fixture db");
     db.execute_batch(crate::INIT_SQL).expect("base schema");

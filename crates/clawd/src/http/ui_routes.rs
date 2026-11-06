@@ -679,5 +679,9 @@ mod workspace_webd_tests;
 mod auth_contract_tests;
 
 #[cfg(test)]
+#[path = "ui_routes/principal_identity_lifecycle_tests.rs"]
+mod principal_identity_lifecycle_tests;
+
+#[cfg(test)]
 #[path = "ui_routes/messaging_login_tests.rs"]
 mod messaging_login_tests;
