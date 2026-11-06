@@ -1,5 +1,5 @@
 use claw_core::config::MemoryConfig;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,31 +166,10 @@ pub(crate) fn automatic_generation_allowed(
     db: &Connection,
     principal_id: &str,
 ) -> anyhow::Result<bool> {
-    let state = db
-        .query_row(
-            "SELECT state FROM memory_storage_pressure WHERE singleton_id = 1",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-        .unwrap_or_else(|| "normal".to_string());
-    if matches!(
-        state.as_str(),
-        "automatic_generation_paused" | "explicit_write_blocked"
-    ) {
-        return Ok(false);
-    }
-    let quota_available = db
-        .query_row(
-            "SELECT used_rows < max_rows AND used_bytes < max_bytes
-                    AND used_background_cost_microunits < max_background_cost_microunits
-             FROM memory_principal_quotas WHERE principal_id = ?1",
-            [principal_id],
-            |row| row.get::<_, bool>(0),
-        )
-        .optional()?
-        .unwrap_or(true);
-    Ok(quota_available)
+    Ok(
+        super::capacity::automatic_generation_availability(db, principal_id)?
+            == super::capacity::GenerationAvailability::Available,
+    )
 }
 
 pub(crate) fn ensure_principal_quota(

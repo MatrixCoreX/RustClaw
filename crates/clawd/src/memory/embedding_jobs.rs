@@ -58,6 +58,7 @@ pub(crate) fn initialize_embedding_runtime(
     db: &Connection,
     config: &claw_core::config::MemoryConfig,
 ) -> anyhow::Result<super::vector_store::MemoryEmbeddingProfile> {
+    super::jobs::ensure_memory_job_schema(db)?;
     let profile = super::vector_store::register_configured_profile(db, config)?;
     ensure_embedding_control_schema(db)?;
     Ok(profile)
@@ -156,57 +157,16 @@ fn claim_embedding_batch(
          SET status = 'cancelled', lease_owner = NULL, lease_expires_at_ts = NULL,
              error_code = 'cancel_requested', retryable = 0,
              updated_at_ts = ?1, finished_at_ts = ?1
-         WHERE cancel_requested = 1 AND status IN ('queued', 'retry_wait')",
+         WHERE cancel_requested = 1
+           AND (status IN ('queued', 'retry_wait')
+                OR (status = 'running' AND lease_expires_at_ts <= ?1))",
         [now],
     )?;
-    let partition: Option<(String, String, String)> = tx
-        .query_row(
-            "SELECT principal_id, profile_id, consent_policy_digest
-             FROM memory_embedding_jobs
-             WHERE status IN ('queued', 'retry_wait') AND cancel_requested = 0
-               AND not_before_ts <= ?1
-               AND NOT EXISTS (
-                 SELECT 1 FROM memory_embedding_circuits circuit
-                 WHERE circuit.principal_id = memory_embedding_jobs.principal_id
-                   AND circuit.profile_id = memory_embedding_jobs.profile_id
-                   AND circuit.open_until_ts > ?1
-               )
-               AND NOT EXISTS (
-                 SELECT 1 FROM memory_embedding_controls c
-                 WHERE c.principal_id = memory_embedding_jobs.principal_id
-                   AND c.profile_id = memory_embedding_jobs.profile_id
-                   AND c.state = 'paused'
-               )
-             ORDER BY not_before_ts, created_at_ts LIMIT 1",
-            [now],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .optional()?;
-    let Some((principal_id, profile_id, consent_policy_digest)) = partition else {
-        tx.commit()?;
-        return Ok(Vec::new());
-    };
-    let job_ids = {
-        let mut stmt = tx.prepare(
-            "SELECT job_id FROM memory_embedding_jobs
-             WHERE principal_id = ?1 AND profile_id = ?2 AND consent_policy_digest = ?3
-               AND status IN ('queued', 'retry_wait') AND cancel_requested = 0
-               AND not_before_ts <= ?4
-             ORDER BY created_at_ts
-             LIMIT ?5",
-        )?;
-        let rows = stmt.query_map(
-            params![
-                principal_id,
-                profile_id,
-                consent_policy_digest,
-                now,
-                state.policy.memory.embedding_batch_size.clamp(1, 256) as i64,
-            ],
-            |row| row.get::<_, String>(0),
-        )?;
-        rows.collect::<Result<Vec<_>, _>>()?
-    };
+    let job_ids = admitted_embedding_job_ids(
+        &tx,
+        now,
+        state.policy.memory.embedding_batch_size.clamp(1, 256),
+    )?;
     let lease_expires = now + state.policy.memory.background_lease_seconds.max(15) as i64;
     for job_id in &job_ids {
         tx.execute(
@@ -228,34 +188,88 @@ fn claim_embedding_batch(
 }
 
 fn embedding_batch_needs_write(db: &Connection, now: i64) -> anyhow::Result<bool> {
-    db.query_row(
+    let maintenance: bool = db.query_row(
         "SELECT EXISTS(
              SELECT 1 FROM memory_embedding_jobs job
              WHERE (job.status = 'running'
-                    AND job.lease_expires_at_ts <= ?1
-                    AND job.cancel_requested = 0)
+                    AND job.lease_expires_at_ts <= ?1)
                 OR (job.cancel_requested = 1
                     AND job.status IN ('queued', 'retry_wait'))
-                OR (job.status IN ('queued', 'retry_wait')
-                    AND job.cancel_requested = 0
-                    AND job.not_before_ts <= ?1
-                    AND NOT EXISTS (
-                        SELECT 1 FROM memory_embedding_circuits circuit
-                        WHERE circuit.principal_id = job.principal_id
-                          AND circuit.profile_id = job.profile_id
-                          AND circuit.open_until_ts > ?1
-                    )
-                    AND NOT EXISTS (
-                        SELECT 1 FROM memory_embedding_controls control
-                        WHERE control.principal_id = job.principal_id
-                          AND control.profile_id = job.profile_id
-                          AND control.state = 'paused'
-                    ))
          )",
         [now],
         |row| row.get(0),
-    )
-    .map_err(Into::into)
+    )?;
+    Ok(maintenance || !admitted_embedding_job_ids(db, now, 1)?.is_empty())
+}
+
+fn admitted_embedding_job_ids(
+    db: &Connection,
+    now: i64,
+    limit: usize,
+) -> anyhow::Result<Vec<String>> {
+    use super::capacity::{GenerationAvailability, StoragePressure};
+    let pressure = StoragePressure::load(db)?;
+    if pressure.generation_availability() != GenerationAvailability::Available {
+        return Ok(Vec::new());
+    }
+    let mut statement = db.prepare(
+        "SELECT job.job_id, job.principal_id, job.profile_id,
+                job.consent_policy_digest, job.profile_generation,
+                COALESCE((
+                    SELECT MAX(snapshot.generation) FROM memory_vector_snapshots snapshot
+                    WHERE snapshot.principal_id = job.principal_id
+                      AND snapshot.profile_id = job.profile_id AND snapshot.state = 'active'
+                ), profile.generation)
+         FROM memory_embedding_jobs job
+         LEFT JOIN memory_embedding_profiles profile ON profile.profile_id = job.profile_id
+         WHERE job.status IN ('queued', 'retry_wait') AND job.cancel_requested = 0
+           AND job.not_before_ts <= ?1
+           AND NOT EXISTS (
+                SELECT 1 FROM memory_embedding_circuits circuit
+                WHERE circuit.principal_id = job.principal_id
+                  AND circuit.profile_id = job.profile_id AND circuit.open_until_ts > ?1
+           )
+           AND NOT EXISTS (
+                SELECT 1 FROM memory_embedding_controls control
+                WHERE control.principal_id = job.principal_id
+                  AND control.profile_id = job.profile_id AND control.state = 'paused'
+           )
+         ORDER BY job.not_before_ts, job.created_at_ts, job.job_id",
+    )?;
+    let candidates = statement.query_map([now], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            (
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
+            ),
+            row.get::<_, Option<i64>>(5)?,
+        ))
+    })?;
+    let mut partition = None;
+    let mut selected = Vec::new();
+    for candidate in candidates {
+        let (job_id, key, active_generation) = candidate?;
+        if pressure == StoragePressure::BackfillPaused && active_generation != Some(key.3) {
+            continue;
+        }
+        // A batch has one exact generation as well as one owner/profile/
+        // consent. Blocked reindex work cannot hide active incremental work.
+        if let Some(ref expected) = partition {
+            if expected != &key {
+                continue;
+            }
+        } else {
+            partition = Some(key);
+        }
+        selected.push(job_id);
+        if selected.len() >= limit.max(1) {
+            break;
+        }
+    }
+    Ok(selected)
 }
 
 async fn execute_embedding_batch(

@@ -225,6 +225,10 @@ fn claims_are_single_owner_recover_expired_leases_and_favor_unserved_principals(
         ("job-a2", "principal-a", now - 2),
         ("job-b1", "principal-b", now - 1),
     ] {
+        // Match production enqueue prerequisites; preserve every claim,
+        // fairness, and recovery assertion below.
+        crate::memory::retention::ensure_principal_quota(&db, &state.policy.memory, principal, now)
+            .expect("initialize principal quota before queued work");
         db.execute(
             "INSERT INTO memory_jobs(
                 job_id, job_kind, principal_id, scope_kind, scope_ref, source_digest,

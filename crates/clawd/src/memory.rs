@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 pub(crate) mod api;
 pub(crate) mod apply;
+pub(crate) mod capacity;
 pub(crate) mod eligibility;
 pub(crate) mod embedding;
 pub(crate) mod embedding_jobs;

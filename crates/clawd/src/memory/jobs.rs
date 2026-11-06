@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use anyhow::anyhow;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -610,24 +610,14 @@ fn claim_next_job(
          SET status = 'cancelled', lease_owner = NULL, lease_expires_at_ts = NULL,
              error_code = 'cancel_requested', retryable = 0,
              updated_at_ts = ?1, finished_at_ts = ?1
-         WHERE cancel_requested = 1 AND status IN ('queued', 'retry_wait')",
+         WHERE cancel_requested = 1
+           AND (status IN ('queued', 'retry_wait')
+                OR (status = 'running' AND lease_expires_at_ts <= ?1))",
         [now],
     )?;
-    let job_id: Option<String> = tx
-        .query_row(
-            "SELECT j.job_id
-             FROM memory_jobs j
-             WHERE j.status IN ('queued', 'retry_wait')
-               AND j.cancel_requested = 0 AND j.not_before_ts <= ?1
-             ORDER BY (
-                SELECT COUNT(*) FROM memory_jobs active
-                WHERE active.principal_id = j.principal_id AND active.status = 'running'
-             ) ASC, j.not_before_ts ASC, j.created_at_ts ASC
-             LIMIT 1",
-            [now],
-            |row| row.get(0),
-        )
-        .optional()?;
+    // Preflight is only an optimization. Recheck after acquiring the writer
+    // transaction so a policy update committed during the wait takes effect.
+    let job_id = next_admitted_job(&tx, now)?;
     let Some(job_id) = job_id else {
         tx.commit()?;
         return Ok(None);
@@ -656,18 +646,54 @@ fn claim_next_job(
 }
 
 fn memory_job_claim_needs_write(db: &Connection, now: i64) -> anyhow::Result<bool> {
-    Ok(db.query_row(
+    let maintenance: bool = db.query_row(
         "SELECT EXISTS(
             SELECT 1 FROM memory_jobs
             WHERE (status = 'running' AND lease_expires_at_ts IS NOT NULL
-                   AND lease_expires_at_ts <= ?1 AND cancel_requested = 0)
+                   AND lease_expires_at_ts <= ?1)
                OR (cancel_requested = 1 AND status IN ('queued', 'retry_wait'))
-               OR (status IN ('queued', 'retry_wait') AND cancel_requested = 0
-                   AND not_before_ts <= ?1)
          )",
         [now],
         |row| row.get(0),
-    )?)
+    )?;
+    Ok(maintenance || next_admitted_job(db, now)?.is_some())
+}
+
+fn next_admitted_job(db: &Connection, now: i64) -> anyhow::Result<Option<String>> {
+    use super::capacity::{
+        principal_generation_availability, GenerationAvailability, StoragePressure,
+    };
+    if StoragePressure::load(db)?.generation_availability() != GenerationAvailability::Available {
+        return Ok(None);
+    }
+    let mut statement = db.prepare(
+        "SELECT j.job_id, j.principal_id FROM memory_jobs j
+         WHERE j.status IN ('queued', 'retry_wait')
+           AND j.cancel_requested = 0 AND j.not_before_ts <= ?1
+         ORDER BY (
+            SELECT COUNT(*) FROM memory_jobs active
+            WHERE active.principal_id = j.principal_id AND active.status = 'running'
+         ) ASC, j.not_before_ts ASC, j.created_at_ts ASC, j.job_id ASC",
+    )?;
+    let candidates = statement.query_map([now], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    // This cache belongs only to this read/transaction, never to another poll.
+    // Older blocked jobs must not hide another principal's eligible work.
+    let mut blocked = HashSet::new();
+    for candidate in candidates {
+        let (job_id, principal_id) = candidate?;
+        if blocked.contains(&principal_id) {
+            continue;
+        }
+        if principal_generation_availability(db, &principal_id)?
+            == GenerationAvailability::Available
+        {
+            return Ok(Some(job_id));
+        }
+        blocked.insert(principal_id);
+    }
+    Ok(None)
 }
 
 async fn execute_claimed_job(
