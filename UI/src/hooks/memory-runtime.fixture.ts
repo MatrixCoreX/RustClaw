@@ -62,6 +62,7 @@ export function data(path: string, owner: string) {
       extraction_provider: "fixture", extraction_model: "fixture", consolidation_provider: "fixture",
       consolidation_model: "fixture", extraction_sends: [], embedding_sends: [], withdrawal_effect: "stop" };
     case "/v1/memory/vector/status": return { schema_version: 1, provider_location: "local", state: "ready",
+      policy_digest: settings(owner).policy_digest,
       active_generation: 1, queued_jobs: 0, running_jobs: 0, failed_jobs: 0, indexed_rows: 1, remote_consent: "exclude" };
     case "/v1/memory/import/preview": return { schema_version: 1, import_id: "fixture-import",
       payload_digest: "fixture-digest", accepted_items: 1, skipped_items: 0, duplicate_items: 0,

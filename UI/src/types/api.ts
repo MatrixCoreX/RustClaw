@@ -1069,6 +1069,7 @@ export interface RemoteMemoryDisclosure {
 
 export interface MemoryVectorStatus {
   schema_version: number;
+  policy_digest?: string;
   provider_location: "local" | "remote";
   state: "ready" | "building" | "paused" | string;
   active_generation: number;

@@ -30,6 +30,7 @@ struct MemoryVectorStatus {
     failed_jobs: i64,
     indexed_rows: i64,
     remote_consent: String,
+    policy_digest: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -372,12 +373,17 @@ fn load_vector_status_once(
         failed_jobs: count("failed")?,
         indexed_rows,
         remote_consent: settings.external_context_policy.as_str().to_string(),
+        policy_digest: settings.policy_digest,
     })
 }
 
 #[cfg(test)]
 #[path = "memory_routes_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "memory_vector_policy_tests.rs"]
+mod vector_policy_tests;
 
 async fn undo_mutation(
     State(state): State<AppState>,

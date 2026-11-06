@@ -303,10 +303,16 @@ export function useMemoryRuntime({ apiFetch, t, requestScope }: UseMemoryRuntime
   const updateMemoryExternalPolicy = (policy: "exclude" | "evidence_only" | "allow") => saveSettings({ external_context_policy: policy }, true);
 
   const controlMemoryVector = async (action: "reindex" | "pause" | "resume" | "cancel") => {
-    if (!owns() || !latest.current.memorySettings) return;
-    const digest = latest.current.memorySettings.policy_digest;
+    if (!owns() || !latest.current.memoryVectorStatus) return;
+    const snapshot = latest.current.memoryVectorStatus;
     await change("action", `vector:${action}`, ["vector"],
-      () => post<MemoryVectorMutationResult>(`/v1/memory/vector/${action}`, { expected_policy_digest: digest }), async (result, present) => {
+      async () => {
+        // Older devices omit this additive status field. Read their account
+        // policy without changing the selected settings view; never retry a
+        // rejected mutation with a freshly acquired digest.
+        const digest = snapshot.policy_digest ?? (await read<MemorySettingsResult>("/v1/memory/settings")).policy_digest;
+        return post<MemoryVectorMutationResult>(`/v1/memory/vector/${action}`, { expected_policy_digest: digest });
+      }, async (result, present) => {
         update({ memoryMessage: action === "reindex"
           ? t(`已安排重建 ${result.queued_rows} 条搜索索引。`, `Queued ${result.queued_rows} items for search-index rebuild.`)
           : t("搜索索引状态已更新。", "Search-index state updated.") }, present);
