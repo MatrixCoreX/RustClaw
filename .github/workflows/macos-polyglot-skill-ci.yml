@@ -229,6 +229,10 @@ jobs:
           cache-bin: "false"
           cache-on-failure: "false"
           save-if: ${{ github.event_name != 'pull_request' }}
+      - name: Test SDK receipt publication metadata
+        run: |
+          set -euo pipefail
+          cargo test --locked -p agent-skill-sdk receipt::publication_tests -- --test-threads=16 --nocapture
       - name: Test dedicated STT credentials and selected connection ownership
         run: |
           set -euo pipefail
@@ -411,6 +415,11 @@ jobs:
           cache-on-failure: "false"
           save-if: ${{ github.event_name != 'pull_request' }}
 
+      - name: Test SDK receipt publication metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p agent-skill-sdk receipt::publication_tests -- --test-threads=16 --nocapture
       - name: Test dedicated STT credentials and selected connection ownership
         shell: bash
         run: |

@@ -995,6 +995,10 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> SkillSdkResult<()> {
 }
 
 #[cfg(test)]
+#[path = "receipt_publication_tests.rs"]
+mod publication_tests;
+
+#[cfg(test)]
 mod background_version_lease_tests {
     use super::*;
 

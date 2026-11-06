@@ -43,6 +43,21 @@ def required_command_gate(job, command):
 
 
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_sdk_publication_metadata_is_mandatory_on_both_native_platforms(self):
+        jobs = load("macos-polyglot-skill-ci.yml")["jobs"]
+        command = "cargo test --locked -p agent-skill-sdk receipt::publication_tests -- --test-threads=16 --nocapture"
+        for name in ["runtime-read-linux", "polyglot-skill-macos"]:
+            self.assertTrue(required_command_gate(jobs[name], command))
+            for mutation in ["remove", "ignore", "continue", "conditional"]:
+                with self.subTest(job=name, mutation=mutation):
+                    job = deepcopy(jobs[name])
+                    step = next(step for step in job["steps"] if command in step.get("run", ""))
+                    if mutation == "remove": step["run"] = step["run"].replace(command, "true")
+                    elif mutation == "ignore": step["run"] = step["run"].replace(command, command + " || true")
+                    elif mutation == "continue": step["continue-on-error"] = True
+                    else: step["if"] = "${{ always() }}"
+                    self.assertFalse(required_command_gate(job, command))
+
     def test_full_stt_suite_is_mandatory_on_both_native_platforms(self):
         jobs = load("macos-polyglot-skill-ci.yml")["jobs"]
         for name in ["runtime-read-linux", "polyglot-skill-macos"]:
