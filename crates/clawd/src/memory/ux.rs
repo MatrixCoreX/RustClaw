@@ -1661,3 +1661,7 @@ mod clear_import_tests;
 #[cfg(test)]
 #[path = "ux_clear_scope_tests.rs"]
 mod clear_scope_tests;
+
+#[cfg(test)]
+#[path = "ux_pressure_read_tests.rs"]
+mod pressure_read_tests;

@@ -29,6 +29,14 @@ impl GenerationFixture {
     }
 
     pub(super) async fn for_kind(kind: &str) -> Self {
+        Self::with_provider_layout(kind, false).await
+    }
+
+    pub(super) async fn for_vendor_kind(kind: &str) -> Self {
+        Self::with_provider_layout(kind, true).await
+    }
+
+    async fn with_provider_layout(kind: &str, vendor: bool) -> Self {
         let mut fixture = Fixture::file();
         let task = crate::ClaimedTask {
             claim_attempt: 1,
@@ -84,15 +92,24 @@ impl GenerationFixture {
             state.policy.memory.enable_preference_extraction = true;
             state.policy.memory.llm_preference_fallback_enabled = true;
             let mut runtime = (*state.core.llm_providers[0]).clone();
-            runtime.config.name = "memory-generation-fixture".into();
+            runtime.config.name = if vendor {
+                "vendor-custom"
+            } else {
+                "memory-generation-fixture"
+            }
+            .into();
             runtime.config.provider_type = "openai_compat".into();
             runtime.config.base_url = base_url;
             runtime.config.params.stream = Some(false);
             runtime.config.supports_tools = false;
             runtime.client = reqwest::Client::builder().no_proxy().build().unwrap();
-            provider_config::install(state, &runtime);
             state.core.active_provider_type = Some("openai_compat".into());
-            state.core.llm_providers = vec![Arc::new(runtime)];
+            state.core.llm_providers = if vendor {
+                provider_config::install_vendor(state, &runtime)
+            } else {
+                provider_config::install(state, &runtime);
+                vec![Arc::new(runtime)]
+            };
         }
         {
             let db = fixture.state().core.db.get().unwrap();
@@ -209,6 +226,17 @@ impl GenerationFixture {
             super::jobs::run_one_memory_job(self.fixture.state(), "generation-worker").await;
         self.trace_job_state();
         result
+    }
+
+    pub(super) async fn run_cold_first_request(&self) -> anyhow::Result<(bool, usize)> {
+        let state = provider_config::reopened_state(self.fixture.state());
+        let result = super::jobs::run_one_memory_job(&state, "cold-first-worker").await;
+        self.trace_job_state();
+        result.map(|ran| (ran, state.task_llm_call_count(&self.task.task_id) as usize))
+    }
+
+    pub(super) fn provider_request_count(&self) -> usize {
+        self.requests.load(Ordering::SeqCst)
     }
 
     pub(super) async fn run_reopened(&self) -> anyhow::Result<bool> {

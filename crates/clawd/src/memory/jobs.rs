@@ -1190,3 +1190,7 @@ mod capacity_race_tests;
 #[cfg(test)]
 #[path = "completion_execution_tests.rs"]
 mod completion_execution_tests;
+
+#[cfg(test)]
+#[path = "completion_provider_selection_tests.rs"]
+mod provider_selection_tests;
