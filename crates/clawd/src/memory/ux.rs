@@ -1680,3 +1680,11 @@ fn nonempty_or(value: &str, fallback: &str) -> String {
 #[cfg(test)]
 #[path = "ux_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "ux_boundary_test_fixtures.rs"]
+mod boundary_test_fixtures;
+
+#[cfg(test)]
+#[path = "ux_boundary_tests.rs"]
+mod boundary_tests;
