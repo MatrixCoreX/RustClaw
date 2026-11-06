@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from run_privileged_secure_fs_case import TEST_NAME, resolve_executable, run_case
+from run_privileged_secure_fs_case import TEST_NAME, SDK_TEST_NAME, SDK_SUCCESS_MARKER, resolve_executable, run_case
 
 
 class PrivilegedFilesystemCaseTests(unittest.TestCase):
@@ -94,6 +94,35 @@ class PrivilegedFilesystemCaseTests(unittest.TestCase):
                          (0,'secure_workspace_metadata_preserved=true privileged_owner_check=true\ntest result: ok. 0 passed; 0 failed; 1 ignored;')]:
             with self.assertRaises(ValueError), contextlib.redirect_stdout(io.StringIO()):
                 run_case(self.executable,lambda args,**kwargs:subprocess.CompletedProcess(args,code,log))
+
+    def test_sdk_mode_requires_the_exact_cargo_library_test_target(self):
+        item = copy.deepcopy(self.item)
+        item['target'] = {'name': 'skill_sdk', 'kind': ['lib']}
+        self.assertEqual(resolve_executable(json.dumps(item), self.workspace,
+                         target_name='skill_sdk', target_kind='lib'), self.executable)
+        for target in [{'name': 'skill_sdk', 'kind': ['bin']}, {'name': 'other', 'kind': ['lib']}]:
+            bad = copy.deepcopy(item)
+            bad['target'] = target
+            with self.assertRaises(ValueError):
+                resolve_executable(json.dumps(bad), self.workspace, target_name='skill_sdk', target_kind='lib')
+
+    def test_sdk_mode_invokes_only_its_exact_native_fixture(self):
+        calls = []
+        log = SDK_SUCCESS_MARKER + '\ntest result: ok. 1 passed; 0 failed; 0 ignored;\n'
+        def run(args, **kwargs):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, log)
+        with contextlib.redirect_stdout(io.StringIO()):
+            run_case(self.executable, run, test_name=SDK_TEST_NAME, success_marker=SDK_SUCCESS_MARKER)
+        self.assertEqual(calls, [['sudo', '-n', str(self.executable), SDK_TEST_NAME, '--exact', '--nocapture']])
+
+    def test_sdk_mode_rejects_non_root_or_missing_unpreservable_owner_proof(self):
+        for marker in [SDK_SUCCESS_MARKER.replace('privileged_owner_check=true', 'privileged_owner_check=false'),
+                       SDK_SUCCESS_MARKER.replace('unpreservable_owner_rejected=true', 'unpreservable_owner_rejected=false')]:
+            log = marker + '\ntest result: ok. 1 passed; 0 failed; 0 ignored;\n'
+            with self.assertRaises(ValueError), contextlib.redirect_stdout(io.StringIO()):
+                run_case(self.executable, lambda args, **kwargs: subprocess.CompletedProcess(args, 0, log),
+                         test_name=SDK_TEST_NAME, success_marker=SDK_SUCCESS_MARKER)
 
 
 if __name__ == '__main__': unittest.main()

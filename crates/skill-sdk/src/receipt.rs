@@ -16,6 +16,10 @@ use crate::manifest::{
 use crate::platform::HostPlatform;
 use crate::{SkillSdkError, SkillSdkResult};
 
+#[path = "receipt_publication.rs"]
+mod publication;
+use publication::atomic_write;
+
 pub const LEGACY_INSTALL_RECEIPT_SCHEMA_VERSION: u32 = 1;
 pub const INSTALL_RECEIPT_SCHEMA_VERSION: u32 = 2;
 pub const CURRENT_INSTALL_POINTER_SCHEMA_VERSION: u32 = 1;
@@ -976,22 +980,6 @@ fn remove_empty_directory(path: &Path) -> SkillSdkResult<()> {
         }
         Err(error) => Err(error.into()),
     }
-}
-
-fn atomic_write(path: &Path, bytes: &[u8]) -> SkillSdkResult<()> {
-    let parent = path.parent().ok_or_else(|| {
-        SkillSdkError::new("atomic_write_parent_missing", path.display().to_string())
-    })?;
-    fs::create_dir_all(parent)?;
-    let temp = parent.join(format!(".{}.tmp", Uuid::new_v4()));
-    fs::write(&temp, bytes)?;
-    fs::rename(&temp, path).map_err(|error| {
-        let _ = fs::remove_file(&temp);
-        SkillSdkError::new(
-            "atomic_write_commit_failed",
-            format!("path={} error={error}", path.display()),
-        )
-    })
 }
 
 #[cfg(test)]

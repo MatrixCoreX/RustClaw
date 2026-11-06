@@ -55,7 +55,27 @@ fn sdk_publication_preserves_executable_existing_mode() {
 #[test]
 fn sdk_publication_preserves_existing_owner_and_group() {
     use std::os::fd::AsRawFd;
-    use std::os::unix::fs::MetadataExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::os::unix::process::CommandExt;
+    const CHILD: &str = "APP_SDK_OWNER_FAILURE_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        assert_ne!(unsafe { libc::geteuid() }, 0);
+        let target = Path::new("foreign.json");
+        let before = fs::metadata(target).unwrap();
+        assert_eq!(before.uid(), 0);
+        let original_entries = entries(Path::new("."));
+        let error = atomic_write(target, b"must not publish").unwrap_err();
+        assert_eq!(error.code, "atomic_write_metadata_failed");
+        let after = fs::metadata(target).unwrap();
+        assert_eq!(
+            (after.uid(), after.gid(), after.mode()),
+            (before.uid(), before.gid(), before.mode())
+        );
+        assert_eq!(fs::read(target).unwrap(), b"root-owned original");
+        assert_eq!(entries(Path::new(".")), original_entries);
+        eprintln!("sdk_publication_unpreservable_owner_rejected=true");
+        return;
+    }
     let root = tempfile::tempdir().unwrap();
     let target = root.path().join("current.json");
     fs::write(&target, b"old pointer").unwrap();
@@ -70,7 +90,34 @@ fn sdk_publication_preserves_existing_owner_and_group() {
     let after = fs::metadata(&target).unwrap();
     assert_eq!((after.uid(), after.gid()), (before.uid(), before.gid()));
     assert_eq!(fs::read(&target).unwrap(), b"new pointer");
-    eprintln!("sdk_publication_metadata_preserved=true privileged_owner_check={privileged}");
+    if privileged {
+        let foreign = root.path().join("foreign.json");
+        fs::write(&foreign, b"root-owned original").unwrap();
+        fs::set_permissions(&foreign, fs::Permissions::from_mode(0o644)).unwrap();
+        fs::set_permissions(root.path(), fs::Permissions::from_mode(0o777)).unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "receipt::publication_tests::sdk_publication_preserves_existing_owner_and_group",
+                "--exact",
+                "--nocapture",
+            ])
+            .current_dir(root.path())
+            .env(CHILD, "1")
+            .uid(65534)
+            .gid(65534)
+            .output()
+            .unwrap();
+        eprintln!(
+            "sdk_publication_child_status={} stdout={:?} stderr={:?}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr)
+            .contains("sdk_publication_unpreservable_owner_rejected=true"));
+    }
+    eprintln!("sdk_publication_metadata_preserved=true privileged_owner_check={privileged} unpreservable_owner_rejected={privileged}");
 }
 
 #[cfg(unix)]
@@ -153,3 +200,6 @@ fn sdk_publication_preserves_new_file_creation_policy_and_complete_bytes() {
         vec![target.file_name().unwrap().to_os_string()]
     );
 }
+
+#[path = "receipt_publication_failure_tests.rs"]
+mod failures;
