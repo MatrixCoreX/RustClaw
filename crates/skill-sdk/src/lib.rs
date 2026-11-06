@@ -8,6 +8,7 @@ pub mod capability_request;
 pub mod error;
 pub mod installer;
 pub mod manifest;
+mod metadata_file;
 pub mod operation;
 pub mod path_policy;
 pub mod platform;

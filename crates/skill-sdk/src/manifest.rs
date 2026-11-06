@@ -529,13 +529,14 @@ impl PackageManifest {
     }
 
     pub fn load(path: &Path) -> SkillSdkResult<Self> {
-        let raw = std::fs::read_to_string(path).map_err(|error| {
-            SkillSdkError::new(
-                "manifest_read_failed",
-                format!("path={} error={error}", path.display()),
-            )
-            .phase("manifest")
-        })?;
+        let raw =
+            crate::metadata_file::manifest_text(path, crate::metadata_file::LeafLinks::Follow)?;
+        Self::from_toml_str(&raw)
+    }
+
+    pub(crate) fn load_installed(path: &Path) -> SkillSdkResult<Self> {
+        let raw =
+            crate::metadata_file::manifest_text(path, crate::metadata_file::LeafLinks::Reject)?;
         Self::from_toml_str(&raw)
     }
 

@@ -290,15 +290,9 @@ impl SkillRuntimeResolver {
                 continue;
             }
             let receipt_path = entry.path().join("install-receipt.json");
-            if !receipt_path.is_file() {
-                continue;
-            }
             // An unrelated damaged package must not poison exact resolution of
             // another immutable version. Full validation still gates execution.
-            let Ok(raw) = fs::read(receipt_path) else {
-                continue;
-            };
-            let Ok(receipt) = serde_json::from_slice::<InstallReceipt>(&raw) else {
+            let Ok(receipt) = crate::metadata_file::json::<InstallReceipt>(&receipt_path) else {
                 continue;
             };
             if receipt.validate().is_err() {
@@ -412,9 +406,9 @@ impl SkillRuntimeResolver {
                 canonical_install.display().to_string(),
             ));
         }
-        let manifest = PackageManifest::load(&canonical_install.join("skill.toml"))?;
+        let manifest = PackageManifest::load_installed(&canonical_install.join("skill.toml"))?;
         let receipt_path = canonical_install.join("install-receipt.json");
-        let receipt: InstallReceipt = serde_json::from_slice(&fs::read(&receipt_path)?)?;
+        let receipt: InstallReceipt = crate::metadata_file::json(&receipt_path)?;
         receipt.validate()?;
         receipt.verifies_manifest(&manifest)?;
         let receipt_digest = receipt.digest()?;

@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::fs;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -240,9 +239,8 @@ impl AdmissionReceipt {
             &self.manifest_digest,
             &self.install_receipt_digest,
         )?;
-        let receipt: InstallReceipt = serde_json::from_slice(&fs::read(
-            resolved.install_root.join("install-receipt.json"),
-        )?)?;
+        let receipt: InstallReceipt =
+            crate::metadata_file::json(&resolved.install_root.join("install-receipt.json"))?;
         if receipt.artifact_set_digest()? != self.artifact_set_digest {
             return Err(SkillSdkError::new(
                 "admission_install_artifact_set_mismatch",

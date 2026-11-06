@@ -141,6 +141,31 @@ permissions:
   contents: read
 
 jobs:
+  skill-sdk-metadata-windows:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.verification_scope != 'ui' }}
+    name: Windows regular metadata descriptor reads
+    runs-on: windows-2022
+    permissions:
+      contents: read
+    env:
+      CARGO_BUILD_JOBS: "2"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          key: windows-sdk-metadata
+          prefix-key: v1-rust-cargo-profiles
+          env-vars: "CARGO CC CFLAGS CXX CMAKE RUST"
+          cache-targets: "false"
+          cache-directories: target/debug
+          cache-bin: "false"
+          cache-on-failure: "false"
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - name: Test native Windows metadata handles and regular-file links
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p agent-skill-sdk --lib metadata_file::tests -- --test-threads=4 --nocapture
   skill-sdk-linux:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.verification_scope != 'ui' }}
     name: Linux immutable package repair and runner
@@ -233,6 +258,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p agent-skill-sdk receipt::read_tests -- --test-threads=16 --nocapture
+          cargo test --locked -p agent-skill-sdk metadata_file::tests -- --test-threads=16 --nocapture
       - name: Test SDK receipt publication metadata
         run: |
           set -euo pipefail
@@ -426,6 +452,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p agent-skill-sdk receipt::read_tests -- --test-threads=16 --nocapture
+          cargo test --locked -p agent-skill-sdk metadata_file::tests -- --test-threads=16 --nocapture
       - name: Test SDK receipt publication metadata
         shell: bash
         run: |

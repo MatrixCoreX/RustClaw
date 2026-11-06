@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -13,6 +13,7 @@ use crate::manifest::{
     validate_relative_path, validate_safe_name, validate_sha256, BuildAdapter, LauncherKind,
     PackageManifest, SandboxProfile,
 };
+use crate::metadata_file;
 use crate::platform::HostPlatform;
 use crate::{SkillSdkError, SkillSdkResult};
 
@@ -457,23 +458,19 @@ impl InstallReceiptStore {
             install_dir: install_dir_name.to_string(),
             receipt_digest: receipt.digest()?,
         };
-        match fs::read(&current_path) {
-            Ok(current) => {
-                if let Ok(old) = serde_json::from_slice::<CurrentInstallPointer>(&current) {
-                    if validate_pointer(&old).is_ok()
-                        && old != pointer
-                        && self
-                            .verify_pointer_install(&receipt.skill_name, &old)
-                            .is_ok()
-                    {
-                        // A repair must not replace a valid rollback with the
-                        // damaged current package; reinstalling is a no-op here.
-                        atomic_write(&previous_path, &current)?;
-                    }
+        if let Some(current) = metadata_file::read_optional(&current_path)? {
+            if let Ok(old) = serde_json::from_slice::<CurrentInstallPointer>(&current) {
+                if validate_pointer(&old).is_ok()
+                    && old != pointer
+                    && self
+                        .verify_pointer_install(&receipt.skill_name, &old)
+                        .is_ok()
+                {
+                    // A repair must not replace a valid rollback with the
+                    // damaged current package; reinstalling is a no-op here.
+                    atomic_write(&previous_path, &current)?;
                 }
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
         }
         atomic_write_json(&current_path, &pointer)?;
         Ok(())
@@ -481,7 +478,7 @@ impl InstallReceiptStore {
 
     pub fn current_pointer(&self, skill_name: &str) -> SkillSdkResult<CurrentInstallPointer> {
         let path = self.skill_root(skill_name)?.join("current.json");
-        let pointer: CurrentInstallPointer = serde_json::from_slice(&fs::read(&path)?)?;
+        let pointer: CurrentInstallPointer = metadata_file::json(&path)?;
         validate_pointer(&pointer)?;
         Ok(pointer)
     }
@@ -505,10 +502,10 @@ impl InstallReceiptStore {
         let skill_root = self.skill_root(skill_name)?;
         let current_path = self.active_install_path(skill_name)?;
         let previous_path = skill_root.join("previous.json");
-        let previous: CurrentInstallPointer = serde_json::from_slice(&fs::read(&previous_path)?)?;
+        let previous: CurrentInstallPointer = metadata_file::json(&previous_path)?;
         validate_pointer(&previous)?;
         self.verify_pointer_install(skill_name, &previous)?;
-        let current = fs::read(&current_path)?;
+        let current = metadata_file::read(&current_path)?;
         atomic_write_json(&current_path, &previous)?;
         atomic_write(&previous_path, &current)?;
         Ok(previous)
@@ -524,10 +521,9 @@ impl InstallReceiptStore {
     ) -> SkillSdkResult<Option<CurrentInstallPointer>> {
         let skill_root = self.skill_root(skill_name)?;
         let current_path = skill_root.join("current.json");
-        let raw = match fs::read(&current_path) {
-            Ok(raw) => raw,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error.into()),
+        let raw = match metadata_file::read_optional(&current_path)? {
+            Some(raw) => raw,
+            None => return Ok(None),
         };
         let current: CurrentInstallPointer = serde_json::from_slice(&raw)?;
         validate_pointer(&current)?;
@@ -707,9 +703,7 @@ impl InstallReceiptStore {
                 active = true;
                 continue;
             }
-            let record = fs::read(entry.path())
-                .ok()
-                .and_then(|raw| serde_json::from_slice::<BackgroundVersionLeaseRecord>(&raw).ok());
+            let record = metadata_file::json::<BackgroundVersionLeaseRecord>(&entry.path()).ok();
             match record
                 .as_ref()
                 .and_then(|record| background_version_lease_active(record, now_unix))
@@ -769,9 +763,8 @@ impl InstallReceiptStore {
                 format!("install_dir={}", pointer.install_dir),
             ));
         }
-        let receipt: InstallReceipt = serde_json::from_reader(BufReader::new(File::open(
-            install_root.join("install-receipt.json"),
-        )?))?;
+        let receipt: InstallReceipt =
+            metadata_file::json(&install_root.join("install-receipt.json"))?;
         receipt.validate()?;
         if receipt.skill_name != skill_name
             || receipt.version != pointer.version
@@ -782,7 +775,7 @@ impl InstallReceiptStore {
                 format!("skill={skill_name} install_dir={}", pointer.install_dir),
             ));
         }
-        let manifest = PackageManifest::load(&install_root.join("skill.toml"))?;
+        let manifest = PackageManifest::load_installed(&install_root.join("skill.toml"))?;
         receipt.verifies_manifest(&manifest)?;
         Ok(VerifiedInstall {
             install_dir: install_root,
