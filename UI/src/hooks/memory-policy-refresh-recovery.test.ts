@@ -19,6 +19,7 @@ test("memory a previous-owner post-save index read cannot replace a new owner's 
     await act(async () => { await host.runtime.fetchMemoryData(); });
     const saving = await begin(() => host.runtime.updateMemorySetting("use", false));
     assert.equal(host.runtime.memorySettings?.revision, 2);
+    assert.equal(host.runtime.memoryVectorStatus?.policy_digest, undefined);
     owner = "B";
     await host.scope("B");
     await act(async () => { await host.runtime.fetchMemoryData(); });
@@ -59,6 +60,39 @@ test("memory an older post-save index read cannot overwrite a newer account poli
     assert.equal(host.runtime.memoryVectorStatus?.policy_digest, settings("A", 3).policy_digest);
     assert.equal(host.runtime.memorySettings?.revision, 3);
     assert.equal(host.runtime.memorySettingsSaving, false);
+    assert.equal(host.runtime.memoryError, null);
+  } finally { await host.close(); }
+});
+
+test("memory an index action during post-save refresh cannot submit an invalidated cached policy", async () => {
+  const pending = deferred<Response>();
+  let revision = 1;
+  const presented: string[] = [];
+  const host = await mount(async (path, init) => {
+    if (path === "/v1/memory/settings") {
+      if (init?.method === "POST") revision++;
+      return json({ ...settings("A", revision), use_memory: revision === 1 });
+    }
+    if (path === "/v1/memory/vector/status" && revision > 1) return pending.promise;
+    if (init?.method === "POST") {
+      const digest = JSON.parse(String(init.body)).expected_policy_digest;
+      presented.push(digest);
+      assert.equal(digest, settings("A", revision).policy_digest);
+    }
+    return json(data(path, "A"));
+  });
+  try {
+    await act(async () => { await host.runtime.fetchMemoryData(); });
+    const saving = await begin(() => host.runtime.updateMemorySetting("use", false));
+    assert.equal(host.runtime.memorySettings?.revision, 2);
+    assert.equal(host.runtime.memoryVectorStatus?.policy_digest, undefined);
+    const controlling = await begin(() => host.runtime.controlMemoryVector("pause"));
+    assert.deepEqual(presented, [settings("A", 2).policy_digest]);
+    await act(async () => {
+      pending.resolve(json({ ...data("/v1/memory/vector/status", "A"), policy_digest: settings("A", 2).policy_digest }));
+      await Promise.all([saving.pending, controlling.pending]);
+    });
+    assert.equal(host.runtime.memoryVectorStatus?.policy_digest, settings("A", 2).policy_digest);
     assert.equal(host.runtime.memoryError, null);
   } finally { await host.close(); }
 });

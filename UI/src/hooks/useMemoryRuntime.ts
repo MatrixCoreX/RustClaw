@@ -294,6 +294,10 @@ export function useMemoryRuntime({ apiFetch, t, requestScope }: UseMemoryRuntime
       expected_revision: state.memorySettings!.revision, ...body,
     }), async (settings) => {
       if (!currentWrite()) return;
+      if (state.memorySettingScope === "principal") {
+        update(current => ({ memoryVectorStatus: current.memoryVectorStatus
+          ? { ...current.memoryVectorStatus, policy_digest: undefined } : null }), currentWrite);
+      }
       if (settingsDomain(latest.current) === domain
         && (!latest.current.memorySettings || latest.current.memorySettings.revision <= settings.revision)) {
         update(current => ({ memorySettings: settings,
@@ -315,9 +319,9 @@ export function useMemoryRuntime({ apiFetch, t, requestScope }: UseMemoryRuntime
     const snapshot = latest.current.memoryVectorStatus;
     await change("action", `vector:${action}`, ["vector"],
       async () => {
-        // Older devices omit this additive status field. Read their account
-        // policy without changing the selected settings view; never retry a
-        // rejected mutation with a freshly acquired digest.
+        // A device may omit this field, or an account edit may invalidate the
+        // cached policy. Read account policy without changing the selected
+        // view; never replay a rejected mutation with a refreshed digest.
         const digest = snapshot.policy_digest ?? (await read<MemorySettingsResult>("/v1/memory/settings")).policy_digest;
         return post<MemoryVectorMutationResult>(`/v1/memory/vector/${action}`, { expected_policy_digest: digest });
       }, async (result, present) => {
