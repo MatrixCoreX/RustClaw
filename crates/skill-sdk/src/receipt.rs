@@ -986,6 +986,10 @@ fn remove_empty_directory(path: &Path) -> SkillSdkResult<()> {
 #[path = "receipt_publication_tests.rs"]
 mod publication_tests;
 
+#[cfg(all(test, unix))]
+#[path = "receipt_read_tests.rs"]
+mod read_tests;
+
 #[cfg(test)]
 mod background_version_lease_tests {
     use super::*;
