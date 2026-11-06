@@ -88,8 +88,12 @@ fn identity_parsing_normalizes_whitespace_without_reading_keys_or_urls() {
     );
 }
 
-fn receipt_command() -> std::process::Command {
+fn receipt_command(clear: bool) -> std::process::Command {
     let mut command = std::process::Command::new("unused-test-command");
+    if clear {
+        command.env_clear();
+    }
+    command.env("UNRELATED_FIXTURE_ENV", "retained");
     for name in SELECTED_IDENTITY_ENV {
         command.env(name, "untrusted-receipt-value");
     }
@@ -98,33 +102,59 @@ fn receipt_command() -> std::process::Command {
 
 #[test]
 fn declared_identity_uses_host_values_instead_of_receipt_fixed_values() {
-    let mut command = receipt_command();
-    let declared = SELECTED_IDENTITY_ENV.map(str::to_string);
-    apply_host_identity_environment(&mut command, &declared, |name| Some(name.into()));
-    let values: std::collections::BTreeMap<_, _> = command.get_envs().collect();
-    for name in SELECTED_IDENTITY_ENV {
+    for clear in [false, true] {
+        let mut command = receipt_command(clear);
+        let declared = SELECTED_IDENTITY_ENV.map(str::to_string);
+        apply_host_identity_environment(&mut command, &declared, |name| Some(name.into()));
+        let values: std::collections::BTreeMap<_, _> = command.get_envs().collect();
+        for name in SELECTED_IDENTITY_ENV {
+            assert_eq!(
+                values[std::ffi::OsStr::new(name)],
+                Some(std::ffi::OsStr::new(name))
+            );
+        }
         assert_eq!(
-            values[std::ffi::OsStr::new(name)],
-            Some(std::ffi::OsStr::new(name))
+            values[std::ffi::OsStr::new("UNRELATED_FIXTURE_ENV")],
+            Some(std::ffi::OsStr::new("retained"))
         );
     }
 }
 
 #[test]
 fn undeclared_identity_is_not_forwarded_even_when_host_and_receipt_supply_it() {
-    let mut command = receipt_command();
-    apply_host_identity_environment(&mut command, &[], |_| Some("host-value".into()));
-    for (_, value) in command.get_envs() {
-        assert!(value.is_none());
+    for clear in [false, true] {
+        let mut command = receipt_command(clear);
+        apply_host_identity_environment(&mut command, &[], |_| Some("host-value".into()));
+        let values: std::collections::BTreeMap<_, _> = command.get_envs().collect();
+        for name in SELECTED_IDENTITY_ENV {
+            assert_eq!(
+                values.get(std::ffi::OsStr::new(name)).copied().flatten(),
+                None
+            );
+        }
+        assert_eq!(
+            values[std::ffi::OsStr::new("UNRELATED_FIXTURE_ENV")],
+            Some(std::ffi::OsStr::new("retained"))
+        );
     }
 }
 
 #[test]
 fn absent_host_identity_cannot_be_replaced_by_a_receipt() {
-    let mut command = receipt_command();
-    let declared = SELECTED_IDENTITY_ENV.map(str::to_string);
-    apply_host_identity_environment(&mut command, &declared, |_| None);
-    for (_, value) in command.get_envs() {
-        assert!(value.is_none());
+    for clear in [false, true] {
+        let mut command = receipt_command(clear);
+        let declared = SELECTED_IDENTITY_ENV.map(str::to_string);
+        apply_host_identity_environment(&mut command, &declared, |_| None);
+        let values: std::collections::BTreeMap<_, _> = command.get_envs().collect();
+        for name in SELECTED_IDENTITY_ENV {
+            assert_eq!(
+                values.get(std::ffi::OsStr::new(name)).copied().flatten(),
+                None
+            );
+        }
+        assert_eq!(
+            values[std::ffi::OsStr::new("UNRELATED_FIXTURE_ENV")],
+            Some(std::ffi::OsStr::new("retained"))
+        );
     }
 }

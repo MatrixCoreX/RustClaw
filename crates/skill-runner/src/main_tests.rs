@@ -6,6 +6,9 @@ fn installed_command_cannot_take_selected_identity_from_receipt_fixed_values() {
     let mut launch = ChildLaunch::legacy("unused-test-command");
     launch.installed = true;
     launch.working_directory = Some(std::env::temp_dir());
+    launch
+        .environment
+        .insert("UNRELATED_FIXTURE_ENV".into(), "retained".into());
     for name in SELECTED_IDENTITY_ENV {
         launch.environment.insert(name.to_string(), "untrusted-package-value".into());
     }
@@ -15,8 +18,15 @@ fn installed_command_cannot_take_selected_identity_from_receipt_fixed_values() {
     let command = child_process_command_for_parent(&launch, Some("direct")).unwrap();
     let environment: std::collections::BTreeMap<_, _> = command.as_std().get_envs().collect();
     for name in SELECTED_IDENTITY_ENV {
-        assert_eq!(environment[std::ffi::OsStr::new(name)], None);
+        assert_eq!(
+            environment.get(std::ffi::OsStr::new(name)).copied().flatten(),
+            None
+        );
     }
+    assert_eq!(
+        environment[std::ffi::OsStr::new("UNRELATED_FIXTURE_ENV")],
+        Some(std::ffi::OsStr::new("retained"))
+    );
 }
 
 #[tokio::test]
