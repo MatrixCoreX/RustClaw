@@ -82,8 +82,9 @@ test("memory late JSON parsing cannot replace the new owner's state", async () =
     const task = await begin(() => host.runtime.fetchMemoryData());
     owner = "B"; await host.scope("B");
     await act(async () => { await host.runtime.fetchMemoryData(); });
-    await act(async () => { body.resolve(settings("A")); await task.pending; });
+    await act(async () => { body.resolve({ ok: true, data: settings("A") }); await task.pending; });
     assertOwner(host.runtime, "B");
+    assert.equal(host.runtime.memoryError, null);
   } finally { await host.close(); }
 });
 
