@@ -1418,6 +1418,7 @@ kind = "runner"
 planner_kind = "skill"
 group = "audio"
 package_manifest = "crates/skills/audio_transcribe/skill.toml"
+package_version = "0.1.9"
 supported_os = ["linux", "macos"]
 aliases = []
 timeout_seconds = 86400

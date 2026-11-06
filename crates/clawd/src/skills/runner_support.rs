@@ -129,6 +129,35 @@ pub(super) fn add_runner_dispatch_metadata(
     );
 }
 
+pub(super) fn apply_selected_connection_environment(
+    command: &mut tokio::process::Command,
+    connection: Option<&crate::llm_gateway::SelectedLlmConnection>,
+) {
+    use claw_core::llm_connection_environment::{
+        SELECTED_IDENTITY_ENV, SELECTED_PROTOCOL_ENV, SELECTED_RELAY_ENV, SELECTED_VENDOR_ENV,
+    };
+    // Neither a parent deployment environment nor a receipt allowlist owns
+    // the identity of this task's selected connection.
+    for name in SELECTED_IDENTITY_ENV {
+        command.env_remove(name);
+    }
+    if let Some(connection) = connection {
+        command
+            .env("OPENAI_BASE_URL", &connection.base_url)
+            .env("OPENAI_MODEL", &connection.model)
+            .env(SELECTED_VENDOR_ENV, &connection.vendor)
+            .env(SELECTED_PROTOCOL_ENV, &connection.provider_type)
+            .env(
+                SELECTED_RELAY_ENV,
+                if connection.hosted_relay {
+                    "true"
+                } else {
+                    "false"
+                },
+            );
+    }
+}
+
 pub(super) fn selected_provider_api_key_env_names(
     vendor: &str,
     provider_type: &str,
@@ -354,3 +383,7 @@ fn append_cancelled_capture_artifact(
         artifacts.push(json!({"kind": kind, "path": path}));
     }
 }
+
+#[cfg(test)]
+#[path = "runner_selected_connection_tests.rs"]
+mod selected_connection_tests;

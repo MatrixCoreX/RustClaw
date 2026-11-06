@@ -25,6 +25,7 @@ pub mod conversation_input;
 pub mod git_remote_config;
 pub mod hard_rules;
 pub mod host_resources;
+pub mod llm_connection_environment;
 pub mod llm_provider_descriptors;
 pub mod model_catalog;
 pub mod model_turn;

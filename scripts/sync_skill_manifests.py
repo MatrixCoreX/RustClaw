@@ -16,6 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOTS = (ROOT / "crates/skills", ROOT / "optional_skills")
 REGISTRIES = (ROOT / "configs/skills_registry.toml", ROOT / "docker/config/skills_registry.toml")
 MARKER = "# AUTO-GENERATED: sync_skill_manifests.py"
+# Additive host metadata is package opt-in, not a reason to change every
+# installed LLM package's manifest digest during an unrelated skill upgrade.
+OPTIONAL_HOST_IDENTITY_ENV = {"APP_SELECTED_LLM_HOSTED_RELAY"}
 ENV_LITERAL = re.compile(r'(?:std::)?env::var(?:_os)?\(\s*"([A-Z_][A-Z0-9_]*)"')
 BASE_RUNTIME_ENV = {
     "PATH",
@@ -94,6 +97,10 @@ def runtime_environment_allowlist(skill: CargoSkill, entry: dict[str, object]) -
             continue
         names.add(secret_name.upper())
     if "llm" in capabilities:
+        manifest = skill.source_dir / "skill.toml"
+        if manifest.is_file():
+            declared = tomllib.loads(manifest.read_text(encoding="utf-8")).get("run", {}).get("environment_allowlist", [])
+            names.update(OPTIONAL_HOST_IDENTITY_ENV.intersection(declared))
         names.update(
             {
                 "CLAWD_BASE_URL",

@@ -232,6 +232,9 @@ jobs:
       - name: Test dedicated STT credentials and selected connection ownership
         run: |
           set -euo pipefail
+          python3 scripts/sync_skill_manifests_tests.py
+          python3 scripts/sync_skill_manifests.py --check
+          cargo test --locked -p claw-core llm_connection_environment::tests -- --test-threads=1 --nocapture
           cargo test --locked -p audio-transcribe-skill -- --test-threads=16 --nocapture
       - name: Prepare existing runtime verification helpers
         run: |
@@ -250,6 +253,7 @@ jobs:
           python3 scripts/check_aipp_decoupling.py
           python3 scripts/check_historical_hardcoded_language.py --fail-on-runtime --fail-on-ui-visible
           python3 scripts/check_task_lifecycle_contracts.py
+          cargo test --locked -p clawd --bin clawd selected_connection_tests -- --test-threads=1 --nocapture
           cargo test --locked -p claw-core llm_provider_descriptors::tests -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd llm_gateway::tests -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd llm_provider_runtime_tests -- --test-threads=1 --nocapture
@@ -308,6 +312,34 @@ jobs:
         with:
           name: verified-linux-runtime-read-${{ github.sha }}
           path: ${{ runner.temp }}/runtime-read-artifact/*.tar.gz*
+          if-no-files-found: error
+          retention-days: 7
+      - name: Build exact Linux STT consumers and verified skill receipt
+        run: |
+          set -euo pipefail
+          cargo build --locked --release -p skill-runner --bin skill-runner -p audio-transcribe-skill --bin audio-transcribe-skill -p agent-skill-sdk --bin skillctl
+          artifact_root="$RUNNER_TEMP/runtime-stt-artifact"
+          mkdir -p "$artifact_root/runtime-stt/bin"
+          install -m 755 target/release/skill-runner "$artifact_root/runtime-stt/bin/skill-runner"
+          install -m 755 target/release/audio-transcribe-skill "$artifact_root/runtime-stt/bin/audio-transcribe-skill"
+          install -m 755 target/release/skillctl "$artifact_root/runtime-stt/bin/skillctl"
+          python3 scripts/project_skill_receipts.py --skill audio_transcribe --sdk-cli "$PWD/target/release/skillctl" --package-root "$artifact_root/runtime-stt/packages"
+          printf '%s\n' "$GITHUB_SHA" > "$artifact_root/runtime-stt/source-commit"
+          printf '%s\n' 'stt_full_suite selected_connection_environment selected_connection_host_ownership sdk_and_runner receipt_protocol_smoke' > "$artifact_root/runtime-stt/verified-gates"
+          (cd "$artifact_root/runtime-stt" && find bin packages -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          (cd "$artifact_root/runtime-stt" && sha256sum source-commit verified-gates >> SHA256SUMS)
+          tar -czf "$artifact_root/runtime-stt-${GITHUB_SHA}.tar.gz" -C "$artifact_root" runtime-stt
+          (cd "$artifact_root" && sha256sum "runtime-stt-${GITHUB_SHA}.tar.gz" > "runtime-stt-${GITHUB_SHA}.tar.gz.sha256")
+      - name: Attest exact Linux STT consumers and skill package
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-path: ${{ runner.temp }}/runtime-stt-artifact/runtime-stt-${{ github.sha }}.tar.gz
+      - name: Preserve exact verified Linux STT consumers and skill package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: verified-linux-runtime-stt-${{ github.sha }}
+          path: ${{ runner.temp }}/runtime-stt-artifact/*.tar.gz*
           if-no-files-found: error
           retention-days: 7
   media-session-portability:
@@ -383,6 +415,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 scripts/sync_skill_manifests_tests.py
+          python3 scripts/sync_skill_manifests.py --check
+          cargo test --locked -p claw-core llm_connection_environment::tests -- --test-threads=1 --nocapture
           cargo test --locked -p audio-transcribe-skill -- --test-threads=16 --nocapture
 
       - name: Validate manifest and build inventory
@@ -436,6 +471,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cargo test --locked -p clawd --bin clawd selected_connection_tests -- --test-threads=1 --nocapture
           cargo test --locked -p claw-core llm_provider_descriptors::tests -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd llm_gateway::tests -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd llm_provider_runtime_tests -- --test-threads=1 --nocapture

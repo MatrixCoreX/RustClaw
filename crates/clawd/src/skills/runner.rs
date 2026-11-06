@@ -32,7 +32,8 @@ use super::{
 use runner_support::{
     action_allows_provider_credentials, action_requires_browser_subprocess,
     action_scoped_runner_capabilities, action_scoped_runner_sandbox_mode,
-    add_runner_dispatch_metadata, apply_parent_execution_backend, cancelled_capture_projection,
+    add_runner_dispatch_metadata, apply_parent_execution_backend, apply_selected_connection_environment,
+    cancelled_capture_projection,
     has_planner_capability_prefix, inherited_sandbox_backend, invocation_artifact_output_directory,
     local_clawd_base_url_from_internal_listen, runner_additional_writable_paths,
     selected_provider_api_key_env_names, stateless_readonly_reuse_allowed,
@@ -1272,12 +1273,7 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
         )
         .env("AGENT_INTERNAL_NNI_TOKEN", token);
     }
-    if let Some(connection) = &selected_llm_connection {
-        cmd.env("OPENAI_BASE_URL", &connection.base_url)
-            .env("OPENAI_MODEL", &connection.model)
-            .env("APP_SELECTED_LLM_VENDOR", &connection.vendor)
-            .env("APP_SELECTED_LLM_PROVIDER_TYPE", &connection.provider_type);
-    }
+    apply_selected_connection_environment(&mut cmd, selected_llm_connection.as_ref());
     if !selected_provider_key_tokens.is_empty() {
         tracing::info!(
             skill = canonical_skill_name,

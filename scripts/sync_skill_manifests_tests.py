@@ -8,6 +8,17 @@ import sync_skill_manifests as sync
 
 
 class RuntimeFilesTests(unittest.TestCase):
+    def test_connection_identity_is_declared_only_for_llm_capable_packages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            skill = sync.CargoSkill("fixture", source, "fixture", "fixture")
+            expected = {"APP_SELECTED_LLM_VENDOR", "APP_SELECTED_LLM_PROVIDER_TYPE", "APP_SELECTED_LLM_HOSTED_RELAY"}
+            self.assertNotIn("APP_SELECTED_LLM_HOSTED_RELAY", sync.runtime_environment_allowlist(skill, {"capabilities": ["llm"]}))
+            (source / "skill.toml").write_text('[run]\nenvironment_allowlist = ["APP_SELECTED_LLM_HOSTED_RELAY", "UNREVIEWED_METADATA"]\n')
+            self.assertTrue(expected <= set(sync.runtime_environment_allowlist(skill, {"capabilities": ["llm"]})))
+            self.assertTrue(expected.isdisjoint(sync.runtime_environment_allowlist(skill, {"capabilities": ["fs.read"]})))
+            self.assertNotIn("UNREVIEWED_METADATA", sync.runtime_environment_allowlist(skill, {"capabilities": ["llm"]}))
+
     def test_sync_preserves_package_owned_assets_without_a_host_skill_list(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

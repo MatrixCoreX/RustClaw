@@ -1476,6 +1476,11 @@ fn child_process_command_for_parent(
             }
         }
     }
+    claw_core::llm_connection_environment::apply_host_identity_environment(
+        command.as_std_mut(),
+        &launch.environment_allowlist,
+        |name| std::env::var_os(name),
+    );
     if launch.runtime_deadline_enabled {
         // Foreground execution keeps the manifest/host deadline. Durable
         // background execution intentionally removes the inherited deadline.

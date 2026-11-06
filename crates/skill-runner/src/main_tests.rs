@@ -1,5 +1,24 @@
 use super::*;
 
+#[test]
+fn installed_command_cannot_take_selected_identity_from_receipt_fixed_values() {
+    use claw_core::llm_connection_environment::SELECTED_IDENTITY_ENV;
+    let mut launch = ChildLaunch::legacy("unused-test-command");
+    launch.installed = true;
+    launch.working_directory = Some(std::env::temp_dir());
+    for name in SELECTED_IDENTITY_ENV {
+        launch.environment.insert(name.to_string(), "untrusted-package-value".into());
+    }
+    // The package does not declare these names, so neither its fixed values
+    // nor any parent environment may introduce selected-connection identity.
+    launch.environment_allowlist.clear();
+    let command = child_process_command_for_parent(&launch, Some("direct")).unwrap();
+    let environment: std::collections::BTreeMap<_, _> = command.as_std().get_envs().collect();
+    for name in SELECTED_IDENTITY_ENV {
+        assert_eq!(environment[std::ffi::OsStr::new(name)], None);
+    }
+}
+
 #[tokio::test]
 async fn queued_durable_skill_does_not_occupy_a_global_slot() {
     let root = tempfile::tempdir().expect("tempdir");

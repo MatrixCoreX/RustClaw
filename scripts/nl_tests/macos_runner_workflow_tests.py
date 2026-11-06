@@ -45,18 +45,44 @@ def required_command_gate(job, command):
 class MacosRunnerWorkflowTests(unittest.TestCase):
     def test_full_stt_suite_is_mandatory_on_both_native_platforms(self):
         jobs = load("macos-polyglot-skill-ci.yml")["jobs"]
-        command = "cargo test --locked -p audio-transcribe-skill -- --test-threads=16 --nocapture"
         for name in ["runtime-read-linux", "polyglot-skill-macos"]:
-            self.assertTrue(required_command_gate(jobs[name], command))
-            for mutation in ["remove", "ignore", "continue", "conditional"]:
-                with self.subTest(job=name, mutation=mutation):
-                    job = deepcopy(jobs[name])
-                    step = next(step for step in job["steps"] if command in step.get("run", ""))
-                    if mutation == "remove": step["run"] = step["run"].replace(command, "true")
-                    elif mutation == "ignore": step["run"] = step["run"].replace(command, command + " || true")
-                    elif mutation == "continue": step["continue-on-error"] = True
-                    else: step["if"] = "${{ always() }}"
-                    self.assertFalse(required_command_gate(job, command))
+            for command in [
+                "cargo test --locked -p audio-transcribe-skill -- --test-threads=16 --nocapture",
+                "cargo test --locked -p claw-core llm_connection_environment::tests -- --test-threads=1 --nocapture",
+                "cargo test --locked -p clawd --bin clawd selected_connection_tests -- --test-threads=1 --nocapture",
+            ]:
+                self.assertTrue(required_command_gate(jobs[name], command))
+                for mutation in ["remove", "ignore", "continue", "conditional"]:
+                    with self.subTest(job=name, command=command, mutation=mutation):
+                        job = deepcopy(jobs[name])
+                        step = next(step for step in job["steps"] if command in step.get("run", ""))
+                        if mutation == "remove": step["run"] = step["run"].replace(command, "true")
+                        elif mutation == "ignore": step["run"] = step["run"].replace(command, command + " || true")
+                        elif mutation == "continue": step["continue-on-error"] = True
+                        else: step["if"] = "${{ always() }}"
+                        self.assertFalse(required_command_gate(job, command))
+
+    def test_stt_runner_and_skill_are_retained_together_with_attested_receipts(self):
+        steps = load("macos-polyglot-skill-ci.yml")["jobs"]["runtime-read-linux"]["steps"]
+        named = {step.get("name"): step for step in steps}
+        build = named["Build exact Linux STT consumers and verified skill receipt"]
+        attest = named["Attest exact Linux STT consumers and skill package"]
+        upload = named["Preserve exact verified Linux STT consumers and skill package"]
+        self.assertNotIn("if", build)
+        self.assertNotIn("continue-on-error", build)
+        self.assertIn("set -euo pipefail", build["run"])
+        for fragment in [
+            "-p skill-runner --bin skill-runner", "-p audio-transcribe-skill --bin audio-transcribe-skill",
+            "-p agent-skill-sdk --bin skillctl", "scripts/project_skill_receipts.py --skill audio_transcribe",
+            "source-commit", "verified-gates", "SHA256SUMS",
+        ]:
+            self.assertIn(fragment, build["run"])
+        self.assertLess(steps.index(build), steps.index(attest))
+        self.assertLess(steps.index(attest), steps.index(upload))
+        self.assertEqual(attest["if"], "${{ github.event_name != 'pull_request' }}")
+        self.assertTrue(attest["uses"].startswith("actions/attest-build-provenance@"))
+        self.assertIn("runtime-stt-${{ github.sha }}.tar.gz", attest["with"]["subject-path"])
+        self.assertEqual(upload["with"]["if-no-files-found"], "error")
 
     def test_catalogue_selection_and_cli_contracts_gate_both_systems_and_signed_artifact(self):
         jobs = load("macos-polyglot-skill-ci.yml")["jobs"]
