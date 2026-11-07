@@ -189,7 +189,88 @@ def required_memory_actor_gate(job):
         and script.index(listing)<script.index(run))
 
 
+def required_remaining_memory_writer_gate(job):
+    prefix='http::memory_routes::write_fence_tests::'
+    run=f'cargo test --locked -p clawd --bin clawd {prefix} -- --test-threads=1 --nocapture'
+    if not required_command_gate(job,run):
+        return False
+    step=next(step for step in job['steps'] if run in step.get('run',''))
+    script=step['run']
+    listing=f'cargo test --locked -p clawd --bin clawd {prefix} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
+    source=(ROOT/'crates/clawd/src/http/memory_write_fence_tests.rs').read_text(encoding='utf-8')
+    expected=set(re.findall(r'^#\[test\]\nfn (\w+)\(',source,re.M))
+    required=set(re.findall(r'--require ([A-Za-z0-9_:]+)',script))
+    return len(expected)==33 and required==expected and listing in script and (
+        'python3 scripts/tests/assert_rust_test_selection.py --self-test' in script
+        and f'--prefix {prefix}' in script and '|| true' not in script
+        and script.index(listing)<script.index(run))
+
+
+def required_retained_memory_vector_gate(job):
+    for prefix,count,file in [
+        ('http::memory_routes::vector_policy_tests::',3,'memory_vector_policy_tests.rs'),
+        ('http::memory_routes::tests::',1,'memory_routes_tests.rs'),
+    ]:
+        run=f'cargo test --locked -p clawd --bin clawd {prefix} -- --test-threads=1 --nocapture'
+        if not required_command_gate(job,run):
+            return False
+        step=next(step for step in job['steps'] if run in step.get('run',''))
+        script=step['run']
+        listing=f'cargo test --locked -p clawd --bin clawd {prefix} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
+        source=(ROOT/'crates/clawd/src/http'/file).read_text(encoding='utf-8')
+        names=set(re.findall(r'^#\[(?:tokio::)?test\]\n(?:async )?fn (\w+)\(',source,re.M))
+        if not (len(names)==count and listing in script and f'--prefix {prefix}' in script
+                and all(f'--require {name}' in script for name in names)
+                and '|| true' not in script and script.index(listing)<script.index(run)):
+            return False
+    return True
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_retained_memory_vector_policy_and_status_cannot_be_skipped(self):
+        jobs=load('macos-polyglot-skill-ci.yml')['jobs']
+        for name in ['runtime-read-linux','polyglot-skill-macos']:
+            self.assertTrue(required_retained_memory_vector_gate(jobs[name]))
+            for mutation in ['selector','listing','require','ignore','conditional','continue']:
+                with self.subTest(job=name,mutation=mutation):
+                    job=deepcopy(jobs[name])
+                    step=next(step for step in job['steps'] if step.get('name')=='Test retained memory vector policy and read-only status fences')
+                    if mutation=='selector':
+                        step['run']=step['run'].replace('memory_routes::vector_policy_tests::','missing::vector_policy_tests::')
+                    elif mutation=='listing':
+                        step['run']=step['run'].replace('--list --color never','--list')
+                    elif mutation=='require':
+                        step['run']=step['run'].replace('--require index_policy_status_still_requires_authentication','--require absent_case')
+                    elif mutation=='ignore':
+                        step['run']=step['run'].replace('--test-threads=1 --nocapture','--test-threads=1 --nocapture || true')
+                    elif mutation=='conditional':
+                        step['if']='false'
+                    else:
+                        step['continue-on-error']=True
+                    self.assertFalse(required_retained_memory_vector_gate(job))
+
+    def test_remaining_memory_writer_gate_requires_every_case_on_both_platforms(self):
+        jobs=load('macos-polyglot-skill-ci.yml')['jobs']
+        for name in ['runtime-read-linux','polyglot-skill-macos']:
+            self.assertTrue(required_remaining_memory_writer_gate(jobs[name]))
+            for mutation in ['selector','listing','require','ignore','conditional','continue']:
+                with self.subTest(job=name,mutation=mutation):
+                    job=deepcopy(jobs[name])
+                    step=next(step for step in job['steps'] if step.get('name')=='Test remaining memory write authority and policy fences')
+                    if mutation=='selector':
+                        step['run']=step['run'].replace('memory_routes::write_fence_tests::','missing::write_fence_tests::')
+                    elif mutation=='listing':
+                        step['run']=step['run'].replace('--list --color never','--list')
+                    elif mutation=='require':
+                        step['run']=step['run'].replace('--require changed_original_role_cannot_commit_settings','--require absent_case')
+                    elif mutation=='ignore':
+                        step['run']=step['run'].replace('--test-threads=1 --nocapture','--test-threads=1 --nocapture || true')
+                    elif mutation=='conditional':
+                        step['if']='false'
+                    else:
+                        step['continue-on-error']=True
+                    self.assertFalse(required_remaining_memory_writer_gate(job))
+
     def test_memory_actor_gate_requires_every_case_on_both_platforms(self):
         jobs=load('macos-polyglot-skill-ci.yml')['jobs']
         for name in ['runtime-read-linux','polyglot-skill-macos']:

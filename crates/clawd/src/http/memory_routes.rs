@@ -12,6 +12,10 @@ mod capacity;
 #[path = "memory_write.rs"]
 mod writing;
 
+#[cfg(test)]
+#[path = "memory_write_fence_tests.rs"]
+mod write_fence_tests;
+
 use crate::memory::ux::{
     MemoryBulkClearRequest, MemoryClearPreview, MemoryCorrectionRequest, MemoryExport,
     MemoryFeedbackRequest, MemoryImportConfirmRequest, MemoryImportPreview,
@@ -20,8 +24,7 @@ use crate::memory::ux::{
     RemoteMemoryDisclosure,
 };
 use crate::{
-    api_err, api_ok, insert_audit_log, memory, now_ts_u64, require_auth_identity_for_api,
-    ApiResponse, AppState,
+    api_err, api_ok, memory, now_ts_u64, require_auth_identity_for_api, ApiResponse, AppState,
 };
 
 #[derive(Debug, serde::Serialize)]
@@ -128,61 +131,63 @@ async fn vector_reindex(
         Ok(identity) => identity,
         Err(response) => return response,
     };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(_) => {
-            return crate::api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_database_unavailable",
-            )
-        }
-    };
-    let settings = match crate::memory::settings::resolve_principal_memory_settings(
-        &db,
-        &identity.principal_id,
-        state.policy.memory.long_term_enabled,
-    ) {
-        Ok(settings) => settings,
-        Err(_) => {
-            return crate::api_err(
+    let config = state.policy.memory.clone();
+    let result = writing::run(state, identity, move |db, identity| {
+        let settings = crate::memory::settings::resolve_principal_memory_settings(
+            db,
+            &identity.principal_id,
+            config.long_term_enabled,
+        )
+        .map_err(|_| {
+            writing::reject(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "memory_settings_unavailable",
             )
+        })?;
+        if settings.policy_digest != request.expected_policy_digest {
+            return Err(writing::reject(
+                StatusCode::CONFLICT,
+                "memory_settings_revision_conflict",
+            ));
         }
-    };
-    if settings.policy_digest != request.expected_policy_digest {
-        return crate::api_err(StatusCode::CONFLICT, "memory_settings_revision_conflict");
-    }
-    let remote_allowed =
-        settings.external_context_policy == crate::memory::settings::ExternalContextPolicy::Allow;
-    match crate::memory::embedding_jobs::enqueue_reindex(
-        &db,
-        &state.policy.memory,
-        &identity.principal_id,
-        &settings.policy_digest,
-        remote_allowed,
-    ) {
-        Ok((_snapshot_id, generation, queued_rows)) => crate::api_ok(MemoryVectorMutationResult {
+        let remote_allowed = settings.external_context_policy
+            == crate::memory::settings::ExternalContextPolicy::Allow;
+        let (_snapshot_id, generation, queued_rows) =
+            crate::memory::embedding_jobs::enqueue_reindex(
+                db,
+                &config,
+                &identity.principal_id,
+                &settings.policy_digest,
+                remote_allowed,
+            )?;
+        Ok(MemoryVectorMutationResult {
             schema_version: 1,
             status: "queued".to_string(),
             queued_rows,
             generation,
-        }),
-        Err(error) if error.to_string() == "memory_embedding_remote_consent_required" => {
-            crate::api_err(
-                StatusCode::FORBIDDEN,
-                "memory_embedding_remote_consent_required",
-            )
-        }
-        Err(error) if error.to_string() == "memory_embedding_reindex_already_running" => {
-            crate::api_err(
-                StatusCode::CONFLICT,
-                "memory_embedding_reindex_already_running",
-            )
-        }
+        })
+    })
+    .await;
+    match result {
+        Ok(result) => crate::api_ok(result),
         Err(error) => {
-            tracing::warn!(error = %error, "memory vector reindex failed");
-            crate::api_err(StatusCode::BAD_REQUEST, "memory_vector_reindex_failed")
+            if let Some(response) = writing::execution_error(&error) {
+                return response;
+            }
+            match error.to_string().as_str() {
+                "memory_embedding_remote_consent_required" => crate::api_err(
+                    StatusCode::FORBIDDEN,
+                    "memory_embedding_remote_consent_required",
+                ),
+                "memory_embedding_reindex_already_running" => crate::api_err(
+                    StatusCode::CONFLICT,
+                    "memory_embedding_reindex_already_running",
+                ),
+                _ => {
+                    tracing::warn!(error = %error, "memory vector reindex failed");
+                    crate::api_err(StatusCode::BAD_REQUEST, "memory_vector_reindex_failed")
+                }
+            }
         }
     }
 }
@@ -192,7 +197,7 @@ async fn vector_pause(
     headers: HeaderMap,
     Json(request): Json<MemoryVectorMutationRequest>,
 ) -> (StatusCode, Json<ApiResponse<MemoryVectorMutationResult>>) {
-    vector_control(state, headers, request, "paused")
+    vector_control(state, headers, request, "paused").await
 }
 
 async fn vector_resume(
@@ -200,7 +205,7 @@ async fn vector_resume(
     headers: HeaderMap,
     Json(request): Json<MemoryVectorMutationRequest>,
 ) -> (StatusCode, Json<ApiResponse<MemoryVectorMutationResult>>) {
-    vector_control(state, headers, request, "active")
+    vector_control(state, headers, request, "active").await
 }
 
 async fn vector_cancel(
@@ -208,14 +213,14 @@ async fn vector_cancel(
     headers: HeaderMap,
     Json(request): Json<MemoryVectorMutationRequest>,
 ) -> (StatusCode, Json<ApiResponse<MemoryVectorMutationResult>>) {
-    vector_control(state, headers, request, "cancelled")
+    vector_control(state, headers, request, "cancelled").await
 }
 
-fn vector_control(
+async fn vector_control(
     state: AppState,
     headers: HeaderMap,
     request: MemoryVectorMutationRequest,
-    action: &str,
+    action: &'static str,
 ) -> (StatusCode, Json<ApiResponse<MemoryVectorMutationResult>>) {
     let identity = match crate::require_auth_identity_for_api::<MemoryVectorMutationResult>(
         &state, &headers,
@@ -223,77 +228,74 @@ fn vector_control(
         Ok(identity) => identity,
         Err(response) => return response,
     };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(_) => {
-            return crate::api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_database_unavailable",
-            )
-        }
-    };
-    let settings = match crate::memory::settings::resolve_principal_memory_settings(
-        &db,
-        &identity.principal_id,
-        state.policy.memory.long_term_enabled,
-    ) {
-        Ok(settings) => settings,
-        Err(_) => {
-            return crate::api_err(
+    let config = state.policy.memory.clone();
+    let result = writing::run(state, identity, move |db, identity| {
+        let settings = crate::memory::settings::resolve_principal_memory_settings(
+            db,
+            &identity.principal_id,
+            config.long_term_enabled,
+        )
+        .map_err(|_| {
+            writing::reject(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "memory_settings_unavailable",
             )
+        })?;
+        if settings.policy_digest != request.expected_policy_digest {
+            return Err(writing::reject(
+                StatusCode::CONFLICT,
+                "memory_settings_revision_conflict",
+            ));
         }
-    };
-    if settings.policy_digest != request.expected_policy_digest {
-        return crate::api_err(StatusCode::CONFLICT, "memory_settings_revision_conflict");
-    }
-    let profile =
-        match crate::memory::vector_store::register_configured_profile(&db, &state.policy.memory) {
-            Ok(profile) => profile,
-            Err(_) => {
-                return crate::api_err(
+        let profile = crate::memory::vector_store::register_configured_profile(db, &config)
+            .map_err(|_| {
+                writing::reject(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "memory_vector_profile_unavailable",
                 )
-            }
-        };
-    let result = match action {
-        "paused" => crate::memory::embedding_jobs::set_profile_paused(
-            &db,
-            &identity.principal_id,
-            &profile.profile_id,
-            true,
-        )
-        .map(|_| 0),
-        "active" => crate::memory::embedding_jobs::set_profile_paused(
-            &db,
-            &identity.principal_id,
-            &profile.profile_id,
-            false,
-        )
-        .map(|_| 0),
-        "cancelled" => crate::memory::embedding_jobs::cancel_profile_jobs(
-            &db,
-            &identity.principal_id,
-            &profile.profile_id,
-        ),
-        _ => unreachable!(),
-    };
-    match result {
-        Ok(changed) => crate::api_ok(MemoryVectorMutationResult {
+            })?;
+        let changed = match action {
+            "paused" => crate::memory::embedding_jobs::set_profile_paused(
+                db,
+                &identity.principal_id,
+                &profile.profile_id,
+                true,
+            )
+            .map(|_| 0),
+            "active" => crate::memory::embedding_jobs::set_profile_paused(
+                db,
+                &identity.principal_id,
+                &profile.profile_id,
+                false,
+            )
+            .map(|_| 0),
+            "cancelled" => crate::memory::embedding_jobs::cancel_profile_jobs(
+                db,
+                &identity.principal_id,
+                &profile.profile_id,
+            ),
+            _ => unreachable!(),
+        }?;
+        Ok(MemoryVectorMutationResult {
             schema_version: 1,
             status: action.to_string(),
             queued_rows: changed,
             generation: crate::memory::vector_store::active_generation_for_principal(
-                &db,
+                db,
                 &identity.principal_id,
                 &profile.profile_id,
                 profile.generation,
             )
             .unwrap_or(profile.generation),
-        }),
+        })
+    })
+    .await;
+    match result {
+        Ok(result) => crate::api_ok(result),
         Err(error) => {
+            if let Some(response) = writing::execution_error(&error) {
+                return response;
+            }
             tracing::warn!(error = %error, action, "memory vector control failed");
             crate::api_err(StatusCode::BAD_REQUEST, "memory_vector_control_failed")
         }
@@ -1024,28 +1026,25 @@ async fn delete_memory_handler(
             Ok(identity) => identity,
             Err(resp) => return resp,
         };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(err) => {
-            error!("delete memory db failed: {}", err);
-            return api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_database_unavailable",
-            );
-        }
-    };
-    match memory::api::delete_memory_object(
-        &db,
-        identity.user_id,
-        identity.chat_id,
-        &identity.user_key,
-        &identity.principal_id,
-        &memory_id,
-        now_ts_u64() as i64,
-    ) {
+    let result = writing::run(state, identity, move |db, identity| {
+        memory::api::delete_memory_object(
+            db,
+            identity.user_id,
+            identity.chat_id,
+            &identity.user_key,
+            &identity.principal_id,
+            &memory_id,
+            now_ts_u64() as i64,
+        )
+    })
+    .await;
+    match result {
         Ok(Some(result)) => api_ok(result),
         Ok(None) => api_err(StatusCode::NOT_FOUND, "memory_not_found"),
         Err(err) => {
+            if let Some(response) = writing::execution_error(&err) {
+                return response;
+            }
             warn!("delete memory failed: {}", err);
             api_err(StatusCode::BAD_REQUEST, "memory_id_invalid")
         }
@@ -1065,28 +1064,25 @@ async fn expire_memory_handler(
             Ok(identity) => identity,
             Err(resp) => return resp,
         };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(err) => {
-            error!("expire memory db failed: {}", err);
-            return api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_database_unavailable",
-            );
-        }
-    };
-    match memory::api::expire_memory_object(
-        &db,
-        identity.user_id,
-        identity.chat_id,
-        &identity.user_key,
-        &identity.principal_id,
-        &memory_id,
-        now_ts_u64() as i64,
-    ) {
+    let result = writing::run(state, identity, move |db, identity| {
+        memory::api::expire_memory_object(
+            db,
+            identity.user_id,
+            identity.chat_id,
+            &identity.user_key,
+            &identity.principal_id,
+            &memory_id,
+            now_ts_u64() as i64,
+        )
+    })
+    .await;
+    match result {
         Ok(Some(result)) => api_ok(result),
         Ok(None) => api_err(StatusCode::NOT_FOUND, "memory_not_found"),
         Err(err) => {
+            if let Some(response) = writing::execution_error(&err) {
+                return response;
+            }
             warn!("expire memory failed: {}", err);
             api_err(StatusCode::BAD_REQUEST, "memory_id_invalid")
         }
@@ -1106,25 +1102,22 @@ async fn clear_memory_handler(
             Ok(identity) => identity,
             Err(resp) => return resp,
         };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(err) => {
-            error!("clear memory db failed: {}", err);
-            return api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_database_unavailable",
-            );
-        }
-    };
-    match memory::api::clear_memory_scope(
-        &db,
-        identity.chat_id,
-        &identity.principal_id,
-        req.scope,
-        now_ts_u64() as i64,
-    ) {
+    let result = writing::run(state, identity, move |db, identity| {
+        memory::api::clear_memory_scope(
+            db,
+            identity.chat_id,
+            &identity.principal_id,
+            req.scope,
+            now_ts_u64() as i64,
+        )
+    })
+    .await;
+    match result {
         Ok(result) => api_ok(result),
         Err(err) => {
+            if let Some(response) = writing::execution_error(&err) {
+                return response;
+            }
             error!("clear memory failed: {}", err);
             api_err(StatusCode::INTERNAL_SERVER_ERROR, "memory_clear_failed")
         }
@@ -1188,46 +1181,34 @@ async fn link_current_memory_project_handler(
     if identity.role != "admin" {
         return api_err(StatusCode::FORBIDDEN, "memory_project_admin_required");
     }
-    let project_ref = request.project_ref.trim();
+    let project_ref = request.project_ref.trim().to_owned();
     if project_ref.is_empty() || project_ref.len() > 96 {
         return api_err(StatusCode::BAD_REQUEST, "memory_project_ref_invalid");
     }
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(err) => {
-            error!("link current memory project db failed: {}", err);
-            return api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_project_db_failed",
-            );
-        }
-    };
-    let result = memory::project_identity::link_project_path_alias(
-        &db,
-        project_ref,
-        &state.skill_rt.workspace_root,
-    )
-    .and_then(|_| {
-        memory::scope::resolve_project_scope(&db, &identity, &state.skill_rt.workspace_root)
-    });
+    let workspace = state.skill_rt.workspace_root.clone();
+    let result = writing::run(state.clone(), identity.clone(), move |db, identity| {
+        memory::project_identity::link_project_path_alias(db, &project_ref, &workspace)
+            .and_then(|_| memory::scope::resolve_project_scope(db, identity, &workspace))
+    })
+    .await;
     match result {
         Ok(project) => {
-            let _ = insert_audit_log(
-                &state,
-                Some(identity.user_id),
+            writing::record_audit(
+                state.clone(),
+                identity.user_id,
                 "memory_project_alias_link",
-                Some(
-                    &json!({
-                        "actor_principal_id": identity.principal_id,
-                        "target_project_ref": project.scope_ref,
-                    })
-                    .to_string(),
-                ),
-                None,
-            );
+                json!({
+                    "actor_principal_id": identity.principal_id,
+                    "target_project_ref": project.scope_ref,
+                }),
+            )
+            .await;
             api_ok(project)
         }
         Err(err) => {
+            if let Some(response) = writing::execution_error(&err) {
+                return response;
+            }
             warn!("link current memory project failed: {}", err);
             api_err(
                 StatusCode::BAD_REQUEST,
@@ -1254,48 +1235,40 @@ async fn unlink_current_memory_project_handler(
     if identity.role != "admin" {
         return api_err(StatusCode::FORBIDDEN, "memory_project_admin_required");
     }
-    let project_ref = request.project_ref.trim();
+    let project_ref = request.project_ref.trim().to_owned();
     if project_ref.is_empty() || project_ref.len() > 96 {
         return api_err(StatusCode::BAD_REQUEST, "memory_project_ref_invalid");
     }
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(err) => {
-            error!("unlink current memory project db failed: {}", err);
-            return api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_project_db_failed",
-            );
-        }
-    };
-    let result = memory::project_identity::unlink_project_path_alias(
-        &db,
-        project_ref,
-        &state.skill_rt.workspace_root,
-    )
-    .and_then(|removed| {
-        anyhow::ensure!(removed, "memory_project_alias_not_found");
-        memory::scope::resolve_project_scope(&db, &identity, &state.skill_rt.workspace_root)
-    });
+    let workspace = state.skill_rt.workspace_root.clone();
+    let audit_project_ref = project_ref.clone();
+    let result = writing::run(state.clone(), identity.clone(), move |db, identity| {
+        memory::project_identity::unlink_project_path_alias(db, &project_ref, &workspace).and_then(
+            |removed| {
+                anyhow::ensure!(removed, "memory_project_alias_not_found");
+                memory::scope::resolve_project_scope(db, identity, &workspace)
+            },
+        )
+    })
+    .await;
     match result {
         Ok(project) => {
-            let _ = insert_audit_log(
-                &state,
-                Some(identity.user_id),
+            writing::record_audit(
+                state.clone(),
+                identity.user_id,
                 "memory_project_alias_unlink",
-                Some(
-                    &json!({
-                        "actor_principal_id": identity.principal_id,
-                        "detached_project_ref": project_ref,
-                        "current_project_ref": project.scope_ref,
-                    })
-                    .to_string(),
-                ),
-                None,
-            );
+                json!({
+                    "actor_principal_id": identity.principal_id,
+                    "detached_project_ref": audit_project_ref,
+                    "current_project_ref": project.scope_ref,
+                }),
+            )
+            .await;
             api_ok(project)
         }
         Err(err) => {
+            if let Some(response) = writing::execution_error(&err) {
+                return response;
+            }
             warn!("unlink current memory project failed: {}", err);
             api_err(
                 StatusCode::BAD_REQUEST,
@@ -1319,71 +1292,63 @@ async fn update_memory_settings_handler(
         Ok(identity) => identity,
         Err(resp) => return resp,
     };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(err) => {
-            error!("update memory settings db failed: {}", err);
-            return api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_settings_db_failed",
-            );
+    let release_default = state.policy.memory.long_term_enabled;
+    let result = writing::run(state.clone(), identity.clone(), move |db, identity| {
+        let result = memory::settings::update_memory_settings(db, identity, &req, release_default)?;
+        if !result.generate_memory {
+            let scope_ref = result
+                .conversation_id
+                .as_deref()
+                .and_then(|conversation_id| {
+                    memory::scope::conversation_scope_ref(
+                        &result.target_principal_id,
+                        conversation_id,
+                    )
+                    .ok()
+                });
+            if let Err(error) = memory::jobs::request_cancel_for_scope(
+                db,
+                &result.target_principal_id,
+                scope_ref.as_deref(),
+            ) {
+                warn!(error = %error, "memory settings job cancellation failed");
+            }
         }
-    };
-    match memory::settings::update_memory_settings(
-        &db,
-        &identity,
-        &req,
-        state.policy.memory.long_term_enabled,
-    ) {
+        if result.external_context_policy != memory::settings::ExternalContextPolicy::Allow {
+            if let Err(error) = memory::embedding_jobs::revoke_remote_profiles_for_principal(
+                db,
+                &result.target_principal_id,
+            ) {
+                warn!(error = %error, "memory remote embedding revocation failed");
+            }
+        }
+
+        Ok(result)
+    })
+    .await;
+    match result {
         Ok(result) => {
             memory::retrieval_async::invalidate_principal_query_cache(&result.target_principal_id);
-            if !result.generate_memory {
-                let scope_ref = result
-                    .conversation_id
-                    .as_deref()
-                    .and_then(|conversation_id| {
-                        memory::scope::conversation_scope_ref(
-                            &result.target_principal_id,
-                            conversation_id,
-                        )
-                        .ok()
-                    });
-                if let Err(error) = memory::jobs::request_cancel_for_scope(
-                    &db,
-                    &result.target_principal_id,
-                    scope_ref.as_deref(),
-                ) {
-                    warn!(error = %error, "memory settings job cancellation failed");
-                }
-            }
-            if result.external_context_policy != memory::settings::ExternalContextPolicy::Allow {
-                if let Err(error) = memory::embedding_jobs::revoke_remote_profiles_for_principal(
-                    &db,
-                    &result.target_principal_id,
-                ) {
-                    warn!(error = %error, "memory remote embedding revocation failed");
-                }
-            }
-            let _ = insert_audit_log(
-                &state,
-                Some(identity.user_id),
+            writing::record_audit(
+                state.clone(),
+                identity.user_id,
                 "memory_settings_update",
-                Some(
-                    &json!({
-                        "actor_principal_id": identity.principal_id,
-                        "target_principal_id": result.target_principal_id,
-                        "scope": result.scope,
-                        "conversation_id": result.conversation_id,
-                        "revision": result.revision,
-                        "policy_digest": result.policy_digest,
-                    })
-                    .to_string(),
-                ),
-                None,
-            );
+                json!({
+                    "actor_principal_id": identity.principal_id,
+                    "target_principal_id": result.target_principal_id,
+                    "scope": result.scope,
+                    "conversation_id": result.conversation_id,
+                    "revision": result.revision,
+                    "policy_digest": result.policy_digest,
+                }),
+            )
+            .await;
             api_ok(result)
         }
         Err(err) => {
+            if let Some(response) = writing::execution_error(&err) {
+                return response;
+            }
             error!("update memory settings failed: {}", err);
             let error_code = memory_api_error_code(&err, "memory_settings_update_failed");
             let status = if error_code.contains("revision_conflict") {

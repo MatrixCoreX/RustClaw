@@ -27,6 +27,44 @@ impl std::fmt::Display for ExecutionError {
 
 impl std::error::Error for ExecutionError {}
 
+#[derive(Debug)]
+struct ResponseError {
+    status: StatusCode,
+    code: &'static str,
+}
+
+impl std::fmt::Display for ResponseError {
+    fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        output.write_str(self.code)
+    }
+}
+
+impl std::error::Error for ResponseError {}
+
+/// A machine error inside the transaction, not an `Ok` HTTP rejection that
+/// would accidentally commit profile/settings work done before validation.
+pub(super) fn reject(status: StatusCode, code: &'static str) -> anyhow::Error {
+    ResponseError { status, code }.into()
+}
+
+/// The audit ledger has its own database. Record only committed mutations;
+/// keep its existing best-effort semantics without blocking an async worker.
+pub(super) async fn record_audit(
+    state: AppState,
+    user_id: i64,
+    action: &'static str,
+    detail: serde_json::Value,
+) {
+    let result = tokio::task::spawn_blocking(move || {
+        let detail = detail.to_string();
+        crate::insert_audit_log(&state, Some(user_id), action, Some(&detail), None)
+    })
+    .await;
+    if !matches!(result, Ok(Ok(()))) {
+        tracing::warn!(action, "memory_audit_publication_failed");
+    }
+}
+
 pub(super) async fn run<T, F>(
     state: AppState,
     identity: AuthIdentity,
@@ -62,6 +100,9 @@ where
 pub(super) fn execution_error<T: serde::Serialize>(
     error: &anyhow::Error,
 ) -> Option<(StatusCode, Json<ApiResponse<T>>)> {
+    if let Some(failure) = error.downcast_ref::<ResponseError>() {
+        return Some(crate::api_err(failure.status, failure.code));
+    }
     if let Some(failure) = error.downcast_ref::<ExecutionError>() {
         return Some(crate::api_err(
             StatusCode::INTERNAL_SERVER_ERROR,

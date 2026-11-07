@@ -10,10 +10,10 @@ use super::embedding::{EmbeddingProviderError, EmbeddingRequestItem};
 mod commit;
 #[path = "embedding_dispatch.rs"]
 mod dispatch;
-#[path = "embedding_source.rs"]
-mod source;
 #[path = "embedding_snapshot_maintenance.rs"]
 mod snapshot_maintenance;
+#[path = "embedding_source.rs"]
+mod source;
 
 const CONTROL_MIGRATION_ID: &str = "016_memory_embedding_controls_v1";
 const CONTROL_MIGRATION_SQL: &str =
@@ -629,68 +629,68 @@ pub(crate) fn enqueue_reindex(
     consent_policy_digest: &str,
     remote_allowed: bool,
 ) -> anyhow::Result<(String, u64, usize)> {
-    let profile = super::vector_store::register_configured_profile(db, cfg)?;
-    if profile.provider_kind == "remote_http" {
-        anyhow::ensure!(remote_allowed, "memory_embedding_remote_consent_required");
-    }
-    let existing_build: Option<i64> = db
-        .query_row(
-            "SELECT generation FROM memory_vector_snapshots
+    super::projection_transaction::atomic(db, |tx| {
+        let profile = super::vector_store::register_configured_profile(tx, cfg)?;
+        if profile.provider_kind == "remote_http" {
+            anyhow::ensure!(remote_allowed, "memory_embedding_remote_consent_required");
+        }
+        let existing_build: Option<i64> = tx
+            .query_row(
+                "SELECT generation FROM memory_vector_snapshots
              WHERE principal_id = ?1 AND profile_id = ?2 AND state = 'building'
              ORDER BY generation DESC LIMIT 1",
-            params![principal_id, profile.profile_id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    anyhow::ensure!(
-        existing_build.is_none(),
-        "memory_embedding_reindex_already_running"
-    );
-    let latest_generation: i64 = db.query_row(
-        "SELECT COALESCE(MAX(generation), ?3) FROM memory_vector_snapshots
+                params![principal_id, profile.profile_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        anyhow::ensure!(
+            existing_build.is_none(),
+            "memory_embedding_reindex_already_running"
+        );
+        let latest_generation: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(generation), ?3) FROM memory_vector_snapshots
          WHERE principal_id = ?1 AND profile_id = ?2",
-        params![principal_id, profile.profile_id, profile.generation as i64],
-        |row| row.get(0),
-    )?;
-    let target_generation = (latest_generation.max(0) as u64).saturating_add(1);
-    let snapshot_id = format!("memory_vector_snapshot_{}", uuid::Uuid::new_v4().simple());
-    let now = crate::now_ts_u64() as i64;
-    let tx = db.unchecked_transaction()?;
-    let source_rows = {
-        let mut stmt = tx.prepare(
+            params![principal_id, profile.profile_id, profile.generation as i64],
+            |row| row.get(0),
+        )?;
+        let target_generation = (latest_generation.max(0) as u64).saturating_add(1);
+        let snapshot_id = format!("memory_vector_snapshot_{}", uuid::Uuid::new_v4().simple());
+        let now = crate::now_ts_u64() as i64;
+        let source_rows = {
+            let mut stmt = tx.prepare(
             "SELECT id, COALESCE(scope_kind, 'principal'), COALESCE(scope_ref, principal_id), search_text
              FROM memory_retrieval_index
              WHERE principal_id = ?1 ORDER BY id",
         )?;
-        let rows = stmt.query_map([principal_id], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-            ))
-        })?;
-        rows.collect::<Result<Vec<_>, _>>()?
-    };
-    let source_digest = digest_rows(&source_rows);
-    tx.execute(
-        "INSERT INTO memory_vector_snapshots(
+            let rows = stmt.query_map([principal_id], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        let source_digest = digest_rows(&source_rows);
+        tx.execute(
+            "INSERT INTO memory_vector_snapshots(
             snapshot_id, principal_id, profile_id, generation, row_count,
             source_digest, snapshot_checksum, state, created_at_ts, updated_at_ts
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '', 'building', ?7, ?7)",
-        params![
-            snapshot_id,
-            principal_id,
-            profile.profile_id,
-            target_generation as i64,
-            source_rows.len() as i64,
-            source_digest,
-            now,
-        ],
-    )?;
-    for (retrieval_id, scope_kind, scope_ref, text) in &source_rows {
-        let projection_digest = super::vector_store::searchable_projection_digest(text);
-        tx.execute(
+            params![
+                snapshot_id,
+                principal_id,
+                profile.profile_id,
+                target_generation as i64,
+                source_rows.len() as i64,
+                source_digest,
+                now,
+            ],
+        )?;
+        for (retrieval_id, scope_kind, scope_ref, text) in &source_rows {
+            let projection_digest = super::vector_store::searchable_projection_digest(text);
+            tx.execute(
             "INSERT INTO memory_embedding_jobs(
                 job_id, retrieval_id, principal_id, scope_kind, scope_ref, profile_id,
                 profile_generation, request_item_id, projection_version, projection_digest,
@@ -715,12 +715,17 @@ pub(crate) fn enqueue_reindex(
                 json!({"schema_version":1,"snapshot_id":snapshot_id}).to_string(),
             ],
         )?;
-    }
-    tx.commit()?;
-    if source_rows.is_empty() {
-        reconcile_snapshot_generation(db, principal_id, &profile.profile_id, target_generation)?;
-    }
-    Ok((snapshot_id, target_generation, source_rows.len()))
+        }
+        if source_rows.is_empty() {
+            reconcile_snapshot_generation(
+                tx,
+                principal_id,
+                &profile.profile_id,
+                target_generation,
+            )?;
+        }
+        Ok((snapshot_id, target_generation, source_rows.len()))
+    })
 }
 
 pub(crate) fn cancel_profile_jobs(
@@ -728,34 +733,34 @@ pub(crate) fn cancel_profile_jobs(
     principal_id: &str,
     profile_id: &str,
 ) -> anyhow::Result<usize> {
-    let now = crate::now_ts_u64() as i64;
-    let tx = db.unchecked_transaction()?;
-    let changed = tx.execute(
-        "UPDATE memory_embedding_jobs SET cancel_requested = 1, updated_at_ts = ?1
+    super::projection_transaction::atomic(db, |tx| {
+        let now = crate::now_ts_u64() as i64;
+        let changed = tx.execute(
+            "UPDATE memory_embedding_jobs SET cancel_requested = 1, updated_at_ts = ?1
          WHERE principal_id = ?2 AND profile_id = ?3
            AND status IN ('queued', 'retry_wait', 'running')
            AND profile_generation IN (
              SELECT generation FROM memory_vector_snapshots
              WHERE principal_id = ?2 AND profile_id = ?3 AND state = 'building'
            )",
-        params![now, principal_id, profile_id],
-    )?;
-    tx.execute(
-        "UPDATE memory_vector_rows SET status = 'tombstone', updated_at_ts = ?1
+            params![now, principal_id, profile_id],
+        )?;
+        tx.execute(
+            "UPDATE memory_vector_rows SET status = 'tombstone', updated_at_ts = ?1
          WHERE principal_id = ?2 AND profile_id = ?3 AND status = 'active'
            AND generation IN (
              SELECT generation FROM memory_vector_snapshots
              WHERE principal_id = ?2 AND profile_id = ?3 AND state = 'building'
            )",
-        params![now, principal_id, profile_id],
-    )?;
-    tx.execute(
-        "UPDATE memory_vector_snapshots SET state = 'corrupt', updated_at_ts = ?1
+            params![now, principal_id, profile_id],
+        )?;
+        tx.execute(
+            "UPDATE memory_vector_snapshots SET state = 'corrupt', updated_at_ts = ?1
          WHERE principal_id = ?2 AND profile_id = ?3 AND state = 'building'",
-        params![now, principal_id, profile_id],
-    )?;
-    tx.commit()?;
-    Ok(changed)
+            params![now, principal_id, profile_id],
+        )?;
+        Ok(changed)
+    })
 }
 
 pub(crate) fn set_profile_paused(
@@ -829,80 +834,80 @@ fn reconcile_snapshot_generation(
     profile_id: &str,
     generation: u64,
 ) -> anyhow::Result<()> {
-    let terminal_failures: i64 = db.query_row(
-        "SELECT COUNT(*) FROM memory_embedding_jobs
+    super::projection_transaction::atomic(db, |tx| {
+        let terminal_failures: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM memory_embedding_jobs
          WHERE principal_id = ?1 AND profile_id = ?2 AND profile_generation = ?3
            AND status IN ('failed', 'cancelled')",
-        params![principal_id, profile_id, generation as i64],
-        |row| row.get(0),
-    )?;
-    if terminal_failures != 0 {
-        db.execute(
-            "UPDATE memory_vector_snapshots SET state = 'corrupt', updated_at_ts = ?1
+            params![principal_id, profile_id, generation as i64],
+            |row| row.get(0),
+        )?;
+        if terminal_failures != 0 {
+            tx.execute(
+                "UPDATE memory_vector_snapshots SET state = 'corrupt', updated_at_ts = ?1
              WHERE principal_id = ?2 AND profile_id = ?3 AND generation = ?4
                AND state = 'building'",
-            params![
-                crate::now_ts_u64() as i64,
-                principal_id,
-                profile_id,
-                generation as i64,
-            ],
-        )?;
-        return Ok(());
-    }
-    let remaining: i64 = db.query_row(
-        "SELECT COUNT(*) FROM memory_embedding_jobs
+                params![
+                    crate::now_ts_u64() as i64,
+                    principal_id,
+                    profile_id,
+                    generation as i64,
+                ],
+            )?;
+            return Ok(());
+        }
+        let remaining: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM memory_embedding_jobs
          WHERE principal_id = ?1 AND profile_id = ?2 AND profile_generation = ?3
            AND status NOT IN ('completed', 'cancelled')",
-        params![principal_id, profile_id, generation as i64],
-        |row| row.get(0),
-    )?;
-    if remaining != 0 {
-        return Ok(());
-    }
-    let snapshot: Option<(String, i64, String)> = db
-        .query_row(
-            "SELECT snapshot_id, row_count, source_digest
+            params![principal_id, profile_id, generation as i64],
+            |row| row.get(0),
+        )?;
+        if remaining != 0 {
+            return Ok(());
+        }
+        let snapshot: Option<(String, i64, String)> = tx
+            .query_row(
+                "SELECT snapshot_id, row_count, source_digest
              FROM memory_vector_snapshots
              WHERE principal_id = ?1 AND profile_id = ?2 AND generation = ?3
                AND state = 'building' LIMIT 1",
-            params![principal_id, profile_id, generation as i64],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .optional()?;
-    let Some((snapshot_id, expected_count, source_digest)) = snapshot else {
-        return Ok(());
-    };
-    let actual_count: i64 = db.query_row(
-        "SELECT COUNT(*) FROM memory_vector_rows
+                params![principal_id, profile_id, generation as i64],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?;
+        let Some((snapshot_id, expected_count, source_digest)) = snapshot else {
+            return Ok(());
+        };
+        let actual_count: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM memory_vector_rows
          WHERE principal_id = ?1 AND profile_id = ?2 AND generation = ?3
            AND status = 'active'",
-        params![principal_id, profile_id, generation as i64],
-        |row| row.get(0),
-    )?;
-    if actual_count != expected_count {
-        return Ok(());
-    }
-    let checksum = format!(
-        "sha256:{:x}",
-        Sha256::digest(format!("{source_digest}\0{actual_count}\0{generation}").as_bytes())
-    );
-    let now = crate::now_ts_u64() as i64;
-    let tx = db.unchecked_transaction()?;
-    tx.execute(
-        "UPDATE memory_vector_snapshots
+            params![principal_id, profile_id, generation as i64],
+            |row| row.get(0),
+        )?;
+        if actual_count != expected_count {
+            return Ok(());
+        }
+        let checksum = format!(
+            "sha256:{:x}",
+            Sha256::digest(format!("{source_digest}\0{actual_count}\0{generation}").as_bytes())
+        );
+        let now = crate::now_ts_u64() as i64;
+        tx.execute(
+            "UPDATE memory_vector_snapshots
          SET state = 'active', snapshot_checksum = ?1, updated_at_ts = ?2
          WHERE snapshot_id = ?3 AND state = 'building'",
-        params![checksum, now, snapshot_id],
-    )?;
-    tx.execute(
-        "UPDATE memory_vector_snapshots SET state = 'retired', updated_at_ts = ?1
+            params![checksum, now, snapshot_id],
+        )?;
+        tx.execute(
+            "UPDATE memory_vector_snapshots SET state = 'retired', updated_at_ts = ?1
          WHERE principal_id = ?2 AND profile_id = ?3 AND generation < ?4
            AND state = 'active'",
-        params![now, principal_id, profile_id, generation as i64],
-    )?;
-    tx.commit()?;
-    Ok(())
+            params![now, principal_id, profile_id, generation as i64],
+        )?;
+        Ok(())
+    })
 }
 
 fn load_job(db: &Connection, job_id: &str) -> anyhow::Result<Option<EmbeddingJob>> {

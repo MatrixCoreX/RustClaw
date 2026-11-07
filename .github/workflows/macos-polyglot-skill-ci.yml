@@ -472,6 +472,62 @@ jobs:
             --require nested_correction_failure_preserves_private_rows_and_the_callers_transaction \
             --require nested_import_failure_preserves_preview_and_the_callers_transaction
           cargo test --locked -p clawd --bin clawd http::memory_routes::actor_fence_tests:: -- --test-threads=1 --nocapture
+      - name: Test retained memory vector policy and read-only status fences
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd http::memory_routes::vector_policy_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_routes::vector_policy_tests:: \
+            --require index_status_returns_the_account_policy_not_a_conversation_policy \
+            --require index_policy_snapshot_keeps_stale_rejection_for_every_action \
+            --require index_policy_status_still_requires_authentication
+          cargo test --locked -p clawd --bin clawd http::memory_routes::vector_policy_tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd http::memory_routes::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_routes::tests:: \
+            --require vector_status_remains_read_only_while_another_connection_holds_the_writer_lock
+          cargo test --locked -p clawd --bin clawd http::memory_routes::tests:: -- --test-threads=1 --nocapture
+      - name: Test remaining memory write authority and policy fences
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd http::memory_routes::write_fence_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_routes::write_fence_tests:: \
+            --require revoked_key_cannot_commit_queued_settings \
+            --require unchanged_identity_can_commit_real_settings \
+            --require revoked_key_cannot_commit_queued_reindex \
+            --require unchanged_identity_can_commit_real_reindex \
+            --require revoked_key_cannot_commit_queued_pause \
+            --require unchanged_identity_can_commit_real_pause \
+            --require revoked_key_cannot_commit_queued_resume \
+            --require unchanged_identity_can_commit_real_resume \
+            --require revoked_key_cannot_commit_queued_cancel \
+            --require unchanged_identity_can_commit_real_cancel \
+            --require revoked_key_cannot_commit_queued_legacy_delete \
+            --require unchanged_identity_can_commit_real_legacy_delete \
+            --require revoked_key_cannot_commit_queued_legacy_expire \
+            --require unchanged_identity_can_commit_real_legacy_expire \
+            --require revoked_key_cannot_commit_queued_legacy_clear \
+            --require unchanged_identity_can_commit_real_legacy_clear \
+            --require revoked_key_cannot_commit_queued_project_link \
+            --require unchanged_identity_can_commit_real_project_link \
+            --require revoked_key_cannot_commit_queued_project_unlink \
+            --require unchanged_identity_can_commit_real_project_unlink \
+            --require changed_original_binding_cannot_commit_settings \
+            --require changed_original_role_cannot_commit_settings \
+            --require changed_original_principal_cannot_commit_settings \
+            --require stale_policy_at_writer_rejects_settings_without_partial_effects \
+            --require stale_policy_at_writer_rejects_reindex_without_partial_effects \
+            --require stale_policy_at_writer_rejects_pause_without_partial_effects \
+            --require stale_policy_at_writer_rejects_resume_without_partial_effects \
+            --require stale_policy_at_writer_rejects_cancel_without_partial_effects \
+            --require final_key_revocation_rolls_back_settings_and_avoids_false_audit \
+            --require late_sql_failure_rolls_back_reindex_effects \
+            --require late_sql_failure_rolls_back_cancel_effects \
+            --require late_sql_failure_rolls_back_project_link_effects \
+            --require empty_reindex_can_activate_inside_a_parent_transaction_without_committing_it
+          cargo test --locked -p clawd --bin clawd http::memory_routes::write_fence_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         run: |
           set -euo pipefail
@@ -875,6 +931,62 @@ jobs:
             --require nested_correction_failure_preserves_private_rows_and_the_callers_transaction \
             --require nested_import_failure_preserves_preview_and_the_callers_transaction
           cargo test --locked -p clawd --bin clawd http::memory_routes::actor_fence_tests:: -- --test-threads=1 --nocapture
+      - name: Test retained memory vector policy and read-only status fences
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd http::memory_routes::vector_policy_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_routes::vector_policy_tests:: \
+            --require index_status_returns_the_account_policy_not_a_conversation_policy \
+            --require index_policy_snapshot_keeps_stale_rejection_for_every_action \
+            --require index_policy_status_still_requires_authentication
+          cargo test --locked -p clawd --bin clawd http::memory_routes::vector_policy_tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd http::memory_routes::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_routes::tests:: \
+            --require vector_status_remains_read_only_while_another_connection_holds_the_writer_lock
+          cargo test --locked -p clawd --bin clawd http::memory_routes::tests:: -- --test-threads=1 --nocapture
+      - name: Test remaining memory write authority and policy fences
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd http::memory_routes::write_fence_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_routes::write_fence_tests:: \
+            --require revoked_key_cannot_commit_queued_settings \
+            --require unchanged_identity_can_commit_real_settings \
+            --require revoked_key_cannot_commit_queued_reindex \
+            --require unchanged_identity_can_commit_real_reindex \
+            --require revoked_key_cannot_commit_queued_pause \
+            --require unchanged_identity_can_commit_real_pause \
+            --require revoked_key_cannot_commit_queued_resume \
+            --require unchanged_identity_can_commit_real_resume \
+            --require revoked_key_cannot_commit_queued_cancel \
+            --require unchanged_identity_can_commit_real_cancel \
+            --require revoked_key_cannot_commit_queued_legacy_delete \
+            --require unchanged_identity_can_commit_real_legacy_delete \
+            --require revoked_key_cannot_commit_queued_legacy_expire \
+            --require unchanged_identity_can_commit_real_legacy_expire \
+            --require revoked_key_cannot_commit_queued_legacy_clear \
+            --require unchanged_identity_can_commit_real_legacy_clear \
+            --require revoked_key_cannot_commit_queued_project_link \
+            --require unchanged_identity_can_commit_real_project_link \
+            --require revoked_key_cannot_commit_queued_project_unlink \
+            --require unchanged_identity_can_commit_real_project_unlink \
+            --require changed_original_binding_cannot_commit_settings \
+            --require changed_original_role_cannot_commit_settings \
+            --require changed_original_principal_cannot_commit_settings \
+            --require stale_policy_at_writer_rejects_settings_without_partial_effects \
+            --require stale_policy_at_writer_rejects_reindex_without_partial_effects \
+            --require stale_policy_at_writer_rejects_pause_without_partial_effects \
+            --require stale_policy_at_writer_rejects_resume_without_partial_effects \
+            --require stale_policy_at_writer_rejects_cancel_without_partial_effects \
+            --require final_key_revocation_rolls_back_settings_and_avoids_false_audit \
+            --require late_sql_failure_rolls_back_reindex_effects \
+            --require late_sql_failure_rolls_back_cancel_effects \
+            --require late_sql_failure_rolls_back_project_link_effects \
+            --require empty_reindex_can_activate_inside_a_parent_transaction_without_committing_it
+          cargo test --locked -p clawd --bin clawd http::memory_routes::write_fence_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         shell: bash
         run: |
