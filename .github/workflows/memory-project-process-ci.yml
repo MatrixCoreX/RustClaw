@@ -1,0 +1,95 @@
+name: Memory project real process acceptance
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'ci/memory-project-process-*']
+    paths:
+      - '.github/workflows/memory-project-process-ci.yml'
+      - 'scripts/tests/*memory_project_process_probe.py'
+      - 'crates/clawd/src/main.rs'
+      - 'crates/clawd/src/memory/project_identity.rs'
+      - 'crates/clawd/src/memory/scope.rs'
+      - 'crates/clawd/src/repo/auth*.rs'
+      - 'crates/clawd/src/http/memory*.rs'
+  pull_request:
+    paths:
+      - '.github/workflows/memory-project-process-ci.yml'
+      - 'scripts/tests/*memory_project_process_probe.py'
+      - 'crates/clawd/src/main.rs'
+      - 'crates/clawd/src/memory/project_identity.rs'
+      - 'crates/clawd/src/memory/scope.rs'
+      - 'crates/clawd/src/repo/auth*.rs'
+      - 'crates/clawd/src/http/memory*.rs'
+
+permissions:
+  contents: read
+
+jobs:
+  project-process:
+    name: Real project startup and restart (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-15]
+    env:
+      CARGO_BUILD_JOBS: '2'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.11'
+      - name: Prepare Linux native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq pkg-config clang libclang-dev protobuf-compiler
+      - name: Prepare macOS native dependencies
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+        run: |
+          set -euo pipefail
+          if ! command -v protoc >/dev/null 2>&1; then brew install protobuf; fi
+          protoc --version
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          key: ${{ runner.os == 'Linux' && 'linux-runtime-read' || 'macos-runtime-tests' }}
+          prefix-key: v1-rust-cargo-profiles
+          cache-targets: 'false'
+          cache-directories: |
+            target/debug
+            target/release
+          cache-bin: 'false'
+          cache-on-failure: 'false'
+      - name: Test probe scope and rejected evidence
+        run: |
+          set -euo pipefail
+          python3 -m pip install --only-binary=:all: PyYAML==6.0.2
+          python3 -B -m unittest discover -s scripts/tests -p 'test_memory_project_process_probe.py'
+      - name: Build exact native consumers
+        run: |
+          set -euo pipefail
+          cargo build --locked -p clawd --bin clawd -p skill-runner --bin skill-runner -p agent-skill-sdk --bin skillctl
+      - name: Probe real startup and restart
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/project-process-evidence"
+          python3 -B scripts/tests/memory_project_process_probe.py \
+            --repository "$GITHUB_WORKSPACE" --source "$GITHUB_SHA" \
+            --clawd "$GITHUB_WORKSPACE/target/debug/clawd" \
+            --skill-runner "$GITHUB_WORKSPACE/target/debug/skill-runner" \
+            --skillctl "$GITHUB_WORKSPACE/target/debug/skillctl" \
+            --output "$RUNNER_TEMP/project-process-evidence"
+      - name: Preserve results and process logs without fixture credentials
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: project-process-${{ runner.os }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/project-process-evidence/result.json
+            ${{ runner.temp }}/project-process-evidence/*/process-*.log
+          if-no-files-found: warn
+          retention-days: 7
