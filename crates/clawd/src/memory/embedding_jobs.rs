@@ -96,18 +96,15 @@ pub(crate) async fn run_one_embedding_batch(
     };
     match result {
         Ok(completed) => {
+            let db = state.core.db.get()?;
             reconcile_snapshot_generation(
-                &state.core.db.get()?,
+                &db,
                 &jobs[0].principal_id,
                 &jobs[0].profile_id,
                 jobs[0].profile_generation,
             )?;
             if completed > 0 {
-                reset_provider_circuit(
-                    &state.core.db.get()?,
-                    &jobs[0].principal_id,
-                    &jobs[0].profile_id,
-                )?;
+                reset_provider_circuit(&db, &jobs[0].principal_id, &jobs[0].profile_id)?;
             }
         }
         Err(dispatch::Failure::Provider(error, failed)) => {
