@@ -93,11 +93,12 @@ def required_recall_memory_gate(job):
     listing=f'cargo test --locked -p clawd --bin clawd {prefix} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
     expected=set()
     for module,file in [('corrections','ux_recall_correction_tests.rs'),('disabling','ux_recall_disable_tests.rs'),
-        ('incremental','ux_recall_incremental_tests.rs'),('boundaries','ux_recall_boundary_tests.rs')]:
+        ('incremental','ux_recall_incremental_tests.rs'),('boundaries','ux_recall_boundary_tests.rs'),
+        ('derived','ux_recall_derived_tests.rs')]:
         source=(ROOT/'crates/clawd/src/memory'/file).read_text(encoding='utf-8')
-        expected.update(module+'::'+name for name in re.findall(r'^#\[test\]\nfn (\w+)\(',source,re.M))
+        expected.update(module+'::'+name for name in re.findall(r'^#\[(?:tokio::)?test\]\n(?:async )?fn (\w+)\(',source,re.M))
     required=set(re.findall(r'--require ([A-Za-z0-9_:]+)',script))
-    return len(expected)==20 and required==expected and listing in script and (
+    return len(expected)==30 and required==expected and listing in script and (
         'python3 scripts/tests/assert_rust_test_selection.py --self-test' in script
         and f'--prefix {prefix}' in script and '|| true' not in script
         and script.index(listing)<script.index(run))

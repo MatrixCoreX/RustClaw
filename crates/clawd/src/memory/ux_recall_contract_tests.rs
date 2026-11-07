@@ -16,3 +16,5 @@ mod incremental;
 mod boundaries;
 #[path = "ux_recall_boundary_fixtures.rs"]
 mod boundary_support;
+#[path = "ux_recall_derived_tests.rs"]
+mod derived;

@@ -394,7 +394,17 @@ jobs:
             --require boundaries::correcting_preference_preserves_another_scope_of_the_same_principal \
             --require boundaries::rotating_admin_credential_does_not_make_owned_canonical_facts_uncorrectable \
             --require boundaries::rebuild_after_credential_rotation_preserves_every_owned_canonical_kind \
-            --require incremental::stale_incremental_preference_payload_cannot_overwrite_a_confirmed_correction
+            --require incremental::stale_incremental_preference_payload_cannot_overwrite_a_confirmed_correction \
+            --require derived::disabled_fact_retires_queued_embeddings \
+            --require derived::disabled_preference_retires_queued_embeddings \
+            --require derived::disabled_transcript_retires_queued_embeddings \
+            --require derived::disabled_fact_deactivates_previously_completed_vectors \
+            --require derived::disabled_preference_deactivates_previously_completed_vectors \
+            --require derived::disabled_transcript_deactivates_previously_completed_vectors \
+            --require derived::corrected_fact_retires_its_old_completed_vectors \
+            --require derived::corrected_preference_retires_its_old_completed_vectors \
+            --require derived::suppression_keeps_another_owners_completed_vectors_and_pending_work \
+            --require derived::missing_index_source_cannot_produce_a_new_active_vector
           cargo test --locked -p clawd --bin clawd memory::ux::recall_contract_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         run: |
@@ -721,7 +731,17 @@ jobs:
             --require boundaries::correcting_preference_preserves_another_scope_of_the_same_principal \
             --require boundaries::rotating_admin_credential_does_not_make_owned_canonical_facts_uncorrectable \
             --require boundaries::rebuild_after_credential_rotation_preserves_every_owned_canonical_kind \
-            --require incremental::stale_incremental_preference_payload_cannot_overwrite_a_confirmed_correction
+            --require incremental::stale_incremental_preference_payload_cannot_overwrite_a_confirmed_correction \
+            --require derived::disabled_fact_retires_queued_embeddings \
+            --require derived::disabled_preference_retires_queued_embeddings \
+            --require derived::disabled_transcript_retires_queued_embeddings \
+            --require derived::disabled_fact_deactivates_previously_completed_vectors \
+            --require derived::disabled_preference_deactivates_previously_completed_vectors \
+            --require derived::disabled_transcript_deactivates_previously_completed_vectors \
+            --require derived::corrected_fact_retires_its_old_completed_vectors \
+            --require derived::corrected_preference_retires_its_old_completed_vectors \
+            --require derived::suppression_keeps_another_owners_completed_vectors_and_pending_work \
+            --require derived::missing_index_source_cannot_produce_a_new_active_vector
           cargo test --locked -p clawd --bin clawd memory::ux::recall_contract_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         shell: bash
