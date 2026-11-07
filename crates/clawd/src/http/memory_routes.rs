@@ -1155,23 +1155,26 @@ async fn get_current_memory_project_handler(
             Ok(identity) => identity,
             Err(resp) => return resp,
         };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(err) => {
-            error!("get current memory project db failed: {}", err);
-            return api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_project_db_failed",
-            );
-        }
-    };
-    match memory::scope::resolve_project_scope(&db, &identity, &state.skill_rt.workspace_root) {
+    let workspace = state.skill_rt.workspace_root.clone();
+    match reading::run(state, identity, move |db, identity| {
+        memory::scope::lookup_project_scope(db, identity, &workspace)?.ok_or_else(|| {
+            writing::reject(
+                StatusCode::NOT_FOUND,
+                "memory_project_identity_uninitialized",
+            )
+        })
+    })
+    .await
+    {
         Ok(project) => api_ok(project),
         Err(err) => {
-            error!("resolve current memory project failed: {}", err);
+            if let Some(response) = writing::execution_error(&err) {
+                return response;
+            }
+            warn!(error = %err, "memory_project_lookup_unavailable");
             api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_project_resolve_failed",
+                StatusCode::SERVICE_UNAVAILABLE,
+                "memory_project_lookup_unavailable",
             )
         }
     }

@@ -25,6 +25,17 @@ pub(crate) fn ensure_principal_identity_schema(db: &Connection) -> anyhow::Resul
     with_identity_transaction(db, ensure_identity_schema_in_transaction)
 }
 
+/// Check readiness without migrating or scanning other credentials.
+pub(crate) fn require_principal_identity_schema(db: &Connection) -> anyhow::Result<()> {
+    let applied = migration_digest(db, PRINCIPAL_MIGRATION_ID)?;
+    let expected = schema_digest();
+    anyhow::ensure!(
+        applied.as_deref() == Some(expected.as_str()),
+        "principal_identity_schema_unavailable"
+    );
+    Ok(())
+}
+
 // An existing transaction remains owned by its caller, which must propagate an
 // error and roll it back. Standalone calls commit only after the entire action.
 pub(crate) fn with_identity_transaction<T>(

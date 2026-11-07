@@ -10,6 +10,22 @@ pub(crate) struct ResolvedProjectIdentity {
     pub(crate) locator_kind: &'static str,
 }
 
+/// A lookup is not admission to initialize identity or repair credentials.
+pub(crate) fn lookup_project_identity(
+    db: &Connection,
+    workspace: &Path,
+) -> anyhow::Result<Option<ResolvedProjectIdentity>> {
+    crate::repo::auth::require_principal_identity_schema(db)?;
+    let (locator_kind, canonical_locator) = canonical_project_locator(workspace)?;
+    let locator_digest = project_locator_digest(locator_kind, &canonical_locator);
+    Ok(
+        project_ref_for_digest(db, &locator_digest)?.map(|project_ref| ResolvedProjectIdentity {
+            project_ref,
+            locator_kind,
+        }),
+    )
+}
+
 pub(crate) fn resolve_project_identity(
     db: &Connection,
     workspace: &Path,

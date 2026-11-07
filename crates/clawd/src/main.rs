@@ -182,12 +182,11 @@ use providers::{
     ChatRequestHints,
 };
 pub(crate) use repo::{
-    bind_channel_identity,
-    build_channel_ingress_snapshot, build_conversation_chat_id, build_submit_task_payload,
-    cancel_one_task_for_user_chat, cancel_task_by_id, cancel_tasks_for_user_chat,
-    check_submit_task_access, check_submit_task_limits, check_task_view_access, create_auth_key,
-    create_pending_channel_bind_session, delete_auth_key_by_id,
-    exchange_credential_status_for_user_key, factory_reset_auth_state,
+    bind_channel_identity, build_channel_ingress_snapshot, build_conversation_chat_id,
+    build_submit_task_payload, cancel_one_task_for_user_chat, cancel_task_by_id,
+    cancel_tasks_for_user_chat, check_submit_task_access, check_submit_task_limits,
+    check_task_view_access, create_auth_key, create_pending_channel_bind_session,
+    delete_auth_key_by_id, exchange_credential_status_for_user_key, factory_reset_auth_state,
     finalize_pending_channel_bind_session, find_task_by_idempotency_key,
     finish_pending_channel_resume, get_auth_key_value_by_id,
     get_pending_channel_bind_session_by_id, get_pending_channel_bind_session_by_token,
@@ -225,8 +224,7 @@ pub(crate) use system_health::{
     active_running_task_count, active_running_task_count_for_user, channel_gateway_process_stats,
     current_rss_bytes, daemon_process_pids_by_name, feishud_process_stats, larkd_process_stats,
     oldest_running_task_age_seconds, oldest_running_task_age_seconds_for_user,
-    telegramd_process_stats, wa_webd_process_stats, wechatd_process_stats,
-    whatsappd_process_stats,
+    telegramd_process_stats, wa_webd_process_stats, wechatd_process_stats, whatsappd_process_stats,
 };
 use task_admin_routes::{
     cancel_one_task, cancel_task_by_id as cancel_task_by_id_handler, cancel_tasks,
@@ -787,6 +785,10 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         memory::scope::ensure_memory_scope_schema(&db)?;
         memory::jobs::ensure_memory_job_schema(&db)?;
         memory::ux::ensure_memory_ux_schema(&db)?;
+        if let Err(error) = memory::project_identity::resolve_project_identity(&db, &workspace_root)
+        {
+            warn!(%error, "memory_project_startup_initialization_unavailable");
+        }
         memory::embedding_jobs::initialize_embedding_runtime(&db, &memory_runtime)?;
         task_context_builder::context_compaction_lifecycle::ensure_context_compaction_lifecycle_schema(&db)?;
         if memory_runtime.hybrid_recall_enabled
@@ -1189,7 +1191,8 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
             agents_by_id: Arc::new(RwLock::new(Arc::new(agents_by_id))),
             agent_runtime_leases: Arc::new(RwLock::new(agent_runtime_leases)),
             http_client: Client::new(),
-            registration_http_client: http::ui_routes::official_registration_http_client_builder().build()?,
+            registration_http_client: http::ui_routes::official_registration_http_client_builder()
+                .build()?,
             public_http_client: crate::public_http_client::build_public_http_client()?,
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(initial_skill_views))),
             active_provider_type,

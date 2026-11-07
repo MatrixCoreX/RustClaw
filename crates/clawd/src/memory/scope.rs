@@ -116,6 +116,22 @@ pub(crate) fn resolve_project_scope(
     })
 }
 
+pub(crate) fn lookup_project_scope(
+    db: &Connection,
+    identity: &AuthIdentity,
+    workspace: &Path,
+) -> anyhow::Result<Option<ResolvedMemoryScope>> {
+    Ok(
+        super::project_identity::lookup_project_identity(db, workspace)?.map(|project| {
+            ResolvedMemoryScope {
+                kind: MemoryScopeKind::Project,
+                scope_ref: project.project_ref,
+                principal_id: identity.principal_id.clone(),
+            }
+        }),
+    )
+}
+
 pub(super) fn require_applied_migration(
     db: &Connection,
     migration_id: &str,

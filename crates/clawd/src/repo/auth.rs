@@ -20,7 +20,7 @@ pub(crate) use auth_principal::credential_digest;
 pub(super) use auth_principal::with_identity_transaction;
 pub(crate) use auth_principal::{
     active_principal_credential, ensure_principal_identity_schema, principal_id_for_user_key,
-    require_active_principal_credential,
+    require_active_principal_credential, require_principal_identity_schema,
 };
 pub(crate) use auth_request::{require_request_identity, RequestIdentityError};
 pub(crate) use auth_seed::seed_channel_bindings;
