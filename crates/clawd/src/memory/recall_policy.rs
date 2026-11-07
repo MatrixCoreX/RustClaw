@@ -90,7 +90,7 @@ pub(super) fn resolve(
         .ok_or_else(|| anyhow::anyhow!("memory_projection_canonical_identity_unavailable"))?;
     let reference = reference
         .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| anyhow::anyhow!("memory_projection_canonical_scope_unavailable"))?;
+        .ok_or_else(|| anyhow::anyhow!("memory_retrieval_scope_ref_required"))?;
     anyhow::ensure!(
         matches!(kind.as_str(), "principal" | "conversation" | "project"),
         "memory_projection_canonical_scope_unavailable"
@@ -153,21 +153,6 @@ pub(super) fn prepare(
     };
     let values =
         params![principal, kind, reference, user_id, chat_id, user_key, memory_id, pref_key];
-    let fts_present: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table'
-         AND name='memory_retrieval_index_fts')",
-        [],
-        |row| row.get(0),
-    )?;
-    if fts_present {
-        db.execute(
-            &format!("DELETE FROM memory_retrieval_index_fts WHERE rowid IN ({targets})"),
-            values,
-        )?;
-    }
-    db.execute(
-        &format!("DELETE FROM memory_retrieval_index WHERE id IN ({targets})"),
-        values,
-    )?;
+    super::projection_retirement::remove(db, targets, values)?;
     Ok(eligible)
 }

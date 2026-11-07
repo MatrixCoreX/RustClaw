@@ -115,25 +115,7 @@ fn remove_targets(
     targets: &str,
     parameters: &[&dyn ToSql],
 ) -> anyhow::Result<usize> {
-    anyhow::ensure!(
-        !db.is_autocommit(),
-        "memory_retrieval_mutation_requires_transaction"
-    );
-    let fts_present = db.query_row(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'memory_retrieval_index_fts'",
-        [],
-        |row| row.get::<_, i64>(0),
-    ).optional()?.is_some();
-    if fts_present {
-        db.execute(
-            &format!("DELETE FROM memory_retrieval_index_fts WHERE rowid IN ({targets})"),
-            parameters,
-        )?;
-    }
-    Ok(db.execute(
-        &format!("DELETE FROM memory_retrieval_index WHERE id IN ({targets})"),
-        parameters,
-    )?)
+    crate::memory::projection_retirement::remove(db, targets, parameters)
 }
 
 #[cfg(test)]
