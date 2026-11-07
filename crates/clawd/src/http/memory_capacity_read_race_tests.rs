@@ -5,8 +5,7 @@ use axum::{
 use std::time::Duration;
 use tower::ServiceExt;
 
-#[path = "memory_capacity_read_race_test_fixtures.rs"]
-mod fixtures;
+use super::memory_read_race_fixtures as fixtures;
 
 #[derive(Clone, Copy)]
 enum Change {

@@ -5,6 +5,11 @@ pub(crate) mod memory_routes;
 
 #[cfg(test)]
 mod memory_capacity_read_race_tests;
+#[cfg(test)]
+#[path = "memory_capacity_read_race_test_fixtures.rs"]
+mod memory_read_race_fixtures;
+#[cfg(test)]
+mod memory_read_boundary_tests;
 pub(crate) mod task_artifacts;
 pub(crate) mod task_context;
 pub(crate) mod task_delivery;

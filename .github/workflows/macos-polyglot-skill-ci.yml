@@ -677,6 +677,79 @@ jobs:
             --require unchanged_user_still_reads_own_state_after_another_credential_changes \
             --require unchanged_admin_still_reads_current_global_diagnostics_without_mutating_storage
           cargo test --locked -p clawd --bin clawd http::memory_capacity_read_race_tests:: -- --test-threads=1 --nocapture
+      - name: Test memory read boundary authentication contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd http::memory_read_boundary_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_read_boundary_tests:: \
+            --require overview::credential_revoked \
+            --require overview::binding_revoked \
+            --require overview::role_downgraded \
+            --require overview::principal_reassigned \
+            --require overview::unchanged_user_other_key_changed \
+            --require overview::unchanged_admin \
+            --require settings::credential_revoked \
+            --require settings::binding_revoked \
+            --require settings::role_downgraded \
+            --require settings::principal_reassigned \
+            --require settings::unchanged_user_other_key_changed \
+            --require settings::unchanged_admin \
+            --require preferences::credential_revoked \
+            --require preferences::binding_revoked \
+            --require preferences::role_downgraded \
+            --require preferences::principal_reassigned \
+            --require preferences::unchanged_user_other_key_changed \
+            --require preferences::unchanged_admin \
+            --require facts::credential_revoked \
+            --require facts::binding_revoked \
+            --require facts::role_downgraded \
+            --require facts::principal_reassigned \
+            --require facts::unchanged_user_other_key_changed \
+            --require facts::unchanged_admin \
+            --require recent::credential_revoked \
+            --require recent::binding_revoked \
+            --require recent::role_downgraded \
+            --require recent::principal_reassigned \
+            --require recent::unchanged_user_other_key_changed \
+            --require recent::unchanged_admin \
+            --require items::credential_revoked \
+            --require items::binding_revoked \
+            --require items::role_downgraded \
+            --require items::principal_reassigned \
+            --require items::unchanged_user_other_key_changed \
+            --require items::unchanged_admin \
+            --require export::credential_revoked \
+            --require export::binding_revoked \
+            --require export::role_downgraded \
+            --require export::principal_reassigned \
+            --require export::unchanged_user_other_key_changed \
+            --require export::unchanged_admin \
+            --require markdown::credential_revoked \
+            --require markdown::binding_revoked \
+            --require markdown::role_downgraded \
+            --require markdown::principal_reassigned \
+            --require markdown::unchanged_user_other_key_changed \
+            --require markdown::unchanged_admin \
+            --require clear_preview::credential_revoked \
+            --require clear_preview::binding_revoked \
+            --require clear_preview::role_downgraded \
+            --require clear_preview::principal_reassigned \
+            --require clear_preview::unchanged_user_other_key_changed \
+            --require clear_preview::unchanged_admin \
+            --require vector_status::credential_revoked \
+            --require vector_status::binding_revoked \
+            --require vector_status::role_downgraded \
+            --require vector_status::principal_reassigned \
+            --require vector_status::unchanged_user_other_key_changed \
+            --require vector_status::unchanged_admin \
+            --require remote_disclosure::credential_revoked \
+            --require remote_disclosure::binding_revoked \
+            --require remote_disclosure::role_downgraded \
+            --require remote_disclosure::principal_reassigned \
+            --require remote_disclosure::unchanged_user_other_key_changed \
+            --require remote_disclosure::unchanged_admin
+          cargo test --locked -p clawd --bin clawd http::memory_read_boundary_tests:: -- --test-threads=1 --nocapture
       - name: Verify both product identities with the shared UI
         run: |
           npm ci --ignore-scripts --prefix UI
@@ -1264,6 +1337,79 @@ jobs:
             --require unchanged_user_still_reads_own_state_after_another_credential_changes \
             --require unchanged_admin_still_reads_current_global_diagnostics_without_mutating_storage
           cargo test --locked -p clawd --bin clawd http::memory_capacity_read_race_tests:: -- --test-threads=1 --nocapture
+      - name: Test memory read boundary authentication contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd http::memory_read_boundary_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_read_boundary_tests:: \
+            --require overview::credential_revoked \
+            --require overview::binding_revoked \
+            --require overview::role_downgraded \
+            --require overview::principal_reassigned \
+            --require overview::unchanged_user_other_key_changed \
+            --require overview::unchanged_admin \
+            --require settings::credential_revoked \
+            --require settings::binding_revoked \
+            --require settings::role_downgraded \
+            --require settings::principal_reassigned \
+            --require settings::unchanged_user_other_key_changed \
+            --require settings::unchanged_admin \
+            --require preferences::credential_revoked \
+            --require preferences::binding_revoked \
+            --require preferences::role_downgraded \
+            --require preferences::principal_reassigned \
+            --require preferences::unchanged_user_other_key_changed \
+            --require preferences::unchanged_admin \
+            --require facts::credential_revoked \
+            --require facts::binding_revoked \
+            --require facts::role_downgraded \
+            --require facts::principal_reassigned \
+            --require facts::unchanged_user_other_key_changed \
+            --require facts::unchanged_admin \
+            --require recent::credential_revoked \
+            --require recent::binding_revoked \
+            --require recent::role_downgraded \
+            --require recent::principal_reassigned \
+            --require recent::unchanged_user_other_key_changed \
+            --require recent::unchanged_admin \
+            --require items::credential_revoked \
+            --require items::binding_revoked \
+            --require items::role_downgraded \
+            --require items::principal_reassigned \
+            --require items::unchanged_user_other_key_changed \
+            --require items::unchanged_admin \
+            --require export::credential_revoked \
+            --require export::binding_revoked \
+            --require export::role_downgraded \
+            --require export::principal_reassigned \
+            --require export::unchanged_user_other_key_changed \
+            --require export::unchanged_admin \
+            --require markdown::credential_revoked \
+            --require markdown::binding_revoked \
+            --require markdown::role_downgraded \
+            --require markdown::principal_reassigned \
+            --require markdown::unchanged_user_other_key_changed \
+            --require markdown::unchanged_admin \
+            --require clear_preview::credential_revoked \
+            --require clear_preview::binding_revoked \
+            --require clear_preview::role_downgraded \
+            --require clear_preview::principal_reassigned \
+            --require clear_preview::unchanged_user_other_key_changed \
+            --require clear_preview::unchanged_admin \
+            --require vector_status::credential_revoked \
+            --require vector_status::binding_revoked \
+            --require vector_status::role_downgraded \
+            --require vector_status::principal_reassigned \
+            --require vector_status::unchanged_user_other_key_changed \
+            --require vector_status::unchanged_admin \
+            --require remote_disclosure::credential_revoked \
+            --require remote_disclosure::binding_revoked \
+            --require remote_disclosure::role_downgraded \
+            --require remote_disclosure::principal_reassigned \
+            --require remote_disclosure::unchanged_user_other_key_changed \
+            --require remote_disclosure::unchanged_admin
+          cargo test --locked -p clawd --bin clawd http::memory_read_boundary_tests:: -- --test-threads=1 --nocapture
 
       - name: Test browser API authentication boundaries
         shell: bash

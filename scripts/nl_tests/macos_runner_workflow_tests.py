@@ -375,7 +375,56 @@ def required_capacity_read_authentication_gate(job):
             and job['steps'].index(step)==job['steps'].index(prior)+1)
 
 
+def required_memory_read_boundary_gate(job):
+    prefix='http::memory_read_boundary_tests::'
+    run=f'cargo test --locked -p clawd --bin clawd {prefix} -- --test-threads=1 --nocapture'
+    if not required_command_gate(job,run):
+        return False
+    step=next(step for step in job['steps'] if run in step.get('run',''))
+    source=(ROOT/'crates/clawd/src/http/memory_read_boundary_tests.rs').read_text(encoding='utf-8')
+    routes=re.findall(r'read_contract!\((\w+), "[^"]+"\);',source)
+    cases=re.findall(r'#\[test\]\s+fn (\w+)\(',source)
+    names={f'{route}::{case}' for route in routes for case in cases}
+    listing=f'cargo test --locked -p clawd --bin clawd {prefix} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
+    prior=next(value for value in job['steps'] if value.get('name')=='Test capacity read authentication snapshot contracts')
+    script=step['run']
+    required=re.findall(r'--require ([A-Za-z0-9_:]+)',script)
+    return (len(routes)==11 and len(cases)==6 and len(names)==66
+            and len(required)==66 and set(required)==names and listing in script
+            and f'--prefix {prefix}' in script and '|| true' not in script
+            and script.index(listing)<script.index(run)
+            and job['steps'].index(step)==job['steps'].index(prior)+1)
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_memory_read_boundary_gate_retains_every_route_and_normal_control(self):
+        jobs=load('macos-polyglot-skill-ci.yml')['jobs']
+        for name in ['runtime-read-linux','polyglot-skill-macos']:
+            self.assertTrue(required_memory_read_boundary_gate(jobs[name]))
+            for mutation in ['selector','listing','require','ignore','conditional','continue','early','late']:
+                with self.subTest(job=name,mutation=mutation):
+                    job=deepcopy(jobs[name])
+                    step=next(step for step in job['steps'] if step.get('name')=='Test memory read boundary authentication contracts')
+                    if mutation=='selector':
+                        step['run']=step['run'].replace('http::memory_read_boundary_tests::','missing::read_boundary::')
+                    elif mutation=='listing':
+                        step['run']=step['run'].replace('--list --color never','--list')
+                    elif mutation=='require':
+                        step['run']=step['run'].replace('--require settings::role_downgraded','--require settings::absent_case')
+                    elif mutation=='ignore':
+                        step['run']=step['run'].replace('--test-threads=1 --nocapture','--test-threads=1 --nocapture || true')
+                    elif mutation=='conditional':
+                        step['if']='false'
+                    elif mutation=='continue':
+                        step['continue-on-error']=True
+                    else:
+                        job['steps'].remove(step)
+                        if mutation=='late': job['steps'].append(step)
+                        else:
+                            prior=next(value for value in job['steps'] if value.get('name')=='Test capacity read authentication snapshot contracts')
+                            job['steps'].insert(job['steps'].index(prior),step)
+                    self.assertFalse(required_memory_read_boundary_gate(job))
+
     def test_capacity_read_authentication_gate_runs_after_complete_old_memory_HTTP(self):
         jobs=load('macos-polyglot-skill-ci.yml')['jobs']
         for name in ['runtime-read-linux','polyglot-skill-macos']:
