@@ -87,6 +87,7 @@ fn remote_reindex_requires_explicit_consent_before_outbound_jobs_exist() {
     config.embedding_credential_ref = "MEMORY_EMBEDDING_TEST_TOKEN".to_string();
     config.embedding_model = "fixture-embedding".to_string();
     config.embedding_dims = 3;
+    super::initialize_embedding_runtime(&db, &config).unwrap();
     let error = super::enqueue_reindex(&db, &config, "principal:test", "sha256:no-consent", false)
         .unwrap_err();
     assert_eq!(

@@ -528,6 +528,19 @@ jobs:
             --require late_sql_failure_rolls_back_project_link_effects \
             --require empty_reindex_can_activate_inside_a_parent_transaction_without_committing_it
           cargo test --locked -p clawd --bin clawd http::memory_routes::write_fence_tests:: -- --test-threads=1 --nocapture
+      - name: Test rejected reindex startup and no-side-effect contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::tests::remote_reindex_requires_explicit_consent_before_outbound_jobs_exist -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::tests:: \
+            --require remote_reindex_requires_explicit_consent_before_outbound_jobs_exist
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::tests::remote_reindex_requires_explicit_consent_before_outbound_jobs_exist -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::rejected_startup_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::rejected_startup_tests:: \
+            --require denied_reindex_does_not_install_schema_receipts_or_profile_state
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::rejected_startup_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         run: |
           set -euo pipefail
@@ -987,6 +1000,19 @@ jobs:
             --require late_sql_failure_rolls_back_project_link_effects \
             --require empty_reindex_can_activate_inside_a_parent_transaction_without_committing_it
           cargo test --locked -p clawd --bin clawd http::memory_routes::write_fence_tests:: -- --test-threads=1 --nocapture
+      - name: Test rejected reindex startup and no-side-effect contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::tests::remote_reindex_requires_explicit_consent_before_outbound_jobs_exist -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::tests:: \
+            --require remote_reindex_requires_explicit_consent_before_outbound_jobs_exist
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::tests::remote_reindex_requires_explicit_consent_before_outbound_jobs_exist -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::rejected_startup_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::rejected_startup_tests:: \
+            --require denied_reindex_does_not_install_schema_receipts_or_profile_state
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::rejected_startup_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         shell: bash
         run: |

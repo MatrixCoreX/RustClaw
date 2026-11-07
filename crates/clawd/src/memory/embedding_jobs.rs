@@ -1,5 +1,9 @@
 use std::time::Duration;
 
+#[cfg(test)]
+#[path = "embedding_reindex_rejection_tests.rs"]
+mod rejected_startup_tests;
+
 use anyhow::anyhow;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde_json::json;

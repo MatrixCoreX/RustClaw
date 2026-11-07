@@ -226,7 +226,49 @@ def required_retained_memory_vector_gate(job):
     return True
 
 
+def required_reindex_startup_gate(job):
+    pairs=[
+        ('memory::embedding_jobs::tests::remote_reindex_requires_explicit_consent_before_outbound_jobs_exist',
+         'memory::embedding_jobs::tests::','remote_reindex_requires_explicit_consent_before_outbound_jobs_exist'),
+        ('memory::embedding_jobs::rejected_startup_tests::',
+         'memory::embedding_jobs::rejected_startup_tests::','denied_reindex_does_not_install_schema_receipts_or_profile_state'),
+    ]
+    for selector,prefix,name in pairs:
+        run=f'cargo test --locked -p clawd --bin clawd {selector} -- --test-threads=1 --nocapture'
+        if not required_command_gate(job,run):
+            return False
+        step=next(step for step in job['steps'] if run in step.get('run',''))
+        script=step['run']
+        listing=f'cargo test --locked -p clawd --bin clawd {selector} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
+        if not (listing in script and f'--prefix {prefix}' in script and f'--require {name}' in script
+                and '|| true' not in script and script.index(listing)<script.index(run)):
+            return False
+    return True
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_reindex_startup_and_rejection_controls_are_required_on_both_platforms(self):
+        jobs=load('macos-polyglot-skill-ci.yml')['jobs']
+        for name in ['runtime-read-linux','polyglot-skill-macos']:
+            self.assertTrue(required_reindex_startup_gate(jobs[name]))
+            for mutation in ['selector','listing','require','ignore','conditional','continue']:
+                with self.subTest(job=name,mutation=mutation):
+                    job=deepcopy(jobs[name])
+                    step=next(step for step in job['steps'] if step.get('name')=='Test rejected reindex startup and no-side-effect contracts')
+                    if mutation=='selector':
+                        step['run']=step['run'].replace('embedding_jobs::rejected_startup_tests::','missing::rejected_startup_tests::')
+                    elif mutation=='listing':
+                        step['run']=step['run'].replace('--list --color never','--list')
+                    elif mutation=='require':
+                        step['run']=step['run'].replace('--require remote_reindex_requires_explicit_consent_before_outbound_jobs_exist','--require absent_case')
+                    elif mutation=='ignore':
+                        step['run']=step['run'].replace('--test-threads=1 --nocapture','--test-threads=1 --nocapture || true')
+                    elif mutation=='conditional':
+                        step['if']='false'
+                    else:
+                        step['continue-on-error']=True
+                    self.assertFalse(required_reindex_startup_gate(job))
+
     def test_retained_memory_vector_policy_and_status_cannot_be_skipped(self):
         jobs=load('macos-polyglot-skill-ci.yml')['jobs']
         for name in ['runtime-read-linux','polyglot-skill-macos']:
