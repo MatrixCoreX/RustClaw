@@ -438,6 +438,18 @@ jobs:
             --require canonical_content_is_rechecked_even_if_its_index_row_did_not_change \
             --require one_failed_publication_does_not_roll_back_valid_batch_peers
           cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::response_commit:: -- --test-threads=1 --nocapture
+      - name: Test terminal snapshot build maintenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::snapshot_maintenance:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::capacity_http_tests::snapshot_maintenance:: \
+            --require unknown_response_expiry_allows_explicit_rebuild_without_provider_replay \
+            --require revoked_queued_build_is_retired_by_paused_maintenance_without_outbound_work \
+            --require terminal_build_cleanup_preserves_active_and_other_owner_profile_generation_snapshots \
+            --require healthy_paused_build_poll_stays_read_only_under_an_independent_writer
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::snapshot_maintenance:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         run: |
           set -euo pipefail
@@ -807,6 +819,18 @@ jobs:
             --require canonical_content_is_rechecked_even_if_its_index_row_did_not_change \
             --require one_failed_publication_does_not_roll_back_valid_batch_peers
           cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::response_commit:: -- --test-threads=1 --nocapture
+      - name: Test terminal snapshot build maintenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::snapshot_maintenance:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::capacity_http_tests::snapshot_maintenance:: \
+            --require unknown_response_expiry_allows_explicit_rebuild_without_provider_replay \
+            --require revoked_queued_build_is_retired_by_paused_maintenance_without_outbound_work \
+            --require terminal_build_cleanup_preserves_active_and_other_owner_profile_generation_snapshots \
+            --require healthy_paused_build_poll_stays_read_only_under_an_independent_writer
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::snapshot_maintenance:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         shell: bash
         run: |

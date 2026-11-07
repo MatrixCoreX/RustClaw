@@ -225,3 +225,6 @@ mod recall_races;
 
 #[path = "embedding_commit_tests.rs"]
 mod response_commit;
+
+#[path = "embedding_snapshot_tests.rs"]
+mod snapshot_maintenance;

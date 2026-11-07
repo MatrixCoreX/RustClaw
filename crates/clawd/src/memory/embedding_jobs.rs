@@ -12,6 +12,8 @@ mod commit;
 mod dispatch;
 #[path = "embedding_source.rs"]
 mod source;
+#[path = "embedding_snapshot_maintenance.rs"]
+mod snapshot_maintenance;
 
 const CONTROL_MIGRATION_ID: &str = "016_memory_embedding_controls_v1";
 const CONTROL_MIGRATION_SQL: &str =
@@ -194,6 +196,7 @@ fn claim_embedding_batch(
                 OR (status = 'running' AND lease_expires_at_ts <= ?1))",
         [now],
     )?;
+    snapshot_maintenance::reconcile(&tx, now)?;
     let job_ids = admitted_embedding_job_ids(
         &tx,
         now,
@@ -231,7 +234,9 @@ fn embedding_batch_needs_write(db: &Connection, now: i64) -> anyhow::Result<bool
         [now],
         |row| row.get(0),
     )?;
-    Ok(maintenance || !admitted_embedding_job_ids(db, now, 1)?.is_empty())
+    Ok(maintenance
+        || snapshot_maintenance::needed(db)?
+        || !admitted_embedding_job_ids(db, now, 1)?.is_empty())
 }
 
 fn admitted_embedding_job_ids(
