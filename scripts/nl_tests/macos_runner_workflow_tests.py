@@ -396,7 +396,56 @@ def required_memory_read_boundary_gate(job):
             and job['steps'].index(step)==job['steps'].index(prior)+1)
 
 
+def required_project_read_gate(job):
+    prefix='http::memory_project_read_tests::'
+    run=f'cargo test --locked -p clawd --bin clawd {prefix} -- --test-threads=1 --nocapture'
+    if not required_command_gate(job,run):
+        return False
+    step=next(step for step in job['steps'] if run in step.get('run',''))
+    root=ROOT/'crates/clawd/src/http'
+    names=re.findall(r'#\[test\]\s+fn (\w+)\(', (root/'memory_project_read_tests.rs').read_text())
+    lookup=re.findall(r'#\[test\]\s+fn (\w+)\(', (root/'memory_project_lookup_tests.rs').read_text())
+    names=names+['lookup::'+name for name in lookup]
+    listing=f'cargo test --locked -p clawd --bin clawd {prefix} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
+    prior=next(value for value in job['steps'] if value.get('name')=='Test memory read boundary authentication contracts')
+    script=step['run']
+    required=re.findall(r'--require ([A-Za-z0-9_:]+)',script)
+    return (len(names)==12 and len(set(names))==12 and len(lookup)==6
+            and len(required)==12 and set(required)==set(names) and listing in script
+            and f'--prefix {prefix}' in script and '|| true' not in script
+            and script.index(listing)<script.index(run)
+            and job['steps'].index(step)==job['steps'].index(prior)+1)
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_project_read_gate_preserves_normal_reads_and_all_new_contracts(self):
+        jobs=load('macos-polyglot-skill-ci.yml')['jobs']
+        for name in ['runtime-read-linux','polyglot-skill-macos']:
+            self.assertTrue(required_project_read_gate(jobs[name]))
+            for mutation in ['selector','listing','require','ignore','conditional','continue','early','late']:
+                with self.subTest(job=name,mutation=mutation):
+                    job=deepcopy(jobs[name])
+                    step=next(step for step in job['steps'] if step.get('name')=='Test project lookup isolation and read-only identity contracts')
+                    if mutation=='selector':
+                        step['run']=step['run'].replace('http::memory_project_read_tests::','missing::project_read::')
+                    elif mutation=='listing':
+                        step['run']=step['run'].replace('--list --color never','--list')
+                    elif mutation=='require':
+                        step['run']=step['run'].replace('--require principal_reassigned_before_project_read','--require absent_case')
+                    elif mutation=='ignore':
+                        step['run']=step['run'].replace('--test-threads=1 --nocapture','--test-threads=1 --nocapture || true')
+                    elif mutation=='conditional':
+                        step['if']='false'
+                    elif mutation=='continue':
+                        step['continue-on-error']=True
+                    else:
+                        job['steps'].remove(step)
+                        if mutation=='late': job['steps'].append(step)
+                        else:
+                            prior=next(value for value in job['steps'] if value.get('name')=='Test memory read boundary authentication contracts')
+                            job['steps'].insert(job['steps'].index(prior),step)
+                    self.assertFalse(required_project_read_gate(job))
+
     def test_memory_read_boundary_gate_retains_every_route_and_normal_control(self):
         jobs=load('macos-polyglot-skill-ci.yml')['jobs']
         for name in ['runtime-read-linux','polyglot-skill-macos']:

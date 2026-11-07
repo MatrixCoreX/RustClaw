@@ -10,6 +10,8 @@ mod memory_capacity_read_race_tests;
 mod memory_read_race_fixtures;
 #[cfg(test)]
 mod memory_read_boundary_tests;
+#[cfg(test)]
+mod memory_project_read_tests;
 pub(crate) mod task_artifacts;
 pub(crate) mod task_context;
 pub(crate) mod task_delivery;
