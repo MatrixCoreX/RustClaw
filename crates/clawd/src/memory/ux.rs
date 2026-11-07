@@ -18,6 +18,10 @@ pub(crate) use exports::{export_memory, export_memory_markdown};
 mod mutations;
 pub(crate) use mutations::{correct_memory, record_feedback};
 
+#[path = "ux_retrieval.rs"]
+mod retrieval;
+pub(crate) use retrieval::check_memory_consistency;
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub(crate) struct MemoryListFilter {
     pub(crate) search: Option<String>,
@@ -403,17 +407,8 @@ pub(crate) fn delete_memory_with_revision(
         Some(now_ts + UNDO_GRACE_SECONDS),
         now_ts,
     )?;
-    let raw_source_id = if current.kind == "recent" {
-        transaction
-            .query_row(
-                "SELECT id FROM memories WHERE memory_id = ?1 AND principal_id = ?2",
-                params![memory_id, principal_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()?
-    } else {
-        None
-    };
+    let retrieval_identity = retrieval::identity(&transaction, &current)?;
+    let raw_source_id = retrieval_identity.source_memory_id;
     super::jobs::request_cancel_for_scope(&transaction, principal_id, Some(&current.scope_ref))?;
     if let Some(source_id) = raw_source_id {
         transaction.execute(
@@ -459,18 +454,7 @@ pub(crate) fn delete_memory_with_revision(
         }
         _ => anyhow::bail!("memory_kind_unsupported"),
     }
-    transaction.execute(
-        "DELETE FROM memory_retrieval_index
-         WHERE principal_id = ?1 AND (
-            source_ref = ?2 OR source_memory_id = ?3
-         )",
-        params![principal_id, memory_id, raw_source_id],
-    )?;
-    let _ = transaction.execute(
-        "DELETE FROM memory_retrieval_index_fts
-         WHERE rowid NOT IN (SELECT id FROM memory_retrieval_index)",
-        [],
-    );
+    retrieval::remove_identity(&transaction, principal_id, &retrieval_identity)?;
     transaction.execute(
         "INSERT INTO memory_privacy_purge_queue(
             purge_id, principal_id, memory_id, object_kind, purge_after_ts, status, created_at_ts
@@ -1187,99 +1171,6 @@ pub(crate) fn confirm_memory_import(
         status: "confirmed".to_string(),
         imported_items,
         existing_items,
-    })
-}
-
-pub(crate) fn check_memory_consistency(
-    db: &Connection,
-    principal_id: &str,
-    repair: bool,
-    now_ts: i64,
-) -> anyhow::Result<MemoryConsistencyReport> {
-    require_memory_ux_schema(db)?;
-    let deleted_canonical_rows = db.query_row(
-        "SELECT COUNT(*) FROM memory_revisions r
-         WHERE r.principal_id = ?1 AND r.operation = 'delete'
-           AND r.undo_expires_at_ts IS NOT NULL
-           AND (EXISTS(SELECT 1 FROM memory_facts f WHERE f.memory_id = r.memory_id)
-             OR EXISTS(SELECT 1 FROM user_preferences p WHERE p.memory_id = r.memory_id)
-             OR EXISTS(SELECT 1 FROM memories m WHERE m.memory_id = r.memory_id))",
-        [principal_id],
-        |row| row.get::<_, i64>(0),
-    )?;
-    let deleted_retrieval_rows = db.query_row(
-        "SELECT COUNT(*) FROM memory_retrieval_index i
-         WHERE i.principal_id = ?1 AND EXISTS(
-           SELECT 1 FROM memory_revisions r
-            WHERE r.principal_id = i.principal_id AND r.operation = 'delete'
-              AND (i.source_ref = r.memory_id)
-         )",
-        [principal_id],
-        |row| row.get::<_, i64>(0),
-    )?;
-    let orphan_retrieval_rows = db.query_row(
-        "SELECT COUNT(*) FROM memory_retrieval_index i
-         WHERE i.principal_id = ?1
-           AND ((i.source_kind = 'memory' AND i.source_memory_id IS NOT NULL AND NOT EXISTS(
-                 SELECT 1 FROM memories m WHERE m.id = i.source_memory_id))
-             OR (i.source_kind = 'memory_fact' AND NOT EXISTS(
-                 SELECT 1 FROM memory_facts f WHERE CAST(f.id AS TEXT) = i.source_ref)))",
-        [principal_id],
-        |row| row.get::<_, i64>(0),
-    )?;
-    let stale_jobs = db.query_row(
-        "SELECT COUNT(*) FROM memory_jobs j WHERE j.principal_id = ?1
-           AND j.status IN ('queued', 'retry_wait', 'running')
-           AND j.source_task_id IS NOT NULL
-           AND NOT EXISTS(
-             SELECT 1 FROM memory_source_events e
-              WHERE e.principal_id = j.principal_id
-                AND e.source_task_id = j.source_task_id
-                AND e.source_sequence BETWEEN COALESCE(j.source_event_start, e.source_sequence)
-                                          AND COALESCE(j.source_event_end, e.source_sequence)
-           )",
-        [principal_id],
-        |row| row.get::<_, i64>(0),
-    )?;
-    let mut repaired_rows = 0i64;
-    if repair {
-        let transaction = db.unchecked_transaction()?;
-        repaired_rows += transaction.execute(
-            "DELETE FROM memory_retrieval_index
-             WHERE principal_id = ?1
-               AND ((source_kind = 'memory' AND source_memory_id IS NOT NULL AND NOT EXISTS(
-                     SELECT 1 FROM memories m WHERE m.id = source_memory_id))
-                 OR (source_kind = 'memory_fact' AND NOT EXISTS(
-                     SELECT 1 FROM memory_facts f WHERE CAST(f.id AS TEXT) = source_ref)))",
-            [principal_id],
-        )? as i64;
-        repaired_rows += transaction.execute(
-            "UPDATE memory_jobs SET cancel_requested = 1, updated_at_ts = ?2
-             WHERE principal_id = ?1 AND status IN ('queued', 'retry_wait', 'running')
-               AND source_task_id IS NOT NULL
-               AND NOT EXISTS(
-                 SELECT 1 FROM memory_source_events e
-                  WHERE e.principal_id = memory_jobs.principal_id
-                    AND e.source_task_id = memory_jobs.source_task_id
-                    AND e.source_sequence BETWEEN COALESCE(memory_jobs.source_event_start, e.source_sequence)
-                                              AND COALESCE(memory_jobs.source_event_end, e.source_sequence)
-               )",
-            params![principal_id, now_ts],
-        )? as i64;
-        let _ = transaction.execute(
-            "DELETE FROM memory_retrieval_index_fts
-             WHERE rowid NOT IN (SELECT id FROM memory_retrieval_index)",
-            [],
-        );
-        transaction.commit()?;
-    }
-    Ok(MemoryConsistencyReport {
-        schema_version: 1,
-        deleted_canonical_rows,
-        deleted_retrieval_rows,
-        orphan_retrieval_rows,
-        stale_jobs,
-        repaired_rows,
     })
 }
 

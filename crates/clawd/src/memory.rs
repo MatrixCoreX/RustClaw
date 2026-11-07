@@ -238,8 +238,10 @@ pub(crate) fn retrieval_source_ref_for_kb_chunk(
     )
 }
 
+pub(super) const MEMORY_FACT_SOURCE_REF_PREFIX: &str = "memory_fact:";
+
 pub(crate) fn retrieval_source_ref_for_memory_fact(fact_id: i64) -> String {
-    format!("memory_fact:{fact_id}")
+    format!("{MEMORY_FACT_SOURCE_REF_PREFIX}{fact_id}")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
