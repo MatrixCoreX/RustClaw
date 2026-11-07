@@ -457,7 +457,70 @@ def required_streaming_import_gate(job):
             and job['steps'].index(step)==job['steps'].index(prior)+1)
 
 
+def required_staged_import_integration_gate(job,kind):
+    if kind=='shared':
+        prefix='memory::ux::import_items::tests::'
+        sources=[(None,ROOT/'crates/clawd/src/memory/ux_import_items_tests.rs')]
+        count=9
+        prior_name='Test bounded streaming memory export decoding'
+    else:
+        prefix='memory::import_upload::flow_tests::'
+        sources=[(module,ROOT/('crates/clawd/src/memory/import_upload/flow_'+module+'_tests.rs'))
+                 for module in ['roundtrip','failure','lifecycle','batching']]
+        count=20
+        prior_name='Test shared memory import filtering and canonical insertion'
+    command=f'cargo test --locked -p clawd --bin clawd {prefix} -- --test-threads=1 --nocapture'
+    if not required_command_gate(job,command):
+        return False
+    step=next(step for step in job['steps'] if command in step.get('run',''))
+    expected=set()
+    for module,path in sources:
+        for name in re.findall(r'#\[test\]\s+fn (\w+)\(',path.read_text()):
+            expected.add((module+'::' if module else '')+name)
+    script=step['run']
+    listing=f'cargo test --locked -p clawd --bin clawd {prefix} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
+    required=re.findall(r'--require ([A-Za-z0-9_:]+)',script)
+    prior=next(value for value in job['steps'] if value.get('name')==prior_name)
+    return (len(expected)==count and len(required)==count and set(required)==expected
+            and listing in script and f'--prefix {prefix}' in script and '|| true' not in script
+            and script.index(listing)<script.index(command)
+            and job['steps'].index(step)==job['steps'].index(prior)+1)
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_shared_and_whole_import_gates_keep_all_atomicity_and_privacy_cases(self):
+        jobs=load('macos-polyglot-skill-ci.yml')['jobs']
+        for name in ['runtime-read-linux','polyglot-skill-macos']:
+            for kind,label,prefix in [
+                ('shared','Test shared memory import filtering and canonical insertion','memory::ux::import_items::tests::'),
+                ('whole','Test staged memory whole preview confirmation and privacy lifecycle','memory::import_upload::flow_tests::')]:
+                self.assertTrue(required_staged_import_integration_gate(jobs[name],kind))
+                for mutation in ['selector','listing','require','ignore','conditional','continue','early','late']:
+                    with self.subTest(job=name,kind=kind,mutation=mutation):
+                        job=deepcopy(jobs[name])
+                        step=next(value for value in job['steps'] if value.get('name')==label)
+                        if mutation=='selector':
+                            step['run']=step['run'].replace(prefix,'missing::integration::')
+                        elif mutation=='listing':
+                            step['run']=step['run'].replace('--list --color never','--list')
+                        elif mutation=='require':
+                            step['run']=re.sub(r'--require [A-Za-z0-9_:]+','--require absent_case',step['run'],count=1)
+                        elif mutation=='ignore':
+                            step['run']=step['run'].replace('--test-threads=1 --nocapture','--test-threads=1 --nocapture || true')
+                        elif mutation=='conditional':
+                            step['if']='false'
+                        elif mutation=='continue':
+                            step['continue-on-error']=True
+                        else:
+                            job['steps'].remove(step)
+                            if mutation=='late':
+                                job['steps'].append(step)
+                            else:
+                                prior_name=('Test bounded streaming memory export decoding' if kind=='shared'
+                                            else 'Test shared memory import filtering and canonical insertion')
+                                prior=next(value for value in job['steps'] if value.get('name')==prior_name)
+                                job['steps'].insert(job['steps'].index(prior),step)
+                        self.assertFalse(required_staged_import_integration_gate(job,kind))
     def test_streaming_import_gate_keeps_all_unicode_checksum_and_io_cases(self):
         jobs=load('macos-polyglot-skill-ci.yml')['jobs']
         for name in ['runtime-read-linux','polyglot-skill-macos']:

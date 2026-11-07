@@ -28,6 +28,7 @@ pub(super) fn purge_private_clear_state(
         params![principal_id, now_ts],
     )?;
     purge_import_sessions(db, principal_id, include_derived)?;
+    crate::memory::import_upload::purge_for_clear(db, principal_id, include_derived, now_ts)?;
     Ok(())
 }
 
@@ -47,18 +48,30 @@ fn purge_import_sessions(
     {
         after = Some(previous_digest.clone());
         let previous = serde_json::from_str::<Value>(&payload).ok();
-        if !include_derived
-            && !previous
-                .as_ref()
-                .and_then(|value| value.get("items"))
-                .and_then(Value::as_array)
-                .is_some_and(|items| {
-                    items
-                        .iter()
-                        .any(|item| item.get("kind").and_then(Value::as_str) == Some("recent"))
-                })
-        {
-            continue;
+        if !include_derived {
+            let staged = match previous.as_ref() {
+                Some(value) => crate::memory::import_upload::recent_payload(
+                    db,
+                    principal_id,
+                    value,
+                    &previous_digest,
+                )?,
+                None => None,
+            };
+            let recent = staged.unwrap_or_else(|| {
+                previous
+                    .as_ref()
+                    .and_then(|value| value.get("items"))
+                    .and_then(Value::as_array)
+                    .is_some_and(|items| {
+                        items
+                            .iter()
+                            .any(|item| item.get("kind").and_then(Value::as_str) == Some("recent"))
+                    })
+            });
+            if !recent {
+                continue;
+            }
         }
         let original_digest = if previous
             .as_ref()

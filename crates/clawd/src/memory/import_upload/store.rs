@@ -145,6 +145,10 @@ pub(crate) fn cancel(
         if upload.state == UploadState::Cancelled {
             return Ok(upload.public());
         }
+        if upload.state == UploadState::Preview {
+            super::lifecycle::cancel_preview(db, actor, &upload, now)?;
+            return Ok(load(db, actor, id)?.public());
+        }
         anyhow::ensure!(
             matches!(upload.state, UploadState::Uploading | UploadState::Parsing),
             UploadError::StateConflict

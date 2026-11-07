@@ -825,6 +825,51 @@ jobs:
             --require underlying_io_failure_keeps_its_actual_error_kind \
             --require actual_two_point_six_megabyte_unicode_export_streams_from_durable_chunks
           cargo test --locked -p clawd --bin clawd memory::import_upload::parser::tests:: -- --test-threads=1 --nocapture
+      - name: Test shared memory import filtering and canonical insertion
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::import_items::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::import_items::tests:: \
+            --require legacy_character_filter_is_explicit_and_not_a_new_streaming_ceiling \
+            --require unsupported_kinds_and_empty_content_are_skipped_for_both_ingress_paths \
+            --require read_only_filter_preserves_provenance_without_granting_source_trust \
+            --require duplicate_filter_is_cross_kind_but_principal_private \
+            --require all_supported_kinds_use_the_same_principal_scoped_low_trust_writer \
+            --require canonical_writer_keeps_existing_fact_and_preference_idempotency \
+            --require canonical_writer_cannot_commit_an_item_outside_the_whole_import_transaction \
+            --require malformed_digest_kind_or_content_is_rejected_without_panicking_or_writing \
+            --require caller_failure_rolls_back_all_shared_item_writes
+          cargo test --locked -p clawd --bin clawd memory::ux::import_items::tests:: -- --test-threads=1 --nocapture
+      - name: Test staged memory whole preview confirmation and privacy lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::import_upload::flow_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::import_upload::flow_tests:: \
+            --require roundtrip::one_whole_preview_and_confirmation_publish_no_early_canonical_rows \
+            --require roundtrip::staged_preview_matches_legacy_logical_digest_and_reuses_its_receipt \
+            --require roundtrip::legacy_preview_reuses_a_staged_receipt_and_the_same_atomic_operation \
+            --require roundtrip::finalize_and_last_chunk_retries_do_not_duplicate_a_whole_preview \
+            --require roundtrip::original_large_unicode_shape_roundtrips_core_without_claiming_http_repair \
+            --require roundtrip::larger_unicode_record_remains_exact_within_the_advertised_resource_budget \
+            --require failure::wrong_export_checksum_releases_provisional_items_but_keeps_resumable_raw_bytes \
+            --require failure::stale_expected_preview_digest_cannot_publish_any_canonical_item \
+            --require failure::failing_second_canonical_insert_rolls_back_the_entire_confirmation \
+            --require failure::revoked_original_binding_cannot_confirm_through_a_surviving_sibling \
+            --require failure::damaged_staged_content_never_matches_the_original_logical_preview_digest \
+            --require lifecycle::cancelling_a_preview_removes_only_its_owned_plaintext_and_releases_its_file_identity \
+            --require lifecycle::full_clear_purges_owned_pending_raw_and_preview_staging_without_touching_another_owner \
+            --require lifecycle::recent_clear_withdraws_recent_preview_but_keeps_a_fact_only_preview \
+            --require lifecycle::a_failed_staging_purge_rolls_back_session_tombstones_and_the_whole_clear \
+            --require lifecycle::confirmed_receipts_keep_audit_metadata_without_retaining_the_imported_plaintext \
+            --require lifecycle::reopened_database_reuses_one_complete_preview_without_reparsing_raw_bytes \
+            --require batching::more_than_ten_thousand_records_share_one_preview_and_one_confirmation \
+            --require batching::later_batch_failure_discards_provisional_rows_but_keeps_the_whole_raw_upload \
+            --require batching::damaged_raw_blob_larger_than_its_pinned_chunk_budget_is_rejected_before_delivery
+          cargo test --locked -p clawd --bin clawd memory::import_upload::flow_tests:: -- --test-threads=1 --nocapture
       - name: Verify both product identities with the shared UI
         run: |
           npm ci --ignore-scripts --prefix UI
@@ -1561,6 +1606,51 @@ jobs:
             --require underlying_io_failure_keeps_its_actual_error_kind \
             --require actual_two_point_six_megabyte_unicode_export_streams_from_durable_chunks
           cargo test --locked -p clawd --bin clawd memory::import_upload::parser::tests:: -- --test-threads=1 --nocapture
+      - name: Test shared memory import filtering and canonical insertion
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::import_items::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::import_items::tests:: \
+            --require legacy_character_filter_is_explicit_and_not_a_new_streaming_ceiling \
+            --require unsupported_kinds_and_empty_content_are_skipped_for_both_ingress_paths \
+            --require read_only_filter_preserves_provenance_without_granting_source_trust \
+            --require duplicate_filter_is_cross_kind_but_principal_private \
+            --require all_supported_kinds_use_the_same_principal_scoped_low_trust_writer \
+            --require canonical_writer_keeps_existing_fact_and_preference_idempotency \
+            --require canonical_writer_cannot_commit_an_item_outside_the_whole_import_transaction \
+            --require malformed_digest_kind_or_content_is_rejected_without_panicking_or_writing \
+            --require caller_failure_rolls_back_all_shared_item_writes
+          cargo test --locked -p clawd --bin clawd memory::ux::import_items::tests:: -- --test-threads=1 --nocapture
+      - name: Test staged memory whole preview confirmation and privacy lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::import_upload::flow_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::import_upload::flow_tests:: \
+            --require roundtrip::one_whole_preview_and_confirmation_publish_no_early_canonical_rows \
+            --require roundtrip::staged_preview_matches_legacy_logical_digest_and_reuses_its_receipt \
+            --require roundtrip::legacy_preview_reuses_a_staged_receipt_and_the_same_atomic_operation \
+            --require roundtrip::finalize_and_last_chunk_retries_do_not_duplicate_a_whole_preview \
+            --require roundtrip::original_large_unicode_shape_roundtrips_core_without_claiming_http_repair \
+            --require roundtrip::larger_unicode_record_remains_exact_within_the_advertised_resource_budget \
+            --require failure::wrong_export_checksum_releases_provisional_items_but_keeps_resumable_raw_bytes \
+            --require failure::stale_expected_preview_digest_cannot_publish_any_canonical_item \
+            --require failure::failing_second_canonical_insert_rolls_back_the_entire_confirmation \
+            --require failure::revoked_original_binding_cannot_confirm_through_a_surviving_sibling \
+            --require failure::damaged_staged_content_never_matches_the_original_logical_preview_digest \
+            --require lifecycle::cancelling_a_preview_removes_only_its_owned_plaintext_and_releases_its_file_identity \
+            --require lifecycle::full_clear_purges_owned_pending_raw_and_preview_staging_without_touching_another_owner \
+            --require lifecycle::recent_clear_withdraws_recent_preview_but_keeps_a_fact_only_preview \
+            --require lifecycle::a_failed_staging_purge_rolls_back_session_tombstones_and_the_whole_clear \
+            --require lifecycle::confirmed_receipts_keep_audit_metadata_without_retaining_the_imported_plaintext \
+            --require lifecycle::reopened_database_reuses_one_complete_preview_without_reparsing_raw_bytes \
+            --require batching::more_than_ten_thousand_records_share_one_preview_and_one_confirmation \
+            --require batching::later_batch_failure_discards_provisional_rows_but_keeps_the_whole_raw_upload \
+            --require batching::damaged_raw_blob_larger_than_its_pinned_chunk_budget_is_rejected_before_delivery
+          cargo test --locked -p clawd --bin clawd memory::import_upload::flow_tests:: -- --test-threads=1 --nocapture
       - name: Test browser API authentication boundaries
         shell: bash
         env:

@@ -6,15 +6,24 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 mod lease;
+mod item_batch;
+mod lifecycle;
+mod confirmation;
 mod parser;
+mod preview;
 mod reader;
+mod staged_payload;
 mod schema;
 mod store;
 
+pub(super) use confirmation::{confirm_staged, mark_confirmed};
 pub(crate) use lease::{claim_parser, renew_parser, ParseLease};
+pub(super) use lifecycle::{purge_for_clear, recent_payload};
 pub(crate) use parser::{parse_export, ParsedExport};
+pub(crate) use preview::{parse_and_preview, ParsePolicy};
 pub(crate) use reader::ChunkReader;
 pub(crate) use schema::initialize_schema;
+pub(super) use staged_payload::is_staged;
 pub(crate) use store::{append, cancel, create, status};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,6 +46,7 @@ pub(crate) enum UploadError {
     InvalidJson,
     ExportSchemaUnsupported,
     ExportChecksumMismatch,
+    AlreadyConfirmed,
 }
 
 impl UploadError {
@@ -60,6 +70,7 @@ impl UploadError {
             Self::InvalidJson => "memory_import_upload_json_invalid",
             Self::ExportSchemaUnsupported => "memory_import_schema_unsupported",
             Self::ExportChecksumMismatch => "memory_import_checksum_invalid",
+            Self::AlreadyConfirmed => "memory_import_already_confirmed",
         }
     }
 }
@@ -252,5 +263,7 @@ fn checked_read<T>(
 
 #[cfg(test)]
 mod storage_tests;
+#[cfg(test)]
+mod flow_tests;
 #[cfg(test)]
 mod test_fixtures;

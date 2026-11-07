@@ -19,6 +19,9 @@ mod clearing;
 mod exports;
 pub(crate) use exports::{export_memory, export_memory_markdown};
 
+#[path = "ux_import_items.rs"]
+pub(super) mod import_items;
+
 #[path = "ux_mutations.rs"]
 mod mutations;
 pub(crate) use mutations::{correct_memory, record_feedback};
@@ -978,45 +981,11 @@ pub(crate) fn preview_memory_import(
     let mut skipped_items = 0usize;
     let mut duplicate_items = 0usize;
     for item in &request.export.items {
-        if !matches!(item.kind.as_str(), "fact" | "preference" | "recent")
-            || item.content.trim().is_empty()
-            || item.content.chars().count() > 32_768
-        {
-            skipped_items += 1;
-            continue;
+        match import_items::prepare(db, principal_id, item, Some(32_768))? {
+            import_items::Decision::Skipped => skipped_items += 1,
+            import_items::Decision::Duplicate => duplicate_items += 1,
+            import_items::Decision::Accepted(item) => accepted.push(item),
         }
-        let (safe_content, redacted) =
-            crate::skill_output_artifact::sensitivity_aware_text_model_view(&item.content);
-        if redacted || safe_content.trim().is_empty() {
-            skipped_items += 1;
-            continue;
-        }
-        let content_digest = digest_text(&safe_content);
-        let exists: bool = db.query_row(
-            "SELECT EXISTS(
-                SELECT 1 FROM memory_facts
-                 WHERE principal_id = ?1 AND status = 'active'
-                   AND (content_digest = ?2 OR fact_text = ?3)
-                UNION ALL
-                SELECT 1 FROM user_preferences
-                 WHERE principal_id = ?1
-                   AND (content_digest = ?2 OR pref_value = ?3)
-            )",
-            params![principal_id, content_digest, safe_content],
-            |row| row.get(0),
-        )?;
-        if exists {
-            duplicate_items += 1;
-            continue;
-        }
-        accepted.push(json!({
-            "kind": item.kind,
-            "content": safe_content,
-            "content_digest": content_digest,
-            "source_memory_id": item.id,
-            "source_scope_kind": item.scope_kind,
-            "source_origin": item.origin,
-        }));
     }
     let payload = json!({
         "schema_version": 1,
@@ -1116,6 +1085,16 @@ pub(crate) fn confirm_memory_import(
             "memory_import_preview_conflict"
         );
         let payload: Value = serde_json::from_str(&preview_json)?;
+        if super::import_upload::is_staged(&payload) {
+            return super::import_upload::confirm_staged(
+                transaction,
+                principal_id,
+                &user_key,
+                request,
+                &payload,
+                now_ts,
+            );
+        }
         let computed_digest = format!("sha256:{:x}", Sha256::digest(serde_json::to_vec(&payload)?));
         anyhow::ensure!(
             computed_digest == payload_digest,
@@ -1132,76 +1111,14 @@ pub(crate) fn confirm_memory_import(
         let mut prospective =
             (!items.is_empty()).then(|| writing::GrowthAdmission::begin(transaction));
         for item in items {
-            let content = item["content"]
-                .as_str()
-                .ok_or_else(|| anyhow!("memory_import_preview_corrupt"))?;
-            let content_digest = item["content_digest"]
-                .as_str()
-                .ok_or_else(|| anyhow!("memory_import_preview_corrupt"))?;
-            let idempotency_key = format!("import:{content_digest}");
-            let changed = if item["kind"].as_str() == Some("preference") {
-                let item_key = format!(
-                    "imported_{}",
-                    &content_digest[7..23.min(content_digest.len())]
-                );
-                transaction.execute(
-                    "INSERT INTO user_preferences(
-                    memory_id, user_id, chat_id, user_key, principal_id, scope_kind, scope_ref,
-                    pref_key, pref_value, confidence, source, updated_at, updated_at_ts,
-                    origin, row_revision, legacy_scope_inferred, content_digest,
-                    idempotency_key, source_refs_json, evidence_refs_json, trust_tier,
-                    sensitivity, last_verified_at_ts, modified_at_ts
-                 ) SELECT ?1, 0, 0, ?2, ?3, 'principal', ?3, ?4, ?5, 0.5,
-                          'memory_import', ?6, ?7, 'imported_legacy', 1, 0, ?8, ?9,
-                          '[]', '[]', 'imported_legacy', 'normal', ?7, ?7
-                   WHERE NOT EXISTS(
-                       SELECT 1 FROM user_preferences
-                        WHERE principal_id = ?3 AND content_digest = ?8
-                   )",
-                    params![
-                        format!("memory_{}", uuid::Uuid::new_v4().simple()),
-                        user_key,
-                        principal_id,
-                        item_key,
-                        content,
-                        now_ts.to_string(),
-                        now_ts,
-                        content_digest,
-                        idempotency_key,
-                    ],
-                )?
-            } else {
-                let item_key = format!(
-                    "imported_{}",
-                    &content_digest[7..23.min(content_digest.len())]
-                );
-                transaction.execute(
-                    "INSERT INTO memory_facts(
-                    memory_id, user_id, chat_id, user_key, principal_id, scope_kind, scope_ref,
-                    namespace, fact_key, fact_value, fact_text, confidence, source_kind,
-                    source_ref, source_memory_ids_json, reason, created_at_ts, updated_at_ts,
-                    safety_flag, status, origin, row_revision, legacy_scope_inferred,
-                    content_digest, idempotency_key, source_refs_json, evidence_refs_json,
-                    trust_tier, sensitivity, last_verified_at_ts, modified_at_ts
-                 ) VALUES (?1, 0, 0, ?2, ?3, 'principal', ?3, 'imported_memory', ?4,
-                           ?5, ?5, 0.5, 'memory_import', ?6, '[]', 'import_preview_confirmed',
-                           ?7, ?7, 'normal', 'active', 'imported_legacy', 1, 0, ?8, ?9,
-                           '[]', '[]', 'imported_legacy', 'normal', ?7, ?7)
-                 ON CONFLICT(principal_id, scope_kind, scope_ref, idempotency_key)
-                 WHERE idempotency_key IS NOT NULL AND status = 'active' DO NOTHING",
-                    params![
-                        format!("memory_{}", uuid::Uuid::new_v4().simple()),
-                        user_key,
-                        principal_id,
-                        item_key,
-                        content,
-                        request.import_id,
-                        now_ts,
-                        content_digest,
-                        idempotency_key,
-                    ],
-                )?
-            };
+            let changed = import_items::insert(
+                transaction,
+                principal_id,
+                &user_key,
+                &request.import_id,
+                item,
+                now_ts,
+            )?;
             if changed == 1 {
                 // The insert may be a true idempotent no-op. Check admission
                 // only for actual content growth; any rejection rolls it back.
@@ -1217,6 +1134,12 @@ pub(crate) fn confirm_memory_import(
             "UPDATE memory_import_sessions SET status = 'confirmed', confirmed_at_ts = ?3
          WHERE import_id = ?1 AND principal_id = ?2 AND status = 'preview'",
             params![request.import_id, principal_id, now_ts],
+        )?;
+        super::import_upload::mark_confirmed(
+            transaction,
+            principal_id,
+            &request.import_id,
+            now_ts,
         )?;
         if let Some(admission) = admission {
             admission.finish(transaction)?;

@@ -50,12 +50,13 @@ impl<'a> ChunkReader<'a> {
             lease::require_lease(db, self.actor, self.lease)?;
             let (bytes, expected, count) = db
                 .query_row(
-                    "SELECT content,content_digest,byte_count FROM memory_import_upload_chunks
+                    "SELECT CASE WHEN typeof(content)='blob' AND LENGTH(content)<=?3 THEN content END,
+                        content_digest,byte_count FROM memory_import_upload_chunks
                  WHERE upload_id=?1 AND byte_offset=?2",
-                    params![self.lease.upload_id, self.position],
+                    params![self.lease.upload_id, self.position, self.lease.chunk_bytes],
                     |row| {
                         Ok((
-                            row.get::<_, Vec<u8>>(0)?,
+                            row.get::<_, Option<Vec<u8>>>(0)?,
                             row.get::<_, String>(1)?,
                             row.get::<_, u64>(2)?,
                         ))
@@ -63,6 +64,7 @@ impl<'a> ChunkReader<'a> {
                 )
                 .optional()?
                 .ok_or(UploadError::Corrupt)?;
+            let bytes = bytes.ok_or(UploadError::Corrupt)?;
             anyhow::ensure!(
                 count > 0
                     && count <= self.lease.chunk_bytes
