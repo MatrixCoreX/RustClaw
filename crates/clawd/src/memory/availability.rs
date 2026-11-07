@@ -85,6 +85,19 @@ pub(crate) fn observe_sqlite(
     soft_limit: u64,
     sampled_at_ts: i64,
 ) -> anyhow::Result<(MemoryAvailability, Option<String>)> {
+    observe_with_domain_sampler(db, settings, is_admin, soft_limit, sampled_at_ts, || {
+        measurements::memory_btrees(db)
+    })
+}
+
+fn observe_with_domain_sampler(
+    db: &Connection,
+    settings: MemoryEffectiveSettings,
+    is_admin: bool,
+    soft_limit: u64,
+    sampled_at_ts: i64,
+    measure_domain: impl Fn() -> ByteMeasurement,
+) -> anyhow::Result<(MemoryAvailability, Option<String>)> {
     super::ux::require_memory_ux_schema(db)?;
     let owner = &settings.target_principal_id;
     let quota = super::capacity::principal_quota_snapshot(db, owner)?;
@@ -128,13 +141,15 @@ pub(crate) fn observe_sqlite(
         Err(_) => ByteMeasurement::unavailable(MeasurementUnavailable::QueryFailed),
     };
     let unavailable = || ByteMeasurement::unavailable(MeasurementUnavailable::InvalidValue);
-    // Share one measurement with the manual-growth observation. Ordinary
-    // callers receive the decision, never the global byte count or limit.
-    let measured_domain = measurements::memory_btrees(db);
+    // This cache belongs to one observation, never a caller or a later read.
+    // Invalid ordinary requests skip the scan; administrators still receive
+    // diagnostics. Admission and diagnostics reuse the same value or failure.
+    let measured_domain = std::cell::OnceCell::new();
+    let domain_measurement = || measured_domain.get_or_init(&measure_domain).clone();
     let manual = super::growth_availability::probe(
         db,
         super::growth_availability::ProbePhase::BeforeGrowth,
-        || measured_domain.clone(),
+        &domain_measurement,
     );
     let manual_limit = if is_admin {
         manual
@@ -151,7 +166,7 @@ pub(crate) fn observe_sqlite(
                 .unwrap_or_else(unavailable),
             ByteMeasurement::measured(soft_limit),
             measurements::allocated_pages(db, "PRAGMA page_count"),
-            measured_domain,
+            domain_measurement(),
             measurements::allocated_pages(db, "PRAGMA freelist_count"),
             ByteMeasurement::unavailable(MeasurementUnavailable::NotSampled),
             measurements::database_path(db),
@@ -208,3 +223,7 @@ pub(crate) fn observe_sqlite(
 #[cfg(test)]
 #[path = "availability_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "availability_sampling_tests.rs"]
+mod sampling_tests;

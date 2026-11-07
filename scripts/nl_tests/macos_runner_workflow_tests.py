@@ -339,7 +339,50 @@ def required_manual_growth_observation_gate(job):
     return True
 
 
+def required_lazy_domain_sampling_gate(job):
+    prefix='memory::availability::sampling_tests::'
+    run=f'cargo test --locked -p clawd --bin clawd {prefix} -- --test-threads=1 --nocapture'
+    if not required_command_gate(job,run):
+        return False
+    step=next(step for step in job['steps'] if run in step.get('run',''))
+    source=(ROOT/'crates/clawd/src/memory/availability_sampling_tests.rs').read_text(encoding='utf-8')
+    names=re.findall(r'^#\[test\]\nfn (\w+)\(',source,re.M)
+    listing=f'cargo test --locked -p clawd --bin clawd {prefix} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
+    prior=next(value for value in job['steps'] if value.get('name')=='Test manual memory growth availability and read-only HTTP projection')
+    script=step['run']
+    return (len(names)==10 and len(set(names))==10 and listing in script
+            and f'--prefix {prefix}' in script and '|| true' not in script
+            and set(re.findall(r'--require ([A-Za-z0-9_:]+)',script))==set(names)
+            and script.index(listing)<script.index(run)
+            and job['steps'].index(step)<job['steps'].index(prior))
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_lazy_domain_sampling_gate_preserves_all_required_native_cases(self):
+        jobs=load('macos-polyglot-skill-ci.yml')['jobs']
+        for name in ['runtime-read-linux','polyglot-skill-macos']:
+            self.assertTrue(required_lazy_domain_sampling_gate(jobs[name]))
+            for mutation in ['selector','listing','require','ignore','conditional','continue','late']:
+                with self.subTest(job=name,mutation=mutation):
+                    job=deepcopy(jobs[name])
+                    step=next(step for step in job['steps'] if step.get('name')=='Test lazy memory domain sampling and fresh observations')
+                    if mutation=='selector':
+                        step['run']=step['run'].replace('memory::availability::sampling_tests::','missing::sampling_tests::')
+                    elif mutation=='listing':
+                        step['run']=step['run'].replace('--list --color never','--list')
+                    elif mutation=='require':
+                        step['run']=step['run'].replace('--require failed_actual_measurement_is_shared_once_and_a_later_read_can_recover','--require absent_case')
+                    elif mutation=='ignore':
+                        step['run']=step['run'].replace('--test-threads=1 --nocapture','--test-threads=1 --nocapture || true')
+                    elif mutation=='conditional':
+                        step['if']='false'
+                    elif mutation=='continue':
+                        step['continue-on-error']=True
+                    else:
+                        job['steps'].remove(step)
+                        job['steps'].append(step)
+                    self.assertFalse(required_lazy_domain_sampling_gate(job))
+
     def test_manual_growth_observation_and_authenticated_http_gate_is_required(self):
         jobs=load('macos-polyglot-skill-ci.yml')['jobs']
         for name in ['runtime-read-linux','polyglot-skill-macos']:

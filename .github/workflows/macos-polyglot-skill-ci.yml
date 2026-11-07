@@ -541,6 +541,23 @@ jobs:
             --prefix memory::embedding_jobs::rejected_startup_tests:: \
             --require denied_reindex_does_not_install_schema_receipts_or_profile_state
           cargo test --locked -p clawd --bin clawd memory::embedding_jobs::rejected_startup_tests:: -- --test-threads=1 --nocapture
+      - name: Test lazy memory domain sampling and fresh observations
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::availability::sampling_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::availability::sampling_tests:: \
+            --require missing_state_ordinary_read_skips_domain_scan_without_repair \
+            --require unknown_state_ordinary_read_skips_domain_scan_without_normalizing \
+            --require missing_policy_ordinary_read_skips_domain_scan_without_inserting_defaults \
+            --require damaged_policy_ordinary_read_skips_domain_scan_without_rewriting_policy \
+            --require unbound_explicit_stop_ordinary_read_skips_domain_scan \
+            --require healthy_ordinary_read_samples_once_without_exposing_global_bytes_or_path \
+            --require healthy_admin_read_reuses_one_actual_sample_for_decision_and_diagnostics \
+            --require admin_missing_policy_still_samples_once_for_read_only_diagnostics \
+            --require a_later_observation_resamples_changed_storage_instead_of_reusing_old_bytes \
+            --require failed_actual_measurement_is_shared_once_and_a_later_read_can_recover
+          cargo test --locked -p clawd --bin clawd memory::availability::sampling_tests:: -- --test-threads=1 --nocapture
       - name: Test manual memory growth availability and read-only HTTP projection
         shell: bash
         run: |
@@ -1097,6 +1114,23 @@ jobs:
             --prefix memory::embedding_jobs::rejected_startup_tests:: \
             --require denied_reindex_does_not_install_schema_receipts_or_profile_state
           cargo test --locked -p clawd --bin clawd memory::embedding_jobs::rejected_startup_tests:: -- --test-threads=1 --nocapture
+      - name: Test lazy memory domain sampling and fresh observations
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::availability::sampling_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::availability::sampling_tests:: \
+            --require missing_state_ordinary_read_skips_domain_scan_without_repair \
+            --require unknown_state_ordinary_read_skips_domain_scan_without_normalizing \
+            --require missing_policy_ordinary_read_skips_domain_scan_without_inserting_defaults \
+            --require damaged_policy_ordinary_read_skips_domain_scan_without_rewriting_policy \
+            --require unbound_explicit_stop_ordinary_read_skips_domain_scan \
+            --require healthy_ordinary_read_samples_once_without_exposing_global_bytes_or_path \
+            --require healthy_admin_read_reuses_one_actual_sample_for_decision_and_diagnostics \
+            --require admin_missing_policy_still_samples_once_for_read_only_diagnostics \
+            --require a_later_observation_resamples_changed_storage_instead_of_reusing_old_bytes \
+            --require failed_actual_measurement_is_shared_once_and_a_later_read_can_recover
+          cargo test --locked -p clawd --bin clawd memory::availability::sampling_tests:: -- --test-threads=1 --nocapture
       - name: Test manual memory growth availability and read-only HTTP projection
         shell: bash
         run: |
