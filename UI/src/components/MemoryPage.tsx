@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Database, Download, FileUp, Loader2, RefreshCw, Trash2, Undo2 } from "lucide-react";
+import { Database, Download, Loader2, RefreshCw, Trash2, Undo2 } from "lucide-react";
 
 import { formatUnixDateTime } from "../lib/date-format";
 import {
@@ -21,6 +21,8 @@ import type { MemoryListFilters } from "../hooks/useMemoryRuntime";
 import type { KbIdentity } from "../lib/kb-maintenance";
 import { KbMaintenancePanel } from "./KbMaintenancePanel";
 import { MemoryCapacityPanel } from "./MemoryCapacityPanel";
+import { MemoryImportControls } from "./MemoryImportControls";
+import type { MemoryImportProgress } from "../lib/memory-import-upload";
 
 type UiLanguage = "zh" | "en";
 type ClearScope = "recent" | "all";
@@ -43,6 +45,7 @@ export interface MemoryPageProps {
   memoryFacts: MemoryFactItem[];
   memoryRecent: MemoryRecentItem[];
   memoryActionLoading: string | null;
+  memoryImportProgress: MemoryImportProgress | null;
   memorySettingsSaving: boolean;
   memoryClearScope: ClearScope;
   memoryPage: MemoryPageResult | null;
@@ -63,6 +66,8 @@ export interface MemoryPageProps {
   onUndoMemoryMutation: () => void | Promise<void>;
   onExportMemory: (format?: "json" | "markdown") => void | Promise<void>;
   onImportMemory: (file: File) => void | Promise<void>;
+  onResumeMemoryImport: () => void | Promise<void>;
+  onCancelMemoryImport: () => void | Promise<void>;
   onClearMemoryScope: () => void | Promise<void>;
   onUpdateMemorySetting: (kind: "use" | "generate", enabled: boolean) => void | Promise<void>;
   onUpdateMemoryExternalPolicy: (policy: "exclude" | "evidence_only" | "allow") => void | Promise<void>;
@@ -92,6 +97,7 @@ export function MemoryPage({
   memoryFacts,
   memoryRecent,
   memoryActionLoading,
+  memoryImportProgress,
   memorySettingsSaving,
   memoryClearScope,
   memoryPage,
@@ -108,6 +114,8 @@ export function MemoryPage({
   onUndoMemoryMutation,
   onExportMemory,
   onImportMemory,
+  onResumeMemoryImport,
+  onCancelMemoryImport,
   onClearMemoryScope,
   onUpdateMemorySetting,
   onUpdateMemoryExternalPolicy,
@@ -216,21 +224,8 @@ export function MemoryPage({
               <Download className="h-3.5 w-3.5" />
               {t("导出 Markdown", "Export Markdown")}
             </button>
-            <label className="theme-secondary-btn cursor-pointer px-3 py-2 text-xs">
-              <FileUp className="h-3.5 w-3.5" />
-              {t("导入预检", "Preview import")}
-              <input
-                type="file"
-                accept="application/json,.json"
-                className="sr-only"
-                disabled={memoryActionLoading === "import"}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void onImportMemory(file);
-                  event.currentTarget.value = "";
-                }}
-              />
-            </label>
+            <MemoryImportControls t={t} progress={memoryImportProgress} onImport={onImportMemory}
+              onResume={onResumeMemoryImport} onCancel={onCancelMemoryImport} />
           </div>
         </div>
         <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-7">

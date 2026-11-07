@@ -258,7 +258,8 @@ for (const kind of ["delete", "clear", "import"] as const) {
     try {
       const task = await begin(() => kind === "delete" ? host.runtime.deleteMemoryItemWithRevision("fixture", 1)
         : kind === "clear" ? host.runtime.clearMemoryScope()
-          : host.runtime.importMemory({ text: async () => "{}" } as File));
+          : host.runtime.importMemory(new File(["{}"], "memory.json", { type: "application/json" })));
+      if (kind === "import") assert.equal(host.runtime.memoryImportProgress?.phase, "preview");
       const before = [...writes];
       await host.scope("B");
       await act(async () => { approval.resolve(true); await task.pending; });
@@ -270,13 +271,14 @@ for (const kind of ["delete", "clear", "import"] as const) {
 }
 
 test("memory import file parsing cannot send an old file through a changed owner", async () => {
-  const content = deferred<string>();
+  const content = deferred<ArrayBuffer>();
   let calls = 0;
   const host = await mount(async (path) => { calls++; return json(data(path, "A")); });
   try {
-    const task = await begin(() => host.runtime.importMemory({ text: () => content.promise } as File));
+    const task = await begin(() => host.runtime.importMemory({ size: 2,
+      slice: () => ({ arrayBuffer: () => content.promise }) } as unknown as File));
     await host.scope("B");
-    await act(async () => { content.resolve("{}"); await task.pending; });
+    await act(async () => { content.resolve(new TextEncoder().encode("{}").buffer); await task.pending; });
     assert.equal(calls, 0);
   } finally { await host.close(); }
 });

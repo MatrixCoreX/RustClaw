@@ -463,6 +463,7 @@ export default function App() {
     memoryError,
     memoryMessage,
     memoryActionLoading,
+    memoryImportProgress,
     memorySettingsSaving,
     memorySettingScope,
     memoryClearScope,
@@ -480,6 +481,8 @@ export default function App() {
     undoMemoryMutation,
     exportMemory,
     importMemory,
+    resumeMemoryImport,
+    cancelMemoryImport,
     clearMemoryScope,
     updateMemorySetting,
     updateMemoryExternalPolicy,
@@ -2681,6 +2684,7 @@ export default function App() {
               memoryFacts={memoryFacts}
               memoryRecent={memoryRecent}
               memoryActionLoading={memoryActionLoading}
+              memoryImportProgress={memoryImportProgress}
               memorySettingsSaving={memorySettingsSaving}
               memoryClearScope={memoryClearScope}
               memoryPage={memoryPage}
@@ -2697,6 +2701,8 @@ export default function App() {
               onUndoMemoryMutation={undoMemoryMutation}
               onExportMemory={exportMemory}
               onImportMemory={importMemory}
+              onResumeMemoryImport={resumeMemoryImport}
+              onCancelMemoryImport={cancelMemoryImport}
               onClearMemoryScope={clearMemoryScope}
               onUpdateMemorySetting={updateMemorySetting}
               onUpdateMemoryExternalPolicy={updateMemoryExternalPolicy}

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import React from "react";
+import { createHash } from "node:crypto";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { UiDialogProvider, useUiDialog, type UiConfirmOptions } from "../components/UiDialogProvider";
 import { useMemoryRuntime, type MemoryListFilters } from "./useMemoryRuntime";
@@ -42,8 +43,23 @@ export function page(owner: string, number = 1) {
   }] };
 }
 
-export function data(path: string, owner: string) {
+function importPreview() {
+  return { schema_version: 1, import_id: "fixture-import", payload_digest: `sha256:${"0".repeat(64)}`,
+    accepted_items: 1, skipped_items: 0, duplicate_items: 0, trust_tier: "imported_legacy", scope_kind: "principal" };
+}
+
+export function data(path: string, owner: string, method?: string) {
   const url = new URL(path, "https://fixture.invalid");
+  if (url.pathname === "/v1/memory/import/policy") return {
+    schema_version: 1, protocol: "memory-import-upload-v1", max_file_bytes: "10485760", max_chunk_bytes: "1048576",
+    max_value_bytes: "1048576", file_limit_scope: "memory_domain_budget",
+  };
+  if (url.pathname.startsWith("/v1/memory/import/uploads")) {
+    if (url.pathname.endsWith("/preview")) return importPreview();
+    return { schema_version: 1, upload_id: "fixture-upload", file_digest: `sha256:${createHash("sha256").update("{}").digest("hex")}`,
+      total_bytes: "2", received_bytes: url.pathname.endsWith("/chunks") ? "2" : "0", chunk_bytes: "1048576", revision: "1",
+      state: method === "DELETE" ? "cancelled" : "uploading" };
+  }
   switch (url.pathname) {
     case "/v1/memory": return {
       long_term_enabled: true, hybrid_recall_enabled: true,
@@ -64,9 +80,7 @@ export function data(path: string, owner: string) {
     case "/v1/memory/vector/status": return { schema_version: 1, provider_location: "local", state: "ready",
       policy_digest: settings(owner).policy_digest,
       active_generation: 1, queued_jobs: 0, running_jobs: 0, failed_jobs: 0, indexed_rows: 1, remote_consent: "exclude" };
-    case "/v1/memory/import/preview": return { schema_version: 1, import_id: "fixture-import",
-      payload_digest: "fixture-digest", accepted_items: 1, skipped_items: 0, duplicate_items: 0,
-      trust_tier: "imported_legacy", scope_kind: "principal" };
+    case "/v1/memory/import/preview": return importPreview();
     case "/v1/memory/import/confirm": return { schema_version: 1, import_id: "fixture-import",
       status: "confirmed", imported_items: 1, existing_items: 0 };
     case "/v1/memory/clear/preview": return { schema_version: 1, mode: "transcript",
@@ -77,7 +91,7 @@ export function data(path: string, owner: string) {
 }
 
 export function backend(owner: () => string): ApiFetch {
-  return async (path) => json(data(path, owner()));
+  return async (path, init) => json(data(path, owner(), init?.method));
 }
 
 export async function mount(apiFetch: ApiFetch, initialScope = "A",

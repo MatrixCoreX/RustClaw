@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { useUiDialog, type UiConfirmOptions } from "../components/UiDialogProvider";
 import { formatUiError } from "../lib/ui-error";
+import { cancelMemoryImport as cancelStagedImport, MemoryImportTransportError, prepareMemoryImport } from "../lib/memory-import-upload";
+import { memoryImportFailure } from "../lib/memory-import-display";
 import type {
-  ApiResponse, MemoryClearPreview, MemoryExportResult, MemoryFactItem, MemoryImportPreviewResult,
+  ApiResponse, MemoryClearPreview, MemoryExportResult, MemoryFactItem,
   MemoryImportResult, MemoryMarkdownExportResult, MemoryMutationResult, MemoryOverviewResponse,
   MemoryPageResult, MemoryPreferenceItem, MemoryRecentItem, MemorySettingsResult,
   MemoryVectorMutationResult, MemoryVectorStatus, RemoteMemoryDisclosure,
@@ -32,6 +34,10 @@ export function useMemoryRuntime({ apiFetch, t, requestScope }: UseMemoryRuntime
   const { confirm: showConfirm } = useUiDialog();
   const owns = useRequestOwner(requestScope);
   const requests = useMemo(() => memoryRequests(owns), [owns]);
+  const upload = useMemo(() => ({ file: null as File | null, id: null as string | null,
+    active: null as { controller: AbortController; present: MemoryOwner } | null }), [owns]);
+  // Close owner-bound approval UI before a changed account can be painted.
+  useLayoutEffect(() => () => { upload.active?.controller.abort(); upload.file = null; upload.id = null; }, [upload]);
   const empty = useMemo(() => emptyMemoryView(owns), [owns]);
   const [stored, setStored] = useState(empty);
   // The render projection itself is owner-bound; an effect is not the privacy boundary.
@@ -217,33 +223,95 @@ export function useMemoryRuntime({ apiFetch, t, requestScope }: UseMemoryRuntime
   };
 
   const importMemory = async (file: File) => {
-    if (!owns()) return;
-    let present = requests.token("actionBusy");
-    let notice = requests.token("notice");
-    update({ memoryActionLoading: "import", memoryError: null });
+    if (!owns() || upload.active) return;
+    const present = requests.token("actionBusy");
+    const notice = requests.token("notice");
+    const current = requests.token("importRun");
+    const resumeId = upload.file === file ? upload.id ?? undefined : undefined;
+    const active = { controller: new AbortController(), present };
+    upload.active = active; upload.file = file; upload.id = resumeId ?? null;
+    update({ memoryActionLoading: "import", memoryError: null, memoryMessage: null,
+      memoryImportProgress: { phase: "hashing", received: 0, total: file.size } });
     try {
-      const text = await file.text();
-      if (!owns()) return;
-      const preview = await post<MemoryImportPreviewResult>("/v1/memory/import/preview", { export: JSON.parse(text) });
-      if (!await confirm({ title: t("确认导入记忆", "Confirm memory import"), message: t(
+      const preview = await prepareMemoryImport(file, {
+        apiFetch, owns, signal: active.controller.signal, resumeId,
+        onProgress: memoryImportProgress => update({ memoryImportProgress }, current),
+        onUpload: id => { if (current()) upload.id = id; },
+      });
+      update({ memoryImportProgress: { phase: "preview", received: file.size, total: file.size } }, current);
+      const approved = await confirm({ signal: active.controller.signal,
+        title: t("确认导入记忆", "Confirm memory import"), message: t(
         `可导入 ${preview.accepted_items} 条，跳过 ${preview.skipped_items} 条，重复 ${preview.duplicate_items} 条。所有内容都会降级为“旧数据导入”，并限制在当前账号范围。`,
         `${preview.accepted_items} items can be imported; ${preview.skipped_items} skipped and ${preview.duplicate_items} duplicate. All items are downgraded to imported legacy trust and limited to this account.`),
-        confirmLabel: t("确认导入", "Import") })) return;
-      present = requests.token("actionBusy");
-      notice = requests.token("notice");
-      update({ memoryActionLoading: "import", memoryError: null });
+        confirmLabel: t("确认导入", "Import") });
+      if (!current() || active.controller.signal.aborted) return;
+      if (!approved) {
+        await cancelStagedImport(upload.id!, { apiFetch, owns, signal: active.controller.signal });
+        upload.file = null; upload.id = null;
+        update({ memoryImportProgress: null }, current);
+        return;
+      }
+      update({ memoryImportProgress: { phase: "confirming", received: file.size, total: file.size } }, current);
       const finish = requests.write("items", "vector");
       try {
-        const result = await post<MemoryImportResult>("/v1/memory/import/confirm", {
-          import_id: preview.import_id, expected_payload_digest: preview.payload_digest,
+        const result = await read<MemoryImportResult>("/v1/memory/import/confirm", {
+          method: "POST", headers: { "Content-Type": "application/json" }, signal: active.controller.signal,
+          body: JSON.stringify({ import_id: preview.import_id, expected_payload_digest: preview.payload_digest }),
         });
+        if (result.schema_version !== 1 || result.import_id !== preview.import_id || result.status !== "confirmed"
+          || ![result.imported_items, result.existing_items].every(n => Number.isSafeInteger(n) && n >= 0)) {
+          throw new MemoryImportTransportError("memory_import_response_invalid");
+        }
         finish();
+        upload.file = null; upload.id = null;
+        update({ memoryImportProgress: null }, current);
         update({ memoryMessage: t(`已导入 ${result.imported_items} 条，已有 ${result.existing_items} 条。`,
           `Imported ${result.imported_items} items; ${result.existing_items} already existed.`) }, present);
         await fetchMemoryData(true);
       } finally { finish(); }
-    } catch (error) { failure(error, ["导入文件无效或无法读取。", "The import file is invalid or unreadable."], notice); }
-    finally { update({ memoryActionLoading: null }, present); }
+    } catch (error) {
+      if (current() && !active.controller.signal.aborted) {
+        if (error instanceof MemoryImportTransportError && error.code === "memory_import_already_confirmed") {
+          upload.file = null; upload.id = null;
+          update({ memoryImportProgress: null, memoryMessage: t("上次导入已确认，正在刷新记忆列表。", "The previous import was confirmed. Refreshing the memory list.") }, current);
+          await fetchMemoryData(true);
+        } else {
+          update(state => ({ memoryImportProgress: state.memoryImportProgress
+            ? { ...state.memoryImportProgress, phase: "paused" } : null }), current);
+          update({ memoryError: memoryImportFailure(error, t) }, notice);
+        }
+      }
+    } finally {
+      if (upload.active === active) upload.active = null;
+      update({ memoryActionLoading: null }, present);
+    }
+  };
+
+  const cancelMemoryImport = async () => {
+    if (!owns() || latest.current.memoryImportProgress?.phase === "confirming"
+      || latest.current.memoryImportProgress?.phase === "cancelling") return;
+    const previous = upload.active;
+    previous?.controller.abort();
+    const current = requests.token("importRun");
+    const notice = requests.token("notice");
+    const active = { controller: new AbortController(), present: () => false };
+    upload.active = active;
+    update(state => ({ memoryImportProgress: state.memoryImportProgress
+      ? { ...state.memoryImportProgress, phase: "cancelling" } : null }), current);
+    try {
+      if (upload.id) await cancelStagedImport(upload.id, { apiFetch, owns, signal: active.controller.signal });
+      if (!current()) return;
+      upload.file = null; upload.id = null;
+      update({ memoryImportProgress: null, memoryError: null,
+        memoryMessage: t("已停止这次导入；尚未确认的内容不会加入记忆。", "This import was stopped; unconfirmed content is not added to memory.") }, current);
+    } catch (error) {
+      update(state => ({ memoryImportProgress: state.memoryImportProgress
+        ? { ...state.memoryImportProgress, phase: "paused" } : null }), current);
+      update({ memoryError: memoryImportFailure(error, t) }, notice);
+    } finally {
+      if (upload.active === active) upload.active = null;
+      if (previous) update({ memoryActionLoading: null }, previous.present);
+    }
   };
 
   const selectMemorySettingScope = async (scope: MemorySettingScope, conversationId?: string | null) => {
@@ -337,7 +405,8 @@ export function useMemoryRuntime({ apiFetch, t, requestScope }: UseMemoryRuntime
   return { ...publicView,
     setMemoryClearScope: (scope: MemoryClearScope) => update({ memoryClearScope: scope }),
     fetchMemoryData, fetchMemoryPage, correctMemoryItem, sendMemoryFeedback, deleteMemoryItemWithRevision,
-    undoMemoryMutation, exportMemory, importMemory, clearMemoryScope, updateMemorySetting,
+    undoMemoryMutation, exportMemory, importMemory, cancelMemoryImport,
+    resumeMemoryImport: () => upload.file ? importMemory(upload.file) : Promise.resolve(), clearMemoryScope, updateMemorySetting,
     updateMemoryExternalPolicy, selectMemorySettingScope, controlMemoryVector,
   };
 }
