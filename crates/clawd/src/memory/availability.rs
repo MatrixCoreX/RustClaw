@@ -8,7 +8,9 @@ use super::settings::MemoryEffectiveSettings;
 
 #[path = "availability_measurements.rs"]
 mod measurements;
-pub(crate) use measurements::{filesystem_available, ByteMeasurement, MeasurementUnavailable};
+pub(crate) use measurements::{
+    filesystem_available, memory_btrees, ByteMeasurement, MeasurementUnavailable,
+};
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct MemoryAvailability {

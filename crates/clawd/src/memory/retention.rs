@@ -163,6 +163,7 @@ pub(crate) fn initialize_storage_pressure(
 ) -> anyhow::Result<()> {
     super::jobs::require_memory_job_schema(db)?;
     let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+    super::storage_budget::initialize_schema(&tx)?;
     refresh_storage_pressure(&tx, config, now_ts)?;
     tx.commit()?;
     Ok(())
@@ -188,6 +189,7 @@ fn refresh_storage_pressure(
         params![state, if state == "normal" { None::<&str> } else { Some("memory_storage_soft_limit") },
             observed_bytes.min(i64::MAX as u64) as i64, now_ts],
     )?;
+    super::storage_budget::refresh(db, config)?;
     Ok((state.to_string(), observed_bytes))
 }
 

@@ -22,6 +22,7 @@ pub(crate) mod jobs;
 mod memory_recent;
 pub(crate) mod project_identity;
 pub(crate) mod retention;
+mod storage_budget;
 pub(crate) mod retrieval;
 pub(crate) mod retrieval_async;
 pub(crate) mod scope;

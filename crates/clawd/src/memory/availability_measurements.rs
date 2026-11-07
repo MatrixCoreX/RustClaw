@@ -61,7 +61,7 @@ pub(super) fn allocated_pages(db: &Connection, count_pragma: &str) -> ByteMeasur
 /// Aggregate-mode DBSTAT scans the memory-domain btrees, including their
 /// indexes/FTS shadows. It excludes freelists, WAL/SHM and non-btree overhead;
 /// this is neither per-owner physical usage nor filesystem free space.
-pub(super) fn memory_btrees(db: &Connection) -> ByteMeasurement {
+pub(crate) fn memory_btrees(db: &Connection) -> ByteMeasurement {
     let supported = db.query_row(
         "SELECT sqlite_compileoption_used('ENABLE_DBSTAT_VTAB')",
         [],

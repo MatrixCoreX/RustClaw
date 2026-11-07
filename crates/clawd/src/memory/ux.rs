@@ -534,7 +534,7 @@ pub(crate) fn undo_memory_mutation(
             snapshot.get("purged").and_then(Value::as_bool) != Some(true),
             "memory_undo_expired"
         );
-        match operation.as_str() {
+        let admission = match operation.as_str() {
             "correct" => undo_correction(
                 transaction,
                 principal_id,
@@ -546,7 +546,7 @@ pub(crate) fn undo_memory_mutation(
                 now_ts,
             )?,
             "delete" => {
-                writing::require_growth_storage_state(transaction)?;
+                let admission = writing::GrowthAdmission::begin(transaction)?;
                 restore_deleted_memory(
                     transaction,
                     principal_id,
@@ -556,10 +556,13 @@ pub(crate) fn undo_memory_mutation(
                     &snapshot,
                     now_ts,
                 )?;
-                writing::require_growth_storage_state(transaction)?;
+                if object_kind == "recent" {
+                    writing::validate_restored_source_quota(transaction, principal_id, now_ts)?;
+                }
+                Some(admission)
             }
             _ => anyhow::bail!("memory_undo_operation_unsupported"),
-        }
+        };
         transaction.execute(
             "UPDATE memory_privacy_purge_queue
          SET status = 'cancelled', completed_at_ts = ?3
@@ -589,6 +592,9 @@ pub(crate) fn undo_memory_mutation(
             "UPDATE memory_revisions SET undo_expires_at_ts = NULL WHERE revision_id = ?1",
             [request.revision_id.as_str()],
         )?;
+        if let Some(admission) = admission {
+            admission.finish(transaction)?;
+        }
         Ok(MemoryMutationResult {
             status: "restored".to_string(),
             memory_id,
@@ -610,15 +616,15 @@ fn undo_correction(
     old_revision: i64,
     snapshot: &Value,
     now_ts: i64,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<writing::GrowthAdmission>> {
     let replacement_id = replacement_id.ok_or_else(|| anyhow!("memory_replacement_missing"))?;
-    let mut grows = false;
+    let mut admission = None;
     if let Some(replacement) = load_mutable_memory(db, principal_id, replacement_id)? {
-        grows = object_kind == "preference"
+        let grows = object_kind == "preference"
             && snapshot_str(snapshot, "content")?.len()
                 > snapshot_str(&replacement.snapshot, "content")?.len();
         if grows {
-            writing::require_growth_storage_state(db)?;
+            admission = Some(writing::GrowthAdmission::begin(db)?);
         }
         retrieval::remove_canonical(db, &replacement)?;
     }
@@ -658,10 +664,7 @@ fn undo_correction(
         _ => anyhow::bail!("memory_undo_kind_unsupported"),
     }
     projection::refresh_owned_canonical(db, principal_id, memory_id, now_ts)?;
-    if grows {
-        writing::require_growth_storage_state(db)?;
-    }
-    Ok(())
+    Ok(admission)
 }
 
 fn restore_deleted_memory(
@@ -1043,9 +1046,11 @@ pub(crate) fn preview_memory_import(
             anyhow::ensure!(status != "confirmed", "memory_import_already_confirmed");
             import_id
         } else {
-            if !accepted.is_empty() {
-                writing::require_growth_storage_state(transaction)?;
-            }
+            let admission = if accepted.is_empty() {
+                None
+            } else {
+                Some(writing::GrowthAdmission::begin(transaction)?)
+            };
             let import_id = format!("memory_import_{}", uuid::Uuid::new_v4().simple());
             transaction.execute(
                 "INSERT INTO memory_import_sessions(
@@ -1060,8 +1065,8 @@ pub(crate) fn preview_memory_import(
                     now_ts
                 ],
             )?;
-            if !accepted.is_empty() {
-                writing::require_growth_storage_state(transaction)?;
+            if let Some(admission) = admission {
+                admission.finish(transaction)?;
             }
             import_id
         };
@@ -1119,6 +1124,11 @@ pub(crate) fn confirm_memory_import(
             .ok_or_else(|| anyhow!("memory_import_preview_corrupt"))?;
         let mut imported_items = 0usize;
         let mut existing_items = 0usize;
+        let mut admission = None;
+        // Capture once before the batch, not once per duplicate item. Keep a
+        // failed prospective check dormant for a metadata-only confirmation.
+        let mut prospective =
+            (!items.is_empty()).then(|| writing::GrowthAdmission::begin(transaction));
         for item in items {
             let content = item["content"]
                 .as_str()
@@ -1191,7 +1201,11 @@ pub(crate) fn confirm_memory_import(
                 )?
             };
             if changed == 1 {
-                writing::require_growth_storage_state(transaction)?;
+                // The insert may be a true idempotent no-op. Check admission
+                // only for actual content growth; any rejection rolls it back.
+                if let Some(prospective) = prospective.take() {
+                    admission = Some(prospective?);
+                }
                 imported_items += 1;
             } else {
                 existing_items += 1;
@@ -1202,6 +1216,9 @@ pub(crate) fn confirm_memory_import(
          WHERE import_id = ?1 AND principal_id = ?2 AND status = 'preview'",
             params![request.import_id, principal_id, now_ts],
         )?;
+        if let Some(admission) = admission {
+            admission.finish(transaction)?;
+        }
         Ok(MemoryImportResult {
             schema_version: 1,
             import_id: request.import_id.clone(),
@@ -1466,6 +1483,10 @@ mod budget_contract_tests;
 #[cfg(test)]
 #[path = "ux_growth_state_tests.rs"]
 mod growth_state_tests;
+
+#[cfg(test)]
+#[path = "ux_budget_policy_tests.rs"]
+mod budget_policy_tests;
 
 #[cfg(test)]
 #[path = "ux_feedback_tests.rs"]

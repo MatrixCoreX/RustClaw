@@ -1103,6 +1103,12 @@ impl AppState {
             crate::now_ts_u64() as i64,
         )
         .expect("memory quota startup defaults for test runtime");
+        crate::memory::retention::initialize_storage_pressure(
+            &conn,
+            &self.policy.memory,
+            crate::now_ts_u64() as i64,
+        )
+        .expect("configured memory storage startup for test runtime");
         drop(conn);
         self
     }
