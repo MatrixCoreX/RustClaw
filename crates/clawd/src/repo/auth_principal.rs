@@ -365,16 +365,25 @@ pub(crate) fn require_active_principal_credential(
     db: &Connection,
     principal_id: &str,
 ) -> anyhow::Result<String> {
+    active_principal_credential(db, principal_id)?
+        .ok_or_else(|| anyhow::anyhow!("credential_binding_missing"))
+}
+
+/// Live projection metadata is not authorization to act for another account.
+pub(crate) fn active_principal_credential(
+    db: &Connection,
+    principal_id: &str,
+) -> anyhow::Result<Option<String>> {
     let mut statement =
         db.prepare("SELECT user_key FROM auth_keys WHERE principal_id = ?1 AND enabled = 1")?;
     let mut keys = statement.query([principal_id])?;
     while let Some(row) = keys.next()? {
         let key: String = row.get(0)?;
         if active_auth_key_identity(db, &key)?.is_some_and(|(_, owner)| owner == principal_id) {
-            return Ok(key);
+            return Ok(Some(key));
         }
     }
-    anyhow::bail!("credential_binding_missing")
+    Ok(None)
 }
 
 pub(crate) fn principal_id_for_user_key(

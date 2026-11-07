@@ -134,3 +134,48 @@ fn incremental_fact_indexing_does_not_reenable_explicitly_disabled_content() {
     );
     assert_no_orphan_fts(&db);
 }
+
+#[test]
+fn stale_incremental_preference_payload_cannot_overwrite_a_confirmed_correction() {
+    let fixture = setup::fixture();
+    let db = fixture.state().core.db.get().unwrap();
+    seed(
+        &db,
+        &fixture.key,
+        &fixture.principal,
+        "preference",
+        "stale-pref-source",
+    );
+    correct_memory(
+        &db,
+        &fixture.principal,
+        &fixture.principal,
+        "stale-pref-source",
+        &correction(),
+        200,
+    )
+    .unwrap();
+    let before = state(&db);
+    let result = indexing::index_preference_entries(
+        &db,
+        1,
+        7,
+        &fixture.key,
+        &[(
+            "response_format".into(),
+            "markdown".into(),
+            1.0,
+            "user_message".into(),
+        )],
+        201,
+    );
+    assert!(
+        result.is_err(),
+        "a stale canonical snapshot must not be silently indexed as current content"
+    );
+    assert_eq!(
+        state(&db),
+        before,
+        "stale incremental work must preserve the corrected canonical,FTS,index and outbox"
+    );
+}

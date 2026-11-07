@@ -358,6 +358,17 @@ jobs:
             --require success::nonexistent_memory_cannot_receive_feedback \
             --require success::read_only_connection_cannot_partially_record_feedback
           cargo test --locked -p clawd --bin clawd memory::ux::feedback_tests:: -- --test-threads=1 --nocapture
+      - name: Test projection transactions without losing parent ownership
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::projection_transaction::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::projection_transaction::tests:: \
+            --require standalone_failure_rolls_back_and_releases_the_writer \
+            --require nested_failure_caught_by_parent_rolls_back_only_its_local_effects \
+            --require nested_success_does_not_commit_its_parent_transaction \
+            --require nested_panic_restores_local_state_without_ending_the_parent
+          cargo test --locked -p clawd --bin clawd memory::projection_transaction::tests:: -- --test-threads=1 --nocapture
       - name: Test recall mutation indexes without hiding failures
         run: |
           set -euo pipefail
@@ -381,7 +392,9 @@ jobs:
             --require boundaries::failed_fts_insert_rolls_back_feedback_canonical_revision_and_projection \
             --require boundaries::absent_optional_fts_does_not_block_correction_or_initialize_a_table \
             --require boundaries::correcting_preference_preserves_another_scope_of_the_same_principal \
-            --require boundaries::rotating_admin_credential_does_not_make_owned_canonical_facts_uncorrectable
+            --require boundaries::rotating_admin_credential_does_not_make_owned_canonical_facts_uncorrectable \
+            --require boundaries::rebuild_after_credential_rotation_preserves_every_owned_canonical_kind \
+            --require incremental::stale_incremental_preference_payload_cannot_overwrite_a_confirmed_correction
           cargo test --locked -p clawd --bin clawd memory::ux::recall_contract_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         run: |
@@ -672,6 +685,17 @@ jobs:
             --require success::read_only_connection_cannot_partially_record_feedback
           cargo test --locked -p clawd --bin clawd memory::ux::feedback_tests:: -- --test-threads=1 --nocapture
 
+      - name: Test projection transactions without losing parent ownership
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::projection_transaction::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::projection_transaction::tests:: \
+            --require standalone_failure_rolls_back_and_releases_the_writer \
+            --require nested_failure_caught_by_parent_rolls_back_only_its_local_effects \
+            --require nested_success_does_not_commit_its_parent_transaction \
+            --require nested_panic_restores_local_state_without_ending_the_parent
+          cargo test --locked -p clawd --bin clawd memory::projection_transaction::tests:: -- --test-threads=1 --nocapture
       - name: Test recall mutation indexes without hiding failures
         run: |
           set -euo pipefail
@@ -695,7 +719,9 @@ jobs:
             --require boundaries::failed_fts_insert_rolls_back_feedback_canonical_revision_and_projection \
             --require boundaries::absent_optional_fts_does_not_block_correction_or_initialize_a_table \
             --require boundaries::correcting_preference_preserves_another_scope_of_the_same_principal \
-            --require boundaries::rotating_admin_credential_does_not_make_owned_canonical_facts_uncorrectable
+            --require boundaries::rotating_admin_credential_does_not_make_owned_canonical_facts_uncorrectable \
+            --require boundaries::rebuild_after_credential_rotation_preserves_every_owned_canonical_kind \
+            --require incremental::stale_incremental_preference_payload_cannot_overwrite_a_confirmed_correction
           cargo test --locked -p clawd --bin clawd memory::ux::recall_contract_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         shell: bash

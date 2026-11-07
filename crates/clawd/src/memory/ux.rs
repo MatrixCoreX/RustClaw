@@ -24,6 +24,7 @@ pub(crate) use retrieval::check_memory_consistency;
 
 #[path = "ux_projection.rs"]
 mod projection;
+pub(super) use projection::refresh_owned_canonical;
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub(crate) struct MemoryListFilter {

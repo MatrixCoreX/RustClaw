@@ -11,6 +11,8 @@ pub(crate) mod embedding_jobs;
 pub(crate) mod facts;
 mod generation_response;
 pub(crate) mod indexing;
+mod projection_transaction;
+mod recall_policy;
 pub(crate) mod intent;
 mod intent_generation;
 mod job_completion;

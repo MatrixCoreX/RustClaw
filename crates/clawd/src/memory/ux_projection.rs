@@ -5,7 +5,7 @@ use crate::memory::{
 };
 
 /// Synchronize one committed-canonical candidate inside its caller's mutation transaction.
-pub(super) fn refresh_owned_canonical(
+pub(in crate::memory) fn refresh_owned_canonical(
     db: &Connection,
     principal_id: &str,
     memory_id: &str,
@@ -17,26 +17,46 @@ pub(super) fn refresh_owned_canonical(
     );
     let memory = load_mutable_memory(db, principal_id, memory_id)?
         .ok_or_else(|| anyhow!("memory_not_found"))?;
-    let key = memory
-        .snapshot
-        .get("user_key")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
+    // Resolve index metadata through the stable canonical owner after rotation.
+    // This is not authentication of the original request actor.
+    let projection_key = crate::repo::auth::require_active_principal_credential(db, principal_id)?;
     let user_id = snapshot_i64(&memory.snapshot, "user_id")?;
     let chat_id = snapshot_i64(&memory.snapshot, "chat_id")?;
     let content = snapshot_str(&memory.snapshot, "content")?;
     let salience = snapshot_f64(&memory.snapshot, "salience").unwrap_or(0.8) as f32;
+    let fact_id = if memory.kind == "fact" {
+        Some(db.query_row(
+            "SELECT id FROM memory_facts WHERE memory_id=?1 AND principal_id=?2",
+            params![memory_id, principal_id],
+            |row| row.get::<_, i64>(0),
+        )?)
+    } else {
+        None
+    };
+    let source = match memory.kind.as_str() {
+        "fact" => crate::memory::recall_policy::Source::Fact(
+            fact_id.ok_or_else(|| anyhow!("memory_projection_source_identity_required"))?,
+        ),
+        "preference" => crate::memory::recall_policy::Source::Preference {
+            user_id,
+            chat_id,
+            key: snapshot_str(&memory.snapshot, "item_key")?,
+            canonical_id: Some(memory_id),
+        },
+        _ => anyhow::bail!("memory_correction_kind_unsupported"),
+    };
+    if crate::memory::recall_policy::resolve(db, principal_id, &projection_key, source)?.is_none() {
+        retrieval::remove_canonical(db, &memory)?;
+        return Ok(());
+    }
     let (kind, reference, text, trigger, metadata, role, producer) = match memory.kind.as_str() {
         "fact" => {
             anyhow::ensure!(
                 snapshot_str(&memory.snapshot, "status")? == "active",
                 "memory_retrieval_canonical_not_active"
             );
-            let id: i64 = db.query_row(
-                "SELECT id FROM memory_facts WHERE memory_id=?1 AND principal_id=?2",
-                params![memory_id, principal_id],
-                |row| row.get(0),
-            )?;
+            let id =
+                fact_id.ok_or_else(|| anyhow!("memory_projection_source_identity_required"))?;
             (
                 RETRIEVAL_SOURCE_MEMORY_FACT,
                 crate::memory::retrieval_source_ref_for_memory_fact(id),
@@ -63,6 +83,7 @@ pub(super) fn refresh_owned_canonical(
                     key,
                     &memory.scope_kind,
                     Some(&memory.scope_ref),
+                    Some(memory_id),
                 ),
                 None,
                 snapshot_str(&memory.snapshot, "source")?,
@@ -79,7 +100,7 @@ pub(super) fn refresh_owned_canonical(
         Some(&reference),
         user_id,
         if memory.kind == "fact" { 0 } else { chat_id },
-        key,
+        &projection_key,
         RETRIEVAL_KIND_SEMANTIC_FACT,
         role,
         &text,

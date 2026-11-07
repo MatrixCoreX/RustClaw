@@ -217,3 +217,60 @@ fn rotating_admin_credential_does_not_make_owned_canonical_facts_uncorrectable()
         result.replacement_memory_id.as_deref().unwrap(),
     );
 }
+
+#[test]
+fn rebuild_after_credential_rotation_preserves_every_owned_canonical_kind() {
+    let fixture = setup::fixture();
+    let key = crate::repo::auth::create_auth_key(fixture.state(), "admin").unwrap();
+    let owner = crate::resolve_auth_identity_by_key(fixture.state(), &key)
+        .unwrap()
+        .unwrap()
+        .principal_id;
+    let before = {
+        let db = fixture.state().core.db.get().unwrap();
+        seed(&db, &key, &owner, "fact", "rotation-rebuild-fact");
+        seed(&db, &key, &owner, "preference", "rotation-rebuild-pref");
+        seed(&db, &key, &owner, "recent", "rotation-rebuild-recent");
+        rows(&db, &owner)
+    };
+    assert_eq!(
+        before.len(),
+        4,
+        "fact,preference and both transcript projections exist"
+    );
+    let rotated = crate::repo::auth::create_auth_key(fixture.state(), "admin").unwrap();
+    assert_eq!(
+        crate::resolve_auth_identity_by_key(fixture.state(), &rotated)
+            .unwrap()
+            .unwrap()
+            .principal_id,
+        owner
+    );
+    assert!(crate::resolve_auth_identity_by_key(fixture.state(), &key)
+        .unwrap()
+        .is_none());
+    let db = fixture.state().core.db.get().unwrap();
+    rebuild(&db);
+    assert_eq!(
+        rows(&db, &owner),
+        before,
+        "rebuild uses stable ownership,not the expired original credential"
+    );
+    assert_no_orphan_fts(&db);
+    for (table, id) in [
+        ("memory_facts", "rotation-rebuild-fact"),
+        ("user_preferences", "rotation-rebuild-pref"),
+        ("memories", "rotation-rebuild-recent"),
+    ] {
+        assert_eq!(
+            db.query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE memory_id=?1 AND principal_id=?2"),
+                params![id, owner],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1,
+            "canonical source history must remain intact"
+        );
+    }
+}
