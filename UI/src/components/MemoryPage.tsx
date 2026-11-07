@@ -22,6 +22,7 @@ import type { KbIdentity } from "../lib/kb-maintenance";
 import { KbMaintenancePanel } from "./KbMaintenancePanel";
 import { MemoryCapacityPanel } from "./MemoryCapacityPanel";
 import { MemoryImportControls } from "./MemoryImportControls";
+import { ExpandableMemoryText } from "./ExpandableMemoryText";
 import type { MemoryImportProgress } from "../lib/memory-import-upload";
 
 type UiLanguage = "zh" | "en";
@@ -293,7 +294,7 @@ export function MemoryPage({
                   </div>
                 </div>
               ) : (
-                <p className="mt-3 break-words text-sm leading-6 text-white/80">{item.content}</p>
+                <ExpandableMemoryText text={item.content} t={t} className="mt-3 text-sm leading-6 text-white/80" />
               )}
               <p className="mt-3 text-[11px] leading-5 text-white/40">
                 {t("来源", "Source")}: {item.source || "--"} · {t("生成方式", "Origin")}: {item.origin || "--"}<br />
@@ -548,7 +549,7 @@ export function MemoryPage({
                       </span>
                       <span className="text-[10px] text-white/35">{Math.round(item.confidence * 100)}%</span>
                     </div>
-                    <p className="mt-2 break-words text-sm leading-6 text-white/80">{item.fact_text || item.fact_value}</p>
+                    <ExpandableMemoryText text={item.fact_text || item.fact_value} t={t} className="mt-2 text-sm leading-6 text-white/80" />
                     <p className="mt-2 text-[11px] text-white/40">
                       {item.fact_key} · {t("更新", "Updated")}: {timeLabel(item.updated_at_ts)}
                       {item.expires_at_ts ? ` · ${t("过期", "Expires")}: ${timeLabel(item.expires_at_ts)}` : ""}

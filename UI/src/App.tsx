@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ConsoleLayout } from "./components/ConsoleLayout";
 import { RenderErrorBoundary } from "./components/RenderErrorBoundary";
 import { FactoryResetModal } from "./components/FactoryResetModal";
@@ -158,6 +158,9 @@ export default function App() {
     const saved = window.localStorage.getItem(STORAGE_KEYS.lang);
     return saved === "en" ? "en" : "zh";
   });
+  useLayoutEffect(() => {
+    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+  }, [lang]);
   const [themeMode, setThemeMode] = useState<"light" | "dark">(() =>
     window.localStorage.getItem(STORAGE_KEYS.themeMode) === "light" ? "light" : "dark",
   );
