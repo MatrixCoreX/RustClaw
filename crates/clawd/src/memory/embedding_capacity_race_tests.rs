@@ -39,6 +39,19 @@ async fn paused_oldest_backfill_partition_does_not_starve_active_generation_work
             false,
         )
         .unwrap();
+        crate::memory::capacity_test_fixtures::persist_preference_sources(
+            &db,
+            1,
+            0,
+            &fixture.key,
+            &[(
+                "extra-format".to_string(),
+                "new incremental content".to_string(),
+                1.0,
+                "user".to_string(),
+            )],
+            crate::now_ts_u64() as i64,
+        );
         crate::memory::indexing::index_preference_entries(
             &db,
             1,

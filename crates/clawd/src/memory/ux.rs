@@ -1292,7 +1292,15 @@ fn load_mutable_memory(
         },
     )
     .optional()
-    .map_err(Into::into)
+    .map_err(|error| match error {
+        rusqlite::Error::InvalidColumnType(4, column, rusqlite::types::Type::Null)
+            if column == "scope_ref" =>
+        {
+            // An unavailable canonical scope is an error, never a default scope.
+            anyhow!("memory_retrieval_scope_ref_required")
+        }
+        other => other.into(),
+    })
 }
 
 fn append_revision(
