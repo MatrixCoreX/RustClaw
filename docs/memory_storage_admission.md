@@ -42,3 +42,26 @@ DBSTAT allocation excludes freelists, WAL/SHM and other files and is not physica
 per-principal usage. This is not a complete disk quota. SQLite/IO failure still
 requires rollback and a reported failure; metadata exemptions must not be
 misrepresented as unlimited disk capacity.
+
+## Read-only availability
+
+The availability response keeps `capacity_decision` for automatic background
+generation and adds a separate versioned `manual_growth` observation. UI labels
+must not equate these: unrelated main-database growth can pause automatic work
+while an explicit canonical edit still fits the memory-domain budget.
+
+The observation and transactional write admission use one typed evaluator,
+including the distinct before-growth and after-growth allocation boundaries.
+Missing, invalid and unavailable configuration are machine states, not parsed
+error prose or read-side repair triggers. An observation is never a permission
+grant; mutation still rechecks the original actor, policy and actual effects.
+
+Ordinary callers receive the manual decision but not global allocation or
+configured-limit numbers. Administrator measurements remain separate from the
+actual filesystem-free observation. Owner, scope, settings revision and request
+ordering continue to bind the entire response. Clients connected to a node
+without the new observation show it as unavailable, not implicitly allowed.
+
+Deletion/export and no-new-content effects remain usable when growth is blocked.
+Source restoration still has its own source row/byte checks. Displaying an
+available storage budget does not promise model, network or provider readiness.

@@ -106,3 +106,7 @@ fn read(state: &AppState, headers: &HeaderMap, query: CapacityQuery) -> Reply {
 #[cfg(test)]
 #[path = "memory_capacity_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "memory_growth_capacity_tests.rs"]
+mod growth_tests;

@@ -1,6 +1,6 @@
 import { RefreshCw } from "lucide-react";
 import { useMemoryCapacity } from "../hooks/useMemoryCapacity";
-import { capacityLabel, measurementLabel } from "../lib/memory-capacity-display";
+import { capacityLabel, manualGrowthLabel, measurementLabel } from "../lib/memory-capacity-display";
 import { formatUnixDateTime } from "../lib/date-format";
 import type { MemorySettingsResult } from "../types/api";
 
@@ -31,9 +31,12 @@ export function MemoryCapacityPanel({ t, lang, ...options }: Props) {
       <div>
         <h4 className="text-sm font-semibold text-white">{t("容量与状态", "Capacity and status")}</h4>
         <p className="mt-2 text-sm text-white/70" role="status">{status}</p>
+        <p className="mt-1 text-sm text-white/70" data-memory-growth-status>{loading
+          ? t("正在读取新增内容状态…", "Reading new-content status…")
+          : manualGrowthLabel(failed ? undefined : data?.manual_growth?.decision, t)}</p>
         <p className="mt-1 text-xs leading-5 text-white/55">{t(
-          "这里区分用户设置与容量限制；不代表模型、网络或后台任务已经就绪。刷新只读取，不修改设置或清理数据。",
-          "Settings and capacity limits are separate. This is not model, network or job readiness. Refresh only reads; it never changes settings or clears data.",
+          "自动生成、新增内容和账号配额分别检查；这些状态不授予权限，也不代表模型或网络就绪。本页不禁用删除、导出；刷新只读，不修复配置。",
+          "Automatic generation, new-content storage and account quotas are separate. These observations grant no permission and do not confirm model or network readiness. This panel does not disable deletion or export; refresh is read-only and does not repair configuration.",
         )}</p>
       </div>
       <button type="button" onClick={() => void refresh()} disabled={loading || !selectable}
@@ -64,6 +67,10 @@ export function MemoryCapacityPanel({ t, lang, ...options }: Props) {
             [t("数据库软阈值（不是用户配额）", "Database soft threshold, not an account quota"), data.pressure.configured_soft_limit_bytes],
           ] as const).filter(([, metric]) => metric.status !== "admin_only").map(([label, metric]) =>
             <div key={label}><dt>{label}</dt><dd className="mt-1">{bytes(metric)}</dd></div>)}
+          {data.manual_growth && data.manual_growth.configured_limit_bytes.status !== "admin_only" ? <div>
+            <dt>{t("新增内容的实际存储预算", "Effective storage budget for new content")}</dt>
+            <dd className="mt-1">{bytes(data.manual_growth.configured_limit_bytes)}</dd>
+          </div> : null}
         </dl>
         <p className="mt-3 leading-5">{t(
           "原文配额不包含事实、偏好和向量。后台逻辑工作量不是 token 或费用。全库大小不等于记忆占用，数据库空闲页也不等于磁盘可用空间；记忆域页不含 WAL、SHM 和其他文件。",

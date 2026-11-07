@@ -4,6 +4,7 @@ use rusqlite::{types::ValueRef, Connection, OptionalExtension};
 use serde::Serialize;
 
 use super::capacity::{GenerationAvailability, PrincipalQuotaSnapshot, StoragePressure};
+pub(crate) use super::growth_availability::GrowthDecision;
 use super::settings::MemoryEffectiveSettings;
 
 #[path = "availability_measurements.rs"]
@@ -18,9 +19,18 @@ pub(crate) struct MemoryAvailability {
     pub(crate) sampled_at_ts: i64,
     pub(crate) settings: MemoryEffectiveSettings,
     pub(crate) capacity_decision: GenerationAvailability,
+    pub(crate) manual_growth: ManualGrowthOverview,
     pub(crate) quota: QuotaOverview,
     pub(crate) pressure: PressureObservation,
     pub(crate) measurements: Measurements,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ManualGrowthOverview {
+    pub(crate) schema_version: u32,
+    pub(crate) scope: &'static str,
+    pub(crate) decision: GrowthDecision,
+    pub(crate) configured_limit_bytes: ByteMeasurement,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -118,6 +128,22 @@ pub(crate) fn observe_sqlite(
         Err(_) => ByteMeasurement::unavailable(MeasurementUnavailable::QueryFailed),
     };
     let unavailable = || ByteMeasurement::unavailable(MeasurementUnavailable::InvalidValue);
+    // Share one measurement with the manual-growth observation. Ordinary
+    // callers receive the decision, never the global byte count or limit.
+    let measured_domain = measurements::memory_btrees(db);
+    let manual = super::growth_availability::probe(
+        db,
+        super::growth_availability::ProbePhase::BeforeGrowth,
+        || measured_domain.clone(),
+    );
+    let manual_limit = if is_admin {
+        manual
+            .snapshot
+            .map(|snapshot| ByteMeasurement::measured(snapshot.limit))
+            .unwrap_or_else(|| ByteMeasurement::unavailable(MeasurementUnavailable::NotSampled))
+    } else {
+        ByteMeasurement::AdminOnly
+    };
     let (observed_bytes, limit, main, domain, freelist, host, path) = if is_admin {
         (
             bytes
@@ -125,7 +151,7 @@ pub(crate) fn observe_sqlite(
                 .unwrap_or_else(unavailable),
             ByteMeasurement::measured(soft_limit),
             measurements::allocated_pages(db, "PRAGMA page_count"),
-            measurements::memory_btrees(db),
+            measured_domain,
             measurements::allocated_pages(db, "PRAGMA freelist_count"),
             ByteMeasurement::unavailable(MeasurementUnavailable::NotSampled),
             measurements::database_path(db),
@@ -147,6 +173,12 @@ pub(crate) fn observe_sqlite(
             sampled_at_ts,
             settings,
             capacity_decision,
+            manual_growth: ManualGrowthOverview {
+                schema_version: 1,
+                scope: "memory_domain_assigned_btree_content_growth",
+                decision: manual.decision,
+                configured_limit_bytes: manual_limit,
+            },
             quota: QuotaOverview {
                 scope: "source_transcript_content_rows_and_bytes",
                 decision: quota_decision,

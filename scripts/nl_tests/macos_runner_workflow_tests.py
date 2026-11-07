@@ -315,7 +315,56 @@ def required_budget_policy_gate(job):
             and job['steps'].index(step)<job['steps'].index(prior))
 
 
+def required_manual_growth_observation_gate(job):
+    pairs=[
+        ('memory::ux::growth_availability_tests::','memory/ux_growth_availability_tests.rs',8),
+        ('http::memory_routes::capacity::growth_tests::','http/memory_growth_capacity_tests.rs',4),
+    ]
+    for prefix,path,count in pairs:
+        run=f'cargo test --locked -p clawd --bin clawd {prefix} -- --test-threads=1 --nocapture'
+        if not required_command_gate(job,run):
+            return False
+        step=next(step for step in job['steps'] if run in step.get('run',''))
+        source=(ROOT/'crates/clawd/src'/path).read_text(encoding='utf-8')
+        names=re.findall(r'^#\[(?:tokio::)?test\]\n(?:async )?fn (\w+)\(',source,re.M)
+        listing=f'cargo test --locked -p clawd --bin clawd {prefix} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
+        prior=next(value for value in job['steps'] if value.get('name')=='Test configured memory budget and source-only quota contracts')
+        script=step['run']
+        if not (len(names)==count and len(set(names))==count and listing in script
+                and f'--prefix {prefix}' in script and '|| true' not in script
+                and all(f'--require {name}' in script for name in names)
+                and script.index(listing)<script.index(run)
+                and job['steps'].index(step)<job['steps'].index(prior)):
+            return False
+    return True
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_manual_growth_observation_and_authenticated_http_gate_is_required(self):
+        jobs=load('macos-polyglot-skill-ci.yml')['jobs']
+        for name in ['runtime-read-linux','polyglot-skill-macos']:
+            self.assertTrue(required_manual_growth_observation_gate(jobs[name]))
+            for mutation in ['selector','listing','require','ignore','conditional','continue','late']:
+                with self.subTest(job=name,mutation=mutation):
+                    job=deepcopy(jobs[name])
+                    step=next(step for step in job['steps'] if step.get('name')=='Test manual memory growth availability and read-only HTTP projection')
+                    if mutation=='selector':
+                        step['run']=step['run'].replace('memory::ux::growth_availability_tests::','missing::growth_availability_tests::')
+                    elif mutation=='listing':
+                        step['run']=step['run'].replace('--list --color never','--list')
+                    elif mutation=='require':
+                        step['run']=step['run'].replace('--require invalid_budget_is_visible_but_not_normalized_by_http_read','--require absent_case')
+                    elif mutation=='ignore':
+                        step['run']=step['run'].replace('--test-threads=1 --nocapture','--test-threads=1 --nocapture || true')
+                    elif mutation=='conditional':
+                        step['if']='false'
+                    elif mutation=='continue':
+                        step['continue-on-error']=True
+                    else:
+                        job['steps'].remove(step)
+                        job['steps'].append(step)
+                    self.assertFalse(required_manual_growth_observation_gate(job))
+
     def test_configured_budget_atomicity_and_source_quota_gate_cannot_be_skipped(self):
         jobs=load('macos-polyglot-skill-ci.yml')['jobs']
         for name in ['runtime-read-linux','polyglot-skill-macos']:

@@ -10,6 +10,7 @@ pub(crate) mod embedding;
 pub(crate) mod embedding_jobs;
 pub(crate) mod facts;
 mod generation_response;
+mod growth_availability;
 pub(crate) mod indexing;
 mod projection_retirement;
 mod projection_transaction;

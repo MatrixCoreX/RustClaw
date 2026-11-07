@@ -1,7 +1,7 @@
 use super::*;
 use crate::memory::availability::ByteMeasurement;
 
-fn fixture(role: &str) -> (AppState, crate::AuthIdentity, HeaderMap, String) {
+pub(super) fn fixture(role: &str) -> (AppState, crate::AuthIdentity, HeaderMap, String) {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let key = crate::repo::auth::create_auth_key(&state, role).unwrap();
     let identity = crate::resolve_auth_identity_by_key(&state, &key)

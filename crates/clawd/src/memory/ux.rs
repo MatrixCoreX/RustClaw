@@ -1489,6 +1489,10 @@ mod growth_state_tests;
 mod budget_policy_tests;
 
 #[cfg(test)]
+#[path = "ux_growth_availability_tests.rs"]
+mod growth_availability_tests;
+
+#[cfg(test)]
 #[path = "ux_feedback_tests.rs"]
 mod feedback_tests;
 

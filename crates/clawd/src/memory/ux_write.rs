@@ -1,27 +1,6 @@
 use rusqlite::Connection;
 
-/// Validate only the observation's integrity, inside the mutation's rollback
-/// scope. A known whole-database pressure level is not itself a measurement of
-/// memory-domain growth. Effect-specific domain-budget admission is separate.
-pub(super) fn require_growth_storage_state(db: &Connection) -> anyhow::Result<()> {
-    anyhow::ensure!(
-        !db.is_autocommit(),
-        "memory_write_admission_requires_transaction"
-    );
-    match crate::memory::capacity::StoragePressure::load(db)? {
-        crate::memory::capacity::StoragePressure::Missing => {
-            anyhow::bail!("memory_storage_state_missing")
-        }
-        crate::memory::capacity::StoragePressure::Unknown => {
-            anyhow::bail!("memory_storage_state_unknown")
-        }
-        crate::memory::capacity::StoragePressure::Normal
-        | crate::memory::capacity::StoragePressure::DerivedCleanup
-        | crate::memory::capacity::StoragePressure::BackfillPaused
-        | crate::memory::capacity::StoragePressure::AutomaticGenerationPaused
-        | crate::memory::capacity::StoragePressure::ExplicitWriteBlocked => Ok(()),
-    }
-}
+use crate::memory::growth_availability::{self, ProbePhase};
 
 pub(super) struct GrowthAdmission(crate::memory::storage_budget::Snapshot);
 
@@ -67,56 +46,30 @@ pub(super) fn validate_restored_source_quota(
 
 impl GrowthAdmission {
     pub(super) fn begin(db: &Connection) -> anyhow::Result<Self> {
-        require_growth_storage_state(db)?;
-        let budget = crate::memory::storage_budget::Snapshot::load(db)?;
-        Self::validate_observation(db, budget)?;
         anyhow::ensure!(
-            Self::domain_bytes(db)? < budget.limit,
-            "memory_storage_write_blocked"
+            !db.is_autocommit(),
+            "memory_write_admission_requires_transaction"
         );
+        let budget = growth_availability::probe(db, ProbePhase::BeforeGrowth, || {
+            crate::memory::availability::memory_btrees(db)
+        })
+        .admit()?;
         Ok(Self(budget))
     }
 
     pub(super) fn finish(self, db: &Connection) -> anyhow::Result<()> {
-        require_growth_storage_state(db)?;
         anyhow::ensure!(
-            crate::memory::storage_budget::Snapshot::load(db)? == self.0,
+            !db.is_autocommit(),
+            "memory_write_admission_requires_transaction"
+        );
+        let observation = growth_availability::probe(db, ProbePhase::AfterGrowth, || {
+            crate::memory::availability::memory_btrees(db)
+        });
+        anyhow::ensure!(
+            observation.validated_snapshot()? == self.0,
             "memory_storage_policy_conflict"
         );
-        Self::validate_observation(db, self.0)?;
-        anyhow::ensure!(
-            Self::domain_bytes(db)? <= self.0.limit,
-            "memory_storage_write_blocked"
-        );
-        Ok(())
-    }
-
-    fn domain_bytes(db: &Connection) -> anyhow::Result<u64> {
-        match crate::memory::availability::memory_btrees(db) {
-            crate::memory::availability::ByteMeasurement::Measured { bytes } => Ok(bytes),
-            _ => anyhow::bail!("memory_storage_measurement_unavailable"),
-        }
-    }
-
-    fn validate_observation(
-        db: &Connection,
-        budget: crate::memory::storage_budget::Snapshot,
-    ) -> anyhow::Result<()> {
-        // An explicit stop without the producing observation's configuration
-        // binding is conservative. Never infer provenance from reason prose.
-        if crate::memory::capacity::StoragePressure::load(db)?
-            == crate::memory::capacity::StoragePressure::ExplicitWriteBlocked
-        {
-            let revision: i64 = db.query_row(
-                "SELECT revision FROM memory_storage_pressure WHERE singleton_id=1",
-                [],
-                |row| row.get(0),
-            )?;
-            anyhow::ensure!(
-                revision == budget.pressure_revision,
-                "memory_storage_write_blocked"
-            );
-        }
+        observation.admit()?;
         Ok(())
     }
 }

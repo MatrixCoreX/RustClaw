@@ -11,14 +11,39 @@ fn digest() -> String {
     format!("sha256:{:x}", Sha256::digest(MIGRATION_SQL.as_bytes()))
 }
 
-fn applied(db: &Connection) -> anyhow::Result<Option<String>> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ReadError {
+    Missing,
+    Invalid,
+    Unavailable,
+}
+
+impl ReadError {
+    pub(super) fn code(self) -> &'static str {
+        match self {
+            Self::Missing => "memory_storage_policy_missing",
+            Self::Invalid => "memory_storage_policy_invalid",
+            Self::Unavailable => "memory_storage_policy_unavailable",
+        }
+    }
+}
+
+impl std::fmt::Display for ReadError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.code())
+    }
+}
+
+impl std::error::Error for ReadError {}
+
+fn applied(db: &Connection) -> Result<Option<String>, ReadError> {
     db.query_row(
         "SELECT schema_digest FROM runtime_schema_migrations WHERE migration_id=?1",
         [MIGRATION_ID],
         |row| row.get(0),
     )
     .optional()
-    .map_err(|_| anyhow::anyhow!("memory_storage_policy_unavailable"))
+    .map_err(|_| ReadError::Unavailable)
 }
 
 /// Explicit startup only, inside its Immediate transaction. A missing receipt
@@ -47,10 +72,12 @@ pub(super) fn initialize_schema(db: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn require_schema(db: &Connection) -> anyhow::Result<()> {
-    let applied = applied(db)?.ok_or_else(|| anyhow::anyhow!("memory_storage_policy_missing"))?;
-    anyhow::ensure!(applied == digest(), "memory_storage_policy_invalid");
-    Ok(())
+fn require_schema(db: &Connection) -> Result<(), ReadError> {
+    match applied(db)? {
+        Some(applied) if applied == digest() => Ok(()),
+        Some(_) => Err(ReadError::Invalid),
+        None => Err(ReadError::Missing),
+    }
 }
 
 /// Pressure observation and configuration projection are published together.
@@ -80,20 +107,17 @@ pub(super) struct Snapshot {
 }
 
 impl Snapshot {
-    pub(super) fn load(db: &Connection) -> anyhow::Result<Self> {
+    pub(super) fn load(db: &Connection) -> Result<Self, ReadError> {
         require_schema(db)?;
         let (limit, revision) = db.query_row(
             "SELECT configured_limit_bytes,pressure_revision FROM memory_storage_budget WHERE singleton_id=1",
             [], |row| Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?)),
-        ).optional().map_err(|_| anyhow::anyhow!("memory_storage_policy_invalid"))?
-         .ok_or_else(|| anyhow::anyhow!("memory_storage_policy_missing"))?;
-        let bytes = limit
-            .parse::<u64>()
-            .map_err(|_| anyhow::anyhow!("memory_storage_policy_invalid"))?;
-        anyhow::ensure!(
-            bytes > 0 && bytes.to_string() == limit && revision > 0,
-            "memory_storage_policy_invalid"
-        );
+        ).optional().map_err(|_| ReadError::Invalid)?
+         .ok_or(ReadError::Missing)?;
+        let bytes = limit.parse::<u64>().map_err(|_| ReadError::Invalid)?;
+        if bytes == 0 || bytes.to_string() != limit || revision <= 0 {
+            return Err(ReadError::Invalid);
+        }
         Ok(Self {
             limit: bytes,
             pressure_revision: revision,

@@ -1,4 +1,4 @@
-import type { ByteMeasurement, CapacityDecision } from "./memory-capacity";
+import type { ByteMeasurement, CapacityDecision, ManualGrowthDecision } from "./memory-capacity";
 type Translate = (zh: string, en: string) => string;
 
 export function capacityLabel(decision: CapacityDecision, t: Translate) {
@@ -12,6 +12,23 @@ export function capacityLabel(decision: CapacityDecision, t: Translate) {
     principal_rows_exhausted: ["近期原文条数已达配额", "Source transcript row quota reached"],
     principal_bytes_exhausted: ["近期原文字节数已达配额", "Source transcript byte quota reached"],
     principal_background_cost_exhausted: ["后台逻辑工作量已达配额", "Background logical-work quota reached"],
+  };
+  return t(...labels[decision]);
+}
+
+export function manualGrowthLabel(decision: ManualGrowthDecision | undefined, t: Translate): string {
+  if (decision === undefined) return t("新增内容：状态尚不可用，暂不能确认存储预算", "New content: status unavailable; storage budget is unconfirmed");
+  const labels: Record<ManualGrowthDecision, [string, string]> = {
+    available: ["新增内容：记忆存储预算可用", "New content: memory storage budget is available"],
+    storage_state_missing: ["新增内容：缺少存储状态，请联系管理员检查", "New content: storage observation is missing; contact an administrator"],
+    storage_state_unknown: ["新增内容：存储状态需要检查", "New content: storage observation needs attention"],
+    storage_state_unavailable: ["新增内容：暂时无法读取存储状态", "New content: storage observation is unavailable"],
+    storage_policy_missing: ["新增内容：缺少存储配置记录，请联系管理员检查", "New content: storage configuration is missing; contact an administrator"],
+    storage_policy_invalid: ["新增内容：存储配置记录需要检查", "New content: storage configuration needs attention"],
+    storage_policy_unavailable: ["新增内容：暂时无法读取存储配置", "New content: storage configuration is unavailable"],
+    measurement_unavailable: ["新增内容：暂时无法测量记忆占用", "New content: memory usage cannot be measured"],
+    domain_budget_reached: ["新增内容：记忆存储预算已用满，可先导出或删除不需要的内容", "New content: memory storage budget reached; export or delete unwanted content"],
+    explicit_stop_unbound: ["新增内容：存储保护已暂停写入，请联系管理员检查", "New content: storage protection pauses writes; contact an administrator"],
   };
   return t(...labels[decision]);
 }

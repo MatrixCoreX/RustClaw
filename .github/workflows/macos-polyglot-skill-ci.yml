@@ -541,6 +541,29 @@ jobs:
             --prefix memory::embedding_jobs::rejected_startup_tests:: \
             --require denied_reindex_does_not_install_schema_receipts_or_profile_state
           cargo test --locked -p clawd --bin clawd memory::embedding_jobs::rejected_startup_tests:: -- --test-threads=1 --nocapture
+      - name: Test manual memory growth availability and read-only HTTP projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::growth_availability_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::growth_availability_tests:: \
+            --require unrelated_main_growth_can_pause_background_without_blocking_manual_content \
+            --require source_quota_exhaustion_does_not_become_manual_domain_exhaustion \
+            --require missing_budget_is_read_only_unavailability_and_actual_growth_rejection \
+            --require damaged_budget_has_typed_projection_and_is_not_normalized \
+            --require actual_domain_limit_reports_blocked_without_disabling_recovery \
+            --require ordinary_projection_keeps_global_manual_limit_and_measurement_private \
+            --require invalid_state_or_policy_is_rejected_without_sampling_domains \
+            --require exact_allocation_limit_distinguishes_completion_from_new_growth
+          cargo test --locked -p clawd --bin clawd memory::ux::growth_availability_tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd http::memory_routes::capacity::growth_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_routes::capacity::growth_tests:: \
+            --require ordinary_http_response_has_manual_decision_without_global_limit_or_credentials \
+            --require absent_budget_remains_absent_after_authenticated_availability_read \
+            --require missing_source_quota_does_not_repair_policy_or_hide_manual_domain_state \
+            --require invalid_budget_is_visible_but_not_normalized_by_http_read
+          cargo test --locked -p clawd --bin clawd http::memory_routes::capacity::growth_tests:: -- --test-threads=1 --nocapture
       - name: Test configured memory budget and source-only quota contracts
         shell: bash
         run: |
@@ -1074,6 +1097,29 @@ jobs:
             --prefix memory::embedding_jobs::rejected_startup_tests:: \
             --require denied_reindex_does_not_install_schema_receipts_or_profile_state
           cargo test --locked -p clawd --bin clawd memory::embedding_jobs::rejected_startup_tests:: -- --test-threads=1 --nocapture
+      - name: Test manual memory growth availability and read-only HTTP projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::growth_availability_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::growth_availability_tests:: \
+            --require unrelated_main_growth_can_pause_background_without_blocking_manual_content \
+            --require source_quota_exhaustion_does_not_become_manual_domain_exhaustion \
+            --require missing_budget_is_read_only_unavailability_and_actual_growth_rejection \
+            --require damaged_budget_has_typed_projection_and_is_not_normalized \
+            --require actual_domain_limit_reports_blocked_without_disabling_recovery \
+            --require ordinary_projection_keeps_global_manual_limit_and_measurement_private \
+            --require invalid_state_or_policy_is_rejected_without_sampling_domains \
+            --require exact_allocation_limit_distinguishes_completion_from_new_growth
+          cargo test --locked -p clawd --bin clawd memory::ux::growth_availability_tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd http::memory_routes::capacity::growth_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_routes::capacity::growth_tests:: \
+            --require ordinary_http_response_has_manual_decision_without_global_limit_or_credentials \
+            --require absent_budget_remains_absent_after_authenticated_availability_read \
+            --require missing_source_quota_does_not_repair_policy_or_hide_manual_domain_state \
+            --require invalid_budget_is_visible_but_not_normalized_by_http_read
+          cargo test --locked -p clawd --bin clawd http::memory_routes::capacity::growth_tests:: -- --test-threads=1 --nocapture
       - name: Test configured memory budget and source-only quota contracts
         shell: bash
         run: |

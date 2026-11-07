@@ -4,13 +4,24 @@ export const capacityDecisions = ["available", "storage_paused", "storage_state_
   "principal_quota_missing", "principal_quota_invalid", "principal_rows_exhausted", "principal_bytes_exhausted",
   "principal_background_cost_exhausted"] as const;
 export type CapacityDecision = typeof capacityDecisions[number];
+export const manualGrowthDecisions = ["available", "storage_state_missing", "storage_state_unknown",
+  "storage_state_unavailable", "storage_policy_missing", "storage_policy_invalid", "storage_policy_unavailable",
+  "measurement_unavailable", "domain_budget_reached", "explicit_stop_unbound"] as const;
+export type ManualGrowthDecision = typeof manualGrowthDecisions[number];
 export type ByteMeasurement = { status: "measured"; bytes: string }
   | { status: "unavailable"; reason: string } | { status: "admin_only" };
+export interface ManualGrowthAvailability {
+  schema_version: 1;
+  scope: "memory_domain_assigned_btree_content_growth";
+  decision: ManualGrowthDecision;
+  configured_limit_bytes: ByteMeasurement;
+}
 export interface MemoryCapacity {
   schema_version: 1;
   sampled_at_ts: number;
   settings: MemorySettingsResult;
   capacity_decision: CapacityDecision;
+  manual_growth?: ManualGrowthAvailability;
   quota: { scope: "source_transcript_content_rows_and_bytes"; decision: CapacityDecision;
     counters: null | Record<"used_rows" | "max_rows" | "used_bytes" | "max_bytes"
       | "spent_and_pending_logical_microunits" | "max_logical_microunits", string> };
@@ -63,6 +74,30 @@ function measurement(value: unknown): value is ByteMeasurement {
       ["query_failed", "invalid_value", "unsupported_dbstat", "in_memory_database", "filesystem_unavailable", "not_sampled"])));
 }
 
+function manualGrowthValid(value: unknown, domain: ByteMeasurement, pressure: string): boolean {
+  // Older nodes have no manual-write observation. Absence must never be
+  // presented as "available"; the display layer labels it unavailable.
+  if (value === undefined) return true;
+  if (!record(value) || value.schema_version !== 1
+    || value.scope !== "memory_domain_assigned_btree_content_growth"
+    || !oneOf(value.decision, manualGrowthDecisions) || !measurement(value.configured_limit_bytes)) return false;
+  const decision = value.decision;
+  const limit = value.configured_limit_bytes;
+  if (limit.status === "measured" && BigInt(limit.bytes) === BigInt(0)) return false;
+  if (pressure === "missing" && decision !== "storage_state_missing") return false;
+  if (pressure === "unknown" && decision !== "storage_state_unknown") return false;
+  if (decision === "explicit_stop_unbound" && pressure !== "explicit_write_blocked") return false;
+  if (["storage_policy_missing", "storage_policy_invalid", "storage_policy_unavailable"].includes(decision as string)
+    && limit.status === "measured") return false;
+  if (decision === "available" || decision === "domain_budget_reached") {
+    if (domain.status === "admin_only" && limit.status === "admin_only") return true;
+    if (domain.status !== "measured" || limit.status !== "measured") return false;
+    const reached = BigInt(domain.bytes) >= BigInt(limit.bytes);
+    if ((decision === "domain_budget_reached") !== reached) return false;
+  }
+  return true;
+}
+
 /** Validate the full observation and the exact owner/scope/policy represented by the page. */
 export function parseMemoryCapacity(value: unknown, expectedPolicy: string): MemoryCapacity | null {
   if (!record(value) || value.schema_version !== 1 || !integer(value.sampled_at_ts)
@@ -93,5 +128,7 @@ export function parseMemoryCapacity(value: unknown, expectedPolicy: string): Mem
     : ["automatic_generation_paused", "explicit_write_blocked"].includes(pressure.state as string) ? "storage_paused" : value.quota.decision;
   if (value.capacity_decision !== decision) return null;
   if ((["principal_quota_missing", "principal_quota_invalid"].includes(value.quota.decision as string)) !== (counters === null)) return null;
+  if (!manualGrowthValid(value.manual_growth, observed.memory_domain_assigned_btree_bytes as ByteMeasurement,
+    pressure.state as string)) return null;
   return value as unknown as MemoryCapacity;
 }
