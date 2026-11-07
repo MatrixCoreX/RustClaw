@@ -790,6 +790,7 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
             warn!(%error, "memory_project_startup_initialization_unavailable");
         }
         memory::embedding_jobs::initialize_embedding_runtime(&db, &memory_runtime)?;
+        memory::ensure_retirement_access_schema(&db)?;
         task_context_builder::context_compaction_lifecycle::ensure_context_compaction_lifecycle_schema(&db)?;
         if memory_runtime.hybrid_recall_enabled
             && (memory_runtime.reindex_on_startup

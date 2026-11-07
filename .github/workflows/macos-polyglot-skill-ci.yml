@@ -930,6 +930,40 @@ jobs:
             --require memory_runtime_config_tests::missing_or_malformed_file_keeps_main_configuration \
             --require memory_runtime_config_tests::empty_path_keeps_main_configuration_without_reading_a_file
           cargo test --locked -p clawd --bin clawd bootstrap::config_loaders:: -- --test-threads=1 --nocapture
+      - name: Test owned memory retirement access paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::retirement_access:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::retirement_access:: \
+            --require migration_tests::upgrade_preserves_duplicates_data_and_prior_receipts \
+            --require migration_tests::repeated_initialization_is_read_only_and_query_only_safe \
+            --require migration_tests::digest_mismatch_precedes_any_schema_write \
+            --require migration_tests::unreceipted_wrong_projection_index_shapes_reject_atomically \
+            --require migration_tests::wrong_job_index_rolls_back_projection_index_and_receipt \
+            --require migration_tests::missing_applied_index_is_not_repaired \
+            --require migration_tests::outer_transaction_can_roll_back_successful_migration \
+            --require migration_tests::failed_nested_migration_preserves_caller_work \
+            --require migration_tests::missing_jobs_schema_is_not_initialized_by_index_migration \
+            --require migration_tests::readonly_first_initialization_has_no_partial_adoption \
+            --require migration_tests::concurrent_initializers_publish_one_valid_receipt \
+            --require migration_tests::validation_and_receipts_are_bound_to_main_not_temp_shadows \
+            --require tests::exact_identity_retirement_preserves_foreign_derived_rows_and_fts \
+            --require tests::all_scopes_and_principals_retire_only_their_selected_identity \
+            --require tests::eligibility_and_rotated_profile_generations_preserve_terminal_work \
+            --require tests::legacy_and_parameterless_selectors_preserve_duplicate_target_semantics \
+            --require tests::missing_targets_and_replays_have_no_unrelated_side_effects \
+            --require tests::absent_optional_tables_are_not_created_by_text_only_retirement \
+            --require tests::autocommit_retirement_is_rejected_without_changes \
+            --require tests::successful_nested_retirement_remains_owned_by_caller_transaction \
+            --require failure_tests::failures_at_every_retirement_stage_restore_all_rows_and_caller_can_commit \
+            --require failure_tests::malformed_present_tables_fail_even_for_empty_targets_without_repair \
+            --require failure_tests::readonly_failure_does_not_cancel_or_tombstone_work \
+            --require work_tests::populated_job_retirement_is_target_bounded_and_matches_legacy_effects \
+            --require work_tests::populated_vector_retirement_is_target_bounded_and_matches_legacy_effects \
+            --require work_tests::populated_upgrade_reports_storage_and_writer_hold_without_rewriting_rows
+          cargo test --locked -p clawd --bin clawd memory::retirement_access:: -- --test-threads=1 --nocapture
       - name: Verify both product identities with the shared UI
         run: |
           npm ci --ignore-scripts --prefix UI
@@ -1774,6 +1808,40 @@ jobs:
             --require memory_runtime_config_tests::missing_or_malformed_file_keeps_main_configuration \
             --require memory_runtime_config_tests::empty_path_keeps_main_configuration_without_reading_a_file
           cargo test --locked -p clawd --bin clawd bootstrap::config_loaders:: -- --test-threads=1 --nocapture
+      - name: Test owned memory retirement access paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::retirement_access:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::retirement_access:: \
+            --require migration_tests::upgrade_preserves_duplicates_data_and_prior_receipts \
+            --require migration_tests::repeated_initialization_is_read_only_and_query_only_safe \
+            --require migration_tests::digest_mismatch_precedes_any_schema_write \
+            --require migration_tests::unreceipted_wrong_projection_index_shapes_reject_atomically \
+            --require migration_tests::wrong_job_index_rolls_back_projection_index_and_receipt \
+            --require migration_tests::missing_applied_index_is_not_repaired \
+            --require migration_tests::outer_transaction_can_roll_back_successful_migration \
+            --require migration_tests::failed_nested_migration_preserves_caller_work \
+            --require migration_tests::missing_jobs_schema_is_not_initialized_by_index_migration \
+            --require migration_tests::readonly_first_initialization_has_no_partial_adoption \
+            --require migration_tests::concurrent_initializers_publish_one_valid_receipt \
+            --require migration_tests::validation_and_receipts_are_bound_to_main_not_temp_shadows \
+            --require tests::exact_identity_retirement_preserves_foreign_derived_rows_and_fts \
+            --require tests::all_scopes_and_principals_retire_only_their_selected_identity \
+            --require tests::eligibility_and_rotated_profile_generations_preserve_terminal_work \
+            --require tests::legacy_and_parameterless_selectors_preserve_duplicate_target_semantics \
+            --require tests::missing_targets_and_replays_have_no_unrelated_side_effects \
+            --require tests::absent_optional_tables_are_not_created_by_text_only_retirement \
+            --require tests::autocommit_retirement_is_rejected_without_changes \
+            --require tests::successful_nested_retirement_remains_owned_by_caller_transaction \
+            --require failure_tests::failures_at_every_retirement_stage_restore_all_rows_and_caller_can_commit \
+            --require failure_tests::malformed_present_tables_fail_even_for_empty_targets_without_repair \
+            --require failure_tests::readonly_failure_does_not_cancel_or_tombstone_work \
+            --require work_tests::populated_job_retirement_is_target_bounded_and_matches_legacy_effects \
+            --require work_tests::populated_vector_retirement_is_target_bounded_and_matches_legacy_effects \
+            --require work_tests::populated_upgrade_reports_storage_and_writer_hold_without_rewriting_rows
+          cargo test --locked -p clawd --bin clawd memory::retirement_access:: -- --test-threads=1 --nocapture
       - name: Test browser API authentication boundaries
         shell: bash
         env:

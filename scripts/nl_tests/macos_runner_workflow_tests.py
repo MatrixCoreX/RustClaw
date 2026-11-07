@@ -605,7 +605,90 @@ def required_memory_configuration_gate(job):
             and '#[path = "memory_runtime_config_tests.rs"]\nmod memory_runtime_config_tests;' in loader)
 
 
+def required_owned_retirement_gate(job):
+    prefix = 'memory::retirement_access::'
+    run = f'cargo test --locked -p clawd --bin clawd {prefix} -- --test-threads=1 --nocapture'
+    if not required_command_gate(job, run):
+        return False
+    step = next(step for step in job['steps'] if run in step.get('run', ''))
+    root = ROOT / 'crates/clawd/src/memory'
+    owner = (root / 'retirement_access.rs').read_text()
+    expected = set()
+    for module, filename, count in [
+        ('migration_tests', 'retirement_access_migration_tests.rs', 12),
+        ('tests', 'retirement_access_tests.rs', 8),
+        ('failure_tests', 'retirement_access_failure_tests.rs', 3),
+        ('work_tests', 'retirement_access_work_tests.rs', 3),
+    ]:
+        source = (root / filename).read_text()
+        names = re.findall(r'^#\[test\]\nfn (\w+)\(', source, re.M)
+        if (len(names) != len(set(names)) or len(names) != count or '#[ignore' in source
+                or f'#[cfg(test)]\n#[path = "{filename}"]\nmod {module};' not in owner):
+            return False
+        expected.update(module + '::' + name for name in names)
+    script = step['run']
+    listing = f'cargo test --locked -p clawd --bin clawd {prefix} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
+    self_test = 'python3 scripts/tests/assert_rust_test_selection.py --self-test'
+    previous = [item for item in job['steps'] if item.get('name') == 'Test effective flat and wrapped memory configuration']
+    required = re.findall(r'--require ([A-Za-z0-9_:]+)', script)
+    return (step.get('name') == 'Test owned memory retirement access paths'
+            and step.get('shell') == 'bash' and len(previous) == 1
+            and job['steps'].index(step) == job['steps'].index(previous[0]) + 1
+            and script.splitlines().count(listing + ' \\') == 1
+            and script.splitlines().count(self_test) == 1
+            and script.index(self_test) < script.index(listing) < script.index(run)
+            and re.findall(r'--prefix ([A-Za-z0-9_:]+)', script) == [prefix]
+            and len(required) == len(expected) == 26 and set(required) == expected
+            and '|| true' not in script and '--ignored' not in script)
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_owned_retirement_gates_cover_every_native_case_without_bypasses(self):
+        jobs = load('macos-polyglot-skill-ci.yml')['jobs']
+        prefix = 'memory::retirement_access::'
+        run = f'cargo test --locked -p clawd --bin clawd {prefix} -- --test-threads=1 --nocapture'
+        for name in ['runtime-read-linux', 'polyglot-skill-macos']:
+            self.assertTrue(required_owned_retirement_gate(jobs[name]))
+            original = next(step for step in jobs[name]['steps'] if run in step.get('run', ''))
+            cases = re.findall(r'--require ([A-Za-z0-9_:]+)', original['run'])
+            mutations = ['remove', 'conditional', 'continue', 'ignore', 'duplicate-case',
+                         'wrong-prefix', 'run-before-list', 'ignore-list', 'moved-step',
+                         'without-self-test', 'without-pipefail'] + ['missing:' + case for case in cases]
+            for mutation in mutations:
+                with self.subTest(job=name, mutation=mutation):
+                    job = deepcopy(jobs[name])
+                    step = next(step for step in job['steps'] if run in step.get('run', ''))
+                    script = step['run']
+                    if mutation == 'remove':
+                        job['steps'].remove(step)
+                    elif mutation == 'conditional':
+                        step['if'] = '${{ false }}'
+                    elif mutation == 'continue':
+                        step['continue-on-error'] = True
+                    elif mutation == 'ignore':
+                        step['run'] = script.replace(run, run + ' || true')
+                    elif mutation == 'duplicate-case':
+                        case = '--require ' + cases[0]
+                        step['run'] = script.replace(case, case + ' ' + case)
+                    elif mutation == 'wrong-prefix':
+                        step['run'] = script.replace('--prefix ' + prefix, '--prefix missing::')
+                    elif mutation == 'run-before-list':
+                        step['run'] = script.replace(run + '\n', '')
+                        step['run'] = step['run'].replace('set -euo pipefail\n', 'set -euo pipefail\n' + run + '\n')
+                    elif mutation == 'ignore-list':
+                        step['run'] = script.replace(' | python3 scripts/tests/assert_rust_test_selection.py', ' || true | python3 scripts/tests/assert_rust_test_selection.py')
+                    elif mutation == 'moved-step':
+                        at = job['steps'].index(step)
+                        job['steps'].remove(step)
+                        job['steps'].insert(at + 1, step)
+                    elif mutation == 'without-self-test':
+                        step['run'] = script.replace('python3 scripts/tests/assert_rust_test_selection.py --self-test\n', '')
+                    elif mutation == 'without-pipefail':
+                        step['run'] = script.replace('set -euo pipefail', 'set -e')
+                    else:
+                        step['run'] = script.replace('--require ' + mutation.split(':', 1)[1], '')
+                    self.assertFalse(required_owned_retirement_gate(job))
+
     def test_memory_configuration_gates_require_both_shapes_and_the_existing_native_case(self):
         jobs = load('macos-polyglot-skill-ci.yml')['jobs']
         prefix = 'bootstrap::config_loaders::'

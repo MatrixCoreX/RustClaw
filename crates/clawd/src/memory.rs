@@ -15,6 +15,7 @@ pub(crate) mod indexing;
 pub(crate) mod import_upload;
 mod projection_retirement;
 mod projection_transaction;
+mod retirement_access;
 mod recall_policy;
 pub(crate) mod intent;
 mod intent_generation;
@@ -53,6 +54,7 @@ pub(crate) use memory_recent::{
     build_recent_turns_full_context_with_sources,
 };
 pub(crate) use service::dynamic_chat_memory_budget_chars;
+pub(crate) use retirement_access::ensure_retirement_access_schema;
 
 use memory_recent::is_transient_assistant_context_text;
 
