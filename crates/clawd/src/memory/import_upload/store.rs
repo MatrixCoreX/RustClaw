@@ -59,6 +59,17 @@ pub(crate) fn status(
     checked_read(db, actor, |db| Ok(load(db, actor, id)?.public()))
 }
 
+pub(crate) fn chunk_budget(db: &Connection, actor: &AuthIdentity, id: &str) -> anyhow::Result<u64> {
+    checked_read(db, actor, |db| {
+        let upload = load(db, actor, id)?;
+        anyhow::ensure!(
+            upload.state != UploadState::Cancelled,
+            UploadError::StateConflict
+        );
+        Ok(upload.chunk)
+    })
+}
+
 pub(crate) fn append(
     db: &Connection,
     actor: &AuthIdentity,

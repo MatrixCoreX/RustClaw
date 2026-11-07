@@ -13,6 +13,8 @@ mod capacity;
 mod reading;
 #[path = "memory_write.rs"]
 mod writing;
+#[path = "memory_import.rs"]
+mod uploading;
 
 #[cfg(test)]
 #[path = "memory_write_fence_tests.rs"]
@@ -58,6 +60,7 @@ struct MemoryVectorMutationResult {
 
 pub(crate) fn router() -> Router<AppState> {
     Router::new()
+        .merge(uploading::router())
         .route("/memory", get(get_memory_overview))
         .route("/memory/availability", get(capacity::get))
         .route("/memory/recent", get(list_memory_recent_handler))
@@ -778,6 +781,9 @@ fn mutation_error_typed<T: serde::Serialize>(
     error: anyhow::Error,
 ) -> (StatusCode, Json<ApiResponse<T>>) {
     if let Some(response) = writing::execution_error(&error) {
+        return response;
+    }
+    if let Some(response) = uploading::typed_upload_error(&error) {
         return response;
     }
     let code = memory_api_error_code(&error, "memory_mutation_failed");

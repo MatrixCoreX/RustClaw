@@ -487,7 +487,80 @@ def required_staged_import_integration_gate(job,kind):
             and job['steps'].index(step)==job['steps'].index(prior)+1)
 
 
+def required_staged_http_gate(job,kind):
+    if kind=='clawd':
+        groups=[
+            ('clawd','memory::import_upload::ingress::tests::',6,
+             [(None,ROOT/'crates/clawd/src/memory/import_upload/ingress_tests.rs')]),
+            ('clawd','http::memory_import_http_tests::',15,
+             [(module,ROOT/('crates/clawd/src/http/memory_import_'+module+'_tests.rs'))
+              for module in ['ingress','roundtrip','boundary']])]
+        prior='Test staged memory whole preview confirmation and privacy lifecycle'
+    else:
+        groups=[('webd','request_limits::memory_import_tests::',4,
+                 [(None,ROOT/'crates/webd/src/memory_import_limits_tests.rs')])]
+        prior='Test bounded staged import HTTP and ingress policies'
+    gate_step=None
+    for package,prefix,count,sources in groups:
+        run=f'cargo test --locked -p {package} --bin {package} {prefix} -- --test-threads=1 --nocapture'
+        if not required_command_gate(job,run):
+            return False
+        step=next(step for step in job['steps'] if run in step.get('run',''))
+        if gate_step is not None and step is not gate_step:
+            return False
+        gate_step=step
+        expected=set()
+        for module,path in sources:
+            for name in re.findall(r'#\[(?:tokio::)?test\]\s+(?:async\s+)?fn (\w+)\(',path.read_text()):
+                expected.add((module+'::' if module else '')+name)
+        listing=f'cargo test --locked -p {package} --bin {package} {prefix} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
+        script=step['run']
+        if listing not in script or script.index(listing)>script.index(run):
+            return False
+        segment=script[script.index(listing):script.index(run)]
+        required=re.findall(r'--require ([A-Za-z0-9_:]+)',segment)
+        if not(len(expected)==count and len(required)==count and set(required)==expected
+               and f'--prefix {prefix}' in segment and '|| true' not in script):
+            return False
+    previous=next(step for step in job['steps'] if step.get('name')==prior)
+    return (job['steps'].index(gate_step)==job['steps'].index(previous)+1
+            and (kind!='webd' or 'cargo test --locked -p webd --bin webd -- --test-threads=1 --nocapture' in gate_step['run']))
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_staged_http_and_webd_gates_keep_all_raw_body_and_policy_cases(self):
+        jobs=load('macos-polyglot-skill-ci.yml')['jobs']
+        for name in ['runtime-read-linux','polyglot-skill-macos']:
+            for kind,label in [
+                ('clawd','Test bounded staged import HTTP and ingress policies'),
+                ('webd','Test native webd staged import transport limits')]:
+                self.assertTrue(required_staged_http_gate(jobs[name],kind))
+                for mutation in ['selector','listing','require','ignore','conditional','continue','early','late']:
+                    with self.subTest(job=name,kind=kind,mutation=mutation):
+                        job=deepcopy(jobs[name])
+                        step=next(value for value in job['steps'] if value.get('name')==label)
+                        if mutation=='selector':
+                            step['run']=step['run'].replace('memory::import_upload::ingress::tests::' if kind=='clawd'
+                                else 'request_limits::memory_import_tests::','missing::transport::')
+                        elif mutation=='listing':
+                            step['run']=step['run'].replace('--list --color never','--list')
+                        elif mutation=='require':
+                            step['run']=re.sub(r'--require [A-Za-z0-9_:]+','--require absent_case',step['run'],count=1)
+                        elif mutation=='ignore':
+                            step['run']=step['run'].replace('--test-threads=1 --nocapture','--test-threads=1 --nocapture || true')
+                        elif mutation=='conditional':
+                            step['if']='false'
+                        elif mutation=='continue':
+                            step['continue-on-error']=True
+                        else:
+                            job['steps'].remove(step)
+                            if mutation=='late':job['steps'].append(step)
+                            else:
+                                prior=('Test staged memory whole preview confirmation and privacy lifecycle' if kind=='clawd'
+                                    else 'Test bounded staged import HTTP and ingress policies')
+                                previous=next(value for value in job['steps'] if value.get('name')==prior)
+                                job['steps'].insert(job['steps'].index(previous),step)
+                        self.assertFalse(required_staged_http_gate(job,kind))
     def test_shared_and_whole_import_gates_keep_all_atomicity_and_privacy_cases(self):
         jobs=load('macos-polyglot-skill-ci.yml')['jobs']
         for name in ['runtime-read-linux','polyglot-skill-macos']:

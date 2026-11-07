@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 mod lease;
+mod failure;
+mod ingress;
 mod item_batch;
 mod lifecycle;
 mod confirmation;
@@ -17,6 +19,8 @@ mod schema;
 mod store;
 
 pub(super) use confirmation::{confirm_staged, mark_confirmed};
+pub(crate) use failure::{failure, Failure, FailureKind};
+pub(crate) use ingress::{transport_policy, IngressPolicy, TransportPolicy};
 pub(crate) use lease::{claim_parser, renew_parser, ParseLease};
 pub(super) use lifecycle::{purge_for_clear, recent_payload};
 pub(crate) use parser::{parse_export, ParsedExport};
@@ -24,7 +28,7 @@ pub(crate) use preview::{parse_and_preview, ParsePolicy};
 pub(crate) use reader::ChunkReader;
 pub(crate) use schema::initialize_schema;
 pub(super) use staged_payload::is_staged;
-pub(crate) use store::{append, cancel, create, status};
+pub(crate) use store::{append, cancel, chunk_budget, create, status};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UploadError {
@@ -47,6 +51,8 @@ pub(crate) enum UploadError {
     ExportSchemaUnsupported,
     ExportChecksumMismatch,
     AlreadyConfirmed,
+    IngressUnavailable,
+    OuterTransaction,
 }
 
 impl UploadError {
@@ -71,6 +77,8 @@ impl UploadError {
             Self::ExportSchemaUnsupported => "memory_import_schema_unsupported",
             Self::ExportChecksumMismatch => "memory_import_checksum_invalid",
             Self::AlreadyConfirmed => "memory_import_already_confirmed",
+            Self::IngressUnavailable => "memory_import_ingress_unavailable",
+            Self::OuterTransaction => "memory_import_parser_requires_autocommit",
         }
     }
 }
@@ -162,7 +170,7 @@ fn digest(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
-fn valid_digest(value: &str) -> bool {
+pub(crate) fn valid_digest(value: &str) -> bool {
     value.strip_prefix("sha256:").is_some_and(|hex| {
         hex.len() == 64
             && hex

@@ -870,6 +870,50 @@ jobs:
             --require batching::later_batch_failure_discards_provisional_rows_but_keeps_the_whole_raw_upload \
             --require batching::damaged_raw_blob_larger_than_its_pinned_chunk_budget_is_rejected_before_delivery
           cargo test --locked -p clawd --bin clawd memory::import_upload::flow_tests:: -- --test-threads=1 --nocapture
+      - name: Test bounded staged import HTTP and ingress policies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::import_upload::ingress::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::import_upload::ingress::tests:: \
+            --require ingress_projects_existing_webd_values_without_second_defaults \
+            --require invalid_ingress_or_lease_configuration_fails_without_silent_clamping \
+            --require policy_read_reports_the_real_persisted_budget_without_initializing_missing_state \
+            --require revoked_original_identity_cannot_read_policy_through_a_surviving_key \
+            --require growth_failures_keep_typed_machine_codes_and_not_provider_prose \
+            --require parser_rejects_an_outer_transaction_before_claim_or_staging
+          cargo test --locked -p clawd --bin clawd memory::import_upload::ingress::tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd http::memory_import_http_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_import_http_tests:: \
+            --require ingress::policy_projects_config_and_requires_authentication \
+            --require ingress::create_rejects_payload_supplied_ownership_and_does_not_write_a_session \
+            --require ingress::identical_chunk_retry_is_idempotent_and_out_of_order_bytes_do_not_advance \
+            --require ingress::declared_and_streamed_oversize_chunks_return_json_413_without_partial_append \
+            --require ingress::another_owner_is_rejected_before_any_chunk_body_is_consumed \
+            --require ingress::original_key_revocation_during_body_receipt_rejects_persistence \
+            --require ingress::malformed_metadata_query_and_digest_have_structured_errors \
+            --require roundtrip::large_unicode_export_uses_one_real_http_preview_and_one_confirmation \
+            --require roundtrip::legacy_single_request_limit_is_not_disabled_for_unrelated_routes \
+            --require boundary::status_and_policy_reads_do_not_need_the_sqlite_writer_lock \
+            --require boundary::missing_migration_returns_json_unavailable_without_read_repair \
+            --require boundary::preview_cancellation_requires_its_owner_and_removes_pending_plaintext \
+            --require boundary::invalid_ingress_configuration_does_not_block_status_or_cancellation_recovery \
+            --require boundary::body_receipt_deadline_is_structured_and_does_not_append_partial_bytes \
+            --require boundary::pressure_rejection_exposes_its_typed_reason_and_keeps_recovery_available
+          cargo test --locked -p clawd --bin clawd http::memory_import_http_tests:: -- --test-threads=1 --nocapture
+      - name: Test native webd staged import transport limits
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p webd --bin webd request_limits::memory_import_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix request_limits::memory_import_tests:: \
+            --require only_the_exact_chunk_path_gets_the_existing_upload_policy \
+            --require similarly_named_nested_or_encoded_paths_do_not_expand_the_upload_exception \
+            --require chunk_class_uses_configured_upload_bytes_not_a_second_body_limit \
+            --require parser_and_upload_use_the_existing_separate_resource_permits
+          cargo test --locked -p webd --bin webd request_limits::memory_import_tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p webd --bin webd -- --test-threads=1 --nocapture
       - name: Verify both product identities with the shared UI
         run: |
           npm ci --ignore-scripts --prefix UI
@@ -1651,6 +1695,50 @@ jobs:
             --require batching::later_batch_failure_discards_provisional_rows_but_keeps_the_whole_raw_upload \
             --require batching::damaged_raw_blob_larger_than_its_pinned_chunk_budget_is_rejected_before_delivery
           cargo test --locked -p clawd --bin clawd memory::import_upload::flow_tests:: -- --test-threads=1 --nocapture
+      - name: Test bounded staged import HTTP and ingress policies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::import_upload::ingress::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::import_upload::ingress::tests:: \
+            --require ingress_projects_existing_webd_values_without_second_defaults \
+            --require invalid_ingress_or_lease_configuration_fails_without_silent_clamping \
+            --require policy_read_reports_the_real_persisted_budget_without_initializing_missing_state \
+            --require revoked_original_identity_cannot_read_policy_through_a_surviving_key \
+            --require growth_failures_keep_typed_machine_codes_and_not_provider_prose \
+            --require parser_rejects_an_outer_transaction_before_claim_or_staging
+          cargo test --locked -p clawd --bin clawd memory::import_upload::ingress::tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd http::memory_import_http_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_import_http_tests:: \
+            --require ingress::policy_projects_config_and_requires_authentication \
+            --require ingress::create_rejects_payload_supplied_ownership_and_does_not_write_a_session \
+            --require ingress::identical_chunk_retry_is_idempotent_and_out_of_order_bytes_do_not_advance \
+            --require ingress::declared_and_streamed_oversize_chunks_return_json_413_without_partial_append \
+            --require ingress::another_owner_is_rejected_before_any_chunk_body_is_consumed \
+            --require ingress::original_key_revocation_during_body_receipt_rejects_persistence \
+            --require ingress::malformed_metadata_query_and_digest_have_structured_errors \
+            --require roundtrip::large_unicode_export_uses_one_real_http_preview_and_one_confirmation \
+            --require roundtrip::legacy_single_request_limit_is_not_disabled_for_unrelated_routes \
+            --require boundary::status_and_policy_reads_do_not_need_the_sqlite_writer_lock \
+            --require boundary::missing_migration_returns_json_unavailable_without_read_repair \
+            --require boundary::preview_cancellation_requires_its_owner_and_removes_pending_plaintext \
+            --require boundary::invalid_ingress_configuration_does_not_block_status_or_cancellation_recovery \
+            --require boundary::body_receipt_deadline_is_structured_and_does_not_append_partial_bytes \
+            --require boundary::pressure_rejection_exposes_its_typed_reason_and_keeps_recovery_available
+          cargo test --locked -p clawd --bin clawd http::memory_import_http_tests:: -- --test-threads=1 --nocapture
+      - name: Test native webd staged import transport limits
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p webd --bin webd request_limits::memory_import_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix request_limits::memory_import_tests:: \
+            --require only_the_exact_chunk_path_gets_the_existing_upload_policy \
+            --require similarly_named_nested_or_encoded_paths_do_not_expand_the_upload_exception \
+            --require chunk_class_uses_configured_upload_bytes_not_a_second_body_limit \
+            --require parser_and_upload_use_the_existing_separate_resource_permits
+          cargo test --locked -p webd --bin webd request_limits::memory_import_tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p webd --bin webd -- --test-threads=1 --nocapture
       - name: Test browser API authentication boundaries
         shell: bash
         env:

@@ -1233,6 +1233,9 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         policy: crate::PolicyConfig {
             maintenance: config.maintenance.clone(),
             memory: memory_runtime,
+            memory_import_ingress: crate::memory::import_upload::IngressPolicy::from_config(
+                &config.webd,
+            ),
             routing,
             limits: config.limits.clone(),
             llm_cost_governance: config.llm.cost_governance.clone(),

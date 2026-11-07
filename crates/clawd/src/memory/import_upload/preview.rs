@@ -19,6 +19,7 @@ pub(crate) fn parse_and_preview(
     policy: ParsePolicy,
     now: i64,
 ) -> anyhow::Result<MemoryImportPreview> {
+    anyhow::ensure!(db.is_autocommit(), UploadError::OuterTransaction);
     let previous = checked_read(db, actor, |db| {
         let upload = load(db, actor, id)?;
         if upload.state == UploadState::Preview {

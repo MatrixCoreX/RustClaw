@@ -73,7 +73,7 @@ fn recent_clear_withdraws_recent_preview_but_keeps_a_fact_only_preview() {
     let (recent, recent_preview) =
         preview(&db, &env.actor, vec![item("recent private data", "recent")]);
     let (fact, fact_preview) = preview(&db, &env.actor, vec![item("fact remains pending", "fact")]);
-    clear(&db, &env.actor, "transcript_only").unwrap();
+    clear(&db, &env.actor, "transcript").unwrap();
     assert_eq!(
         status(&db, &env.actor, &recent.upload_id).unwrap().state,
         UploadState::Cancelled

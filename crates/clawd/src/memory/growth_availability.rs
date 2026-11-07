@@ -38,6 +38,20 @@ impl GrowthDecision {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct GrowthError(pub(crate) GrowthDecision);
+impl GrowthError {
+    pub(crate) fn code(self) -> &'static str {
+        self.0.code().unwrap_or("memory_storage_state_unavailable")
+    }
+}
+impl std::fmt::Display for GrowthError {
+    fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        output.write_str(self.code())
+    }
+}
+impl std::error::Error for GrowthError {}
+
 #[derive(Clone, Copy)]
 pub(super) enum ProbePhase {
     BeforeGrowth,
@@ -60,10 +74,7 @@ impl GrowthProbe {
                 | GrowthDecision::StoragePolicyInvalid
                 | GrowthDecision::StoragePolicyUnavailable
         ) {
-            anyhow::bail!(self
-                .decision
-                .code()
-                .unwrap_or(ReadError::Unavailable.code()));
+            anyhow::bail!(GrowthError(self.decision));
         }
         self.snapshot
             .ok_or_else(|| anyhow::anyhow!(ReadError::Unavailable))
@@ -71,8 +82,8 @@ impl GrowthProbe {
 
     pub(super) fn admit(self) -> anyhow::Result<Snapshot> {
         let snapshot = self.validated_snapshot()?;
-        if let Some(code) = self.decision.code() {
-            anyhow::bail!(code);
+        if self.decision.code().is_some() {
+            anyhow::bail!(GrowthError(self.decision));
         }
         Ok(snapshot)
     }

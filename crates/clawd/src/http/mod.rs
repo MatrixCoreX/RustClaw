@@ -4,6 +4,9 @@ pub(crate) mod conversation_inputs;
 pub(crate) mod memory_routes;
 
 #[cfg(test)]
+mod memory_import_http_tests;
+
+#[cfg(test)]
 mod memory_capacity_read_race_tests;
 #[cfg(test)]
 #[path = "memory_capacity_read_race_test_fixtures.rs"]
