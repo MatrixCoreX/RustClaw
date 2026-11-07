@@ -8,6 +8,10 @@ const MIGRATION_ID: &str = "012_memory_ux_audit_v1";
 const MIGRATION_SQL: &str = include_str!("../../../../migrations/012_memory_ux_audit.sql");
 const UNDO_GRACE_SECONDS: i64 = 300;
 
+#[path = "ux_write.rs"]
+mod writing;
+pub(crate) use writing::atomic_mutation;
+
 #[path = "ux_clear.rs"]
 mod clearing;
 #[path = "ux_export.rs"]
@@ -395,91 +399,91 @@ pub(crate) fn delete_memory_with_revision(
     now_ts: i64,
 ) -> anyhow::Result<MemoryMutationResult> {
     require_memory_ux_schema(db)?;
-    let transaction = db.unchecked_transaction()?;
-    let current = load_mutable_memory(&transaction, principal_id, memory_id)?
-        .ok_or_else(|| anyhow!("memory_not_found"))?;
-    anyhow::ensure!(
-        current.revision == request.expected_revision,
-        "memory_revision_conflict"
-    );
-    let revision_id = append_revision(
-        &transaction,
-        &current,
-        "delete",
-        principal_id,
-        None,
-        Some(now_ts + UNDO_GRACE_SECONDS),
-        now_ts,
-    )?;
-    let retrieval_identity = retrieval::identity(&transaction, &current)?;
-    let raw_source_id = retrieval_identity.source_memory_id;
-    super::jobs::request_cancel_for_scope(&transaction, principal_id, Some(&current.scope_ref))?;
-    if let Some(source_id) = raw_source_id {
-        transaction.execute(
-            "DELETE FROM memory_facts
+    atomic_mutation(db, |transaction| {
+        let current = load_mutable_memory(transaction, principal_id, memory_id)?
+            .ok_or_else(|| anyhow!("memory_not_found"))?;
+        anyhow::ensure!(
+            current.revision == request.expected_revision,
+            "memory_revision_conflict"
+        );
+        let revision_id = append_revision(
+            transaction,
+            &current,
+            "delete",
+            principal_id,
+            None,
+            Some(now_ts + UNDO_GRACE_SECONDS),
+            now_ts,
+        )?;
+        let retrieval_identity = retrieval::identity(transaction, &current)?;
+        let raw_source_id = retrieval_identity.source_memory_id;
+        super::jobs::request_cancel_for_scope(transaction, principal_id, Some(&current.scope_ref))?;
+        if let Some(source_id) = raw_source_id {
+            transaction.execute(
+                "DELETE FROM memory_facts
              WHERE principal_id = ?1 AND EXISTS (
                SELECT 1 FROM json_each(memory_facts.source_memory_ids_json)
                WHERE CAST(value AS INTEGER) = ?2
              )",
-            params![principal_id, source_id],
-        )?;
-        transaction.execute(
+                params![principal_id, source_id],
+            )?;
+            transaction.execute(
             "DELETE FROM memory_source_events WHERE principal_id = ?1 AND source_memory_id = ?2",
             params![principal_id, source_id],
         )?;
-        transaction.execute(
-            "UPDATE memory_evidence SET availability = 'purged', redacted_excerpt = NULL
+            transaction.execute(
+                "UPDATE memory_evidence SET availability = 'purged', redacted_excerpt = NULL
              WHERE principal_id = ?1 AND source_type = 'memory' AND source_ref = ?2",
-            params![principal_id, source_id.to_string()],
-        )?;
+                params![principal_id, source_id.to_string()],
+            )?;
+            transaction.execute(
+                "DELETE FROM long_term_memories WHERE principal_id = ?1 AND scope_ref = ?2",
+                params![principal_id, current.scope_ref],
+            )?;
+        }
+        match current.kind.as_str() {
+            "fact" => {
+                transaction.execute(
+                    "DELETE FROM memory_facts WHERE memory_id = ?1 AND principal_id = ?2",
+                    params![memory_id, principal_id],
+                )?;
+            }
+            "preference" => {
+                transaction.execute(
+                    "DELETE FROM user_preferences WHERE memory_id = ?1 AND principal_id = ?2",
+                    params![memory_id, principal_id],
+                )?;
+            }
+            "recent" => {
+                transaction.execute(
+                    "DELETE FROM memories WHERE memory_id = ?1 AND principal_id = ?2",
+                    params![memory_id, principal_id],
+                )?;
+            }
+            _ => anyhow::bail!("memory_kind_unsupported"),
+        }
+        retrieval::remove_identity(transaction, principal_id, &retrieval_identity)?;
         transaction.execute(
-            "DELETE FROM long_term_memories WHERE principal_id = ?1 AND scope_ref = ?2",
-            params![principal_id, current.scope_ref],
-        )?;
-    }
-    match current.kind.as_str() {
-        "fact" => {
-            transaction.execute(
-                "DELETE FROM memory_facts WHERE memory_id = ?1 AND principal_id = ?2",
-                params![memory_id, principal_id],
-            )?;
-        }
-        "preference" => {
-            transaction.execute(
-                "DELETE FROM user_preferences WHERE memory_id = ?1 AND principal_id = ?2",
-                params![memory_id, principal_id],
-            )?;
-        }
-        "recent" => {
-            transaction.execute(
-                "DELETE FROM memories WHERE memory_id = ?1 AND principal_id = ?2",
-                params![memory_id, principal_id],
-            )?;
-        }
-        _ => anyhow::bail!("memory_kind_unsupported"),
-    }
-    retrieval::remove_identity(&transaction, principal_id, &retrieval_identity)?;
-    transaction.execute(
-        "INSERT INTO memory_privacy_purge_queue(
+            "INSERT INTO memory_privacy_purge_queue(
             purge_id, principal_id, memory_id, object_kind, purge_after_ts, status, created_at_ts
          ) VALUES (?1, ?2, ?3, ?4, ?5, 'grace', ?6)",
-        params![
-            format!("memory_purge_{}", uuid::Uuid::new_v4().simple()),
-            principal_id,
-            memory_id,
-            current.kind,
-            now_ts + UNDO_GRACE_SECONDS,
-            now_ts,
-        ],
-    )?;
-    transaction.commit()?;
-    Ok(MemoryMutationResult {
-        status: "deleted".to_string(),
-        memory_id: memory_id.to_string(),
-        replacement_memory_id: None,
-        revision: request.expected_revision + 1,
-        revision_id: Some(revision_id),
-        undo_until_ts: Some(now_ts + UNDO_GRACE_SECONDS),
+            params![
+                format!("memory_purge_{}", uuid::Uuid::new_v4().simple()),
+                principal_id,
+                memory_id,
+                current.kind,
+                now_ts + UNDO_GRACE_SECONDS,
+                now_ts,
+            ],
+        )?;
+        Ok(MemoryMutationResult {
+            status: "deleted".to_string(),
+            memory_id: memory_id.to_string(),
+            replacement_memory_id: None,
+            revision: request.expected_revision + 1,
+            revision_id: Some(revision_id),
+            undo_until_ts: Some(now_ts + UNDO_GRACE_SECONDS),
+        })
     })
 }
 
@@ -490,98 +494,105 @@ pub(crate) fn undo_memory_mutation(
     now_ts: i64,
 ) -> anyhow::Result<MemoryMutationResult> {
     require_memory_ux_schema(db)?;
-    let transaction = db.unchecked_transaction()?;
-    let revision = transaction
-        .query_row(
-            "SELECT memory_id, object_kind, row_revision, operation,
+    atomic_mutation(db, |transaction| {
+        let revision = transaction
+            .query_row(
+                "SELECT memory_id, object_kind, row_revision, operation,
                     previous_snapshot_json, replacement_memory_id, undo_expires_at_ts
              FROM memory_revisions
              WHERE revision_id = ?1 AND principal_id = ?2",
-            params![request.revision_id, principal_id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, Option<i64>>(6)?,
-                ))
-            },
-        )
-        .optional()?
-        .ok_or_else(|| anyhow!("memory_revision_not_found"))?;
-    let (memory_id, object_kind, row_revision, operation, snapshot_json, replacement_id, expiry) =
-        revision;
-    anyhow::ensure!(
-        expiry.is_some_and(|value| value >= now_ts),
-        "memory_undo_expired"
-    );
-    let snapshot: Value = serde_json::from_str(&snapshot_json)?;
-    anyhow::ensure!(
-        snapshot.get("purged").and_then(Value::as_bool) != Some(true),
-        "memory_undo_expired"
-    );
-    match operation.as_str() {
-        "correct" => undo_correction(
-            &transaction,
-            principal_id,
-            &memory_id,
-            &object_kind,
-            replacement_id.as_deref(),
+                params![request.revision_id, principal_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<i64>>(6)?,
+                    ))
+                },
+            )
+            .optional()?
+            .ok_or_else(|| anyhow!("memory_revision_not_found"))?;
+        let (
+            memory_id,
+            object_kind,
             row_revision,
-            &snapshot,
-            now_ts,
-        )?,
-        "delete" => restore_deleted_memory(
-            &transaction,
-            principal_id,
-            &memory_id,
-            &object_kind,
-            row_revision,
-            &snapshot,
-            now_ts,
-        )?,
-        _ => anyhow::bail!("memory_undo_operation_unsupported"),
-    }
-    transaction.execute(
-        "UPDATE memory_privacy_purge_queue
+            operation,
+            snapshot_json,
+            replacement_id,
+            expiry,
+        ) = revision;
+        anyhow::ensure!(
+            expiry.is_some_and(|value| value >= now_ts),
+            "memory_undo_expired"
+        );
+        let snapshot: Value = serde_json::from_str(&snapshot_json)?;
+        anyhow::ensure!(
+            snapshot.get("purged").and_then(Value::as_bool) != Some(true),
+            "memory_undo_expired"
+        );
+        match operation.as_str() {
+            "correct" => undo_correction(
+                transaction,
+                principal_id,
+                &memory_id,
+                &object_kind,
+                replacement_id.as_deref(),
+                row_revision,
+                &snapshot,
+                now_ts,
+            )?,
+            "delete" => restore_deleted_memory(
+                transaction,
+                principal_id,
+                &memory_id,
+                &object_kind,
+                row_revision,
+                &snapshot,
+                now_ts,
+            )?,
+            _ => anyhow::bail!("memory_undo_operation_unsupported"),
+        }
+        transaction.execute(
+            "UPDATE memory_privacy_purge_queue
          SET status = 'cancelled', completed_at_ts = ?3
          WHERE principal_id = ?1 AND memory_id = ?2 AND status = 'grace'",
-        params![principal_id, memory_id, now_ts],
-    )?;
-    let restore_revision_id = format!("memory_revision_{}", uuid::Uuid::new_v4().simple());
-    transaction.execute(
-        "INSERT INTO memory_revisions(
+            params![principal_id, memory_id, now_ts],
+        )?;
+        let restore_revision_id = format!("memory_revision_{}", uuid::Uuid::new_v4().simple());
+        transaction.execute(
+            "INSERT INTO memory_revisions(
             revision_id, memory_id, principal_id, scope_kind, scope_ref, object_kind,
             row_revision, operation, previous_snapshot_json, replacement_memory_id,
             actor_principal_id, created_at_ts
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'restore',
                    '{\"schema_version\":1,\"restore\":true}', NULL, ?3, ?8)",
-        params![
-            restore_revision_id,
+            params![
+                restore_revision_id,
+                memory_id,
+                principal_id,
+                snapshot_str(&snapshot, "scope_kind")?,
+                snapshot_str(&snapshot, "scope_ref")?,
+                object_kind,
+                row_revision + 1,
+                now_ts,
+            ],
+        )?;
+        transaction.execute(
+            "UPDATE memory_revisions SET undo_expires_at_ts = NULL WHERE revision_id = ?1",
+            [request.revision_id.as_str()],
+        )?;
+        Ok(MemoryMutationResult {
+            status: "restored".to_string(),
             memory_id,
-            principal_id,
-            snapshot_str(&snapshot, "scope_kind")?,
-            snapshot_str(&snapshot, "scope_ref")?,
-            object_kind,
-            row_revision + 1,
-            now_ts,
-        ],
-    )?;
-    transaction.execute(
-        "UPDATE memory_revisions SET undo_expires_at_ts = NULL WHERE revision_id = ?1",
-        [request.revision_id.as_str()],
-    )?;
-    transaction.commit()?;
-    Ok(MemoryMutationResult {
-        status: "restored".to_string(),
-        memory_id,
-        replacement_memory_id: None,
-        revision: row_revision + 2,
-        revision_id: Some(restore_revision_id),
-        undo_until_ts: None,
+            replacement_memory_id: None,
+            revision: row_revision + 2,
+            revision_id: Some(restore_revision_id),
+            undo_until_ts: None,
+        })
     })
 }
 
@@ -843,81 +854,81 @@ pub(crate) fn clear_with_mode(
     now_ts: i64,
 ) -> anyhow::Result<MemoryClearPreview> {
     require_memory_ux_schema(db)?;
-    let transaction = db.unchecked_transaction()?;
-    let preview = clear_preview(&transaction, principal_id, &request.mode)?;
-    anyhow::ensure!(
-        preview.transcript_rows == request.expected_transcript_rows
-            && preview.derived_rows == request.expected_derived_rows,
-        "memory_clear_preview_conflict"
-    );
-    super::jobs::request_cancel_for_scope(&transaction, principal_id, None)?;
-    transaction.execute(
-        "DELETE FROM memory_retrieval_index WHERE principal_id = ?1
+    atomic_mutation(db, |transaction| {
+        let preview = clear_preview(transaction, principal_id, &request.mode)?;
+        anyhow::ensure!(
+            preview.transcript_rows == request.expected_transcript_rows
+                && preview.derived_rows == request.expected_derived_rows,
+            "memory_clear_preview_conflict"
+        );
+        super::jobs::request_cancel_for_scope(transaction, principal_id, None)?;
+        transaction.execute(
+            "DELETE FROM memory_retrieval_index WHERE principal_id = ?1
          AND (?2 = 1 OR source_kind = ?3)",
-        params![
+            params![
+                principal_id,
+                request.mode == "transcript_and_derived",
+                super::RETRIEVAL_SOURCE_MEMORY
+            ],
+        )?;
+        transaction.execute(
+            "DELETE FROM memory_source_events WHERE principal_id = ?1",
+            [principal_id],
+        )?;
+        transaction.execute(
+            "DELETE FROM memories WHERE principal_id = ?1",
+            [principal_id],
+        )?;
+        if request.mode == "transcript_and_derived" {
+            for table in [
+                "memory_facts",
+                "user_preferences",
+                "long_term_memories",
+                "memory_raw_candidates",
+                "memory_evidence",
+            ] {
+                transaction.execute(
+                    &format!("DELETE FROM {table} WHERE principal_id = ?1"),
+                    [principal_id],
+                )?;
+            }
+        }
+        clearing::purge_private_clear_state(
+            transaction,
             principal_id,
             request.mode == "transcript_and_derived",
-            super::RETRIEVAL_SOURCE_MEMORY
-        ],
-    )?;
-    transaction.execute(
-        "DELETE FROM memory_source_events WHERE principal_id = ?1",
-        [principal_id],
-    )?;
-    transaction.execute(
-        "DELETE FROM memories WHERE principal_id = ?1",
-        [principal_id],
-    )?;
-    if request.mode == "transcript_and_derived" {
-        for table in [
-            "memory_facts",
-            "user_preferences",
-            "long_term_memories",
-            "memory_raw_candidates",
-            "memory_evidence",
-        ] {
-            transaction.execute(
-                &format!("DELETE FROM {table} WHERE principal_id = ?1"),
-                [principal_id],
-            )?;
-        }
-    }
-    clearing::purge_private_clear_state(
-        &transaction,
-        principal_id,
-        request.mode == "transcript_and_derived",
-        now_ts,
-    )?;
-    let _ = transaction.execute(
-        "DELETE FROM memory_retrieval_index_fts
+            now_ts,
+        )?;
+        let _ = transaction.execute(
+            "DELETE FROM memory_retrieval_index_fts
          WHERE rowid NOT IN (SELECT id FROM memory_retrieval_index)",
-        [],
-    );
-    transaction.execute(
-        "INSERT INTO memory_retention_ledger(
+            [],
+        );
+        transaction.execute(
+            "INSERT INTO memory_retention_ledger(
             ledger_id, principal_id, scope_kind, scope_ref, object_kind, object_count,
             object_digest, reason_code, actor_principal_id, created_at_ts
          ) VALUES (?1, ?2, 'principal', ?2, 'bulk_clear', ?3, ?4,
                    'user_confirmed_bulk_clear', ?2, ?5)",
-        params![
-            format!("memory_clear_{}", uuid::Uuid::new_v4().simple()),
-            principal_id,
-            preview.transcript_rows + preview.derived_rows,
-            format!(
-                "sha256:{:x}",
-                Sha256::digest(
-                    format!(
-                        "{}:{}:{}",
-                        request.mode, preview.transcript_rows, preview.derived_rows
+            params![
+                format!("memory_clear_{}", uuid::Uuid::new_v4().simple()),
+                principal_id,
+                preview.transcript_rows + preview.derived_rows,
+                format!(
+                    "sha256:{:x}",
+                    Sha256::digest(
+                        format!(
+                            "{}:{}:{}",
+                            request.mode, preview.transcript_rows, preview.derived_rows
+                        )
+                        .as_bytes()
                     )
-                    .as_bytes()
-                )
-            ),
-            now_ts,
-        ],
-    )?;
-    transaction.commit()?;
-    Ok(preview)
+                ),
+                now_ts,
+            ],
+        )?;
+        Ok(preview)
+    })
 }
 
 pub(crate) fn preview_memory_import(
@@ -997,54 +1008,53 @@ pub(crate) fn preview_memory_import(
         "scope_kind": "principal",
     });
     let payload_digest = format!("sha256:{:x}", Sha256::digest(serde_json::to_vec(&payload)?));
-    let transaction =
-        rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
-    crate::repo::auth::require_active_principal_credential(&transaction, principal_id)?;
-    let existing = transaction
-        .query_row(
-            "SELECT import_id, preview_json, status
+    atomic_mutation(db, |transaction| {
+        crate::repo::auth::require_active_principal_credential(transaction, principal_id)?;
+        let existing = transaction
+            .query_row(
+                "SELECT import_id, preview_json, status
              FROM memory_import_sessions
              WHERE principal_id = ?1 AND payload_digest = ?2",
-            params![principal_id, payload_digest],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            },
-        )
-        .optional()?;
-    let import_id = if let Some((import_id, _, status)) = existing {
-        anyhow::ensure!(status != "confirmed", "memory_import_already_confirmed");
-        import_id
-    } else {
-        let import_id = format!("memory_import_{}", uuid::Uuid::new_v4().simple());
-        transaction.execute(
-            "INSERT INTO memory_import_sessions(
+                params![principal_id, payload_digest],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let import_id = if let Some((import_id, _, status)) = existing {
+            anyhow::ensure!(status != "confirmed", "memory_import_already_confirmed");
+            import_id
+        } else {
+            let import_id = format!("memory_import_{}", uuid::Uuid::new_v4().simple());
+            transaction.execute(
+                "INSERT INTO memory_import_sessions(
                 import_id, principal_id, scope_kind, scope_ref, payload_digest,
                 preview_json, status, created_at_ts
              ) VALUES (?1, ?2, 'principal', ?2, ?3, ?4, 'preview', ?5)",
-            params![
-                import_id,
-                principal_id,
-                payload_digest,
-                payload.to_string(),
-                now_ts
-            ],
-        )?;
-        import_id
-    };
-    transaction.commit()?;
-    Ok(MemoryImportPreview {
-        schema_version: 1,
-        import_id,
-        payload_digest,
-        accepted_items: payload["items"].as_array().map_or(0, Vec::len),
-        skipped_items,
-        duplicate_items,
-        trust_tier: "imported_legacy".to_string(),
-        scope_kind: "principal".to_string(),
+                params![
+                    import_id,
+                    principal_id,
+                    payload_digest,
+                    payload.to_string(),
+                    now_ts
+                ],
+            )?;
+            import_id
+        };
+        Ok(MemoryImportPreview {
+            schema_version: 1,
+            import_id,
+            payload_digest,
+            accepted_items: payload["items"].as_array().map_or(0, Vec::len),
+            skipped_items,
+            duplicate_items,
+            trust_tier: "imported_legacy".to_string(),
+            scope_kind: "principal".to_string(),
+        })
     })
 }
 
@@ -1055,56 +1065,55 @@ pub(crate) fn confirm_memory_import(
     now_ts: i64,
 ) -> anyhow::Result<MemoryImportResult> {
     require_memory_ux_schema(db)?;
-    let transaction =
-        rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
-    let user_key =
-        crate::repo::auth::require_active_principal_credential(&transaction, principal_id)?;
-    let (payload_digest, preview_json, status) = transaction
-        .query_row(
-            "SELECT payload_digest, preview_json, status FROM memory_import_sessions
+    atomic_mutation(db, |transaction| {
+        let user_key =
+            crate::repo::auth::require_active_principal_credential(transaction, principal_id)?;
+        let (payload_digest, preview_json, status) = transaction
+            .query_row(
+                "SELECT payload_digest, preview_json, status FROM memory_import_sessions
              WHERE import_id = ?1 AND principal_id = ?2",
-            params![request.import_id, principal_id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            },
-        )
-        .optional()?
-        .ok_or_else(|| anyhow!("memory_import_session_not_found"))?;
-    anyhow::ensure!(status == "preview", "memory_import_state_conflict");
-    anyhow::ensure!(
-        payload_digest == request.expected_payload_digest,
-        "memory_import_preview_conflict"
-    );
-    let payload: Value = serde_json::from_str(&preview_json)?;
-    let computed_digest = format!("sha256:{:x}", Sha256::digest(serde_json::to_vec(&payload)?));
-    anyhow::ensure!(
-        computed_digest == payload_digest,
-        "memory_import_preview_corrupt"
-    );
-    let items = payload["items"]
-        .as_array()
-        .ok_or_else(|| anyhow!("memory_import_preview_corrupt"))?;
-    let mut imported_items = 0usize;
-    let mut existing_items = 0usize;
-    for item in items {
-        let content = item["content"]
-            .as_str()
+                params![request.import_id, principal_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?
+            .ok_or_else(|| anyhow!("memory_import_session_not_found"))?;
+        anyhow::ensure!(status == "preview", "memory_import_state_conflict");
+        anyhow::ensure!(
+            payload_digest == request.expected_payload_digest,
+            "memory_import_preview_conflict"
+        );
+        let payload: Value = serde_json::from_str(&preview_json)?;
+        let computed_digest = format!("sha256:{:x}", Sha256::digest(serde_json::to_vec(&payload)?));
+        anyhow::ensure!(
+            computed_digest == payload_digest,
+            "memory_import_preview_corrupt"
+        );
+        let items = payload["items"]
+            .as_array()
             .ok_or_else(|| anyhow!("memory_import_preview_corrupt"))?;
-        let content_digest = item["content_digest"]
-            .as_str()
-            .ok_or_else(|| anyhow!("memory_import_preview_corrupt"))?;
-        let idempotency_key = format!("import:{content_digest}");
-        let changed = if item["kind"].as_str() == Some("preference") {
-            let item_key = format!(
-                "imported_{}",
-                &content_digest[7..23.min(content_digest.len())]
-            );
-            transaction.execute(
-                "INSERT INTO user_preferences(
+        let mut imported_items = 0usize;
+        let mut existing_items = 0usize;
+        for item in items {
+            let content = item["content"]
+                .as_str()
+                .ok_or_else(|| anyhow!("memory_import_preview_corrupt"))?;
+            let content_digest = item["content_digest"]
+                .as_str()
+                .ok_or_else(|| anyhow!("memory_import_preview_corrupt"))?;
+            let idempotency_key = format!("import:{content_digest}");
+            let changed = if item["kind"].as_str() == Some("preference") {
+                let item_key = format!(
+                    "imported_{}",
+                    &content_digest[7..23.min(content_digest.len())]
+                );
+                transaction.execute(
+                    "INSERT INTO user_preferences(
                     memory_id, user_id, chat_id, user_key, principal_id, scope_kind, scope_ref,
                     pref_key, pref_value, confidence, source, updated_at, updated_at_ts,
                     origin, row_revision, legacy_scope_inferred, content_digest,
@@ -1117,25 +1126,25 @@ pub(crate) fn confirm_memory_import(
                        SELECT 1 FROM user_preferences
                         WHERE principal_id = ?3 AND content_digest = ?8
                    )",
-                params![
-                    format!("memory_{}", uuid::Uuid::new_v4().simple()),
-                    user_key,
-                    principal_id,
-                    item_key,
-                    content,
-                    now_ts.to_string(),
-                    now_ts,
-                    content_digest,
-                    idempotency_key,
-                ],
-            )?
-        } else {
-            let item_key = format!(
-                "imported_{}",
-                &content_digest[7..23.min(content_digest.len())]
-            );
-            transaction.execute(
-                "INSERT INTO memory_facts(
+                    params![
+                        format!("memory_{}", uuid::Uuid::new_v4().simple()),
+                        user_key,
+                        principal_id,
+                        item_key,
+                        content,
+                        now_ts.to_string(),
+                        now_ts,
+                        content_digest,
+                        idempotency_key,
+                    ],
+                )?
+            } else {
+                let item_key = format!(
+                    "imported_{}",
+                    &content_digest[7..23.min(content_digest.len())]
+                );
+                transaction.execute(
+                    "INSERT INTO memory_facts(
                     memory_id, user_id, chat_id, user_key, principal_id, scope_kind, scope_ref,
                     namespace, fact_key, fact_value, fact_text, confidence, source_kind,
                     source_ref, source_memory_ids_json, reason, created_at_ts, updated_at_ts,
@@ -1148,37 +1157,37 @@ pub(crate) fn confirm_memory_import(
                            '[]', '[]', 'imported_legacy', 'normal', ?7, ?7)
                  ON CONFLICT(principal_id, scope_kind, scope_ref, idempotency_key)
                  WHERE idempotency_key IS NOT NULL AND status = 'active' DO NOTHING",
-                params![
-                    format!("memory_{}", uuid::Uuid::new_v4().simple()),
-                    user_key,
-                    principal_id,
-                    item_key,
-                    content,
-                    request.import_id,
-                    now_ts,
-                    content_digest,
-                    idempotency_key,
-                ],
-            )?
-        };
-        if changed == 1 {
-            imported_items += 1;
-        } else {
-            existing_items += 1;
+                    params![
+                        format!("memory_{}", uuid::Uuid::new_v4().simple()),
+                        user_key,
+                        principal_id,
+                        item_key,
+                        content,
+                        request.import_id,
+                        now_ts,
+                        content_digest,
+                        idempotency_key,
+                    ],
+                )?
+            };
+            if changed == 1 {
+                imported_items += 1;
+            } else {
+                existing_items += 1;
+            }
         }
-    }
-    transaction.execute(
-        "UPDATE memory_import_sessions SET status = 'confirmed', confirmed_at_ts = ?3
+        transaction.execute(
+            "UPDATE memory_import_sessions SET status = 'confirmed', confirmed_at_ts = ?3
          WHERE import_id = ?1 AND principal_id = ?2 AND status = 'preview'",
-        params![request.import_id, principal_id, now_ts],
-    )?;
-    transaction.commit()?;
-    Ok(MemoryImportResult {
-        schema_version: 1,
-        import_id: request.import_id.clone(),
-        status: "confirmed".to_string(),
-        imported_items,
-        existing_items,
+            params![request.import_id, principal_id, now_ts],
+        )?;
+        Ok(MemoryImportResult {
+            schema_version: 1,
+            import_id: request.import_id.clone(),
+            status: "confirmed".to_string(),
+            imported_items,
+            existing_items,
+        })
     })
 }
 

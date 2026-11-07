@@ -450,6 +450,28 @@ jobs:
             --require terminal_build_cleanup_preserves_active_and_other_owner_profile_generation_snapshots \
             --require healthy_paused_build_poll_stays_read_only_under_an_independent_writer
           cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::snapshot_maintenance:: -- --test-threads=1 --nocapture
+      - name: Test original request memory mutation authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd http::memory_routes::actor_fence_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_routes::actor_fence_tests:: \
+            --require revoked_original_key_cannot_correct_through_another_live_account_key \
+            --require revoked_original_key_cannot_record_feedback_through_another_live_account_key \
+            --require revoked_original_key_cannot_delete_through_another_live_account_key \
+            --require revoked_original_key_cannot_undo_through_another_live_account_key \
+            --require revoked_original_key_cannot_persist_an_import_preview \
+            --require revoked_original_key_cannot_confirm_an_existing_import_preview \
+            --require revoked_original_key_cannot_clear_owned_memory \
+            --require revoked_original_binding_cannot_borrow_a_surviving_credential \
+            --require changed_original_role_is_rejected_at_the_actual_writer \
+            --require reassigned_original_credential_cannot_mutate_either_account \
+            --require unchanged_original_identity_still_commits_the_real_correction \
+            --require final_identity_loss_rolls_back_canonical_projection_audit_and_identity_changes \
+            --require nested_correction_failure_preserves_private_rows_and_the_callers_transaction \
+            --require nested_import_failure_preserves_preview_and_the_callers_transaction
+          cargo test --locked -p clawd --bin clawd http::memory_routes::actor_fence_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         run: |
           set -euo pipefail
@@ -831,6 +853,28 @@ jobs:
             --require terminal_build_cleanup_preserves_active_and_other_owner_profile_generation_snapshots \
             --require healthy_paused_build_poll_stays_read_only_under_an_independent_writer
           cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::snapshot_maintenance:: -- --test-threads=1 --nocapture
+      - name: Test original request memory mutation authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd http::memory_routes::actor_fence_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_routes::actor_fence_tests:: \
+            --require revoked_original_key_cannot_correct_through_another_live_account_key \
+            --require revoked_original_key_cannot_record_feedback_through_another_live_account_key \
+            --require revoked_original_key_cannot_delete_through_another_live_account_key \
+            --require revoked_original_key_cannot_undo_through_another_live_account_key \
+            --require revoked_original_key_cannot_persist_an_import_preview \
+            --require revoked_original_key_cannot_confirm_an_existing_import_preview \
+            --require revoked_original_key_cannot_clear_owned_memory \
+            --require revoked_original_binding_cannot_borrow_a_surviving_credential \
+            --require changed_original_role_is_rejected_at_the_actual_writer \
+            --require reassigned_original_credential_cannot_mutate_either_account \
+            --require unchanged_original_identity_still_commits_the_real_correction \
+            --require final_identity_loss_rolls_back_canonical_projection_audit_and_identity_changes \
+            --require nested_correction_failure_preserves_private_rows_and_the_callers_transaction \
+            --require nested_import_failure_preserves_preview_and_the_callers_transaction
+          cargo test --locked -p clawd --bin clawd http::memory_routes::actor_fence_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         shell: bash
         run: |

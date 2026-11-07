@@ -9,6 +9,8 @@ use tracing::{error, warn};
 
 #[path = "memory_capacity.rs"]
 mod capacity;
+#[path = "memory_write.rs"]
+mod writing;
 
 use crate::memory::ux::{
     MemoryBulkClearRequest, MemoryClearPreview, MemoryCorrectionRequest, MemoryExport,
@@ -389,6 +391,10 @@ mod tests;
 #[path = "memory_vector_policy_tests.rs"]
 mod vector_policy_tests;
 
+#[cfg(test)]
+#[path = "memory_actor_fence_tests.rs"]
+mod actor_fence_tests;
+
 async fn undo_mutation(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -399,21 +405,16 @@ async fn undo_mutation(
             Ok(identity) => identity,
             Err(response) => return response,
         };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(_) => {
-            return crate::api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_database_unavailable",
-            )
-        }
-    };
-    match crate::memory::ux::undo_memory_mutation(
-        &db,
-        &identity.principal_id,
-        &request,
-        crate::now_ts_u64() as i64,
-    ) {
+    match writing::run(state, identity, move |db, identity| {
+        crate::memory::ux::undo_memory_mutation(
+            db,
+            &identity.principal_id,
+            &request,
+            crate::now_ts_u64() as i64,
+        )
+    })
+    .await
+    {
         Ok(result) => crate::api_ok(result),
         Err(error) => mutation_error(error),
     }
@@ -485,23 +486,18 @@ async fn correct_item(
             Ok(identity) => identity,
             Err(response) => return response,
         };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(_) => {
-            return crate::api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_database_unavailable",
-            )
-        }
-    };
-    match crate::memory::ux::correct_memory(
-        &db,
-        &identity.principal_id,
-        &identity.principal_id,
-        &memory_id,
-        &request,
-        crate::now_ts_u64() as i64,
-    ) {
+    match writing::run(state, identity, move |db, identity| {
+        crate::memory::ux::correct_memory(
+            db,
+            &identity.principal_id,
+            &identity.principal_id,
+            &memory_id,
+            &request,
+            crate::now_ts_u64() as i64,
+        )
+    })
+    .await
+    {
         Ok(result) => crate::api_ok(result),
         Err(error) => mutation_error(error),
     }
@@ -518,22 +514,17 @@ async fn record_feedback(
             Ok(identity) => identity,
             Err(response) => return response,
         };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(_) => {
-            return crate::api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_database_unavailable",
-            )
-        }
-    };
-    match crate::memory::ux::record_feedback(
-        &db,
-        &identity.principal_id,
-        &memory_id,
-        &request,
-        crate::now_ts_u64() as i64,
-    ) {
+    match writing::run(state, identity, move |db, identity| {
+        crate::memory::ux::record_feedback(
+            db,
+            &identity.principal_id,
+            &memory_id,
+            &request,
+            crate::now_ts_u64() as i64,
+        )
+    })
+    .await
+    {
         Ok(result) => crate::api_ok(result),
         Err(error) => mutation_error(error),
     }
@@ -550,22 +541,17 @@ async fn delete_item(
             Ok(identity) => identity,
             Err(response) => return response,
         };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(_) => {
-            return crate::api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_database_unavailable",
-            )
-        }
-    };
-    match crate::memory::ux::delete_memory_with_revision(
-        &db,
-        &identity.principal_id,
-        &memory_id,
-        &request,
-        crate::now_ts_u64() as i64,
-    ) {
+    match writing::run(state, identity, move |db, identity| {
+        crate::memory::ux::delete_memory_with_revision(
+            db,
+            &identity.principal_id,
+            &memory_id,
+            &request,
+            crate::now_ts_u64() as i64,
+        )
+    })
+    .await
+    {
         Ok(result) => crate::api_ok(result),
         Err(error) => mutation_error(error),
     }
@@ -639,21 +625,16 @@ async fn import_preview(
             Ok(identity) => identity,
             Err(response) => return response,
         };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(_) => {
-            return crate::api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_database_unavailable",
-            )
-        }
-    };
-    match crate::memory::ux::preview_memory_import(
-        &db,
-        &identity.principal_id,
-        &request,
-        crate::now_ts_u64() as i64,
-    ) {
+    match writing::run(state, identity, move |db, identity| {
+        crate::memory::ux::preview_memory_import(
+            db,
+            &identity.principal_id,
+            &request,
+            crate::now_ts_u64() as i64,
+        )
+    })
+    .await
+    {
         Ok(result) => crate::api_ok(result),
         Err(error) => mutation_error_typed(error),
     }
@@ -669,21 +650,16 @@ async fn import_confirm(
             Ok(identity) => identity,
             Err(response) => return response,
         };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(_) => {
-            return crate::api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_database_unavailable",
-            )
-        }
-    };
-    match crate::memory::ux::confirm_memory_import(
-        &db,
-        &identity.principal_id,
-        &request,
-        crate::now_ts_u64() as i64,
-    ) {
+    match writing::run(state, identity, move |db, identity| {
+        crate::memory::ux::confirm_memory_import(
+            db,
+            &identity.principal_id,
+            &request,
+            crate::now_ts_u64() as i64,
+        )
+    })
+    .await
+    {
         Ok(result) => crate::api_ok(result),
         Err(error) => mutation_error_typed(error),
     }
@@ -733,33 +709,36 @@ async fn clear_scoped(
             Ok(identity) => identity,
             Err(response) => return response,
         };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(_) => {
-            return crate::api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_database_unavailable",
-            )
-        }
-    };
-    match crate::memory::ux::clear_with_mode(
-        &db,
-        &identity.principal_id,
-        &request,
-        crate::now_ts_u64() as i64,
-    ) {
+    match writing::run(state, identity, move |db, identity| {
+        crate::memory::ux::clear_with_mode(
+            db,
+            &identity.principal_id,
+            &request,
+            crate::now_ts_u64() as i64,
+        )
+    })
+    .await
+    {
         Ok(result) => crate::api_ok(result),
         Err(error) if error.to_string() == "memory_clear_preview_conflict" => {
             crate::api_err(StatusCode::CONFLICT, "memory_clear_preview_conflict")
         }
-        Err(error) => crate::api_err(
-            StatusCode::BAD_REQUEST,
-            &memory_api_error_code(&error, "memory_clear_failed"),
-        ),
+        Err(error) => {
+            if let Some(response) = writing::execution_error(&error) {
+                return response;
+            }
+            crate::api_err(
+                StatusCode::BAD_REQUEST,
+                &memory_api_error_code(&error, "memory_clear_failed"),
+            )
+        }
     }
 }
 
 fn mutation_error(error: anyhow::Error) -> (StatusCode, Json<ApiResponse<MemoryMutationResult>>) {
+    if let Some(response) = writing::execution_error(&error) {
+        return response;
+    }
     let code = memory_api_error_code(&error, "memory_mutation_failed");
     let status = match code.as_str() {
         "memory_revision_conflict" => StatusCode::CONFLICT,
@@ -773,6 +752,9 @@ fn mutation_error(error: anyhow::Error) -> (StatusCode, Json<ApiResponse<MemoryM
 fn mutation_error_typed<T: serde::Serialize>(
     error: anyhow::Error,
 ) -> (StatusCode, Json<ApiResponse<T>>) {
+    if let Some(response) = writing::execution_error(&error) {
+        return response;
+    }
     let code = memory_api_error_code(&error, "memory_mutation_failed");
     let status = if code.contains("conflict") || code.contains("already_confirmed") {
         StatusCode::CONFLICT

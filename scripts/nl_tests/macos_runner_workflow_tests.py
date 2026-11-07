@@ -172,7 +172,46 @@ def required_snapshot_maintenance_gate(job):
         and script.index(listing)<script.index(run))
 
 
+def required_memory_actor_gate(job):
+    prefix='http::memory_routes::actor_fence_tests::'
+    run=f'cargo test --locked -p clawd --bin clawd {prefix} -- --test-threads=1 --nocapture'
+    if not required_command_gate(job,run):
+        return False
+    step=next(step for step in job['steps'] if run in step.get('run',''))
+    script=step['run']
+    listing=f'cargo test --locked -p clawd --bin clawd {prefix} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
+    source=(ROOT/'crates/clawd/src/http/memory_actor_fence_tests.rs').read_text(encoding='utf-8')
+    expected=set(re.findall(r'^#\[test\]\nfn (\w+)\(',source,re.M))
+    required=set(re.findall(r'--require ([A-Za-z0-9_:]+)',script))
+    return len(expected)==14 and required==expected and listing in script and (
+        'python3 scripts/tests/assert_rust_test_selection.py --self-test' in script
+        and f'--prefix {prefix}' in script and '|| true' not in script
+        and script.index(listing)<script.index(run))
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_memory_actor_gate_requires_every_case_on_both_platforms(self):
+        jobs=load('macos-polyglot-skill-ci.yml')['jobs']
+        for name in ['runtime-read-linux','polyglot-skill-macos']:
+            self.assertTrue(required_memory_actor_gate(jobs[name]))
+            for mutation in ['selector','listing','require','ignore','conditional','continue']:
+                with self.subTest(job=name,mutation=mutation):
+                    job=deepcopy(jobs[name])
+                    step=next(step for step in job['steps'] if step.get('name')=='Test original request memory mutation authority')
+                    if mutation=='selector':
+                        step['run']=step['run'].replace('memory_routes::actor_fence_tests::','missing::actor_fence_tests::')
+                    elif mutation=='listing':
+                        step['run']=step['run'].replace('--list --color never','--list')
+                    elif mutation=='require':
+                        step['run']=step['run'].replace('--require changed_original_role_is_rejected_at_the_actual_writer','--require absent_case')
+                    elif mutation=='ignore':
+                        step['run']=step['run'].replace('--test-threads=1 --nocapture','--test-threads=1 --nocapture || true')
+                    elif mutation=='conditional':
+                        step['if']='false'
+                    else:
+                        step['continue-on-error']=True
+                    self.assertFalse(required_memory_actor_gate(job))
+
     def test_snapshot_maintenance_gate_requires_every_case_on_both_platforms(self):
         jobs=load('macos-polyglot-skill-ci.yml')['jobs']
         for name in ['runtime-read-linux','polyglot-skill-macos']:

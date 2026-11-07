@@ -1,5 +1,3 @@
-use rusqlite::{Transaction, TransactionBehavior};
-
 use super::*;
 
 pub(crate) fn correct_memory(
@@ -12,21 +10,21 @@ pub(crate) fn correct_memory(
 ) -> anyhow::Result<MemoryMutationResult> {
     require_memory_ux_schema(db)?;
     let content = correction_content(&request.content)?;
-    let transaction = db.unchecked_transaction()?;
-    let old = load_mutable_memory(&transaction, principal_id, memory_id)?
-        .ok_or_else(|| anyhow!("memory_not_found"))?;
-    anyhow::ensure!(
-        old.revision == request.expected_revision,
-        "memory_revision_conflict"
-    );
-    let result = apply_correction(&transaction, &old, actor_principal_id, content, now_ts)?;
-    transaction.commit()?;
-    Ok(result)
+    atomic_mutation(db, |transaction| {
+        let old = load_mutable_memory(transaction, principal_id, memory_id)?
+            .ok_or_else(|| anyhow!("memory_not_found"))?;
+        anyhow::ensure!(
+            old.revision == request.expected_revision,
+            "memory_revision_conflict"
+        );
+        let result = apply_correction(transaction, &old, actor_principal_id, content, now_ts)?;
+        Ok(result)
+    })
 }
 
 /// The caller owns revision validation and the transaction commit.
 fn apply_correction(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     old: &MutableMemory,
     actor_principal_id: &str,
     content: &str,
@@ -111,55 +109,55 @@ pub(crate) fn record_feedback(
     now_ts: i64,
 ) -> anyhow::Result<MemoryMutationResult> {
     require_memory_ux_schema(db)?;
-    let transaction = Transaction::new_unchecked(db, TransactionBehavior::Immediate)?;
-    let current = load_mutable_memory(&transaction, principal_id, memory_id)?
-        .ok_or_else(|| anyhow!("memory_not_found"))?;
-    anyhow::ensure!(
-        current.revision == request.expected_revision,
-        "memory_revision_conflict"
-    );
-    let corrected = if matches!(request.feedback_kind, MemoryFeedbackKind::Incorrect) {
-        Some(correction_content(
-            request
-                .corrected_content
-                .as_deref()
-                .ok_or_else(|| anyhow!("memory_correction_content_required"))?,
-        )?)
-    } else {
-        None
-    };
-    transaction.execute(
-        "INSERT INTO memory_retrieval_feedback(
+    atomic_mutation(db, |transaction| {
+        let current = load_mutable_memory(transaction, principal_id, memory_id)?
+            .ok_or_else(|| anyhow!("memory_not_found"))?;
+        anyhow::ensure!(
+            current.revision == request.expected_revision,
+            "memory_revision_conflict"
+        );
+        let corrected = if matches!(request.feedback_kind, MemoryFeedbackKind::Incorrect) {
+            Some(correction_content(
+                request
+                    .corrected_content
+                    .as_deref()
+                    .ok_or_else(|| anyhow!("memory_correction_content_required"))?,
+            )?)
+        } else {
+            None
+        };
+        transaction.execute(
+            "INSERT INTO memory_retrieval_feedback(
             feedback_id, principal_id, memory_id, feedback_kind, retrieval_event_ref,
             expected_revision, created_at_ts
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![
-            format!("memory_feedback_{}", uuid::Uuid::new_v4().simple()),
-            principal_id,
-            memory_id,
-            request.feedback_kind.as_str(),
-            request.retrieval_event_ref.as_deref(),
-            request.expected_revision,
-            now_ts,
-        ],
-    )?;
-    let result = if let Some(content) = corrected {
-        apply_correction(&transaction, &current, principal_id, content, now_ts)?
-    } else {
-        if matches!(request.feedback_kind, MemoryFeedbackKind::DoNotUse) {
-            disable_memory_recall(&transaction, &current, now_ts)?;
-        }
-        MemoryMutationResult {
-            status: request.feedback_kind.as_str().to_string(),
-            memory_id: memory_id.to_string(),
-            replacement_memory_id: None,
-            revision: current.revision,
-            revision_id: None,
-            undo_until_ts: None,
-        }
-    };
-    transaction.commit()?;
-    Ok(result)
+            params![
+                format!("memory_feedback_{}", uuid::Uuid::new_v4().simple()),
+                principal_id,
+                memory_id,
+                request.feedback_kind.as_str(),
+                request.retrieval_event_ref.as_deref(),
+                request.expected_revision,
+                now_ts,
+            ],
+        )?;
+        let result = if let Some(content) = corrected {
+            apply_correction(transaction, &current, principal_id, content, now_ts)?
+        } else {
+            if matches!(request.feedback_kind, MemoryFeedbackKind::DoNotUse) {
+                disable_memory_recall(transaction, &current, now_ts)?;
+            }
+            MemoryMutationResult {
+                status: request.feedback_kind.as_str().to_string(),
+                memory_id: memory_id.to_string(),
+                replacement_memory_id: None,
+                revision: current.revision,
+                revision_id: None,
+                undo_until_ts: None,
+            }
+        };
+        Ok(result)
+    })
 }
 
 fn correction_content(content: &str) -> anyhow::Result<&str> {

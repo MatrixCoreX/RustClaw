@@ -7,17 +7,22 @@ use crate::{mask_secret, normalize_external_id_opt, now_ts, AppState};
 
 #[path = "auth_principal.rs"]
 mod auth_principal;
+#[path = "auth_request.rs"]
+mod auth_request;
 #[path = "auth_seed.rs"]
 mod auth_seed;
 #[path = "auth_webd.rs"]
 mod auth_webd;
 mod schema;
 
+#[cfg(test)]
+pub(crate) use auth_principal::credential_digest;
 pub(super) use auth_principal::with_identity_transaction;
 pub(crate) use auth_principal::{
     active_principal_credential, ensure_principal_identity_schema, principal_id_for_user_key,
     require_active_principal_credential,
 };
+pub(crate) use auth_request::{require_request_identity, RequestIdentityError};
 pub(crate) use auth_seed::seed_channel_bindings;
 pub(crate) use auth_webd::{upsert_webd_login_account, verify_webd_password_login};
 pub(crate) use schema::ensure_key_auth_schema;
