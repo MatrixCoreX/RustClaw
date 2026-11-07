@@ -83,6 +83,42 @@ pub(super) fn principal_generation_availability(
     db: &Connection,
     principal_id: &str,
 ) -> anyhow::Result<GenerationAvailability> {
+    Ok(principal_quota_snapshot(db, principal_id)?.availability())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PrincipalQuotaSnapshot {
+    Missing,
+    Invalid,
+    // The fifth value includes already-spent plus unsettled logical work.
+    Known([i64; 6]),
+}
+
+impl PrincipalQuotaSnapshot {
+    pub(crate) fn availability(self) -> GenerationAvailability {
+        match self {
+            Self::Missing => GenerationAvailability::PrincipalQuotaMissing,
+            Self::Invalid => GenerationAvailability::PrincipalQuotaInvalid,
+            Self::Known(values) => match values {
+                [used, limit, ..] if used >= limit => {
+                    GenerationAvailability::PrincipalRowsExhausted
+                }
+                [_, _, used, limit, ..] if used >= limit => {
+                    GenerationAvailability::PrincipalBytesExhausted
+                }
+                [_, _, _, _, used, limit] if used >= limit => {
+                    GenerationAvailability::PrincipalBackgroundCostExhausted
+                }
+                _ => GenerationAvailability::Available,
+            },
+        }
+    }
+}
+
+pub(crate) fn principal_quota_snapshot(
+    db: &Connection,
+    principal_id: &str,
+) -> anyhow::Result<PrincipalQuotaSnapshot> {
     let quota = db
         .query_row(
             "SELECT used_rows, max_rows, used_bytes, max_bytes,
@@ -102,12 +138,12 @@ pub(super) fn principal_generation_availability(
         )
         .optional()?;
     let mut values = match quota {
-        None => return Ok(GenerationAvailability::PrincipalQuotaMissing),
-        Some(None) => return Ok(GenerationAvailability::PrincipalQuotaInvalid),
+        None => return Ok(PrincipalQuotaSnapshot::Missing),
+        Some(None) => return Ok(PrincipalQuotaSnapshot::Invalid),
         Some(Some(values)) => values,
     };
     if values.iter().any(|value| *value < 0) {
-        return Ok(GenerationAvailability::PrincipalQuotaInvalid);
+        return Ok(PrincipalQuotaSnapshot::Invalid);
     }
     // Validate persisted types before arithmetic: SQLite coerces invalid TEXT
     // operands to zero and may promote overflowing integer sums to REAL.
@@ -119,21 +155,14 @@ pub(super) fn principal_generation_availability(
     let mut rows = pending.query([principal_id])?;
     while let Some(row) = rows.next()? {
         let ValueRef::Integer(cost) = row.get_ref(0)? else {
-            return Ok(GenerationAvailability::PrincipalQuotaInvalid);
+            return Ok(PrincipalQuotaSnapshot::Invalid);
         };
         let Some(total) = values[4].checked_add(cost) else {
-            return Ok(GenerationAvailability::PrincipalQuotaInvalid);
+            return Ok(PrincipalQuotaSnapshot::Invalid);
         };
         values[4] = total;
     }
-    Ok(match values {
-        [used, limit, ..] if used >= limit => GenerationAvailability::PrincipalRowsExhausted,
-        [_, _, used, limit, ..] if used >= limit => GenerationAvailability::PrincipalBytesExhausted,
-        [_, _, _, _, used, limit] if used >= limit => {
-            GenerationAvailability::PrincipalBackgroundCostExhausted
-        }
-        _ => GenerationAvailability::Available,
-    })
+    Ok(PrincipalQuotaSnapshot::Known(values))
 }
 
 #[cfg(test)]

@@ -20,12 +20,14 @@ import type {
 import type { MemoryListFilters } from "../hooks/useMemoryRuntime";
 import type { KbIdentity } from "../lib/kb-maintenance";
 import { KbMaintenancePanel } from "./KbMaintenancePanel";
+import { MemoryCapacityPanel } from "./MemoryCapacityPanel";
 
 type UiLanguage = "zh" | "en";
 type ClearScope = "recent" | "all";
 type Translate = (zh: string, en: string) => string;
 
 export interface MemoryPageProps {
+  requestScope: string;
   lang: UiLanguage;
   t: Translate;
   memoryLoading: boolean;
@@ -74,6 +76,7 @@ export interface MemoryPageProps {
 }
 
 export function MemoryPage({
+  requestScope,
   lang,
   t,
   memoryLoading,
@@ -184,6 +187,8 @@ export function MemoryPage({
         </div>
       </div>
 
+      <MemoryCapacityPanel t={t} lang={lang} requestScope={requestScope} settings={memorySettings}
+        scope={memorySettingScope} conversationId={activeConversationId} apiFetch={apiFetch} />
       <KbMaintenancePanel t={t} apiFetch={apiFetch} identity={kbIdentity} />
 
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">

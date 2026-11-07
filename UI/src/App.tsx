@@ -2661,6 +2661,7 @@ export default function App() {
           {currentPage === "memory" ? (
             <MemoryPage
               key={activeUiRequestScope}
+              requestScope={activeUiRequestScope}
               lang={lang}
               t={t}
               memoryLoading={memoryLoading}

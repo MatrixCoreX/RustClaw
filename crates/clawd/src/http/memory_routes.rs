@@ -7,6 +7,9 @@ use serde::Deserialize;
 use serde_json::json;
 use tracing::{error, warn};
 
+#[path = "memory_capacity.rs"]
+mod capacity;
+
 use crate::memory::ux::{
     MemoryBulkClearRequest, MemoryClearPreview, MemoryCorrectionRequest, MemoryExport,
     MemoryFeedbackRequest, MemoryImportConfirmRequest, MemoryImportPreview,
@@ -49,6 +52,7 @@ struct MemoryVectorMutationResult {
 pub(crate) fn router() -> Router<AppState> {
     Router::new()
         .route("/memory", get(get_memory_overview))
+        .route("/memory/availability", get(capacity::get))
         .route("/memory/recent", get(list_memory_recent_handler))
         .route("/memory/preferences", get(list_memory_preferences_handler))
         .route("/memory/facts", get(list_memory_facts_handler))
