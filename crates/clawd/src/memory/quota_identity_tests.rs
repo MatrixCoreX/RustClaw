@@ -11,7 +11,7 @@ fn fresh_identity_after_initialized_empty_startup_receives_defaults_atomically()
     let kind: String = db
         .query_row(
             "SELECT initialization_kind FROM memory_quota_initializations WHERE principal_id=?1",
-            [owner],
+            [&owner],
             |r| r.get(0),
         )
         .unwrap();
