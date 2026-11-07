@@ -22,6 +22,9 @@ pub(crate) use mutations::{correct_memory, record_feedback};
 mod retrieval;
 pub(crate) use retrieval::check_memory_consistency;
 
+#[path = "ux_projection.rs"]
+mod projection;
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub(crate) struct MemoryListFilter {
     pub(crate) search: Option<String>,
@@ -593,6 +596,9 @@ fn undo_correction(
     now_ts: i64,
 ) -> anyhow::Result<()> {
     let replacement_id = replacement_id.ok_or_else(|| anyhow!("memory_replacement_missing"))?;
+    if let Some(replacement) = load_mutable_memory(db, principal_id, replacement_id)? {
+        retrieval::remove_canonical(db, &replacement)?;
+    }
     match object_kind {
         "fact" => {
             db.execute(
@@ -628,6 +634,7 @@ fn undo_correction(
         }
         _ => anyhow::bail!("memory_undo_kind_unsupported"),
     }
+    projection::refresh_owned_canonical(db, principal_id, memory_id, now_ts)?;
     Ok(())
 }
 
@@ -1331,26 +1338,14 @@ fn disable_memory_recall(
         "fact" => {
             db.execute(
                 "UPDATE memory_facts SET status = 'deleted', row_revision = row_revision + 1,
-                    modified_at_ts = ?2 WHERE memory_id = ?1",
-                params![memory.id, now_ts],
+                    modified_at_ts = ?2 WHERE memory_id = ?1 AND principal_id = ?3",
+                params![memory.id, now_ts, memory.principal_id],
             )?;
         }
-        "preference" => {
-            db.execute(
-                "DELETE FROM memory_retrieval_index WHERE source_kind = 'preference'
-                   AND source_ref IN (SELECT pref_key FROM user_preferences WHERE memory_id = ?1)",
-                [memory.id.as_str()],
-            )?;
-        }
-        "recent" => {
-            db.execute(
-                "DELETE FROM memory_retrieval_index WHERE source_kind = 'memory'
-                   AND source_memory_id IN (SELECT id FROM memories WHERE memory_id = ?1)",
-                [memory.id.as_str()],
-            )?;
-        }
+        "preference" | "recent" => {}
         _ => anyhow::bail!("memory_kind_unsupported"),
     }
+    retrieval::remove_canonical(db, memory)?;
     Ok(())
 }
 

@@ -60,13 +60,6 @@ fn apply_correction(
                    FROM memory_facts WHERE memory_id = ?3 AND principal_id = ?5",
                 params![replacement_id, content, memory_id, now_ts, principal_id],
             )?;
-            transaction.execute(
-                "DELETE FROM memory_retrieval_index
-                 WHERE source_kind = 'memory_fact' AND source_ref IN (
-                    SELECT CAST(id AS TEXT) FROM memory_facts WHERE memory_id = ?1
-                 )",
-                [memory_id],
-            )?;
         }
         "preference" => {
             transaction.execute(
@@ -89,6 +82,8 @@ fn apply_correction(
         }
         _ => anyhow::bail!("memory_correction_kind_unsupported"),
     }
+    retrieval::remove_canonical(transaction, old)?;
+    projection::refresh_owned_canonical(transaction, principal_id, &replacement_id, now_ts)?;
     let revision_id = append_revision(
         transaction,
         old,

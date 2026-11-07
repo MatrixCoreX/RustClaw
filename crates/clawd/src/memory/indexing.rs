@@ -428,7 +428,7 @@ pub(crate) fn index_memory_row(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn insert_index_row(
+pub(super) fn insert_index_row(
     db: &Connection,
     source_kind: &str,
     source_memory_id: Option<i64>,
@@ -600,7 +600,7 @@ fn build_chat_scope_metadata_json() -> String {
     .to_string()
 }
 
-fn build_preference_metadata_json(
+pub(super) fn build_preference_metadata_json(
     pref_key: &str,
     scope_kind: &str,
     scope_ref: Option<&str>,
@@ -780,7 +780,7 @@ fn build_knowledge_fact_metadata_json(namespace: &str) -> String {
     .to_string()
 }
 
-fn build_memory_fact_metadata_json(
+pub(super) fn build_memory_fact_metadata_json(
     namespace: &str,
     fact_id: i64,
     scope_kind: &str,

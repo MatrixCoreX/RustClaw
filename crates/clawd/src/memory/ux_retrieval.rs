@@ -91,6 +91,25 @@ pub(super) fn remove_identity(
     Ok(())
 }
 
+/// Canonical mutations have an admitted scope; never affect another conversation.
+pub(super) fn remove_canonical(db: &Connection, memory: &MutableMemory) -> anyhow::Result<()> {
+    let identity = identity(db, memory)?;
+    remove_targets(
+        db,
+        "SELECT id FROM memory_retrieval_index
+         WHERE principal_id=?1 AND source_kind=?2 AND source_ref=?3
+           AND scope_kind=?4 AND scope_ref=?5",
+        params![
+            memory.principal_id,
+            identity.source_kind,
+            identity.source_ref,
+            memory.scope_kind,
+            memory.scope_ref
+        ],
+    )?;
+    Ok(())
+}
+
 fn remove_targets(
     db: &Connection,
     targets: &str,
