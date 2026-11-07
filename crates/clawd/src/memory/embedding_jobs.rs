@@ -92,10 +92,16 @@ pub(crate) async fn run_one_embedding_batch(
         tokio::select! {
             result = &mut execution => break result,
             _ = tokio::time::sleep(Duration::from_secs(heartbeat_seconds)) => {
-                if renew_embedding_leases(state, worker_id, &jobs).is_err() {
-                    break Err(dispatch::Failure::AfterDispatch(anyhow!(
-                        "memory_embedding_heartbeat_lease_lost"
-                    )));
+                match renew_embedding_leases(state, worker_id, &jobs) {
+                    Ok(true) => {}
+                    // Drop the pending provider future when no item still has
+                    // authority; do not occupy this worker until HTTP timeout.
+                    Ok(false) => return Ok(true),
+                    Err(_) => {
+                        break Err(dispatch::Failure::AfterDispatch(anyhow!(
+                            "memory_embedding_heartbeat_lease_lost"
+                        )));
+                    }
                 }
             }
         }
@@ -138,13 +144,14 @@ fn renew_embedding_leases(
     state: &crate::AppState,
     worker_id: &str,
     jobs: &[EmbeddingJob],
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     let db = state.core.db.get()?;
     let now = crate::now_ts_u64() as i64;
     let lease_expires =
         now.saturating_add(state.policy.memory.background_lease_seconds.max(15) as i64);
+    let mut renewed = 0;
     for job in jobs {
-        db.execute(
+        renewed += db.execute(
             "UPDATE memory_embedding_jobs
              SET lease_expires_at_ts = ?1, updated_at_ts = ?2
              WHERE job_id = ?3 AND status = 'running' AND lease_owner = ?4
@@ -153,7 +160,7 @@ fn renew_embedding_leases(
         )?;
         // A cancelled/lost item does not abort valid peers already in flight.
     }
-    Ok(())
+    Ok(renewed > 0)
 }
 
 fn claim_embedding_batch(
@@ -1015,6 +1022,10 @@ fn ensure_embedding_control_schema(db: &Connection) -> anyhow::Result<()> {
 #[cfg(test)]
 #[path = "embedding_jobs_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "embedding_lease_renewal_tests.rs"]
+mod lease_renewal_tests;
 
 #[cfg(test)]
 #[path = "embedding_capacity_tests.rs"]
