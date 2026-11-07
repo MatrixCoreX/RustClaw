@@ -268,7 +268,61 @@ def required_domain_budget_gate(job):
             and job['steps'].index(step)<job['steps'].index(full))
 
 
+def required_growth_state_gate(job):
+    pairs=[
+        ('memory::ux::growth_state_tests::','memory::ux::growth_state_tests::'),
+        ('memory::ux::admission_contract_tests::missing_pressure_correction_fails_closed_without_repairing_the_observation',
+         'memory::ux::admission_contract_tests::'),
+    ]
+    for selector,prefix in pairs:
+        run=f'cargo test --locked -p clawd --bin clawd {selector} -- --test-threads=1 --nocapture'
+        if not required_command_gate(job,run):
+            return False
+        step=next(step for step in job['steps'] if run in step.get('run',''))
+        script=step['run']
+        listing=f'cargo test --locked -p clawd --bin clawd {selector} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
+        if selector.endswith('growth_state_tests::'):
+            source=(ROOT/'crates/clawd/src/memory/ux_growth_state_tests.rs').read_text(encoding='utf-8')
+            names=re.findall(r'^#\[test\]\nfn (\w+)\(',source,re.M)
+            if len(names)!=8 or len(set(names))!=8:
+                return False
+        else:
+            names=['missing_pressure_correction_fails_closed_without_repairing_the_observation']
+        budget=next(value for value in job['steps'] if value.get('name')=='Test actual memory domain budget and effect contracts')
+        if not (listing in script and f'--prefix {prefix}' in script and '|| true' not in script
+                and all(f'--require {name}' in script for name in names)
+                and script.index(listing)<script.index(run)
+                and job['steps'].index(step)<job['steps'].index(budget)):
+            return False
+    return True
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_growth_state_repair_and_releasing_controls_are_required(self):
+        jobs=load('macos-polyglot-skill-ci.yml')['jobs']
+        for name in ['runtime-read-linux','polyglot-skill-macos']:
+            self.assertTrue(required_growth_state_gate(jobs[name]))
+            for mutation in ['selector','listing','require','ignore','conditional','continue','late']:
+                with self.subTest(job=name,mutation=mutation):
+                    job=deepcopy(jobs[name])
+                    step=next(step for step in job['steps'] if step.get('name')=='Test invalid capacity state admission and recovery controls')
+                    if mutation=='selector':
+                        step['run']=step['run'].replace('memory::ux::growth_state_tests::','missing::growth_state_tests::')
+                    elif mutation=='listing':
+                        step['run']=step['run'].replace('--list --color never','--list')
+                    elif mutation=='require':
+                        step['run']=step['run'].replace('--require missing_pressure_correction_fails_closed_without_repairing_the_observation','--require absent_case')
+                    elif mutation=='ignore':
+                        step['run']=step['run'].replace('--test-threads=1 --nocapture','--test-threads=1 --nocapture || true')
+                    elif mutation=='conditional':
+                        step['if']='false'
+                    elif mutation=='continue':
+                        step['continue-on-error']=True
+                    else:
+                        job['steps'].remove(step)
+                        job['steps'].append(step)
+                    self.assertFalse(required_growth_state_gate(job))
+
     def test_domain_growth_and_releasing_controls_cannot_be_skipped(self):
         jobs=load('macos-polyglot-skill-ci.yml')['jobs']
         for name in ['runtime-read-linux','polyglot-skill-macos']:

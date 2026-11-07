@@ -30,6 +30,7 @@ fn apply_correction(
     content: &str,
     now_ts: i64,
 ) -> anyhow::Result<MemoryMutationResult> {
+    writing::require_growth_storage_state(transaction)?;
     let memory_id = old.id.as_str();
     let principal_id = old.principal_id.as_str();
     let expected_revision = old.revision;
@@ -91,6 +92,7 @@ fn apply_correction(
         Some(now_ts + UNDO_GRACE_SECONDS),
         now_ts,
     )?;
+    writing::require_growth_storage_state(transaction)?;
     Ok(MemoryMutationResult {
         status: "corrected".to_string(),
         memory_id: memory_id.to_string(),

@@ -541,6 +541,26 @@ jobs:
             --prefix memory::embedding_jobs::rejected_startup_tests:: \
             --require denied_reindex_does_not_install_schema_receipts_or_profile_state
           cargo test --locked -p clawd --bin clawd memory::embedding_jobs::rejected_startup_tests:: -- --test-threads=1 --nocapture
+      - name: Test invalid capacity state admission and recovery controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::growth_state_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::growth_state_tests:: \
+            --require missing_state_preview_does_not_store_private_payload \
+            --require unknown_state_confirmation_retains_preview_for_explicit_retry \
+            --require incorrect_feedback_rolls_back_its_record_when_state_is_unknown \
+            --require unknown_state_deleted_content_restore_keeps_undo_receipt \
+            --require unknown_state_preference_undo_to_smaller_content_still_succeeds \
+            --require unknown_state_fact_undo_releases_replacement_without_losing_history \
+            --require suppression_feedback_still_works_with_unknown_capacity \
+            --require late_state_corruption_rolls_back_only_the_nested_correction
+          cargo test --locked -p clawd --bin clawd memory::ux::growth_state_tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd memory::ux::admission_contract_tests::missing_pressure_correction_fails_closed_without_repairing_the_observation -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::admission_contract_tests:: \
+            --require missing_pressure_correction_fails_closed_without_repairing_the_observation
+          cargo test --locked -p clawd --bin clawd memory::ux::admission_contract_tests::missing_pressure_correction_fails_closed_without_repairing_the_observation -- --test-threads=1 --nocapture
       - name: Test actual memory domain budget and effect contracts
         shell: bash
         run: |
@@ -1034,6 +1054,26 @@ jobs:
             --prefix memory::embedding_jobs::rejected_startup_tests:: \
             --require denied_reindex_does_not_install_schema_receipts_or_profile_state
           cargo test --locked -p clawd --bin clawd memory::embedding_jobs::rejected_startup_tests:: -- --test-threads=1 --nocapture
+      - name: Test invalid capacity state admission and recovery controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::growth_state_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::growth_state_tests:: \
+            --require missing_state_preview_does_not_store_private_payload \
+            --require unknown_state_confirmation_retains_preview_for_explicit_retry \
+            --require incorrect_feedback_rolls_back_its_record_when_state_is_unknown \
+            --require unknown_state_deleted_content_restore_keeps_undo_receipt \
+            --require unknown_state_preference_undo_to_smaller_content_still_succeeds \
+            --require unknown_state_fact_undo_releases_replacement_without_losing_history \
+            --require suppression_feedback_still_works_with_unknown_capacity \
+            --require late_state_corruption_rolls_back_only_the_nested_correction
+          cargo test --locked -p clawd --bin clawd memory::ux::growth_state_tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd memory::ux::admission_contract_tests::missing_pressure_correction_fails_closed_without_repairing_the_observation -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::admission_contract_tests:: \
+            --require missing_pressure_correction_fails_closed_without_repairing_the_observation
+          cargo test --locked -p clawd --bin clawd memory::ux::admission_contract_tests::missing_pressure_correction_fails_closed_without_repairing_the_observation -- --test-threads=1 --nocapture
       - name: Test actual memory domain budget and effect contracts
         shell: bash
         run: |

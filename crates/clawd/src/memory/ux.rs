@@ -545,15 +545,19 @@ pub(crate) fn undo_memory_mutation(
                 &snapshot,
                 now_ts,
             )?,
-            "delete" => restore_deleted_memory(
-                transaction,
-                principal_id,
-                &memory_id,
-                &object_kind,
-                row_revision,
-                &snapshot,
-                now_ts,
-            )?,
+            "delete" => {
+                writing::require_growth_storage_state(transaction)?;
+                restore_deleted_memory(
+                    transaction,
+                    principal_id,
+                    &memory_id,
+                    &object_kind,
+                    row_revision,
+                    &snapshot,
+                    now_ts,
+                )?;
+                writing::require_growth_storage_state(transaction)?;
+            }
             _ => anyhow::bail!("memory_undo_operation_unsupported"),
         }
         transaction.execute(
@@ -608,7 +612,14 @@ fn undo_correction(
     now_ts: i64,
 ) -> anyhow::Result<()> {
     let replacement_id = replacement_id.ok_or_else(|| anyhow!("memory_replacement_missing"))?;
+    let mut grows = false;
     if let Some(replacement) = load_mutable_memory(db, principal_id, replacement_id)? {
+        grows = object_kind == "preference"
+            && snapshot_str(snapshot, "content")?.len()
+                > snapshot_str(&replacement.snapshot, "content")?.len();
+        if grows {
+            writing::require_growth_storage_state(db)?;
+        }
         retrieval::remove_canonical(db, &replacement)?;
     }
     match object_kind {
@@ -647,6 +658,9 @@ fn undo_correction(
         _ => anyhow::bail!("memory_undo_kind_unsupported"),
     }
     projection::refresh_owned_canonical(db, principal_id, memory_id, now_ts)?;
+    if grows {
+        writing::require_growth_storage_state(db)?;
+    }
     Ok(())
 }
 
@@ -1029,6 +1043,9 @@ pub(crate) fn preview_memory_import(
             anyhow::ensure!(status != "confirmed", "memory_import_already_confirmed");
             import_id
         } else {
+            if !accepted.is_empty() {
+                writing::require_growth_storage_state(transaction)?;
+            }
             let import_id = format!("memory_import_{}", uuid::Uuid::new_v4().simple());
             transaction.execute(
                 "INSERT INTO memory_import_sessions(
@@ -1043,6 +1060,9 @@ pub(crate) fn preview_memory_import(
                     now_ts
                 ],
             )?;
+            if !accepted.is_empty() {
+                writing::require_growth_storage_state(transaction)?;
+            }
             import_id
         };
         Ok(MemoryImportPreview {
@@ -1171,6 +1191,7 @@ pub(crate) fn confirm_memory_import(
                 )?
             };
             if changed == 1 {
+                writing::require_growth_storage_state(transaction)?;
                 imported_items += 1;
             } else {
                 existing_items += 1;
@@ -1441,6 +1462,10 @@ mod admission_contract_tests;
 #[cfg(test)]
 #[path = "ux_budget_contract_tests.rs"]
 mod budget_contract_tests;
+
+#[cfg(test)]
+#[path = "ux_growth_state_tests.rs"]
+mod growth_state_tests;
 
 #[cfg(test)]
 #[path = "ux_feedback_tests.rs"]
