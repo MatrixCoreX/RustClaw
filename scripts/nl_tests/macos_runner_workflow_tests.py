@@ -42,7 +42,45 @@ def required_command_gate(job, command):
     )
 
 
+def required_builtin_memory_gate(job):
+    prefix='skills::builtin::builtin_memory_store::'
+    run=f'cargo test --locked -p clawd --bin clawd {prefix} -- --test-threads=1 --nocapture'
+    if not required_command_gate(job,run):
+        return False
+    step=next(step for step in job['steps'] if run in step.get('run',''))
+    script=step['run']
+    listing=f'cargo test --locked -p clawd --bin clawd {prefix} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
+    self_test='python3 scripts/tests/assert_rust_test_selection.py --self-test'
+    required=['save_is_effectively_once_and_search_returns_only_opaque_identity',
+        'conversation_scope_isolated_and_child_mutation_is_denied',
+        'pagination_scope_revision_forget_and_disabled_generation_are_enforced']
+    return listing in script and self_test in script and '|| true' not in script and (
+        script.index(self_test)<script.index(listing)<script.index(run)
+        and f'--prefix {prefix}tests::' in script
+        and all(f'--require {name}' in script for name in required))
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_builtin_memory_selection_cannot_succeed_with_zero_or_missing_cases(self):
+        jobs=load('macos-polyglot-skill-ci.yml')['jobs']
+        for name in ['runtime-read-linux','polyglot-skill-macos']:
+            self.assertTrue(required_builtin_memory_gate(jobs[name]))
+            for mutation in ['selector','listing','require','ignore','conditional']:
+                with self.subTest(job=name,mutation=mutation):
+                    job=deepcopy(jobs[name])
+                    step=next(step for step in job['steps'] if 'assert_rust_test_selection.py' in step.get('run',''))
+                    if mutation=='selector':
+                        step['run']=step['run'].replace('skills::builtin::builtin_memory_store::','skills::builtin_memory_store::')
+                    elif mutation=='listing':
+                        step['run']=step['run'].replace(' | python3 scripts/tests/assert_rust_test_selection.py',' | true')
+                    elif mutation=='require':
+                        step['run']=step['run'].replace('--require conversation_scope_isolated_and_child_mutation_is_denied','')
+                    elif mutation=='ignore':
+                        step['run']+='\ntrue || true\n'
+                    else:
+                        step['if']='${{ always() }}'
+                    self.assertFalse(required_builtin_memory_gate(job))
+
     def test_memory_quota_accounting_gates_both_native_runtime_jobs(self):
         jobs = load('macos-polyglot-skill-ci.yml')['jobs']
         for name in ['runtime-read-linux', 'polyglot-skill-macos']:

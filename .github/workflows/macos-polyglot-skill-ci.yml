@@ -342,7 +342,13 @@ jobs:
           cargo test --locked -p clawd --bin clawd memory::availability:: -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd http::memory_routes::capacity:: -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd memory::quota:: -- --test-threads=1 --nocapture
-          cargo test --locked -p clawd --bin clawd skills::builtin_memory_store:: -- --test-threads=1 --nocapture
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd skills::builtin::builtin_memory_store:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix skills::builtin::builtin_memory_store::tests:: \
+            --require save_is_effectively_once_and_search_returns_only_opaque_identity \
+            --require conversation_scope_isolated_and_child_mutation_is_denied \
+            --require pagination_scope_revision_forget_and_disabled_generation_are_enforced
+          cargo test --locked -p clawd --bin clawd skills::builtin::builtin_memory_store:: -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd memory::retention -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd memory:: -- --test-threads=1 --nocapture
       - name: Test memory vector status policy and scoped controls
@@ -599,7 +605,13 @@ jobs:
           cargo test --locked -p clawd --bin clawd memory::availability:: -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd http::memory_routes::capacity:: -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd memory::quota:: -- --test-threads=1 --nocapture
-          cargo test --locked -p clawd --bin clawd skills::builtin_memory_store:: -- --test-threads=1 --nocapture
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd skills::builtin::builtin_memory_store:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix skills::builtin::builtin_memory_store::tests:: \
+            --require save_is_effectively_once_and_search_returns_only_opaque_identity \
+            --require conversation_scope_isolated_and_child_mutation_is_denied \
+            --require pagination_scope_revision_forget_and_disabled_generation_are_enforced
+          cargo test --locked -p clawd --bin clawd skills::builtin::builtin_memory_store:: -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd memory::retention -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd memory:: -- --test-threads=1 --nocapture
       - name: Test memory vector status policy and scoped controls
