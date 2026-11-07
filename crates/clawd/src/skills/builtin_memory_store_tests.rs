@@ -37,6 +37,17 @@ fn setup() -> crate::AppState {
     let principal_id = crate::repo::auth::principal_id_for_user_key(&db, "memory-capability-key")
         .expect("resolve principal")
         .expect("principal");
+    let tx = db
+        .unchecked_transaction()
+        .expect("new fixture identity transaction");
+    crate::memory::quota::initialize_new_identity(
+        &tx,
+        &state.policy.memory,
+        &principal_id,
+        crate::now_ts_u64() as i64,
+    )
+    .expect("new fixture identity quota initialization");
+    tx.commit().expect("commit new fixture identity defaults");
     crate::memory::settings::update_memory_settings(
         &db,
         &claw_core::types::AuthIdentity {

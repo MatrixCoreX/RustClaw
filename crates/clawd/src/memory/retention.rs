@@ -201,6 +201,8 @@ pub(crate) fn automatic_generation_allowed(
     )
 }
 
+/// Explicit policy initialization only. Operational callers use the update-only
+/// refresh below; this constructor is owned by startup/new-identity lifecycle.
 pub(crate) fn ensure_principal_quota(
     db: &Connection,
     config: &MemoryConfig,
@@ -236,29 +238,34 @@ pub(crate) fn ensure_principal_quota(
     Ok(())
 }
 
+pub(crate) fn refresh_existing_principal_usage(
+    db: &Connection,
+    principal: &str,
+    now: i64,
+) -> anyhow::Result<()> {
+    db.execute(
+        "UPDATE memory_principal_quotas SET
+            used_rows=(SELECT COUNT(*) FROM memories WHERE principal_id=?1),
+            used_bytes=(SELECT COALESCE(SUM(LENGTH(CAST(content AS BLOB))),0) FROM memories WHERE principal_id=?1),
+            updated_at_ts=?2 WHERE principal_id=?1",
+        params![principal,now],
+    )?;
+    Ok(())
+}
+
 fn refresh_principal_usage(
     db: &Connection,
-    config: &MemoryConfig,
+    _config: &MemoryConfig,
     now_ts: i64,
 ) -> anyhow::Result<()> {
     db.execute(
-        "INSERT INTO memory_principal_quotas(
-            principal_id, max_rows, max_bytes, max_background_cost_microunits,
-            used_rows, used_bytes, used_background_cost_microunits, revision, updated_at_ts
-         )
-         SELECT principal_id, ?1, ?2, ?3, COUNT(*), COALESCE(SUM(LENGTH(CAST(content AS BLOB))), 0), 0, 1, ?4
-         FROM memories WHERE principal_id IS NOT NULL GROUP BY principal_id
-         ON CONFLICT(principal_id) DO UPDATE SET
-            used_rows = excluded.used_rows, used_bytes = excluded.used_bytes,
-            updated_at_ts = excluded.updated_at_ts",
-        params![
-            config.max_rows.max(1) as i64,
-            config.principal_max_bytes.min(i64::MAX as u64) as i64,
-            config
-                .principal_background_cost_microunits
-                .min(i64::MAX as u64) as i64,
-            now_ts,
-        ],
+        "UPDATE memory_principal_quotas AS q
+         SET used_rows=u.source_rows,used_bytes=u.source_bytes,updated_at_ts=?1
+         FROM (
+            SELECT principal_id,COUNT(*) AS source_rows,COALESCE(SUM(LENGTH(CAST(content AS BLOB))),0) AS source_bytes
+            FROM memories WHERE principal_id IS NOT NULL GROUP BY principal_id
+         ) u WHERE q.principal_id=u.principal_id",
+        [now_ts],
     )?;
     // GROUP BY has no row for an emptied principal. Clear only stale usage;
     // configured policy, revision and already-spent background cost survive.

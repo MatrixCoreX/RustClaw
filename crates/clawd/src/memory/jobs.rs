@@ -151,9 +151,8 @@ pub(crate) fn enqueue_turn_memory_jobs(
     if !settings.generate_memory {
         return Ok(Vec::new());
     }
-    super::retention::ensure_principal_quota(
+    super::retention::refresh_existing_principal_usage(
         &db,
-        &state.policy.memory,
         &settings.target_principal_id,
         crate::now_ts_u64() as i64,
     )?;
@@ -237,9 +236,8 @@ pub(crate) fn persist_turn_and_enqueue(
         tx.commit()?;
         return Ok(Vec::new());
     };
-    super::retention::ensure_principal_quota(
+    super::retention::refresh_existing_principal_usage(
         &tx,
-        &state.policy.memory,
         &settings.target_principal_id,
         crate::now_ts_u64() as i64,
     )?;

@@ -583,7 +583,13 @@ pub(crate) fn create_auth_key(state: &AppState, role: &str) -> anyhow::Result<St
              VALUES (?1, ?2, 1, ?3, NULL)",
             params![user_key, role, now_ts()],
         )?;
-        auth_principal::create_principal_for_auth_key(db, &user_key, &role)?;
+        let principal = auth_principal::create_principal_for_auth_key(db, &user_key, &role)?;
+        crate::memory::quota::initialize_new_identity(
+            db,
+            &state.policy.memory,
+            &principal,
+            crate::now_ts_u64() as i64,
+        )?;
         Ok(())
     })?;
     Ok(user_key)

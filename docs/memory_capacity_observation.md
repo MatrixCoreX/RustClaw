@@ -50,6 +50,18 @@ responses or callbacks from reviving a previous account's observations.
 
 ## Work still required
 
+Quota-policy defaults are now owned by explicit startup and new-identity
+transactions, not by queue admission or periodic usage refresh. A one-time
+startup migration initializes legacy account defaults and preserves all
+existing policy values, revisions and spent costs. An independent per-account
+initialization receipt survives loss of the quota row. Later startup or a
+repeated identity callback does not recreate that policy. Missing or corrupt
+initialization metadata fails explicitly rather than being treated as a new
+installation. New identity, credential binding and initial policy publish in
+one transaction; key rotation keeps the existing account and policy. Creating
+defaults does not enable memory generation or grant consent. These lifecycle
+changes still require exact-source native and upgrade acceptance.
+
 Observation does not resolve the broader pressure/accounting policy. Before
 strengthening manual-write enforcement, define valid memory-domain and host
 pressure, preserve content-releasing operations and recovery, distinguish

@@ -26,6 +26,7 @@ fn single_refresh_counts_embedded_nul_bytes() {
 #[test]
 fn bulk_refresh_counts_utf8_storage_bytes() {
     let (db, config) = fixture();
+    ensure_principal_quota(&db, &config, PRINCIPAL, NOW).expect("explicit quota initialization");
     source(&db, Some(PRINCIPAL), "中文🙂", NOW);
     refresh_principal_usage(&db, &config, NOW).expect("bulk refresh");
     assert_eq!(usage(&db, PRINCIPAL), (1, 10));
@@ -34,6 +35,7 @@ fn bulk_refresh_counts_utf8_storage_bytes() {
 #[test]
 fn bulk_refresh_counts_embedded_nul_bytes() {
     let (db, config) = fixture();
+    ensure_principal_quota(&db, &config, PRINCIPAL, NOW).expect("explicit quota initialization");
     source(&db, Some(PRINCIPAL), "A\0B", NOW);
     refresh_principal_usage(&db, &config, NOW).expect("bulk refresh");
     assert_eq!(usage(&db, PRINCIPAL), (1, 3));
@@ -52,6 +54,7 @@ fn single_refresh_enforces_multibyte_byte_quota() {
 fn bulk_refresh_enforces_multibyte_byte_quota() {
     let (db, mut config) = fixture();
     config.principal_max_bytes = 9;
+    ensure_principal_quota(&db, &config, PRINCIPAL, NOW).expect("explicit quota initialization");
     source(&db, Some(PRINCIPAL), "中文🙂", NOW);
     refresh_principal_usage(&db, &config, NOW).expect("bulk refresh");
     assert!(!automatic_generation_allowed(&db, PRINCIPAL).expect("byte quota"));
@@ -60,6 +63,7 @@ fn bulk_refresh_enforces_multibyte_byte_quota() {
 #[test]
 fn bulk_refresh_clears_usage_after_last_source_is_deleted() {
     let (db, config) = fixture();
+    ensure_principal_quota(&db, &config, PRINCIPAL, NOW).expect("explicit quota initialization");
     source(&db, Some(PRINCIPAL), "alpha", NOW);
     refresh_principal_usage(&db, &config, NOW).expect("initial usage");
     assert_eq!(usage(&db, PRINCIPAL), (1, 5));
@@ -97,6 +101,9 @@ fn empty_refresh_clears_usage_without_resetting_admin_policy() {
 #[test]
 fn bulk_refresh_keeps_principal_usage_separate() {
     let (db, config) = fixture();
+    ensure_principal_quota(&db, &config, PRINCIPAL, NOW).expect("explicit quota initialization");
+    ensure_principal_quota(&db, &config, "principal-other", NOW)
+        .expect("explicit second quota initialization");
     source(&db, Some(PRINCIPAL), "alpha", NOW);
     source(&db, Some("principal-other"), "beta", NOW);
     refresh_principal_usage(&db, &config, NOW).expect("separate usage");
@@ -120,6 +127,7 @@ fn single_refresh_preserves_admin_policy_revision_and_spent_cost() {
 #[test]
 fn bulk_refresh_preserves_admin_policy_revision_and_spent_cost() {
     let (db, config) = fixture();
+    ensure_principal_quota(&db, &config, PRINCIPAL, NOW).expect("explicit quota initialization");
     source(&db, Some(PRINCIPAL), "alpha", NOW);
     refresh_principal_usage(&db, &config, NOW).expect("initial usage");
     set_admin_policy(&db);
@@ -182,6 +190,7 @@ fn already_empty_quota_refresh_is_write_free() {
 #[test]
 fn unassigned_sources_are_not_charged_to_other_principals() {
     let (db, config) = fixture();
+    ensure_principal_quota(&db, &config, PRINCIPAL, NOW).expect("explicit quota initialization");
     source(&db, None, "unowned", NOW);
     source(&db, Some(PRINCIPAL), "alpha", NOW);
     refresh_principal_usage(&db, &config, NOW).expect("principal usage");

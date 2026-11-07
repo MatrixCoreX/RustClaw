@@ -1097,6 +1097,12 @@ impl AppState {
             .expect("memory startup schema for test runtime");
         crate::memory::ux::ensure_memory_ux_schema(&conn)
             .expect("memory UX startup schema for test runtime");
+        crate::memory::quota::initialize_startup_defaults(
+            &conn,
+            &self.policy.memory,
+            crate::now_ts_u64() as i64,
+        )
+        .expect("memory quota startup defaults for test runtime");
         drop(conn);
         self
     }

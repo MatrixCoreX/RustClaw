@@ -795,7 +795,6 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         {
             memory::indexing::rebuild_retrieval_index(&db, &memory_runtime)?;
         }
-        memory::retention::initialize_storage_pressure(&db, &memory_runtime, now_ts_u64() as i64)?;
     }
     let bootstrap_admin = {
         let db = db_pool
@@ -803,6 +802,8 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
             .map_err(|e| anyhow::anyhow!("get db conn: {e}"))?;
         let key = ensure_bootstrap_admin_key(&db)?;
         seed_channel_bindings(&db, &config)?;
+        memory::quota::initialize_startup_defaults(&db, &memory_runtime, now_ts_u64() as i64)?;
+        memory::retention::initialize_storage_pressure(&db, &memory_runtime, now_ts_u64() as i64)?;
         key
     };
     let skill_storage = Arc::new(skill_storage::SkillStorageRuntime::initialize(
