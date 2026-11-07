@@ -54,7 +54,8 @@ def required_builtin_memory_gate(job):
     self_test='python3 scripts/tests/assert_rust_test_selection.py --self-test'
     required=['save_is_effectively_once_and_search_returns_only_opaque_identity',
         'conversation_scope_isolated_and_child_mutation_is_denied',
-        'pagination_scope_revision_forget_and_disabled_generation_are_enforced']
+        'pagination_scope_revision_forget_and_disabled_generation_are_enforced',
+        'builtin_saved_fact_can_be_deleted_with_its_revision_and_index']
     return listing in script and self_test in script and '|| true' not in script and (
         script.index(self_test)<script.index(listing)<script.index(run)
         and f'--prefix {prefix}tests::' in script

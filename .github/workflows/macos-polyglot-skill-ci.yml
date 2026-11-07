@@ -369,7 +369,8 @@ jobs:
             --prefix skills::builtin::builtin_memory_store::tests:: \
             --require save_is_effectively_once_and_search_returns_only_opaque_identity \
             --require conversation_scope_isolated_and_child_mutation_is_denied \
-            --require pagination_scope_revision_forget_and_disabled_generation_are_enforced
+            --require pagination_scope_revision_forget_and_disabled_generation_are_enforced \
+            --require builtin_saved_fact_can_be_deleted_with_its_revision_and_index
           cargo test --locked -p clawd --bin clawd skills::builtin::builtin_memory_store:: -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd memory::retention -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd memory:: -- --test-threads=1 --nocapture
@@ -656,7 +657,8 @@ jobs:
             --prefix skills::builtin::builtin_memory_store::tests:: \
             --require save_is_effectively_once_and_search_returns_only_opaque_identity \
             --require conversation_scope_isolated_and_child_mutation_is_denied \
-            --require pagination_scope_revision_forget_and_disabled_generation_are_enforced
+            --require pagination_scope_revision_forget_and_disabled_generation_are_enforced \
+            --require builtin_saved_fact_can_be_deleted_with_its_revision_and_index
           cargo test --locked -p clawd --bin clawd skills::builtin::builtin_memory_store:: -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd memory::retention -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd memory:: -- --test-threads=1 --nocapture

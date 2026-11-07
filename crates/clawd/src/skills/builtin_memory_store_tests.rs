@@ -337,3 +337,68 @@ async fn pagination_scope_revision_forget_and_disabled_generation_are_enforced()
     .unwrap();
     assert_eq!(disabled["error_code"], "memory_generate_disabled");
 }
+
+#[tokio::test]
+async fn builtin_saved_fact_can_be_deleted_with_its_revision_and_index() {
+    let state = setup();
+    let task = task("memory-capability-delete-contract", "conversation-a");
+    let saved: Value = serde_json::from_str(
+        &super::execute(
+            &state,
+            Some(&task),
+            &args(json!({
+                "action": "save",
+                "scope": "current_principal",
+                "kind": "fact",
+                "content": "An indexed fact that the user can forget",
+                "idempotency_key": "fixture-delete-contract",
+            })),
+        )
+        .await
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(saved["status"], "ok", "save outcome: {saved}");
+    let memory_id = saved["data"]["memory_id"].as_str().unwrap();
+    let revision = saved["data"]["revision"].as_i64().unwrap();
+    let db = state.core.db.get().unwrap();
+    let owner = crate::repo::auth::principal_id_for_user_key(&db, "memory-capability-key")
+        .unwrap()
+        .unwrap();
+    let index_count = || {
+        db.query_row(
+            "SELECT COUNT(*) FROM memory_retrieval_index WHERE search_text=?1",
+            ["An indexed fact that the user can forget"],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap()
+    };
+    assert_eq!(index_count(), 1, "save creates a real retrieval row");
+    let deleted = crate::memory::ux::delete_memory_with_revision(
+        &db,
+        &owner,
+        memory_id,
+        &crate::memory::ux::MemoryMutationRequest {
+            expected_revision: revision,
+        },
+        crate::now_ts_u64() as i64,
+    )
+    .expect("normal builtin-created indexed fact deletion must succeed");
+    assert_eq!(deleted.status, "deleted");
+    assert_eq!(
+        index_count(),
+        0,
+        "forget also removes the owned retrieval row"
+    );
+    assert!(deleted.revision_id.is_some());
+    assert!(db.is_autocommit());
+    assert_eq!(
+        db.query_row(
+            "SELECT COUNT(*) FROM memory_facts WHERE memory_id=?1 AND principal_id=?2",
+            rusqlite::params![memory_id, owner],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap(),
+        0
+    );
+}
