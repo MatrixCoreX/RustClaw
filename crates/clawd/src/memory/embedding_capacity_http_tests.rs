@@ -106,6 +106,13 @@ impl Drop for LoopbackEmbedding {
 }
 
 async fn remote_fixture(endpoint: &str) -> (Fixture, Credential) {
+    remote_fixture_configured(endpoint, |_| {}).await
+}
+
+async fn remote_fixture_configured(
+    endpoint: &str,
+    configure: impl FnOnce(&mut claw_core::config::MemoryConfig),
+) -> (Fixture, Credential) {
     let mut fixture = Fixture::memory();
     fixture.seed_embedding();
     assert!(
@@ -122,6 +129,7 @@ async fn remote_fixture(endpoint: &str) -> (Fixture, Credential) {
         config.embedding_model = "capacity-http-fixture".to_string();
         config.embedding_version = "capacity-http-v1".to_string();
         config.embedding_dims = 3;
+        configure(config);
     }
     {
         let actor = crate::resolve_auth_identity_by_key(fixture.state(), &fixture.key)
@@ -222,6 +230,72 @@ async fn pressure_change_does_not_kill_already_inflight_provider_work() {
 
 #[path = "embedding_recall_race_tests.rs"]
 mod recall_races;
+
+#[tokio::test]
+async fn cancelled_remote_batch_releases_worker_without_a_provider_response() {
+    let mut server = LoopbackEmbedding::start().await;
+    let (fixture, _credential) = remote_fixture_configured(&server.endpoint, |config| {
+        config.background_lease_seconds = 15;
+        config.embedding_query_timeout_ms = 120_000;
+        config.embedding_idle_timeout_ms = 120_000;
+    })
+    .await;
+    let state = fixture.state().clone();
+    let mut worker = tokio::spawn(async move {
+        super::run_one_embedding_batch(&state, "cancelled-held-worker").await
+    });
+    server.wait_for_request().await;
+    {
+        let db = fixture.state().core.db.get().unwrap();
+        let profile: String = db
+            .query_row(
+                "SELECT profile_id FROM memory_embedding_profiles
+                 WHERE provider_kind='remote_http'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            super::cancel_profile_jobs(&db, &fixture.principal, &profile).unwrap(),
+            1
+        );
+    }
+
+    // Observe two original five-second heartbeat periods, not a product limit.
+    // A timed-out old worker is released and joined before reporting failure.
+    let released = match tokio::time::timeout(Duration::from_secs(10), &mut worker).await {
+        Ok(outcome) => {
+            assert!(outcome.unwrap().unwrap());
+            true
+        }
+        Err(_) => {
+            server.release();
+            assert!(worker.await.unwrap().unwrap());
+            false
+        }
+    };
+    assert!(
+        released,
+        "an all-cancelled batch must release its worker while the provider response is held"
+    );
+    assert_eq!(server.calls.load(Ordering::SeqCst), 1);
+    let db = fixture.state().core.db.get().unwrap();
+    assert_eq!(
+        scalar(
+            &db,
+            "SELECT COUNT(*) FROM memory_vector_rows
+             WHERE profile_id IN (
+                 SELECT profile_id FROM memory_embedding_profiles
+                 WHERE provider_kind='remote_http'
+             )"
+        ),
+        0
+    );
+    assert_eq!(
+        scalar(&db, "SELECT COUNT(*) FROM memory_embedding_circuits"),
+        0
+    );
+}
 
 #[path = "embedding_commit_tests.rs"]
 mod response_commit;
