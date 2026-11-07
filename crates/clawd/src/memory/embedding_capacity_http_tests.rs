@@ -125,11 +125,32 @@ async fn remote_fixture(endpoint: &str) -> (Fixture, Credential) {
     }
     {
         let db = fixture.state().core.db.get().unwrap();
+        let actor = crate::resolve_auth_identity_by_key(fixture.state(), &fixture.key)
+            .unwrap()
+            .unwrap();
+        let settings = crate::memory::settings::update_memory_settings(
+            &db,
+            &actor,
+            &crate::memory::settings::MemorySettingsUpdateRequest {
+                scope: crate::memory::settings::MemorySettingScope::Principal,
+                target_principal_id: None,
+                conversation_id: None,
+                use_mode: None,
+                generate_mode: None,
+                external_context_policy: Some(
+                    crate::memory::settings::ExternalContextPolicy::Allow,
+                ),
+                expected_revision: Some(0),
+                long_term_enabled: None,
+            },
+            fixture.state().policy.memory.long_term_enabled,
+        )
+        .unwrap();
         let (_, _, count) = super::enqueue_reindex(
             &db,
             &fixture.state().policy.memory,
             &fixture.principal,
-            "sha256:fixture-explicit-consent",
+            &settings.policy_digest,
             true,
         )
         .unwrap();
@@ -201,3 +222,6 @@ async fn pressure_change_does_not_kill_already_inflight_provider_work() {
 
 #[path = "embedding_recall_race_tests.rs"]
 mod recall_races;
+
+#[path = "embedding_commit_tests.rs"]
+mod response_commit;

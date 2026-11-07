@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -7,7 +6,12 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use super::embedding::{EmbeddingProviderError, EmbeddingRequestItem};
-use super::vector_store::{MemoryVectorIndex, VectorWrite};
+#[path = "embedding_commit.rs"]
+mod commit;
+#[path = "embedding_dispatch.rs"]
+mod dispatch;
+#[path = "embedding_source.rs"]
+mod source;
 
 const CONTROL_MIGRATION_ID: &str = "016_memory_embedding_controls_v1";
 const CONTROL_MIGRATION_SQL: &str =
@@ -16,7 +20,7 @@ const CIRCUIT_MIGRATION_ID: &str = "017_memory_embedding_circuit_v1";
 const CIRCUIT_MIGRATION_SQL: &str =
     include_str!("../../../../migrations/017_memory_embedding_circuit.sql");
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct EmbeddingJob {
     job_id: String,
     retrieval_id: i64,
@@ -68,11 +72,14 @@ pub(crate) async fn run_one_embedding_batch(
     state: &crate::AppState,
     worker_id: &str,
 ) -> anyhow::Result<bool> {
+    if commit::recover_one_response(state, worker_id)? {
+        return Ok(true);
+    }
     let jobs = claim_embedding_batch(state, worker_id)?;
     if jobs.is_empty() {
         return Ok(false);
     }
-    let execution = execute_embedding_batch(state, &jobs);
+    let execution = execute_embedding_batch(state, worker_id, &jobs);
     tokio::pin!(execution);
     let heartbeat_seconds = (state.policy.memory.background_lease_seconds.max(15) / 3).clamp(5, 30);
     let result = loop {
@@ -80,19 +87,38 @@ pub(crate) async fn run_one_embedding_batch(
             result = &mut execution => break result,
             _ = tokio::time::sleep(Duration::from_secs(heartbeat_seconds)) => {
                 if renew_embedding_leases(state, worker_id, &jobs).is_err() {
-                    break Err(embedding_error(
-                        "memory_embedding_heartbeat_lease_lost",
-                        false,
-                        None,
-                        None,
-                    ));
+                    break Err(dispatch::Failure::AfterDispatch(anyhow!(
+                        "memory_embedding_heartbeat_lease_lost"
+                    )));
                 }
             }
         }
     };
     match result {
-        Ok(()) => complete_jobs(state, worker_id, &jobs)?,
-        Err(error) => fail_jobs(state, worker_id, &jobs, &error)?,
+        Ok(completed) => {
+            reconcile_snapshot_generation(
+                &state.core.db.get()?,
+                &jobs[0].principal_id,
+                &jobs[0].profile_id,
+                jobs[0].profile_generation,
+            )?;
+            if completed > 0 {
+                reset_provider_circuit(
+                    &state.core.db.get()?,
+                    &jobs[0].principal_id,
+                    &jobs[0].profile_id,
+                )?;
+            }
+        }
+        Err(dispatch::Failure::Provider(error, failed)) => {
+            fail_jobs(state, worker_id, &failed, &error, true)?
+        }
+        Err(dispatch::Failure::BeforeDispatch(error)) => {
+            fail_jobs(state, worker_id, &jobs, &error, false)?
+        }
+        // The response or dispatch marker remains durable. Recovery never sends
+        // the request again just because local publication/acknowledgement failed.
+        Err(dispatch::Failure::AfterDispatch(error)) => return Err(error),
     }
     tokio::time::sleep(Duration::from_millis(
         state
@@ -115,14 +141,14 @@ fn renew_embedding_leases(
     let lease_expires =
         now.saturating_add(state.policy.memory.background_lease_seconds.max(15) as i64);
     for job in jobs {
-        let changed = db.execute(
+        db.execute(
             "UPDATE memory_embedding_jobs
              SET lease_expires_at_ts = ?1, updated_at_ts = ?2
              WHERE job_id = ?3 AND status = 'running' AND lease_owner = ?4
-               AND cancel_requested = 0",
+               AND cancel_requested = 0 AND lease_expires_at_ts > ?2",
             params![lease_expires, now, job.job_id, worker_id],
         )?;
-        anyhow::ensure!(changed == 1, "memory_embedding_heartbeat_lease_lost");
+        // A cancelled/lost item does not abort valid peers already in flight.
     }
     Ok(())
 }
@@ -144,6 +170,15 @@ fn claim_embedding_batch(
         return Ok(Vec::new());
     }
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    tx.execute(
+        "UPDATE memory_embedding_jobs
+         SET status='failed',lease_owner=NULL,lease_expires_at_ts=NULL,
+             error_code='memory_embedding_response_outcome_unknown',retryable=0,
+             updated_at_ts=?1,finished_at_ts=?1
+         WHERE status='running' AND lease_expires_at_ts<=?1 AND cancel_requested=0
+           AND json_extract(checkpoint_json,'$.phase')='dispatch_started'",
+        [now],
+    )?;
     tx.execute(
         "UPDATE memory_embedding_jobs
          SET status = 'retry_wait', lease_owner = NULL, lease_expires_at_ts = NULL,
@@ -224,6 +259,7 @@ fn admitted_embedding_job_ids(
          LEFT JOIN memory_embedding_profiles profile ON profile.profile_id = job.profile_id
          WHERE job.status IN ('queued', 'retry_wait') AND job.cancel_requested = 0
            AND job.not_before_ts <= ?1
+           AND COALESCE(json_extract(job.checkpoint_json,'$.phase'),'') != 'response_received'
            AND NOT EXISTS (
                 SELECT 1 FROM memory_embedding_circuits circuit
                 WHERE circuit.principal_id = job.principal_id
@@ -274,8 +310,9 @@ fn admitted_embedding_job_ids(
 
 async fn execute_embedding_batch(
     state: &crate::AppState,
+    worker_id: &str,
     jobs: &[EmbeddingJob],
-) -> Result<(), EmbeddingProviderError> {
+) -> Result<usize, dispatch::Failure> {
     let first = jobs
         .first()
         .ok_or_else(|| embedding_error("memory_embedding_batch_empty", false, None, None))?;
@@ -300,7 +337,8 @@ async fn execute_embedding_batch(
                 false,
                 None,
                 None,
-            ));
+            )
+            .into());
         }
         let row: Option<(String, Option<String>, String, Option<String>)> = db
             .query_row(
@@ -314,12 +352,9 @@ async fn execute_embedding_batch(
                 embedding_error("memory_embedding_source_load_failed", true, None, None)
             })?;
         let Some((text, principal_id, scope_kind, scope_ref)) = row else {
-            return Err(embedding_error(
-                "memory_embedding_source_missing",
-                false,
-                None,
-                None,
-            ));
+            return Err(
+                embedding_error("memory_embedding_source_missing", false, None, None).into(),
+            );
         };
         if principal_id.as_deref() != Some(job.principal_id.as_str())
             || scope_kind != job.scope_kind
@@ -332,7 +367,8 @@ async fn execute_embedding_batch(
                 false,
                 None,
                 None,
-            ));
+            )
+            .into());
         }
         if profile.provider_kind == "remote_http" {
             let (safe, redacted) =
@@ -343,7 +379,8 @@ async fn execute_embedding_batch(
                     false,
                     None,
                     None,
-                ));
+                )
+                .into());
             }
             requests.push(EmbeddingRequestItem {
                 request_item_id: job.request_item_id.clone(),
@@ -373,61 +410,21 @@ async fn execute_embedding_batch(
             false,
             None,
             None,
-        ));
+        )
+        .into());
     }
-    let responses = embed_batch_with_payload_split(
+    dispatch::execute(
+        state,
+        worker_id,
+        &profile,
         provider.as_ref(),
+        jobs,
         &requests,
-        state.policy.memory.embedding_max_request_bytes.max(1),
     )
-    .await?;
-    let response_by_id = responses
-        .into_iter()
-        .map(|item| (item.request_item_id.clone(), item))
-        .collect::<HashMap<_, _>>();
-    if response_by_id.len() != jobs.len() {
-        return Err(embedding_error(
-            "memory_embedding_response_count_mismatch",
-            false,
-            None,
-            None,
-        ));
-    }
-    let mut db = state
-        .core
-        .db
-        .get()
-        .map_err(|_| embedding_error("memory_embedding_db_pool", true, None, None))?;
-    let tx = db
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(|_| embedding_error("memory_embedding_commit_begin_failed", true, None, None))?;
-    let index = super::vector_store::ExactSqliteVectorIndex;
-    for job in jobs {
-        let response = response_by_id.get(&job.request_item_id).ok_or_else(|| {
-            embedding_error("memory_embedding_response_item_missing", false, None, None)
-        })?;
-        index
-            .upsert(
-                &tx,
-                &profile,
-                &VectorWrite {
-                    retrieval_id: job.retrieval_id,
-                    principal_id: &job.principal_id,
-                    scope_kind: &job.scope_kind,
-                    scope_ref: &job.scope_ref,
-                    projection_digest: &job.projection_digest,
-                    vector: &response.vector,
-                },
-            )
-            .map_err(|_| {
-                embedding_error("memory_embedding_vector_commit_failed", true, None, None)
-            })?;
-    }
-    tx.commit()
-        .map_err(|_| embedding_error("memory_embedding_commit_failed", true, None, None))?;
-    Ok(())
+    .await
 }
 
+#[cfg(test)]
 fn embed_batch_with_payload_split<'a>(
     provider: &'a dyn super::embedding::MemoryEmbeddingProvider,
     requests: &'a [EmbeddingRequestItem],
@@ -483,51 +480,12 @@ fn embed_batch_with_payload_split<'a>(
     })
 }
 
-fn complete_jobs(
-    state: &crate::AppState,
-    worker_id: &str,
-    jobs: &[EmbeddingJob],
-) -> anyhow::Result<()> {
-    let db = state.core.db.get()?;
-    let now = crate::now_ts_u64() as i64;
-    for job in jobs {
-        let changed = db.execute(
-            "UPDATE memory_embedding_jobs
-             SET status = CASE WHEN cancel_requested = 1 THEN 'cancelled' ELSE 'completed' END,
-                 lease_owner = NULL, lease_expires_at_ts = NULL, retryable = 0,
-                 checkpoint_json = ?1, updated_at_ts = ?2, finished_at_ts = ?2
-             WHERE job_id = ?3 AND status = 'running' AND lease_owner = ?4",
-            params![
-                json!({
-                    "schema_version": 1,
-                    "phase": "vector_committed",
-                    "retrieval_id": job.retrieval_id,
-                    "profile_generation": job.profile_generation,
-                    "projection_digest": job.projection_digest,
-                })
-                .to_string(),
-                now,
-                job.job_id,
-                worker_id,
-            ],
-        )?;
-        anyhow::ensure!(changed == 1, "memory_embedding_completion_lease_lost");
-    }
-    reconcile_snapshot_generation(
-        &db,
-        &jobs[0].principal_id,
-        &jobs[0].profile_id,
-        jobs[0].profile_generation,
-    )?;
-    reset_provider_circuit(&db, &jobs[0].principal_id, &jobs[0].profile_id)?;
-    Ok(())
-}
-
 fn fail_jobs(
     state: &crate::AppState,
     worker_id: &str,
     jobs: &[EmbeddingJob],
     error: &EmbeddingProviderError,
+    provider_failure: bool,
 ) -> anyhow::Result<()> {
     let db = state.core.db.get()?;
     let now = crate::now_ts_u64() as i64;
@@ -545,9 +503,11 @@ fn fail_jobs(
                                WHEN ?1 != 0 THEN 'retry_wait' ELSE 'failed' END,
                  lease_owner = NULL, lease_expires_at_ts = NULL,
                  not_before_ts = ?2, error_code = ?3, retryable = ?1,
+                 checkpoint_json = json_set(checkpoint_json,'$.phase','provider_failed'),
                  updated_at_ts = ?4,
                  finished_at_ts = CASE WHEN cancel_requested = 1 OR ?1 = 0 THEN ?4 ELSE NULL END
-             WHERE job_id = ?5 AND status = 'running' AND lease_owner = ?6",
+             WHERE job_id = ?5 AND status = 'running' AND lease_owner = ?6
+               AND COALESCE(json_extract(checkpoint_json,'$.phase'),'') != 'response_received'",
             params![
                 if retryable { 1 } else { 0 },
                 now.saturating_add(delay as i64),
@@ -564,13 +524,15 @@ fn fail_jobs(
         &jobs[0].profile_id,
         jobs[0].profile_generation,
     )?;
-    record_provider_failure(
-        &db,
-        &jobs[0].principal_id,
-        &jobs[0].profile_id,
-        error,
-        &state.policy.memory,
-    )?;
+    if provider_failure {
+        record_provider_failure(
+            &db,
+            &jobs[0].principal_id,
+            &jobs[0].profile_id,
+            error,
+            &state.policy.memory,
+        )?;
+    }
     Ok(())
 }
 

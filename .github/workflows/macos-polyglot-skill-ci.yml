@@ -422,6 +422,22 @@ jobs:
             --require unchanged_inflight_source_and_lease_still_commit_once \
             --require another_owners_suppression_does_not_discard_the_current_response
           cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::recall_races:: -- --test-threads=1 --nocapture
+      - name: Test embedding response publication and recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::response_commit:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::capacity_http_tests::response_commit:: \
+            --require failed_ack_rolls_back_vector_and_recovers_response_without_another_provider_call \
+            --require received_response_is_discarded_if_consent_is_revoked_before_recovery \
+            --require a_live_replacement_lease_cannot_be_consumed_by_response_recovery \
+            --require an_unpersisted_provider_response_is_not_blindly_replayed_after_lease_expiry \
+            --require expired_inflight_lease_cannot_publish_a_vector_or_completion_receipt \
+            --require effective_consent_is_rechecked_without_relying_on_a_cancel_signal \
+            --require canonical_content_is_rechecked_even_if_its_index_row_did_not_change \
+            --require one_failed_publication_does_not_roll_back_valid_batch_peers
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::response_commit:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         run: |
           set -euo pipefail
@@ -775,6 +791,22 @@ jobs:
             --require unchanged_inflight_source_and_lease_still_commit_once \
             --require another_owners_suppression_does_not_discard_the_current_response
           cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::recall_races:: -- --test-threads=1 --nocapture
+      - name: Test embedding response publication and recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::response_commit:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::capacity_http_tests::response_commit:: \
+            --require failed_ack_rolls_back_vector_and_recovers_response_without_another_provider_call \
+            --require received_response_is_discarded_if_consent_is_revoked_before_recovery \
+            --require a_live_replacement_lease_cannot_be_consumed_by_response_recovery \
+            --require an_unpersisted_provider_response_is_not_blindly_replayed_after_lease_expiry \
+            --require expired_inflight_lease_cannot_publish_a_vector_or_completion_receipt \
+            --require effective_consent_is_rechecked_without_relying_on_a_cancel_signal \
+            --require canonical_content_is_rechecked_even_if_its_index_row_did_not_change \
+            --require one_failed_publication_does_not_roll_back_valid_batch_peers
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::response_commit:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         shell: bash
         run: |

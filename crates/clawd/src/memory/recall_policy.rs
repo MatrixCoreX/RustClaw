@@ -48,6 +48,22 @@ pub(super) struct SourceScope {
     content: String,
 }
 
+impl SourceScope {
+    pub(super) fn matches_projection(&self, source: Source<'_>, text: &str) -> bool {
+        match source {
+            Source::Preference { key, .. } => text == format!("Preference {key}: {}", self.content),
+            Source::Fact(_) => text == self.content.trim(),
+            Source::Memory(_) => {
+                let content = self.content.trim();
+                text == content
+                    .strip_prefix(super::LLM_SHORT_TERM_MEMORY_PREFIX)
+                    .unwrap_or(content)
+                    .trim()
+            }
+        }
+    }
+}
+
 /// Eligibility is canonical ownership plus the durable choice, never request authentication.
 pub(super) fn resolve(
     db: &Connection,
