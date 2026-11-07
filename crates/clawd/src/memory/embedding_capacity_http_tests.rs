@@ -198,3 +198,6 @@ async fn pressure_change_does_not_kill_already_inflight_provider_work() {
         .unwrap();
     assert_eq!(state, "explicit_write_blocked");
 }
+
+#[path = "embedding_recall_race_tests.rs"]
+mod recall_races;

@@ -406,6 +406,22 @@ jobs:
             --require derived::suppression_keeps_another_owners_completed_vectors_and_pending_work \
             --require derived::missing_index_source_cannot_produce_a_new_active_vector
           cargo test --locked -p clawd --bin clawd memory::ux::recall_contract_tests:: -- --test-threads=1 --nocapture
+      - name: Test inflight embedding recall and lease fences
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::recall_races:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::capacity_http_tests::recall_races:: \
+            --require recall_suppression_after_request_cannot_reactivate_a_late_vector \
+            --require canonical_deletion_after_request_cannot_create_an_active_orphan_vector \
+            --require canonical_correction_after_request_cannot_commit_an_obsolete_vector \
+            --require remote_consent_revocation_after_request_cannot_commit_a_late_vector \
+            --require replacing_a_worker_lease_after_request_prevents_the_old_vector_commit \
+            --require projection_digest_change_after_request_prevents_a_stale_vector_commit \
+            --require unchanged_inflight_source_and_lease_still_commit_once \
+            --require another_owners_suppression_does_not_discard_the_current_response
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::recall_races:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         run: |
           set -euo pipefail
@@ -743,6 +759,22 @@ jobs:
             --require derived::suppression_keeps_another_owners_completed_vectors_and_pending_work \
             --require derived::missing_index_source_cannot_produce_a_new_active_vector
           cargo test --locked -p clawd --bin clawd memory::ux::recall_contract_tests:: -- --test-threads=1 --nocapture
+      - name: Test inflight embedding recall and lease fences
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::recall_races:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::capacity_http_tests::recall_races:: \
+            --require recall_suppression_after_request_cannot_reactivate_a_late_vector \
+            --require canonical_deletion_after_request_cannot_create_an_active_orphan_vector \
+            --require canonical_correction_after_request_cannot_commit_an_obsolete_vector \
+            --require remote_consent_revocation_after_request_cannot_commit_a_late_vector \
+            --require replacing_a_worker_lease_after_request_prevents_the_old_vector_commit \
+            --require projection_digest_change_after_request_prevents_a_stale_vector_commit \
+            --require unchanged_inflight_source_and_lease_still_commit_once \
+            --require another_owners_suppression_does_not_discard_the_current_response
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::recall_races:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         shell: bash
         run: |

@@ -121,7 +121,46 @@ def required_projection_transaction_gate(job):
         and script.index(listing)<script.index(run))
 
 
+def required_inflight_embedding_gate(job):
+    prefix='memory::embedding_jobs::capacity_http_tests::recall_races::'
+    run=f'cargo test --locked -p clawd --bin clawd {prefix} -- --test-threads=1 --nocapture'
+    if not required_command_gate(job,run):
+        return False
+    step=next(step for step in job['steps'] if run in step.get('run',''))
+    script=step['run']
+    listing=f'cargo test --locked -p clawd --bin clawd {prefix} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
+    source=(ROOT/'crates/clawd/src/memory/embedding_recall_race_tests.rs').read_text(encoding='utf-8')
+    expected=set(re.findall(r'^#\[tokio::test\]\nasync fn (\w+)\(',source,re.M))
+    required=set(re.findall(r'--require ([A-Za-z0-9_:]+)',script))
+    return len(expected)==8 and required==expected and listing in script and (
+        'python3 scripts/tests/assert_rust_test_selection.py --self-test' in script
+        and f'--prefix {prefix}' in script and '|| true' not in script
+        and script.index(listing)<script.index(run))
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_inflight_embedding_gate_requires_every_case_on_both_platforms(self):
+        jobs=load('macos-polyglot-skill-ci.yml')['jobs']
+        for name in ['runtime-read-linux','polyglot-skill-macos']:
+            self.assertTrue(required_inflight_embedding_gate(jobs[name]))
+            for mutation in ['selector','listing','require','ignore','conditional','continue']:
+                with self.subTest(job=name,mutation=mutation):
+                    job=deepcopy(jobs[name])
+                    step=next(step for step in job['steps'] if step.get('name')=='Test inflight embedding recall and lease fences')
+                    if mutation=='selector':
+                        step['run']=step['run'].replace('memory::embedding_jobs::capacity_http_tests::recall_races::','memory::embedding_jobs::missing_races::')
+                    elif mutation=='listing':
+                        step['run']=step['run'].replace(' | python3 scripts/tests/assert_rust_test_selection.py',' | true')
+                    elif mutation=='require':
+                        step['run']=step['run'].replace('--require recall_suppression_after_request_cannot_reactivate_a_late_vector','')
+                    elif mutation=='ignore':
+                        step['run']+='\ntrue || true\n'
+                    elif mutation=='conditional':
+                        step['if']='${{ always() }}'
+                    else:
+                        step['continue-on-error']=True
+                    self.assertFalse(required_inflight_embedding_gate(job))
+
     def test_projection_transaction_gate_requires_every_case_on_both_platforms(self):
         jobs=load('macos-polyglot-skill-ci.yml')['jobs']
         for name in ['runtime-read-linux','polyglot-skill-macos']:
