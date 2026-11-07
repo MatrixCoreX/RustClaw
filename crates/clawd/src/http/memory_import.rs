@@ -11,8 +11,11 @@ use super::{reading, writing};
 use crate::memory::import_upload::{self as upload, UploadError};
 use crate::AppState;
 
+#[path = "memory_import/body.rs"]
 mod body;
+#[path = "memory_import/errors.rs"]
 mod errors;
+#[path = "memory_import/execution.rs"]
 mod execution;
 
 pub(super) use errors::typed_upload_error;

@@ -528,6 +528,15 @@ def required_staged_http_gate(job,kind):
 
 
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_staged_http_adapter_children_have_explicit_resolvable_paths(self):
+        root=ROOT/'crates/clawd/src/http'
+        source=(root/'memory_import.rs').read_text()
+        for name in ['body','errors','execution']:
+            expected=f'memory_import/{name}.rs'
+            declarations=re.findall(r'#\[path = "([^"]+)"\]\s+mod '+name+r';',source)
+            self.assertEqual(declarations,[expected])
+            self.assertTrue((root/expected).is_file())
+
     def test_staged_http_and_webd_gates_keep_all_raw_body_and_policy_cases(self):
         jobs=load('macos-polyglot-skill-ci.yml')['jobs']
         for name in ['runtime-read-linux','polyglot-skill-macos']:
