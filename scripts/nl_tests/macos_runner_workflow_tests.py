@@ -527,7 +527,122 @@ def required_staged_http_gate(job,kind):
             and (kind!='webd' or 'cargo test --locked -p webd --bin webd -- --test-threads=1 --nocapture' in gate_step['run']))
 
 
+def required_signed_webd_bundle(job):
+    names = [
+        'Test native webd staged import transport limits',
+        'Build the exact verified Linux core without publishing a release',
+        'Attest the exact Linux core provenance',
+        'Preserve the exact verified Linux core artifact',
+    ]
+    steps = job['steps']
+    if any(sum(step.get('name') == name for step in steps) != 1 for name in names):
+        return False
+    gate, build, attest, upload = [next(step for step in steps if step.get('name') == name)
+                                   for name in names]
+    if not (required_staged_http_gate(job, 'clawd')
+            and required_staged_http_gate(job, 'webd')
+            and steps.index(gate) < steps.index(build) < steps.index(attest) < steps.index(upload)
+            and all('if' not in step for step in [build, upload])
+            and all(not step.get('continue-on-error', False) for step in [build, attest, upload])):
+        return False
+    lines = [line.strip() for line in build.get('run', '').splitlines() if line.strip()]
+    gate_lines = [line for line in lines if re.fullmatch(
+        r'''printf '%s\\n' '[a-z0-9_ ]+' > "\$artifact_root/runtime-read/verified-gates"''', line)]
+    if len(gate_lines) != 1:
+        return False
+    expected = [
+        'set -euo pipefail',
+        'cargo build --locked --release -p clawd --bin clawd -p clawcli --bin clawcli -p webd --bin webd',
+        'artifact_root="$RUNNER_TEMP/runtime-read-artifact"',
+        'mkdir -p "$artifact_root/runtime-read"',
+        'install -m 755 target/release/clawd "$artifact_root/runtime-read/clawd"',
+        'install -m 755 target/release/clawcli "$artifact_root/runtime-read/clawcli"',
+        'install -m 755 target/release/webd "$artifact_root/runtime-read/webd"',
+        'printf \'%s\\n\' "$GITHUB_SHA" > "$artifact_root/runtime-read/source-commit"',
+        gate_lines[0],
+        'printf \'%s\\n\' \'memory_staged_import_http_native webd_import_transport_native\' >> "$artifact_root/runtime-read/verified-gates"',
+        '(cd "$artifact_root/runtime-read" && sha256sum clawd clawcli source-commit verified-gates > SHA256SUMS)',
+        '(cd "$artifact_root/runtime-read" && sha256sum webd >> SHA256SUMS)',
+        'tar -czf "$artifact_root/runtime-read-${GITHUB_SHA}.tar.gz" -C "$artifact_root" runtime-read',
+        '(cd "$artifact_root" && sha256sum "runtime-read-${GITHUB_SHA}.tar.gz" > "runtime-read-${GITHUB_SHA}.tar.gz.sha256")',
+    ]
+    return (lines == expected
+            and attest.get('if') == "${{ github.event_name != 'pull_request' }}"
+            and attest.get('uses') == 'actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661'
+            and attest.get('with') == {
+                'subject-path': '${{ runner.temp }}/runtime-read-artifact/runtime-read-${{ github.sha }}.tar.gz'}
+            and upload.get('uses') == 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'
+            and upload.get('with') == {
+                'name': 'verified-linux-runtime-read-${{ github.sha }}',
+                'path': '${{ runner.temp }}/runtime-read-artifact/*.tar.gz*',
+                'if-no-files-found': 'error', 'retention-days': 7}
+            and job.get('permissions', {}).get('id-token') == 'write'
+            and job.get('permissions', {}).get('attestations') == 'write')
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_signed_core_bundle_contains_exact_tested_webd_and_no_bypass(self):
+        original = load('macos-polyglot-skill-ci.yml')['jobs']['runtime-read-linux']
+        self.assertTrue(required_signed_webd_bundle(original))
+        build_name = 'Build the exact verified Linux core without publishing a release'
+        attest_name = 'Attest the exact Linux core provenance'
+        upload_name = 'Preserve the exact verified Linux core artifact'
+        for mutation in [
+            'build-target', 'debug-binary', 'missing-stage', 'missing-hash', 'missing-marker',
+            'stage-after-tar', 'hash-after-tar', 'source-sha', 'ignored-command',
+            'upload-before-attest', 'build-before-tests', 'wrong-subject', 'unsigned-condition',
+            'conditional-build', 'conditional-upload', 'continue-build', 'continue-attest',
+            'continue-upload', 'missing-artifact', 'unpinned-attest', 'id-token',
+        ]:
+            with self.subTest(mutation=mutation):
+                job = deepcopy(original)
+                steps = job['steps']
+                named = {step.get('name'): step for step in steps}
+                build, attest, upload = [named[name] for name in [build_name, attest_name, upload_name]]
+                script = build['run']
+                if mutation == 'build-target':
+                    build['run'] = script.replace(' -p webd --bin webd', '')
+                elif mutation == 'debug-binary':
+                    build['run'] = script.replace('target/release/webd', 'target/debug/webd')
+                elif mutation in ['missing-stage', 'missing-hash', 'missing-marker']:
+                    fragment = {'missing-stage': 'install -m 755 target/release/webd',
+                                'missing-hash': 'sha256sum webd',
+                                'missing-marker': 'memory_staged_import_http_native'}[mutation]
+                    build['run'] = '\n'.join(line for line in script.splitlines() if fragment not in line)
+                elif mutation in ['stage-after-tar', 'hash-after-tar']:
+                    fragment = 'install -m 755 target/release/webd' if mutation == 'stage-after-tar' else 'sha256sum webd'
+                    lines = script.splitlines()
+                    moved = next(line for line in lines if fragment in line)
+                    lines.remove(moved)
+                    lines.insert(next(i for i, line in enumerate(lines) if 'tar -czf' in line) + 1, moved)
+                    build['run'] = '\n'.join(lines)
+                elif mutation == 'source-sha':
+                    build['run'] = script.replace('$GITHUB_SHA', 'unverified-source')
+                elif mutation == 'ignored-command':
+                    build['run'] = script.replace(' -p webd --bin webd', ' -p webd --bin webd || true')
+                elif mutation == 'upload-before-attest':
+                    steps.remove(upload)
+                    steps.insert(steps.index(attest), upload)
+                elif mutation == 'build-before-tests':
+                    steps.remove(build)
+                    steps.insert(steps.index(named['Test native webd staged import transport limits']), build)
+                elif mutation == 'wrong-subject':
+                    attest['with']['subject-path'] = 'old-unsigned-gateway.tar.gz'
+                elif mutation == 'unsigned-condition':
+                    attest['if'] = '${{ false }}'
+                elif mutation.startswith('conditional-'):
+                    {'conditional-build': build, 'conditional-upload': upload}[mutation]['if'] = '${{ false }}'
+                elif mutation.startswith('continue-'):
+                    {'continue-build': build, 'continue-attest': attest,
+                     'continue-upload': upload}[mutation]['continue-on-error'] = True
+                elif mutation == 'missing-artifact':
+                    upload['with']['if-no-files-found'] = 'ignore'
+                elif mutation == 'unpinned-attest':
+                    attest['uses'] = 'actions/attest-build-provenance@main'
+                else:
+                    job['permissions']['id-token'] = 'read'
+                self.assertFalse(required_signed_webd_bundle(job))
+
     def test_staged_http_adapter_children_have_explicit_resolvable_paths(self):
         root=ROOT/'crates/clawd/src/http'
         source=(root/'memory_import.rs').read_text()

@@ -921,14 +921,17 @@ jobs:
       - name: Build the exact verified Linux core without publishing a release
         run: |
           set -euo pipefail
-          cargo build --locked --release -p clawd --bin clawd -p clawcli --bin clawcli
+          cargo build --locked --release -p clawd --bin clawd -p clawcli --bin clawcli -p webd --bin webd
           artifact_root="$RUNNER_TEMP/runtime-read-artifact"
           mkdir -p "$artifact_root/runtime-read"
           install -m 755 target/release/clawd "$artifact_root/runtime-read/clawd"
           install -m 755 target/release/clawcli "$artifact_root/runtime-read/clawcli"
+          install -m 755 target/release/webd "$artifact_root/runtime-read/webd"
           printf '%s\n' "$GITHUB_SHA" > "$artifact_root/runtime-read/source-commit"
           printf '%s\n' 'task_event_transport_and_archive ui_auth_error_contract model_catalog_fixture_isolation model_catalog_read model_settings_integrity secure_workspace_metadata configuration_reads skill_state_mutations skill_switch_updates skill_reload_publication configuration_publication provider_credentials aipp aipp_read_surfaces aipp_generation run_skill product_identity storage_ownership aipp_decoupling cross_platform task_lifecycle model_catalog_truthfulness task_model_selection cli_model_readiness provider_descriptors receipt_publication_metadata receipt_regular_file_reads artifact_regular_file_reads principal_identity_lifecycle memory_quota_accounting memory_vector_policy' > "$artifact_root/runtime-read/verified-gates"
+          printf '%s\n' 'memory_staged_import_http_native webd_import_transport_native' >> "$artifact_root/runtime-read/verified-gates"
           (cd "$artifact_root/runtime-read" && sha256sum clawd clawcli source-commit verified-gates > SHA256SUMS)
+          (cd "$artifact_root/runtime-read" && sha256sum webd >> SHA256SUMS)
           tar -czf "$artifact_root/runtime-read-${GITHUB_SHA}.tar.gz" -C "$artifact_root" runtime-read
           (cd "$artifact_root" && sha256sum "runtime-read-${GITHUB_SHA}.tar.gz" > "runtime-read-${GITHUB_SHA}.tar.gz.sha256")
       - name: Attest the exact Linux core provenance
