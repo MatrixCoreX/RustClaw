@@ -246,7 +246,54 @@ def required_reindex_startup_gate(job):
     return True
 
 
+def required_domain_budget_gate(job):
+    prefix='memory::ux::budget_contract_tests::'
+    run=f'cargo test --locked -p clawd --bin clawd {prefix} -- --test-threads=1 --nocapture'
+    if not required_command_gate(job,run):
+        return False
+    step=next(step for step in job['steps'] if run in step.get('run',''))
+    script=step['run']
+    listing=f'cargo test --locked -p clawd --bin clawd {prefix} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
+    names=set()
+    for module,file,count in [('growth','growth',5),('controls','control',8)]:
+        source=(ROOT/'crates/clawd/src/memory'/f'ux_budget_{file}_tests.rs').read_text(encoding='utf-8')
+        cases=re.findall(r'^#\[test\]\nfn (\w+)\(',source,re.M)
+        if len(cases)!=count or len(set(cases))!=count:
+            return False
+        names.update(module+'::'+name for name in cases)
+    full=next(step for step in job['steps'] if step.get('name')=='Test memory quota byte accounting and empty-principal refresh')
+    return (listing in script and f'--prefix {prefix}' in script
+            and set(re.findall(r'--require ([A-Za-z0-9_:]+)',script))==names
+            and '|| true' not in script and script.index(listing)<script.index(run)
+            and job['steps'].index(step)<job['steps'].index(full))
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_domain_growth_and_releasing_controls_cannot_be_skipped(self):
+        jobs=load('macos-polyglot-skill-ci.yml')['jobs']
+        for name in ['runtime-read-linux','polyglot-skill-macos']:
+            self.assertTrue(required_domain_budget_gate(jobs[name]))
+            for mutation in ['selector','listing','require','ignore','conditional','continue','late']:
+                with self.subTest(job=name,mutation=mutation):
+                    job=deepcopy(jobs[name])
+                    step=next(step for step in job['steps'] if step.get('name')=='Test actual memory domain budget and effect contracts')
+                    if mutation=='selector':
+                        step['run']=step['run'].replace('memory::ux::budget_contract_tests::','missing::budget_contract_tests::')
+                    elif mutation=='listing':
+                        step['run']=step['run'].replace('--list --color never','--list')
+                    elif mutation=='require':
+                        step['run']=step['run'].replace('--require growth::actual_domain_budget_rejects_private_correction_growth','--require growth::absent_case')
+                    elif mutation=='ignore':
+                        step['run']=step['run'].replace('--test-threads=1 --nocapture','--test-threads=1 --nocapture || true')
+                    elif mutation=='conditional':
+                        step['if']='false'
+                    elif mutation=='continue':
+                        step['continue-on-error']=True
+                    else:
+                        job['steps'].remove(step)
+                        job['steps'].append(step)
+                    self.assertFalse(required_domain_budget_gate(job))
+
     def test_reindex_startup_and_rejection_controls_are_required_on_both_platforms(self):
         jobs=load('macos-polyglot-skill-ci.yml')['jobs']
         for name in ['runtime-read-linux','polyglot-skill-macos']:

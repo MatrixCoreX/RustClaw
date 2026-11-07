@@ -541,6 +541,27 @@ jobs:
             --prefix memory::embedding_jobs::rejected_startup_tests:: \
             --require denied_reindex_does_not_install_schema_receipts_or_profile_state
           cargo test --locked -p clawd --bin clawd memory::embedding_jobs::rejected_startup_tests:: -- --test-threads=1 --nocapture
+      - name: Test actual memory domain budget and effect contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::budget_contract_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::budget_contract_tests:: \
+            --require growth::actual_domain_budget_rejects_private_correction_growth \
+            --require growth::actual_domain_budget_rejects_new_private_preview_growth \
+            --require growth::actual_domain_budget_rejects_confirmation_preserving_retryable_preview \
+            --require growth::preference_undo_to_larger_original_is_growth_without_receipt_loss \
+            --require growth::unknown_storage_state_rejects_private_growth_without_read_repair \
+            --require controls::unrelated_main_database_growth_does_not_reject_memory_growth_below_domain_budget \
+            --require controls::duplicate_only_and_empty_previews_are_metadata_not_private_payload_growth \
+            --require controls::existing_preview_reuse_under_pressure_does_not_write_or_consume_receipt \
+            --require controls::confirmation_after_competing_import_only_updates_metadata \
+            --require controls::fact_correction_undo_releases_replacement_and_preserves_original_history \
+            --require controls::preference_undo_to_smaller_original_is_releasing \
+            --require controls::unknown_state_still_allows_export_and_user_requested_content_deletion \
+            --require controls::host_available_observation_is_independent_of_main_pages_and_domain_budget
+          cargo test --locked -p clawd --bin clawd memory::ux::budget_contract_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         run: |
           set -euo pipefail
@@ -1013,6 +1034,27 @@ jobs:
             --prefix memory::embedding_jobs::rejected_startup_tests:: \
             --require denied_reindex_does_not_install_schema_receipts_or_profile_state
           cargo test --locked -p clawd --bin clawd memory::embedding_jobs::rejected_startup_tests:: -- --test-threads=1 --nocapture
+      - name: Test actual memory domain budget and effect contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::budget_contract_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::budget_contract_tests:: \
+            --require growth::actual_domain_budget_rejects_private_correction_growth \
+            --require growth::actual_domain_budget_rejects_new_private_preview_growth \
+            --require growth::actual_domain_budget_rejects_confirmation_preserving_retryable_preview \
+            --require growth::preference_undo_to_larger_original_is_growth_without_receipt_loss \
+            --require growth::unknown_storage_state_rejects_private_growth_without_read_repair \
+            --require controls::unrelated_main_database_growth_does_not_reject_memory_growth_below_domain_budget \
+            --require controls::duplicate_only_and_empty_previews_are_metadata_not_private_payload_growth \
+            --require controls::existing_preview_reuse_under_pressure_does_not_write_or_consume_receipt \
+            --require controls::confirmation_after_competing_import_only_updates_metadata \
+            --require controls::fact_correction_undo_releases_replacement_and_preserves_original_history \
+            --require controls::preference_undo_to_smaller_original_is_releasing \
+            --require controls::unknown_state_still_allows_export_and_user_requested_content_deletion \
+            --require controls::host_available_observation_is_independent_of_main_pages_and_domain_budget
+          cargo test --locked -p clawd --bin clawd memory::ux::budget_contract_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         shell: bash
         run: |
