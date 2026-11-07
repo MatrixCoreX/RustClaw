@@ -914,6 +914,22 @@ jobs:
             --require parser_and_upload_use_the_existing_separate_resource_permits
           cargo test --locked -p webd --bin webd request_limits::memory_import_tests:: -- --test-threads=1 --nocapture
           cargo test --locked -p webd --bin webd -- --test-threads=1 --nocapture
+      - name: Test effective flat and wrapped memory configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd bootstrap::config_loaders:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix bootstrap::config_loaders:: \
+            --require tests::memory_runtime_file_controls_startup_reindex_and_background_concurrency \
+            --require memory_runtime_config_tests::flat_explicit_false_and_nondefault_values_are_preserved \
+            --require memory_runtime_config_tests::wrapped_explicit_false_and_nondefault_values_are_not_replaced_by_defaults \
+            --require memory_runtime_config_tests::flat_and_wrapped_forms_agree_and_keep_the_selected_absolute_path \
+            --require memory_runtime_config_tests::explicit_memory_namespace_is_not_shadowed_by_flat_fields \
+            --require memory_runtime_config_tests::malformed_wrapper_uses_explicit_main_values_not_flat_defaults \
+            --require memory_runtime_config_tests::missing_or_malformed_file_keeps_main_configuration \
+            --require memory_runtime_config_tests::empty_path_keeps_main_configuration_without_reading_a_file
+          cargo test --locked -p clawd --bin clawd bootstrap::config_loaders:: -- --test-threads=1 --nocapture
       - name: Verify both product identities with the shared UI
         run: |
           npm ci --ignore-scripts --prefix UI
@@ -1742,6 +1758,22 @@ jobs:
             --require parser_and_upload_use_the_existing_separate_resource_permits
           cargo test --locked -p webd --bin webd request_limits::memory_import_tests:: -- --test-threads=1 --nocapture
           cargo test --locked -p webd --bin webd -- --test-threads=1 --nocapture
+      - name: Test effective flat and wrapped memory configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd bootstrap::config_loaders:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix bootstrap::config_loaders:: \
+            --require tests::memory_runtime_file_controls_startup_reindex_and_background_concurrency \
+            --require memory_runtime_config_tests::flat_explicit_false_and_nondefault_values_are_preserved \
+            --require memory_runtime_config_tests::wrapped_explicit_false_and_nondefault_values_are_not_replaced_by_defaults \
+            --require memory_runtime_config_tests::flat_and_wrapped_forms_agree_and_keep_the_selected_absolute_path \
+            --require memory_runtime_config_tests::explicit_memory_namespace_is_not_shadowed_by_flat_fields \
+            --require memory_runtime_config_tests::malformed_wrapper_uses_explicit_main_values_not_flat_defaults \
+            --require memory_runtime_config_tests::missing_or_malformed_file_keeps_main_configuration \
+            --require memory_runtime_config_tests::empty_path_keeps_main_configuration_without_reading_a_file
+          cargo test --locked -p clawd --bin clawd bootstrap::config_loaders:: -- --test-threads=1 --nocapture
       - name: Test browser API authentication boundaries
         shell: bash
         env:

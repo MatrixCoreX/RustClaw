@@ -580,7 +580,73 @@ def required_signed_webd_bundle(job):
             and job.get('permissions', {}).get('attestations') == 'write')
 
 
+def required_memory_configuration_gate(job):
+    prefix = 'bootstrap::config_loaders::'
+    run = f'cargo test --locked -p clawd --bin clawd {prefix} -- --test-threads=1 --nocapture'
+    if not required_command_gate(job, run):
+        return False
+    step = next(step for step in job['steps'] if run in step.get('run', ''))
+    root = ROOT / 'crates/clawd/src/bootstrap'
+    source = (root / 'memory_runtime_config_tests.rs').read_text()
+    names = re.findall(r'^#\[test\]\nfn (\w+)\(', source, re.M)
+    expected = {'memory_runtime_config_tests::' + name for name in names}
+    expected.add('tests::memory_runtime_file_controls_startup_reindex_and_background_concurrency')
+    script = step['run']
+    listing = f'cargo test --locked -p clawd --bin clawd {prefix} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
+    if listing not in script or script.index(listing) > script.index(run):
+        return False
+    required = re.findall(r'--require ([A-Za-z0-9_:]+)', script)
+    previous = next(step for step in job['steps'] if step.get('name') == 'Test native webd staged import transport limits')
+    loader = (root / 'config_loaders.rs').read_text()
+    return (len(names) == len(set(names)) == 7 and len(required) == 8 and set(required) == expected
+            and f'--prefix {prefix}' in script and '|| true' not in script
+            and 'python3 scripts/tests/assert_rust_test_selection.py --self-test' in script
+            and job['steps'].index(step) == job['steps'].index(previous) + 1
+            and '#[path = "memory_runtime_config_tests.rs"]\nmod memory_runtime_config_tests;' in loader)
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_memory_configuration_gates_require_both_shapes_and_the_existing_native_case(self):
+        jobs = load('macos-polyglot-skill-ci.yml')['jobs']
+        prefix = 'bootstrap::config_loaders::'
+        run = f'cargo test --locked -p clawd --bin clawd {prefix} -- --test-threads=1 --nocapture'
+        for name in ['runtime-read-linux', 'polyglot-skill-macos']:
+            self.assertTrue(required_memory_configuration_gate(jobs[name]))
+            for mutation in ['remove', 'conditional', 'continue', 'ignore', 'missing-case',
+                             'missing-existing-case', 'duplicate-case', 'wrong-prefix',
+                             'run-before-list', 'ignore-list', 'moved-step']:
+                with self.subTest(job=name, mutation=mutation):
+                    job = deepcopy(jobs[name])
+                    step = next(step for step in job['steps'] if run in step.get('run', ''))
+                    script = step['run']
+                    case = '--require memory_runtime_config_tests::flat_explicit_false_and_nondefault_values_are_preserved'
+                    if mutation == 'remove':
+                        job['steps'].remove(step)
+                    elif mutation == 'conditional':
+                        step['if'] = '${{ false }}'
+                    elif mutation == 'continue':
+                        step['continue-on-error'] = True
+                    elif mutation == 'ignore':
+                        step['run'] = script.replace(run, run + ' || true')
+                    elif mutation == 'missing-case':
+                        step['run'] = script.replace(case, '')
+                    elif mutation == 'missing-existing-case':
+                        step['run'] = script.replace('--require tests::memory_runtime_file_controls_startup_reindex_and_background_concurrency', '')
+                    elif mutation == 'duplicate-case':
+                        step['run'] = script.replace(case, case + ' ' + case)
+                    elif mutation == 'wrong-prefix':
+                        step['run'] = script.replace('--prefix ' + prefix, '--prefix missing::')
+                    elif mutation == 'run-before-list':
+                        step['run'] = script.replace(run + '\n', '')
+                        step['run'] = step['run'].replace('set -euo pipefail\n', 'set -euo pipefail\n' + run + '\n')
+                    elif mutation == 'ignore-list':
+                        step['run'] = script.replace(' | python3 scripts/tests/assert_rust_test_selection.py', ' || true | python3 scripts/tests/assert_rust_test_selection.py')
+                    else:
+                        at = job['steps'].index(step)
+                        job['steps'].remove(step)
+                        job['steps'].insert(at + 1, step)
+                    self.assertFalse(required_memory_configuration_gate(job))
+
     def test_signed_core_bundle_contains_exact_tested_webd_and_no_bypass(self):
         original = load('macos-polyglot-skill-ci.yml')['jobs']['runtime-read-linux']
         self.assertTrue(required_signed_webd_bundle(original))

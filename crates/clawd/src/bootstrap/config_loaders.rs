@@ -285,38 +285,52 @@ pub(crate) fn load_memory_runtime_config(
             return cfg.clone();
         }
     };
-    match toml::from_str::<MemoryConfig>(&raw) {
-        Ok(mut loaded) => {
+    match parse_memory_runtime_config(&raw) {
+        Ok((mut loaded, wrapped)) => {
             loaded.config_path = path_raw.to_string();
-            info!(
-                "loaded memory runtime config: path={} recall_limit={} prompt_recall_limit={}",
-                path.display(),
-                loaded.recall_limit,
-                loaded.prompt_recall_limit
-            );
-            loaded
-        }
-        Err(_) => match toml::from_str::<MemoryConfigFileWrapper>(&raw) {
-            Ok(mut wrapped) => {
-                wrapped.memory.config_path = path_raw.to_string();
+            if wrapped {
                 info!(
                     "loaded wrapped memory runtime config: path={} recall_limit={} prompt_recall_limit={}",
                     path.display(),
-                    wrapped.memory.recall_limit,
-                    wrapped.memory.prompt_recall_limit
+                    loaded.recall_limit,
+                    loaded.prompt_recall_limit
                 );
-                wrapped.memory
-            }
-            Err(err) => {
-                warn!(
-                    "parse memory config failed: path={} err={err}; fallback to main config values",
-                    path.display()
+            } else {
+                info!(
+                    "loaded memory runtime config: path={} recall_limit={} prompt_recall_limit={}",
+                    path.display(),
+                    loaded.recall_limit,
+                    loaded.prompt_recall_limit
                 );
-                cfg.clone()
             }
-        },
+            loaded
+        }
+        Err(err) => {
+            warn!(
+                "parse memory config failed: path={} err={err}; fallback to main config values",
+                path.display()
+            );
+            cfg.clone()
+        }
     }
 }
+
+fn parse_memory_runtime_config(raw: &str) -> Result<(MemoryConfig, bool), toml::de::Error> {
+    // Per-field defaults make a wrapped document valid as an empty flat config.
+    // Select its declared shape first; a malformed wrapper must not fall through.
+    let document: TomlValue = toml::from_str(raw)?;
+    let wrapped = document.get("memory").is_some();
+    let config = if wrapped {
+        toml::from_str::<MemoryConfigFileWrapper>(raw)?.memory
+    } else {
+        toml::from_str::<MemoryConfig>(raw)?
+    };
+    Ok((config, wrapped))
+}
+
+#[cfg(test)]
+#[path = "memory_runtime_config_tests.rs"]
+mod memory_runtime_config_tests;
 
 #[cfg(test)]
 mod tests {
