@@ -804,6 +804,27 @@ jobs:
             --require reader::changed_chunk_body_is_rejected_even_when_its_size_is_unchanged \
             --require reader::reopened_database_can_resume_upload_and_steal_only_an_expired_parse
           cargo test --locked -p clawd --bin clawd memory::import_upload::storage_tests:: -- --test-threads=1 --nocapture
+      - name: Test bounded streaming memory export decoding
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::import_upload::parser::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::import_upload::parser::tests:: \
+            --require empty_export_retains_schema1_vec_checksum \
+            --require one_byte_reads_preserve_unicode_escapes_and_canonical_item_order \
+            --require top_level_field_order_and_unknown_fields_match_legacy_typed_hash \
+            --require decoder_does_not_impose_the_legacy_ten_thousand_item_ceiling \
+            --require decoder_does_not_confuse_legacy_character_filter_with_a_parser_limit \
+            --require oversized_single_item_is_rejected_before_consumer_allocation \
+            --require oversized_metadata_and_unknown_field_keys_are_bounded_too \
+            --require wrong_export_checksum_never_returns_a_publishable_summary \
+            --require duplicate_missing_malformed_and_trailing_documents_fail_structurally \
+            --require unsupported_schema_is_a_typed_error_not_parsed_prose \
+            --require consumer_failure_keeps_its_original_machine_error \
+            --require underlying_io_failure_keeps_its_actual_error_kind \
+            --require actual_two_point_six_megabyte_unicode_export_streams_from_durable_chunks
+          cargo test --locked -p clawd --bin clawd memory::import_upload::parser::tests:: -- --test-threads=1 --nocapture
       - name: Verify both product identities with the shared UI
         run: |
           npm ci --ignore-scripts --prefix UI
@@ -1519,6 +1540,27 @@ jobs:
             --require reader::changed_chunk_body_is_rejected_even_when_its_size_is_unchanged \
             --require reader::reopened_database_can_resume_upload_and_steal_only_an_expired_parse
           cargo test --locked -p clawd --bin clawd memory::import_upload::storage_tests:: -- --test-threads=1 --nocapture
+      - name: Test bounded streaming memory export decoding
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::import_upload::parser::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::import_upload::parser::tests:: \
+            --require empty_export_retains_schema1_vec_checksum \
+            --require one_byte_reads_preserve_unicode_escapes_and_canonical_item_order \
+            --require top_level_field_order_and_unknown_fields_match_legacy_typed_hash \
+            --require decoder_does_not_impose_the_legacy_ten_thousand_item_ceiling \
+            --require decoder_does_not_confuse_legacy_character_filter_with_a_parser_limit \
+            --require oversized_single_item_is_rejected_before_consumer_allocation \
+            --require oversized_metadata_and_unknown_field_keys_are_bounded_too \
+            --require wrong_export_checksum_never_returns_a_publishable_summary \
+            --require duplicate_missing_malformed_and_trailing_documents_fail_structurally \
+            --require unsupported_schema_is_a_typed_error_not_parsed_prose \
+            --require consumer_failure_keeps_its_original_machine_error \
+            --require underlying_io_failure_keeps_its_actual_error_kind \
+            --require actual_two_point_six_megabyte_unicode_export_streams_from_durable_chunks
+          cargo test --locked -p clawd --bin clawd memory::import_upload::parser::tests:: -- --test-threads=1 --nocapture
       - name: Test browser API authentication boundaries
         shell: bash
         env:

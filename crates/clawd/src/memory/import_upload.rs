@@ -6,11 +6,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 mod lease;
+mod parser;
 mod reader;
 mod schema;
 mod store;
 
 pub(crate) use lease::{claim_parser, renew_parser, ParseLease};
+pub(crate) use parser::{parse_export, ParsedExport};
 pub(crate) use reader::ChunkReader;
 pub(crate) use schema::initialize_schema;
 pub(crate) use store::{append, cancel, create, status};
@@ -31,6 +33,10 @@ pub(crate) enum UploadError {
     RevisionExhausted,
     SchemaUnavailable,
     Corrupt,
+    ValueTooLarge,
+    InvalidJson,
+    ExportSchemaUnsupported,
+    ExportChecksumMismatch,
 }
 
 impl UploadError {
@@ -50,6 +56,10 @@ impl UploadError {
             Self::RevisionExhausted => "memory_import_upload_revision_exhausted",
             Self::SchemaUnavailable => "memory_import_upload_schema_unavailable",
             Self::Corrupt => "memory_import_upload_corrupt",
+            Self::ValueTooLarge => "memory_import_upload_value_too_large",
+            Self::InvalidJson => "memory_import_upload_json_invalid",
+            Self::ExportSchemaUnsupported => "memory_import_schema_unsupported",
+            Self::ExportChecksumMismatch => "memory_import_checksum_invalid",
         }
     }
 }

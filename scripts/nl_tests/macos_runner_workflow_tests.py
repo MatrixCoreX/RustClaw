@@ -439,7 +439,53 @@ def required_import_upload_gate(job):
             and job['steps'].index(step)==job['steps'].index(prior)+1)
 
 
+def required_streaming_import_gate(job):
+    prefix='memory::import_upload::parser::tests::'
+    command=f'cargo test --locked -p clawd --bin clawd {prefix} -- --test-threads=1 --nocapture'
+    if not required_command_gate(job,command):
+        return False
+    step=next(step for step in job['steps'] if command in step.get('run',''))
+    source=(ROOT/'crates/clawd/src/memory/import_upload/parser/tests.rs').read_text()
+    expected=set(re.findall(r'#\[test\]\s+fn (\w+)\(',source))
+    script=step['run']
+    listing=f'cargo test --locked -p clawd --bin clawd {prefix} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
+    required=re.findall(r'--require ([A-Za-z0-9_:]+)',script)
+    prior=next(value for value in job['steps'] if value.get('name')=='Test durable memory import upload foundations')
+    return (len(expected)==13 and len(required)==13 and set(required)==expected
+            and listing in script and f'--prefix {prefix}' in script and '|| true' not in script
+            and script.index(listing)<script.index(command)
+            and job['steps'].index(step)==job['steps'].index(prior)+1)
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_streaming_import_gate_keeps_all_unicode_checksum_and_io_cases(self):
+        jobs=load('macos-polyglot-skill-ci.yml')['jobs']
+        for name in ['runtime-read-linux','polyglot-skill-macos']:
+            self.assertTrue(required_streaming_import_gate(jobs[name]))
+            for mutation in ['selector','listing','require','ignore','conditional','continue','early','late']:
+                with self.subTest(job=name,mutation=mutation):
+                    job=deepcopy(jobs[name])
+                    step=next(value for value in job['steps'] if value.get('name')=='Test bounded streaming memory export decoding')
+                    if mutation=='selector':
+                        step['run']=step['run'].replace('memory::import_upload::parser::tests::','missing::parser::')
+                    elif mutation=='listing':
+                        step['run']=step['run'].replace('--list --color never','--list')
+                    elif mutation=='require':
+                        step['run']=step['run'].replace('--require consumer_failure_keeps_its_original_machine_error','--require absent_case')
+                    elif mutation=='ignore':
+                        step['run']=step['run'].replace('--test-threads=1 --nocapture','--test-threads=1 --nocapture || true')
+                    elif mutation=='conditional':
+                        step['if']='false'
+                    elif mutation=='continue':
+                        step['continue-on-error']=True
+                    else:
+                        job['steps'].remove(step)
+                        if mutation=='late':
+                            job['steps'].append(step)
+                        else:
+                            prior=next(value for value in job['steps'] if value.get('name')=='Test durable memory import upload foundations')
+                            job['steps'].insert(job['steps'].index(prior),step)
+                    self.assertFalse(required_streaming_import_gate(job))
     def test_import_upload_gate_requires_all_storage_lease_and_reader_cases(self):
         jobs=load('macos-polyglot-skill-ci.yml')['jobs']
         for name in ['runtime-read-linux','polyglot-skill-macos']:
