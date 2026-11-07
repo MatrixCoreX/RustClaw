@@ -404,3 +404,6 @@ async fn builtin_saved_fact_can_be_deleted_with_its_revision_and_index() {
         0
     );
 }
+
+#[path = "builtin_memory_consistency_tests.rs"]
+mod consistency;

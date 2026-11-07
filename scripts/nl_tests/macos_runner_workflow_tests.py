@@ -55,7 +55,9 @@ def required_builtin_memory_gate(job):
     required=['save_is_effectively_once_and_search_returns_only_opaque_identity',
         'conversation_scope_isolated_and_child_mutation_is_denied',
         'pagination_scope_revision_forget_and_disabled_generation_are_enforced',
-        'builtin_saved_fact_can_be_deleted_with_its_revision_and_index']
+        'builtin_saved_fact_can_be_deleted_with_its_revision_and_index',
+        'consistency::healthy_fact_is_not_reported_or_deleted_as_orphan',
+        'consistency::repair_removes_only_the_actual_orphan_and_preserves_other_owners']
     return listing in script and self_test in script and '|| true' not in script and (
         script.index(self_test)<script.index(listing)<script.index(run)
         and f'--prefix {prefix}tests::' in script
