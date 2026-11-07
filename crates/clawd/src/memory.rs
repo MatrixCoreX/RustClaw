@@ -12,6 +12,7 @@ pub(crate) mod facts;
 mod generation_response;
 mod growth_availability;
 pub(crate) mod indexing;
+pub(crate) mod import_upload;
 mod projection_retirement;
 mod projection_transaction;
 mod recall_policy;

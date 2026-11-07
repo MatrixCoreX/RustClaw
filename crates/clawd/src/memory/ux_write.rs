@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::memory::growth_availability::{self, ProbePhase};
 
-pub(super) struct GrowthAdmission(crate::memory::storage_budget::Snapshot);
+pub(in crate::memory) struct GrowthAdmission(crate::memory::storage_budget::Snapshot);
 
 /// Only restoring a source transcript consumes the existing source quota.
 /// Facts/preferences, derived rows and metadata are not relabelled as sources.
@@ -45,7 +45,7 @@ pub(super) fn validate_restored_source_quota(
 }
 
 impl GrowthAdmission {
-    pub(super) fn begin(db: &Connection) -> anyhow::Result<Self> {
+    pub(in crate::memory) fn begin(db: &Connection) -> anyhow::Result<Self> {
         anyhow::ensure!(
             !db.is_autocommit(),
             "memory_write_admission_requires_transaction"
@@ -57,7 +57,7 @@ impl GrowthAdmission {
         Ok(Self(budget))
     }
 
-    pub(super) fn finish(self, db: &Connection) -> anyhow::Result<()> {
+    pub(in crate::memory) fn finish(self, db: &Connection) -> anyhow::Result<()> {
         anyhow::ensure!(
             !db.is_autocommit(),
             "memory_write_admission_requires_transaction"

@@ -11,6 +11,7 @@ const UNDO_GRACE_SECONDS: i64 = 300;
 #[path = "ux_write.rs"]
 mod writing;
 pub(crate) use writing::atomic_mutation;
+pub(super) use writing::GrowthAdmission;
 
 #[path = "ux_clear.rs"]
 mod clearing;
@@ -282,6 +283,7 @@ pub(crate) fn ensure_memory_ux_schema(db: &Connection) -> anyhow::Result<()> {
          VALUES (?1, ?2, ?3) ON CONFLICT(migration_id) DO NOTHING",
         params![MIGRATION_ID, migration_digest(), crate::now_ts()],
     )?;
+    super::import_upload::initialize_schema(db)?;
     Ok(())
 }
 

@@ -769,6 +769,41 @@ jobs:
             --require lookup::corrupt_identity_migration_is_unavailable_without_read_repair \
             --require lookup::explicit_initialization_survives_repeated_readonly_queries
           cargo test --locked -p clawd --bin clawd http::memory_project_read_tests:: -- --test-threads=1 --nocapture
+      - name: Test durable memory import upload foundations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s scripts/tests -p 'test_memory_import_upload_schema.py'
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::import_upload::storage_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::import_upload::storage_tests:: \
+            --require accounting::raw_staging_is_measured_as_domain_growth_not_relabelled_as_source_quota \
+            --require identity::original_revoked_key_cannot_renew_or_open_a_parser_with_a_surviving_sibling \
+            --require schema::explicit_startup_is_idempotent_and_status_is_query_only \
+            --require schema::missing_marker_is_not_repaired_or_adopted_by_read_or_startup \
+            --require schema::corrupt_marker_fails_closed_without_overwriting_receipt \
+            --require schema::missing_schema_read_never_creates_tables \
+            --require schema::invalid_metadata_and_oversized_file_leave_no_staging \
+            --require chunks::create_resumes_same_file_only_within_the_same_owner \
+            --require chunks::duplicate_chunk_does_not_write_or_need_growth_admission \
+            --require chunks::bad_digest_order_overlap_and_size_never_advance_the_cursor \
+            --require chunks::failed_pointer_write_rolls_back_the_inserted_chunk \
+            --require chunks::storage_policy_change_inside_chunk_write_rolls_back_all_effects \
+            --require chunks::nested_chunk_write_cannot_commit_its_callers_transaction \
+            --require chunks::read_status_does_not_contend_with_an_independent_sqlite_writer \
+            --require identity::other_owner_cannot_read_append_cancel_or_claim_an_upload \
+            --require identity::original_key_binding_role_and_principal_are_rechecked_with_a_surviving_sibling \
+            --require leases::incomplete_upload_is_not_claimed_or_modified_by_the_parser \
+            --require leases::parser_expiry_fences_old_workers_without_losing_raw_chunks \
+            --require leases::an_unstolen_parser_renews_after_expiry_instead_of_wall_clock_killing_work \
+            --require leases::cancellation_releases_only_owned_staging_even_when_capacity_is_missing \
+            --require leases::last_chunk_retry_remains_idempotent_after_parser_claim \
+            --require reader::streaming_reader_preserves_split_unicode_and_validates_full_file_digest \
+            --require reader::complete_bytes_are_not_verified_until_the_reader_checks_eof \
+            --require reader::intact_chunks_with_a_wrong_declared_file_digest_cannot_pass_eof \
+            --require reader::changed_chunk_body_is_rejected_even_when_its_size_is_unchanged \
+            --require reader::reopened_database_can_resume_upload_and_steal_only_an_expired_parse
+          cargo test --locked -p clawd --bin clawd memory::import_upload::storage_tests:: -- --test-threads=1 --nocapture
       - name: Verify both product identities with the shared UI
         run: |
           npm ci --ignore-scripts --prefix UI
@@ -1449,6 +1484,41 @@ jobs:
             --require lookup::explicit_initialization_survives_repeated_readonly_queries
           cargo test --locked -p clawd --bin clawd http::memory_project_read_tests:: -- --test-threads=1 --nocapture
 
+      - name: Test durable memory import upload foundations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s scripts/tests -p 'test_memory_import_upload_schema.py'
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::import_upload::storage_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::import_upload::storage_tests:: \
+            --require accounting::raw_staging_is_measured_as_domain_growth_not_relabelled_as_source_quota \
+            --require identity::original_revoked_key_cannot_renew_or_open_a_parser_with_a_surviving_sibling \
+            --require schema::explicit_startup_is_idempotent_and_status_is_query_only \
+            --require schema::missing_marker_is_not_repaired_or_adopted_by_read_or_startup \
+            --require schema::corrupt_marker_fails_closed_without_overwriting_receipt \
+            --require schema::missing_schema_read_never_creates_tables \
+            --require schema::invalid_metadata_and_oversized_file_leave_no_staging \
+            --require chunks::create_resumes_same_file_only_within_the_same_owner \
+            --require chunks::duplicate_chunk_does_not_write_or_need_growth_admission \
+            --require chunks::bad_digest_order_overlap_and_size_never_advance_the_cursor \
+            --require chunks::failed_pointer_write_rolls_back_the_inserted_chunk \
+            --require chunks::storage_policy_change_inside_chunk_write_rolls_back_all_effects \
+            --require chunks::nested_chunk_write_cannot_commit_its_callers_transaction \
+            --require chunks::read_status_does_not_contend_with_an_independent_sqlite_writer \
+            --require identity::other_owner_cannot_read_append_cancel_or_claim_an_upload \
+            --require identity::original_key_binding_role_and_principal_are_rechecked_with_a_surviving_sibling \
+            --require leases::incomplete_upload_is_not_claimed_or_modified_by_the_parser \
+            --require leases::parser_expiry_fences_old_workers_without_losing_raw_chunks \
+            --require leases::an_unstolen_parser_renews_after_expiry_instead_of_wall_clock_killing_work \
+            --require leases::cancellation_releases_only_owned_staging_even_when_capacity_is_missing \
+            --require leases::last_chunk_retry_remains_idempotent_after_parser_claim \
+            --require reader::streaming_reader_preserves_split_unicode_and_validates_full_file_digest \
+            --require reader::complete_bytes_are_not_verified_until_the_reader_checks_eof \
+            --require reader::intact_chunks_with_a_wrong_declared_file_digest_cannot_pass_eof \
+            --require reader::changed_chunk_body_is_rejected_even_when_its_size_is_unchanged \
+            --require reader::reopened_database_can_resume_upload_and_steal_only_an_expired_parse
+          cargo test --locked -p clawd --bin clawd memory::import_upload::storage_tests:: -- --test-threads=1 --nocapture
       - name: Test browser API authentication boundaries
         shell: bash
         env:

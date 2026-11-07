@@ -417,7 +417,58 @@ def required_project_read_gate(job):
             and job['steps'].index(step)==job['steps'].index(prior)+1)
 
 
+def required_import_upload_gate(job):
+    prefix='memory::import_upload::storage_tests::'
+    command=f'cargo test --locked -p clawd --bin clawd {prefix} -- --test-threads=1 --nocapture'
+    if not required_command_gate(job,command):
+        return False
+    step=next(step for step in job['steps'] if command in step.get('run',''))
+    root=ROOT/'crates/clawd/src/memory/import_upload'
+    expected=set()
+    for module in ['schema','chunks','identity','leases','reader','accounting']:
+        source=(root/(module+'_tests.rs')).read_text()
+        expected.update(module+'::'+name for name in re.findall(r'#\[test\]\s+fn (\w+)\(',source))
+    script=step['run']
+    listing=f'cargo test --locked -p clawd --bin clawd {prefix} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
+    required=re.findall(r'--require ([A-Za-z0-9_:]+)',script)
+    prior=next(value for value in job['steps'] if value.get('name')=='Test project lookup isolation and read-only identity contracts')
+    return (len(expected)==26 and len(required)==26 and set(required)==expected
+            and listing in script and f'--prefix {prefix}' in script and '|| true' not in script
+            and "python3 -B -m unittest discover -s scripts/tests -p 'test_memory_import_upload_schema.py'" in script
+            and script.index(listing)<script.index(command)
+            and job['steps'].index(step)==job['steps'].index(prior)+1)
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_import_upload_gate_requires_all_storage_lease_and_reader_cases(self):
+        jobs=load('macos-polyglot-skill-ci.yml')['jobs']
+        for name in ['runtime-read-linux','polyglot-skill-macos']:
+            self.assertTrue(required_import_upload_gate(jobs[name]))
+            for mutation in ['selector','listing','require','ignore','conditional','continue','early','late']:
+                with self.subTest(job=name,mutation=mutation):
+                    job=deepcopy(jobs[name])
+                    step=next(value for value in job['steps'] if value.get('name')=='Test durable memory import upload foundations')
+                    if mutation=='selector':
+                        step['run']=step['run'].replace('memory::import_upload::storage_tests::','missing::upload::')
+                    elif mutation=='listing':
+                        step['run']=step['run'].replace('--list --color never','--list')
+                    elif mutation=='require':
+                        step['run']=step['run'].replace('--require schema::missing_schema_read_never_creates_tables','--require absent_case')
+                    elif mutation=='ignore':
+                        step['run']=step['run'].replace('--test-threads=1 --nocapture','--test-threads=1 --nocapture || true')
+                    elif mutation=='conditional':
+                        step['if']='false'
+                    elif mutation=='continue':
+                        step['continue-on-error']=True
+                    else:
+                        job['steps'].remove(step)
+                        if mutation=='late':
+                            job['steps'].append(step)
+                        else:
+                            prior=next(value for value in job['steps'] if value.get('name')=='Test project lookup isolation and read-only identity contracts')
+                            job['steps'].insert(job['steps'].index(prior),step)
+                    self.assertFalse(required_import_upload_gate(job))
+
     def test_project_read_gate_preserves_normal_reads_and_all_new_contracts(self):
         jobs=load('macos-polyglot-skill-ci.yml')['jobs']
         for name in ['runtime-read-linux','polyglot-skill-macos']:
