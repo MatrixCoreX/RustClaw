@@ -9,6 +9,8 @@ use tracing::{error, warn};
 
 #[path = "memory_capacity.rs"]
 mod capacity;
+#[path = "memory_read.rs"]
+mod reading;
 #[path = "memory_write.rs"]
 mod writing;
 
@@ -108,9 +110,17 @@ async fn vector_status(
             Ok(identity) => identity,
             Err(response) => return response,
         };
-    match load_vector_status(&state, &identity.principal_id) {
+    let config = state.policy.memory.clone();
+    match reading::run(state, identity, move |db, identity| {
+        load_vector_status_from_db(db, &config, &identity.principal_id)
+    })
+    .await
+    {
         Ok(status) => crate::api_ok(status),
         Err(error) => {
+            if let Some(response) = writing::execution_error(&error) {
+                return response;
+            }
             tracing::warn!(error = %error, "memory vector status failed");
             crate::api_err(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -302,6 +312,7 @@ async fn vector_control(
     }
 }
 
+#[cfg(test)]
 fn load_vector_status(state: &AppState, principal_id: &str) -> anyhow::Result<MemoryVectorStatus> {
     crate::sqlite_busy_retry::with_sqlite_busy_retry(
         crate::sqlite_busy_retry::SqliteBusyRetryPolicy::default(),
@@ -309,6 +320,7 @@ fn load_vector_status(state: &AppState, principal_id: &str) -> anyhow::Result<Me
     )
 }
 
+#[cfg(test)]
 fn load_vector_status_once(
     state: &AppState,
     principal_id: &str,
@@ -318,13 +330,21 @@ fn load_vector_status_once(
         .db
         .get()
         .context("memory_vector_status_db_pool")?;
-    let configured = crate::memory::vector_store::configured_profile(&state.policy.memory)
+    load_vector_status_from_db(&db, &state.policy.memory, principal_id)
+}
+
+fn load_vector_status_from_db(
+    db: &rusqlite::Connection,
+    config: &claw_core::config::MemoryConfig,
+    principal_id: &str,
+) -> anyhow::Result<MemoryVectorStatus> {
+    let configured = crate::memory::vector_store::configured_profile(config)
         .context("memory_vector_status_configured_profile")?;
-    let profile = crate::memory::vector_store::load_profile(&db, &configured.profile_id)
+    let profile = crate::memory::vector_store::load_profile(db, &configured.profile_id)
         .context("memory_vector_status_load_profile")?
         .ok_or_else(|| anyhow::anyhow!("memory_embedding_profile_not_initialized"))?;
     let generation = crate::memory::vector_store::active_generation_for_principal(
-        &db,
+        db,
         principal_id,
         &profile.profile_id,
         profile.generation,
@@ -350,9 +370,9 @@ fn load_vector_status_once(
         )
         .context("memory_vector_status_indexed_rows")?;
     let settings = crate::memory::settings::resolve_principal_memory_settings(
-        &db,
+        db,
         principal_id,
-        state.policy.memory.long_term_enabled,
+        config.long_term_enabled,
     )
     .context("memory_vector_status_settings")?;
     Ok(MemoryVectorStatus {
@@ -363,7 +383,7 @@ fn load_vector_status_once(
             "local".to_string()
         },
         state: if crate::memory::embedding_jobs::profile_paused(
-            &db,
+            db,
             principal_id,
             &profile.profile_id,
         )
@@ -431,9 +451,17 @@ async fn remote_disclosure(
             Ok(identity) => identity,
             Err(response) => return response,
         };
-    match crate::memory::ux::remote_memory_disclosure(&state, &identity.principal_id) {
+    let context = state.clone();
+    match reading::run(state, identity, move |db, identity| {
+        crate::memory::ux::remote_memory_disclosure(db, &context, &identity.principal_id)
+    })
+    .await
+    {
         Ok(result) => crate::api_ok(result),
         Err(error) => {
+            if let Some(response) = writing::execution_error(&error) {
+                return response;
+            }
             tracing::warn!(error = %error, "memory remote disclosure failed");
             crate::api_err(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -453,24 +481,21 @@ async fn list_items(
         Ok(identity) => identity,
         Err(response) => return response,
     };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(error) => {
-            tracing::error!(error = %error, "memory page database unavailable");
-            return crate::api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_database_unavailable",
-            );
-        }
-    };
-    match crate::memory::ux::list_memory_page(
-        &db,
-        &identity.principal_id,
-        &filter,
-        crate::now_ts_u64() as i64,
-    ) {
+    match reading::run(state, identity, move |db, identity| {
+        crate::memory::ux::list_memory_page(
+            db,
+            &identity.principal_id,
+            &filter,
+            crate::now_ts_u64() as i64,
+        )
+    })
+    .await
+    {
         Ok(result) => crate::api_ok(result),
         Err(error) => {
+            if let Some(response) = writing::execution_error(&error) {
+                return response;
+            }
             tracing::warn!(error = %error, "memory page query failed");
             crate::api_err(StatusCode::BAD_REQUEST, "memory_page_query_failed")
         }
@@ -567,19 +592,16 @@ async fn export_items(
         Ok(identity) => identity,
         Err(response) => return response,
     };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(_) => {
-            return crate::api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_database_unavailable",
-            )
-        }
-    };
-    match crate::memory::ux::export_memory(&db, &identity.principal_id, crate::now_ts_u64() as i64)
+    match reading::run(state, identity, move |db, identity| {
+        crate::memory::ux::export_memory(db, &identity.principal_id, crate::now_ts_u64() as i64)
+    })
+    .await
     {
         Ok(result) => crate::api_ok(result),
         Err(error) => {
+            if let Some(response) = writing::execution_error(&error) {
+                return response;
+            }
             tracing::warn!(error = %error, "memory export failed");
             crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "memory_export_failed")
         }
@@ -595,22 +617,20 @@ async fn export_markdown(
             Ok(identity) => identity,
             Err(response) => return response,
         };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(_) => {
-            return crate::api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_database_unavailable",
-            )
-        }
-    };
-    match crate::memory::ux::export_memory_markdown(
-        &db,
-        &identity.principal_id,
-        crate::now_ts_u64() as i64,
-    ) {
+    match reading::run(state, identity, move |db, identity| {
+        crate::memory::ux::export_memory_markdown(
+            db,
+            &identity.principal_id,
+            crate::now_ts_u64() as i64,
+        )
+    })
+    .await
+    {
         Ok(result) => crate::api_ok(result),
         Err(error) => {
+            if let Some(response) = writing::execution_error(&error) {
+                return response;
+            }
             tracing::warn!(error = %error, "memory markdown export failed");
             crate::api_err(StatusCode::INTERNAL_SERVER_ERROR, "memory_export_failed")
         }
@@ -682,22 +702,25 @@ async fn clear_preview(
             Ok(identity) => identity,
             Err(response) => return response,
         };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(_) => {
-            return crate::api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_database_unavailable",
+    match reading::run(state, identity, move |db, identity| {
+        crate::memory::ux::clear_preview(
+            db,
+            &identity.principal_id,
+            query.mode.as_deref().unwrap_or("transcript"),
+        )
+    })
+    .await
+    {
+        Ok(result) => crate::api_ok(result),
+        Err(error) => {
+            if let Some(response) = writing::execution_error(&error) {
+                return response;
+            }
+            crate::api_err(
+                StatusCode::BAD_REQUEST,
+                &memory_api_error_code(&error, "memory_clear_preview_failed"),
             )
         }
-    };
-    let mode = query.mode.as_deref().unwrap_or("transcript");
-    match crate::memory::ux::clear_preview(&db, &identity.principal_id, mode) {
-        Ok(result) => crate::api_ok(result),
-        Err(error) => crate::api_err(
-            StatusCode::BAD_REQUEST,
-            &memory_api_error_code(&error, "memory_clear_preview_failed"),
-        ),
     }
 }
 
@@ -788,40 +811,36 @@ async fn get_memory_overview(
             Ok(identity) => identity,
             Err(resp) => return resp,
         };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(err) => {
-            error!("get memory overview db failed: {}", err);
-            return api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_database_unavailable",
-            );
-        }
-    };
-    let settings = match memory::settings::resolve_principal_memory_settings(
-        &db,
-        &identity.principal_id,
-        state.policy.memory.long_term_enabled,
-    ) {
-        Ok(settings) => settings,
-        Err(err) => {
+    let config = state.policy.memory.clone();
+    match reading::run(state, identity, move |db, identity| {
+        let settings = memory::settings::resolve_principal_memory_settings(
+            db,
+            &identity.principal_id,
+            config.long_term_enabled,
+        )
+        .map_err(|err| {
             error!("resolve memory overview settings failed: {}", err);
-            return api_err(
+            writing::reject(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "memory_settings_resolve_failed",
-            );
-        }
-    };
-    let memory_scope = memory::scope::resolve_principal_scope(&identity);
-    match memory::api::memory_overview(
-        &db,
-        identity.chat_id,
-        &memory_scope.scope_ref,
-        settings.use_memory && settings.generate_memory,
-        state.policy.memory.hybrid_recall_enabled,
-    ) {
+            )
+        })?;
+        let scope = memory::scope::resolve_principal_scope(identity);
+        memory::api::memory_overview(
+            db,
+            identity.chat_id,
+            &scope.scope_ref,
+            settings.use_memory && settings.generate_memory,
+            config.hybrid_recall_enabled,
+        )
+    })
+    .await
+    {
         Ok(overview) => api_ok(overview),
         Err(err) => {
+            if let Some(response) = writing::execution_error(&err) {
+                return response;
+            }
             error!("get memory overview failed: {}", err);
             api_err(StatusCode::INTERNAL_SERVER_ERROR, "memory_lookup_failed")
         }
@@ -842,66 +861,69 @@ async fn get_memory_settings_handler(
         Ok(identity) => identity,
         Err(resp) => return resp,
     };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(err) => {
-            error!("get memory settings db failed: {}", err);
-            return api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_settings_db_failed",
-            );
+    let default_enabled = state.policy.memory.long_term_enabled;
+    let resolved = reading::run(state, identity, move |db, identity| {
+        let target_principal_id = query
+            .target_principal_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(&identity.principal_id);
+        if target_principal_id != identity.principal_id && identity.role != "admin" {
+            return Err(writing::reject(
+                StatusCode::FORBIDDEN,
+                "memory_settings_admin_required",
+            ));
         }
-    };
-    let target_principal_id = query
-        .target_principal_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(&identity.principal_id);
-    if target_principal_id != identity.principal_id && identity.role != "admin" {
-        return api_err(StatusCode::FORBIDDEN, "memory_settings_admin_required");
-    }
-    let resolved = match query.scope.unwrap_or_default() {
-        memory::settings::MemorySettingScope::Admin => {
-            if identity.role != "admin" {
-                return api_err(StatusCode::FORBIDDEN, "memory_settings_admin_required");
+        match query.scope.unwrap_or_default() {
+            memory::settings::MemorySettingScope::Admin => {
+                if identity.role != "admin" {
+                    return Err(writing::reject(
+                        StatusCode::FORBIDDEN,
+                        "memory_settings_admin_required",
+                    ));
+                }
+                memory::settings::resolve_principal_memory_settings(
+                    db,
+                    target_principal_id,
+                    default_enabled,
+                )
             }
-            memory::settings::resolve_principal_memory_settings(
-                &db,
-                target_principal_id,
-                state.policy.memory.long_term_enabled,
-            )
+            memory::settings::MemorySettingScope::Principal => {
+                memory::settings::resolve_principal_memory_settings(
+                    db,
+                    target_principal_id,
+                    default_enabled,
+                )
+            }
+            memory::settings::MemorySettingScope::Conversation => {
+                let conversation_id = query
+                    .conversation_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| {
+                        writing::reject(
+                            StatusCode::BAD_REQUEST,
+                            "memory_settings_conversation_required",
+                        )
+                    })?;
+                memory::settings::resolve_memory_settings(
+                    db,
+                    target_principal_id,
+                    Some(conversation_id),
+                    default_enabled,
+                )
+            }
         }
-        memory::settings::MemorySettingScope::Principal => {
-            memory::settings::resolve_principal_memory_settings(
-                &db,
-                target_principal_id,
-                state.policy.memory.long_term_enabled,
-            )
-        }
-        memory::settings::MemorySettingScope::Conversation => {
-            let Some(conversation_id) = query
-                .conversation_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-            else {
-                return api_err(
-                    StatusCode::BAD_REQUEST,
-                    "memory_settings_conversation_required",
-                );
-            };
-            memory::settings::resolve_memory_settings(
-                &db,
-                target_principal_id,
-                Some(conversation_id),
-                state.policy.memory.long_term_enabled,
-            )
-        }
-    };
+    })
+    .await;
     match resolved {
         Ok(result) => api_ok(result),
         Err(err) => {
+            if let Some(response) = writing::execution_error(&err) {
+                return response;
+            }
             error!("get memory settings failed: {}", err);
             api_err(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -931,19 +953,16 @@ async fn list_memory_preferences_handler(
         Ok(identity) => identity,
         Err(resp) => return resp,
     };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(err) => {
-            error!("list memory preferences db failed: {}", err);
-            return api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_database_unavailable",
-            );
-        }
-    };
-    match memory::api::list_preferences(&db, identity.chat_id, &identity.principal_id) {
+    match reading::run(state, identity, move |db, identity| {
+        memory::api::list_preferences(db, identity.chat_id, &identity.principal_id)
+    })
+    .await
+    {
         Ok(items) => api_ok(items),
         Err(err) => {
+            if let Some(response) = writing::execution_error(&err) {
+                return response;
+            }
             error!("list memory preferences failed: {}", err);
             api_err(StatusCode::INTERNAL_SERVER_ERROR, "memory_lookup_failed")
         }
@@ -962,19 +981,16 @@ async fn list_memory_facts_handler(
             Ok(identity) => identity,
             Err(resp) => return resp,
         };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(err) => {
-            error!("list memory facts db failed: {}", err);
-            return api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_database_unavailable",
-            );
-        }
-    };
-    match memory::api::list_facts(&db, &identity.principal_id) {
+    match reading::run(state, identity, move |db, identity| {
+        memory::api::list_facts(db, &identity.principal_id)
+    })
+    .await
+    {
         Ok(items) => api_ok(items),
         Err(err) => {
+            if let Some(response) = writing::execution_error(&err) {
+                return response;
+            }
             error!("list memory facts failed: {}", err);
             api_err(StatusCode::INTERNAL_SERVER_ERROR, "memory_lookup_failed")
         }
@@ -994,19 +1010,16 @@ async fn list_memory_recent_handler(
             Ok(identity) => identity,
             Err(resp) => return resp,
         };
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(err) => {
-            error!("list recent memories db failed: {}", err);
-            return api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "memory_database_unavailable",
-            );
-        }
-    };
-    match memory::api::list_recent(&db, identity.chat_id, &identity.principal_id, 50) {
+    match reading::run(state, identity, move |db, identity| {
+        memory::api::list_recent(db, identity.chat_id, &identity.principal_id, 50)
+    })
+    .await
+    {
         Ok(items) => api_ok(items),
         Err(err) => {
+            if let Some(response) = writing::execution_error(&err) {
+                return response;
+            }
             error!("list recent memories failed: {}", err);
             api_err(StatusCode::INTERNAL_SERVER_ERROR, "memory_lookup_failed")
         }

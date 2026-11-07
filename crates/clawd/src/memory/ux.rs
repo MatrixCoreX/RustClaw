@@ -213,12 +213,12 @@ pub(crate) struct RemoteMemoryDisclosure {
 }
 
 pub(crate) fn remote_memory_disclosure(
+    db: &Connection,
     state: &crate::AppState,
     principal_id: &str,
 ) -> anyhow::Result<RemoteMemoryDisclosure> {
-    let db = state.core.db.get().map_err(|error| anyhow!(error))?;
     let settings = super::settings::resolve_principal_memory_settings(
-        &db,
+        db,
         principal_id,
         state.policy.memory.long_term_enabled,
     )?;
