@@ -664,6 +664,19 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p clawd --bin clawd http::memory_routes:: -- --test-threads=1 --nocapture
+      - name: Test capacity read authentication snapshot contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd http::memory_capacity_read_race_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_capacity_read_race_tests:: \
+            --require credential_revoked_after_authentication_does_not_return_later_private_state \
+            --require binding_revoked_after_authentication_does_not_return_later_private_state \
+            --require role_downgraded_after_authentication_does_not_return_later_admin_metrics \
+            --require principal_reassigned_after_authentication_does_not_return_previous_owner_state \
+            --require unchanged_user_still_reads_own_state_after_another_credential_changes \
+            --require unchanged_admin_still_reads_current_global_diagnostics_without_mutating_storage
+          cargo test --locked -p clawd --bin clawd http::memory_capacity_read_race_tests:: -- --test-threads=1 --nocapture
       - name: Verify both product identities with the shared UI
         run: |
           npm ci --ignore-scripts --prefix UI
@@ -1238,6 +1251,19 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p clawd --bin clawd http::memory_routes:: -- --test-threads=1 --nocapture
+      - name: Test capacity read authentication snapshot contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd http::memory_capacity_read_race_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_capacity_read_race_tests:: \
+            --require credential_revoked_after_authentication_does_not_return_later_private_state \
+            --require binding_revoked_after_authentication_does_not_return_later_private_state \
+            --require role_downgraded_after_authentication_does_not_return_later_admin_metrics \
+            --require principal_reassigned_after_authentication_does_not_return_previous_owner_state \
+            --require unchanged_user_still_reads_own_state_after_another_credential_changes \
+            --require unchanged_admin_still_reads_current_global_diagnostics_without_mutating_storage
+          cargo test --locked -p clawd --bin clawd http::memory_capacity_read_race_tests:: -- --test-threads=1 --nocapture
 
       - name: Test browser API authentication boundaries
         shell: bash

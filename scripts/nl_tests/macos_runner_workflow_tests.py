@@ -357,7 +357,53 @@ def required_lazy_domain_sampling_gate(job):
             and job['steps'].index(step)<job['steps'].index(prior))
 
 
+def required_capacity_read_authentication_gate(job):
+    prefix='http::memory_capacity_read_race_tests::'
+    run=f'cargo test --locked -p clawd --bin clawd {prefix} -- --test-threads=1 --nocapture'
+    if not required_command_gate(job,run):
+        return False
+    step=next(step for step in job['steps'] if run in step.get('run',''))
+    source=(ROOT/'crates/clawd/src/http/memory_capacity_read_race_tests.rs').read_text(encoding='utf-8')
+    names=re.findall(r'^#\[test\]\nfn (\w+)\(',source,re.M)
+    listing=f'cargo test --locked -p clawd --bin clawd {prefix} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
+    prior=next(value for value in job['steps'] if value.get('name')=='Test memory vector status policy and scoped controls')
+    script=step['run']
+    return (len(names)==6 and len(set(names))==6 and listing in script
+            and f'--prefix {prefix}' in script and '|| true' not in script
+            and set(re.findall(r'--require ([A-Za-z0-9_:]+)',script))==set(names)
+            and script.index(listing)<script.index(run)
+            and job['steps'].index(step)==job['steps'].index(prior)+1)
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_capacity_read_authentication_gate_runs_after_complete_old_memory_HTTP(self):
+        jobs=load('macos-polyglot-skill-ci.yml')['jobs']
+        for name in ['runtime-read-linux','polyglot-skill-macos']:
+            self.assertTrue(required_capacity_read_authentication_gate(jobs[name]))
+            for mutation in ['selector','listing','require','ignore','conditional','continue','early','late']:
+                with self.subTest(job=name,mutation=mutation):
+                    job=deepcopy(jobs[name])
+                    step=next(step for step in job['steps'] if step.get('name')=='Test capacity read authentication snapshot contracts')
+                    if mutation=='selector':
+                        step['run']=step['run'].replace('http::memory_capacity_read_race_tests::','missing::read_race_tests::')
+                    elif mutation=='listing':
+                        step['run']=step['run'].replace('--list --color never','--list')
+                    elif mutation=='require':
+                        step['run']=step['run'].replace('--require principal_reassigned_after_authentication_does_not_return_previous_owner_state','--require absent_case')
+                    elif mutation=='ignore':
+                        step['run']=step['run'].replace('--test-threads=1 --nocapture','--test-threads=1 --nocapture || true')
+                    elif mutation=='conditional':
+                        step['if']='false'
+                    elif mutation=='continue':
+                        step['continue-on-error']=True
+                    else:
+                        job['steps'].remove(step)
+                        if mutation=='late': job['steps'].append(step)
+                        else:
+                            prior=next(value for value in job['steps'] if value.get('name')=='Test memory vector status policy and scoped controls')
+                            job['steps'].insert(job['steps'].index(prior),step)
+                    self.assertFalse(required_capacity_read_authentication_gate(job))
+
     def test_lazy_domain_sampling_gate_preserves_all_required_native_cases(self):
         jobs=load('macos-polyglot-skill-ci.yml')['jobs']
         for name in ['runtime-read-linux','polyglot-skill-macos']:

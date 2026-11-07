@@ -3,10 +3,10 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection};
 
-pub(super) struct Fixture {
+pub(crate) struct Fixture {
     state: Option<crate::AppState>,
-    pub(super) principal: String,
-    pub(super) key: String,
+    pub(crate) principal: String,
+    pub(crate) key: String,
     root: Option<PathBuf>,
 }
 
@@ -15,7 +15,7 @@ impl Fixture {
         Self::finish(crate::AppState::test_default_with_fixture_provider(), None)
     }
 
-    pub(super) fn file() -> Self {
+    pub(crate) fn file() -> Self {
         let root = std::env::temp_dir().join(format!(
             "agent-runtime-memory-capacity-{}",
             uuid::Uuid::new_v4().simple()
@@ -66,11 +66,11 @@ impl Fixture {
         }
     }
 
-    pub(super) fn state(&self) -> &crate::AppState {
+    pub(crate) fn state(&self) -> &crate::AppState {
         self.state.as_ref().unwrap()
     }
 
-    pub(super) fn state_mut(&mut self) -> &mut crate::AppState {
+    pub(crate) fn state_mut(&mut self) -> &mut crate::AppState {
         self.state.as_mut().unwrap()
     }
 

@@ -38,7 +38,7 @@ mod capacity_availability_tests;
 #[cfg(test)]
 mod capacity_race_test_fixtures;
 #[cfg(test)]
-mod capacity_test_fixtures;
+pub(crate) mod capacity_test_fixtures;
 #[cfg(test)]
 mod completion_test_fixtures;
 
