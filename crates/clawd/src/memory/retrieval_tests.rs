@@ -432,6 +432,7 @@ fn ensure_test_principal_scope(db: &rusqlite::Connection, user_key: &str) {
     crate::repo::auth::ensure_principal_identity_schema(db).expect("test principal schema");
     crate::repo::ensure_principal_ownership_schema(db).expect("test ownership schema");
     crate::memory::scope::ensure_memory_scope_schema(db).expect("test memory scope schema");
+    crate::memory::ux::ensure_memory_ux_schema(db).expect("explicit fixture UX startup");
 }
 
 #[test]
@@ -838,8 +839,11 @@ fn retrieval_multilingual_queries_keep_structured_preferences_and_facts() {
         ensure_test_principal_scope(&db, user_key);
         db.execute(
             "INSERT INTO user_preferences
-             (user_id, chat_id, user_key, pref_key, pref_value, confidence, source, updated_at, updated_at_ts)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             (memory_id,principal_id,scope_kind,scope_ref,user_id, chat_id, user_key, pref_key, pref_value, confidence, source, updated_at, updated_at_ts)
+             VALUES ('memory_multilingual_preference',
+                     (SELECT principal_id FROM auth_keys WHERE user_key=?3),'principal',
+                     (SELECT principal_id FROM auth_keys WHERE user_key=?3),
+                     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             rusqlite::params![
                 user_id,
                 chat_id,

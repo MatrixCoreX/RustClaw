@@ -14,6 +14,19 @@ async fn local_embedding_outbox_commits_a_versioned_vector_after_source_write() 
     crate::repo::ensure_principal_ownership_schema(&db).unwrap();
     crate::memory::scope::ensure_memory_scope_schema(&db).unwrap();
     super::initialize_embedding_runtime(&db, &state.policy.memory).unwrap();
+    crate::memory::capacity_test_fixtures::persist_preference_sources(
+        &db,
+        1,
+        0,
+        "embedding-user",
+        &[(
+            "answer_language".into(),
+            "简体中文".into(),
+            0.9,
+            "user".into(),
+        )],
+        1,
+    );
     crate::memory::indexing::index_preference_entries(
         &db,
         1,
@@ -233,6 +246,14 @@ async fn blue_green_reindex_activates_per_principal_and_keeps_old_generation_unt
     let principal_id = crate::repo::auth::principal_id_for_user_key(&db, "reindex-user")
         .unwrap()
         .unwrap();
+    crate::memory::capacity_test_fixtures::persist_preference_sources(
+        &db,
+        1,
+        0,
+        "reindex-user",
+        &[("format".into(), "short".into(), 1.0, "user".into())],
+        1,
+    );
     crate::memory::indexing::index_preference_entries(
         &db,
         1,

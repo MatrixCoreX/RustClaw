@@ -85,6 +85,19 @@ impl Fixture {
 
     pub(super) fn seed_embedding(&self) {
         let db = self.state().core.db.get().unwrap();
+        persist_preference_sources(
+            &db,
+            1,
+            0,
+            &self.key,
+            &[(
+                "format".into(),
+                "capacity fixture".into(),
+                1.0,
+                "user".into(),
+            )],
+            crate::now_ts_u64() as i64,
+        );
         super::indexing::index_preference_entries(
             &db,
             1,
@@ -120,6 +133,45 @@ impl Fixture {
             params![id, self.principal, status, now],
         )
         .expect("isolated scheduler job");
+    }
+}
+
+/// Explicitly persist canonical test sources before invoking production indexing.
+/// This helper performs no migration or repair and is never called by runtime reads.
+pub(super) fn persist_preference_sources(
+    db: &Connection,
+    user_id: i64,
+    chat_id: i64,
+    key: &str,
+    entries: &[(String, String, f32, String)],
+    ts: i64,
+) {
+    let owner = crate::repo::auth::principal_id_for_user_key(db, key)
+        .expect("fixture source principal lookup")
+        .expect("fixture sources require a real admitted owner");
+    for (pref_key, content, confidence, source) in entries {
+        db.execute(
+            "INSERT INTO user_preferences(
+                memory_id,user_id,chat_id,user_key,principal_id,scope_kind,scope_ref,
+                pref_key,pref_value,confidence,source,updated_at,updated_at_ts,
+                origin,row_revision,legacy_scope_inferred
+             ) VALUES (?1,?2,?3,?4,?5,'principal',?5,?6,?7,?8,?9,?10,?11,
+                       'user_confirmed',1,0)",
+            params![
+                format!("memory_{}", uuid::Uuid::new_v4().simple()),
+                user_id,
+                chat_id,
+                key,
+                owner,
+                pref_key,
+                content,
+                confidence,
+                source,
+                ts.to_string(),
+                ts
+            ],
+        )
+        .expect("persist owned canonical preference fixture");
     }
 }
 

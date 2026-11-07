@@ -24,6 +24,14 @@ fn seed_many(fixture: &Fixture) -> Vec<String> {
             )
         })
         .collect::<Vec<_>>();
+    crate::memory::capacity_test_fixtures::persist_preference_sources(
+        &db,
+        1,
+        0,
+        &fixture.key,
+        &entries,
+        crate::now_ts_u64() as i64,
+    );
     crate::memory::indexing::index_preference_entries(
         &db,
         1,
