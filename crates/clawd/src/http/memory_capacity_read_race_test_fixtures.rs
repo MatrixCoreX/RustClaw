@@ -67,9 +67,19 @@ pub(super) struct Setup {
 impl Setup {
     pub(super) fn new(admin: bool) -> Self {
         let mut fixture = Fixture::file();
+        if admin {
+            // The real API creates/rotates the sole administrator; never turn
+            // a second fixture key into another administrator by SQL.
+            let key = crate::repo::auth::create_auth_key(fixture.state(), "admin").unwrap();
+            let actor = crate::resolve_auth_identity_by_key(fixture.state(), &key)
+                .unwrap()
+                .unwrap();
+            fixture.key = key;
+            fixture.principal = actor.principal_id;
+        }
         let state = fixture.state();
         let role = if admin { "admin" } else { "user" };
-        let sibling_key = crate::repo::auth::create_auth_key(state, role).unwrap();
+        let sibling_key = crate::repo::auth::create_auth_key(state, "user").unwrap();
         let other_key = crate::repo::auth::create_auth_key(state, "user").unwrap();
         let other_principal = crate::resolve_auth_identity_by_key(state, &other_key)
             .unwrap()
@@ -100,6 +110,13 @@ impl Setup {
                 )
                 .unwrap();
             transaction.commit().unwrap();
+            crate::memory::retention::ensure_principal_quota(
+                &db,
+                &state.policy.memory,
+                &fixture.principal,
+                100,
+            )
+            .unwrap();
             crate::memory::ux::ensure_memory_ux_schema(&db).unwrap();
             crate::memory::retention::initialize_storage_pressure(&db, &state.policy.memory, 100)
                 .unwrap();

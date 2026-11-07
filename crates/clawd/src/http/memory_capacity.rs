@@ -60,6 +60,7 @@ fn read(state: &AppState, headers: &HeaderMap, query: CapacityQuery) -> Reply {
     let observation = || -> anyhow::Result<_> {
         let db = state.core.db.get()?;
         let transaction = db.unchecked_transaction()?;
+        crate::repo::auth::require_request_identity(&transaction, &identity)?;
         let settings = if scope == MemorySettingScope::Conversation {
             settings::resolve_memory_settings(
                 &transaction,
@@ -94,6 +95,9 @@ fn read(state: &AppState, headers: &HeaderMap, query: CapacityQuery) -> Reply {
             api_ok(report)
         }
         Err(error) => {
+            if let Some(response) = super::writing::execution_error(&error) {
+                return response;
+            }
             tracing::warn!(%error,"memory capacity observation unavailable");
             api_err(
                 StatusCode::SERVICE_UNAVAILABLE,
