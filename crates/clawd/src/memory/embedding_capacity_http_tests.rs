@@ -124,10 +124,10 @@ async fn remote_fixture(endpoint: &str) -> (Fixture, Credential) {
         config.embedding_dims = 3;
     }
     {
-        let db = fixture.state().core.db.get().unwrap();
         let actor = crate::resolve_auth_identity_by_key(fixture.state(), &fixture.key)
             .unwrap()
             .unwrap();
+        let db = fixture.state().core.db.get().unwrap();
         let settings = crate::memory::settings::update_memory_settings(
             &db,
             &actor,
