@@ -9,3 +9,10 @@ use support::*;
 mod corrections;
 #[path = "ux_recall_disable_tests.rs"]
 mod disabling;
+
+#[path = "ux_recall_incremental_tests.rs"]
+mod incremental;
+#[path = "ux_recall_boundary_tests.rs"]
+mod boundaries;
+#[path = "ux_recall_boundary_fixtures.rs"]
+mod boundary_support;

@@ -373,7 +373,15 @@ jobs:
             --require corrections::failed_replacement_index_insert_rolls_back_canonical_revision_and_feedback \
             --require corrections::stale_correction_preserves_all_owners_indexes_and_canonical_rows \
             --require disabling::rebuilding_cannot_reenable_a_preference_disabled_by_explicit_feedback \
-            --require disabling::rebuilding_cannot_reenable_a_transcript_disabled_by_explicit_feedback
+            --require disabling::rebuilding_cannot_reenable_a_transcript_disabled_by_explicit_feedback \
+            --require incremental::incremental_preference_indexing_does_not_reenable_explicitly_disabled_content \
+            --require incremental::incremental_transcript_indexing_does_not_reenable_explicitly_disabled_content \
+            --require incremental::incremental_fact_indexing_does_not_reenable_explicitly_disabled_content \
+            --require boundaries::missing_feedback_ledger_rejects_index_refresh_without_effects_or_read_repair \
+            --require boundaries::failed_fts_insert_rolls_back_feedback_canonical_revision_and_projection \
+            --require boundaries::absent_optional_fts_does_not_block_correction_or_initialize_a_table \
+            --require boundaries::correcting_preference_preserves_another_scope_of_the_same_principal \
+            --require boundaries::rotating_admin_credential_does_not_make_owned_canonical_facts_uncorrectable
           cargo test --locked -p clawd --bin clawd memory::ux::recall_contract_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         run: |
@@ -679,7 +687,15 @@ jobs:
             --require corrections::failed_replacement_index_insert_rolls_back_canonical_revision_and_feedback \
             --require corrections::stale_correction_preserves_all_owners_indexes_and_canonical_rows \
             --require disabling::rebuilding_cannot_reenable_a_preference_disabled_by_explicit_feedback \
-            --require disabling::rebuilding_cannot_reenable_a_transcript_disabled_by_explicit_feedback
+            --require disabling::rebuilding_cannot_reenable_a_transcript_disabled_by_explicit_feedback \
+            --require incremental::incremental_preference_indexing_does_not_reenable_explicitly_disabled_content \
+            --require incremental::incremental_transcript_indexing_does_not_reenable_explicitly_disabled_content \
+            --require incremental::incremental_fact_indexing_does_not_reenable_explicitly_disabled_content \
+            --require boundaries::missing_feedback_ledger_rejects_index_refresh_without_effects_or_read_repair \
+            --require boundaries::failed_fts_insert_rolls_back_feedback_canonical_revision_and_projection \
+            --require boundaries::absent_optional_fts_does_not_block_correction_or_initialize_a_table \
+            --require boundaries::correcting_preference_preserves_another_scope_of_the_same_principal \
+            --require boundaries::rotating_admin_credential_does_not_make_owned_canonical_facts_uncorrectable
           cargo test --locked -p clawd --bin clawd memory::ux::recall_contract_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         shell: bash
