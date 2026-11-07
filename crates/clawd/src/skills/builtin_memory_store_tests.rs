@@ -33,6 +33,8 @@ fn setup() -> crate::AppState {
     )
     .expect("auth key");
     super::ensure_schema(&db).expect("memory capability schema");
+    crate::memory::jobs::ensure_memory_job_schema(&db)
+        .expect("fixture startup ownership and scope after retrieval table creation");
     crate::repo::auth::ensure_principal_identity_schema(&db).expect("principal schema");
     let principal_id = crate::repo::auth::principal_id_for_user_key(&db, "memory-capability-key")
         .expect("resolve principal")
