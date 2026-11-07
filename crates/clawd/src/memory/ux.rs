@@ -1681,3 +1681,7 @@ mod import_credential_tests;
 #[cfg(test)]
 #[path = "ux_admission_contract_tests.rs"]
 mod admission_contract_tests;
+
+#[cfg(test)]
+#[path = "ux_feedback_tests.rs"]
+mod feedback_tests;

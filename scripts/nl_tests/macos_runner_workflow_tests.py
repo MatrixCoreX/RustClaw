@@ -1,6 +1,7 @@
 """Keep native Mac verification on supported runners without changing target OS floors."""
 from copy import deepcopy
 from pathlib import Path
+import re
 import unittest
 
 import yaml
@@ -60,7 +61,46 @@ def required_builtin_memory_gate(job):
         and all(f'--require {name}' in script for name in required))
 
 
+def required_feedback_memory_gate(job):
+    prefix='memory::ux::feedback_tests::'
+    run=f'cargo test --locked -p clawd --bin clawd {prefix} -- --test-threads=1 --nocapture'
+    if not required_command_gate(job,run):
+        return False
+    step=next(step for step in job['steps'] if run in step.get('run',''))
+    script=step['run']
+    listing=f'cargo test --locked -p clawd --bin clawd {prefix} -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py'
+    expected=set()
+    for module,file in [('failures','ux_feedback_failure_tests.rs'),('success','ux_feedback_success_tests.rs')]:
+        source=(ROOT/'crates/clawd/src/memory'/file).read_text(encoding='utf-8')
+        expected.update(module+'::'+name for name in re.findall(r'^#\[test\]\nfn (\w+)\(',source,re.M))
+    required=set(re.findall(r'--require ([A-Za-z0-9_:]+)',script))
+    return bool(expected) and required==expected and listing in script and (
+        'python3 scripts/tests/assert_rust_test_selection.py --self-test' in script
+        and f'--prefix {prefix}' in script and '|| true' not in script
+        and script.index(listing)<script.index(run))
+
+
 class MacosRunnerWorkflowTests(unittest.TestCase):
+    def test_feedback_gate_requires_every_actual_case_on_both_native_platforms(self):
+        jobs=load('macos-polyglot-skill-ci.yml')['jobs']
+        for name in ['runtime-read-linux','polyglot-skill-macos']:
+            self.assertTrue(required_feedback_memory_gate(jobs[name]))
+            for mutation in ['selector','listing','require','ignore','conditional']:
+                with self.subTest(job=name,mutation=mutation):
+                    job=deepcopy(jobs[name])
+                    step=next(step for step in job['steps'] if step.get('name')=='Test feedback mutation atomicity without hiding failures')
+                    if mutation=='selector':
+                        step['run']=step['run'].replace('memory::ux::feedback_tests::','memory::feedback_tests::')
+                    elif mutation=='listing':
+                        step['run']=step['run'].replace(' | python3 scripts/tests/assert_rust_test_selection.py',' | true')
+                    elif mutation=='require':
+                        step['run']=step['run'].replace('--require failures::incorrect_without_content_does_not_commit_feedback','')
+                    elif mutation=='ignore':
+                        step['run']+='\ntrue || true\n'
+                    else:
+                        step['if']='${{ always() }}'
+                    self.assertFalse(required_feedback_memory_gate(job))
+
     def test_builtin_memory_selection_cannot_succeed_with_zero_or_missing_cases(self):
         jobs=load('macos-polyglot-skill-ci.yml')['jobs']
         for name in ['runtime-read-linux','polyglot-skill-macos']:
@@ -68,7 +108,7 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
             for mutation in ['selector','listing','require','ignore','conditional']:
                 with self.subTest(job=name,mutation=mutation):
                     job=deepcopy(jobs[name])
-                    step=next(step for step in job['steps'] if 'assert_rust_test_selection.py' in step.get('run',''))
+                    step=next(step for step in job['steps'] if 'skills::builtin::builtin_memory_store:: -- --list' in step.get('run',''))
                     if mutation=='selector':
                         step['run']=step['run'].replace('skills::builtin::builtin_memory_store::','skills::builtin_memory_store::')
                     elif mutation=='listing':

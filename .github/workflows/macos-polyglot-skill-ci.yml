@@ -336,6 +336,28 @@ jobs:
           cargo test --locked -p clawd --bin clawd identity_lifecycle -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd repo::auth:: -- --test-threads=1 --nocapture --skip identity_lifecycle
           cargo test --locked -p clawd --bin clawd principal_ownership -- --test-threads=1 --nocapture
+      - name: Test feedback mutation atomicity without hiding failures
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::feedback_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::feedback_tests:: \
+            --require failures::incorrect_without_content_does_not_commit_feedback \
+            --require failures::blank_correction_does_not_commit_feedback \
+            --require failures::unsupported_correction_does_not_commit_feedback \
+            --require failures::replacement_insert_failure_rolls_back_feedback_and_supersession \
+            --require failures::revision_insert_failure_rolls_back_feedback_and_replacement \
+            --require failures::recall_disable_failure_rolls_back_feedback \
+            --require failures::feedback_insert_failure_cannot_publish_a_correction \
+            --require success::fact_correction_commits_feedback_replacement_and_reversible_revision_together \
+            --require success::preference_correction_preserves_feedback_and_existing_revision_contract \
+            --require success::irrelevant_feedback_records_each_event_without_mutating_content \
+            --require success::do_not_use_commits_feedback_and_existing_recall_disable_result \
+            --require success::stale_revision_is_rejected_without_feedback_or_mutation \
+            --require success::another_principals_memory_cannot_receive_feedback \
+            --require success::nonexistent_memory_cannot_receive_feedback \
+            --require success::read_only_connection_cannot_partially_record_feedback
+          cargo test --locked -p clawd --bin clawd memory::ux::feedback_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         run: |
           set -euo pipefail
@@ -597,6 +619,30 @@ jobs:
           cargo test --locked -p clawd --bin clawd identity_lifecycle -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd repo::auth:: -- --test-threads=1 --nocapture --skip identity_lifecycle
           cargo test --locked -p clawd --bin clawd principal_ownership -- --test-threads=1 --nocapture
+
+      - name: Test feedback mutation atomicity without hiding failures
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::feedback_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::feedback_tests:: \
+            --require failures::incorrect_without_content_does_not_commit_feedback \
+            --require failures::blank_correction_does_not_commit_feedback \
+            --require failures::unsupported_correction_does_not_commit_feedback \
+            --require failures::replacement_insert_failure_rolls_back_feedback_and_supersession \
+            --require failures::revision_insert_failure_rolls_back_feedback_and_replacement \
+            --require failures::recall_disable_failure_rolls_back_feedback \
+            --require failures::feedback_insert_failure_cannot_publish_a_correction \
+            --require success::fact_correction_commits_feedback_replacement_and_reversible_revision_together \
+            --require success::preference_correction_preserves_feedback_and_existing_revision_contract \
+            --require success::irrelevant_feedback_records_each_event_without_mutating_content \
+            --require success::do_not_use_commits_feedback_and_existing_recall_disable_result \
+            --require success::stale_revision_is_rejected_without_feedback_or_mutation \
+            --require success::another_principals_memory_cannot_receive_feedback \
+            --require success::nonexistent_memory_cannot_receive_feedback \
+            --require success::read_only_connection_cannot_partially_record_feedback
+          cargo test --locked -p clawd --bin clawd memory::ux::feedback_tests:: -- --test-threads=1 --nocapture
 
       - name: Test memory quota byte accounting and empty-principal refresh
         shell: bash
