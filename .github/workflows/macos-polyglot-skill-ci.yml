@@ -358,6 +358,23 @@ jobs:
             --require success::nonexistent_memory_cannot_receive_feedback \
             --require success::read_only_connection_cannot_partially_record_feedback
           cargo test --locked -p clawd --bin clawd memory::ux::feedback_tests:: -- --test-threads=1 --nocapture
+      - name: Test recall mutation indexes without hiding failures
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::recall_contract_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::recall_contract_tests:: \
+            --require corrections::fact_correction_replaces_index_and_fts_without_retaining_old_content \
+            --require corrections::preference_correction_replaces_index_and_fts_and_preserves_other_owners \
+            --require corrections::fact_correction_undo_restores_only_original_retrieval \
+            --require disabling::fact_do_not_use_removes_index_and_fts_and_survives_rebuild \
+            --require disabling::preference_do_not_use_survives_rebuild_and_preserves_other_owners \
+            --require disabling::recent_do_not_use_survives_rebuild_without_deleting_transcript \
+            --require corrections::failed_replacement_index_insert_rolls_back_canonical_revision_and_feedback \
+            --require corrections::stale_correction_preserves_all_owners_indexes_and_canonical_rows \
+            --require disabling::rebuilding_cannot_reenable_a_preference_disabled_by_explicit_feedback \
+            --require disabling::rebuilding_cannot_reenable_a_transcript_disabled_by_explicit_feedback
+          cargo test --locked -p clawd --bin clawd memory::ux::recall_contract_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         run: |
           set -euo pipefail
@@ -647,6 +664,23 @@ jobs:
             --require success::read_only_connection_cannot_partially_record_feedback
           cargo test --locked -p clawd --bin clawd memory::ux::feedback_tests:: -- --test-threads=1 --nocapture
 
+      - name: Test recall mutation indexes without hiding failures
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::recall_contract_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::recall_contract_tests:: \
+            --require corrections::fact_correction_replaces_index_and_fts_without_retaining_old_content \
+            --require corrections::preference_correction_replaces_index_and_fts_and_preserves_other_owners \
+            --require corrections::fact_correction_undo_restores_only_original_retrieval \
+            --require disabling::fact_do_not_use_removes_index_and_fts_and_survives_rebuild \
+            --require disabling::preference_do_not_use_survives_rebuild_and_preserves_other_owners \
+            --require disabling::recent_do_not_use_survives_rebuild_without_deleting_transcript \
+            --require corrections::failed_replacement_index_insert_rolls_back_canonical_revision_and_feedback \
+            --require corrections::stale_correction_preserves_all_owners_indexes_and_canonical_rows \
+            --require disabling::rebuilding_cannot_reenable_a_preference_disabled_by_explicit_feedback \
+            --require disabling::rebuilding_cannot_reenable_a_transcript_disabled_by_explicit_feedback
+          cargo test --locked -p clawd --bin clawd memory::ux::recall_contract_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         shell: bash
         run: |

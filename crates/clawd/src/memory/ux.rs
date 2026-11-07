@@ -1428,3 +1428,7 @@ mod admission_contract_tests;
 #[cfg(test)]
 #[path = "ux_feedback_tests.rs"]
 mod feedback_tests;
+
+#[cfg(test)]
+#[path = "ux_recall_contract_tests.rs"]
+mod recall_contract_tests;
