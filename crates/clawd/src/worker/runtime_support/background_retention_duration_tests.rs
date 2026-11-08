@@ -3,6 +3,9 @@ use rusqlite::params;
 
 fn cleanup(days: u64) -> (Vec<String>, Vec<String>) {
     let mut state = test_state();
+    // The shared fixture creates retrieval tables after its startup seed.
+    // Apply the scope migration afterward, matching the real startup schema.
+    crate::memory::scope::ensure_memory_scope_schema(&state.core.db.get().unwrap()).unwrap();
     state.policy.maintenance.tasks_retention_days = days;
     state.policy.maintenance.audit_retention_days = days;
     state.policy.maintenance.tasks_max_rows = 100;
