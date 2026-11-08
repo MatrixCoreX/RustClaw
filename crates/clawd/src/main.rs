@@ -92,6 +92,7 @@ mod repair_boundary_inventory;
 mod repair_signal;
 mod repo;
 mod resource_scheduler;
+mod retention_policy;
 mod routing_context;
 mod runtime;
 mod runtime_memory;

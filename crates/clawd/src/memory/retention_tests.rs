@@ -74,3 +74,6 @@ fn pressure_state_machine_is_monotonic_by_threshold() {
 
 #[path = "retention_accounting_tests.rs"]
 mod accounting;
+
+#[path = "retention_duration_tests.rs"]
+mod duration_bounds;

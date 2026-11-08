@@ -6,6 +6,9 @@ use super::*;
 #[path = "background_blocking_tests.rs"]
 mod blocking;
 
+#[path = "background_retention_duration_tests.rs"]
+mod duration_bounds;
+
 #[test]
 fn terminal_delivery_retry_delay_is_bounded_and_increases() {
     assert_eq!(channel_terminal_delivery_retry_delay(5, 1), 5);

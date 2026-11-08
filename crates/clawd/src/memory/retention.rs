@@ -20,10 +20,11 @@ pub(crate) fn cleanup_memory_data(
     super::jobs::require_memory_job_schema(db)?;
     super::indexing::ensure_retrieval_schema(db)?;
     let transaction = db.unchecked_transaction()?;
-    let source_cutoff = now_ts.saturating_sub(config.retention_days as i64 * 86_400);
-    let long_term_cutoff = now_ts.saturating_sub(config.long_term_retention_days as i64 * 86_400);
+    let source_cutoff = crate::retention_policy::cutoff_timestamp(now_ts, config.retention_days);
+    let long_term_cutoff =
+        crate::retention_policy::cutoff_timestamp(now_ts, config.long_term_retention_days);
     let candidate_cutoff =
-        now_ts.saturating_sub(config.raw_candidate_retention_days as i64 * 86_400);
+        crate::retention_policy::cutoff_timestamp(now_ts, config.raw_candidate_retention_days);
 
     let mut deleted_source_rows = transaction.execute(
         "DELETE FROM memories

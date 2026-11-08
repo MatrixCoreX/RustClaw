@@ -487,6 +487,27 @@ jobs:
             --prefix http::memory_routes::tests:: \
             --require vector_status_remains_read_only_while_another_connection_holds_the_writer_lock
           cargo test --locked -p clawd --bin clawd http::memory_routes::tests:: -- --test-threads=1 --nocapture
+      - name: Test retention duration overflow without arbitrary caps
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd retention_policy::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix retention_policy::tests:: \
+            --require ordinary_and_zero_days_preserve_exact_cutoffs \
+            --require all_u64_durations_match_wide_reference_without_future_cutoffs \
+            --require increasing_retention_never_moves_cutoff_forward \
+            --require duration_beyond_timestamp_range_saturates_to_oldest_timestamp
+          cargo test --locked -p clawd --bin clawd retention_policy::tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd memory::retention::tests::duration_bounds:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::retention::tests::duration_bounds:: \
+            --require all_memory_retention_kinds_preserve_fresh_rows_for_large_durations \
+            --require ordinary_and_zero_durations_keep_the_strict_cutoff_boundary
+          cargo test --locked -p clawd --bin clawd memory::retention::tests::duration_bounds:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd worker::runtime_support::background_workers::tests::duration_bounds:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix worker::runtime_support::background_workers::tests::duration_bounds:: \
+            --require huge_task_and_audit_durations_do_not_delete_retained_rows \
+            --require ordinary_and_zero_task_and_audit_durations_still_remove_expired_rows
+          cargo test --locked -p clawd --bin clawd worker::runtime_support::background_workers::tests::duration_bounds:: -- --test-threads=1 --nocapture
       - name: Verify patched bundled SQLite and all direct consumers
         shell: bash
         run: |
@@ -1401,6 +1422,27 @@ jobs:
             --prefix http::memory_routes::tests:: \
             --require vector_status_remains_read_only_while_another_connection_holds_the_writer_lock
           cargo test --locked -p clawd --bin clawd http::memory_routes::tests:: -- --test-threads=1 --nocapture
+      - name: Test retention duration overflow without arbitrary caps
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd retention_policy::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix retention_policy::tests:: \
+            --require ordinary_and_zero_days_preserve_exact_cutoffs \
+            --require all_u64_durations_match_wide_reference_without_future_cutoffs \
+            --require increasing_retention_never_moves_cutoff_forward \
+            --require duration_beyond_timestamp_range_saturates_to_oldest_timestamp
+          cargo test --locked -p clawd --bin clawd retention_policy::tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd memory::retention::tests::duration_bounds:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::retention::tests::duration_bounds:: \
+            --require all_memory_retention_kinds_preserve_fresh_rows_for_large_durations \
+            --require ordinary_and_zero_durations_keep_the_strict_cutoff_boundary
+          cargo test --locked -p clawd --bin clawd memory::retention::tests::duration_bounds:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd worker::runtime_support::background_workers::tests::duration_bounds:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix worker::runtime_support::background_workers::tests::duration_bounds:: \
+            --require huge_task_and_audit_durations_do_not_delete_retained_rows \
+            --require ordinary_and_zero_task_and_audit_durations_still_remove_expired_rows
+          cargo test --locked -p clawd --bin clawd worker::runtime_support::background_workers::tests::duration_bounds:: -- --test-threads=1 --nocapture
       - name: Verify patched bundled SQLite and all direct consumers
         shell: bash
         run: |

@@ -713,7 +713,10 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
         )
         AND NOT EXISTS (SELECT 1 FROM child_task_graphs graph WHERE graph.parent_task_id = tasks.task_id)
         AND NOT EXISTS (SELECT 1 FROM child_task_graph_nodes node WHERE node.child_task_id = tasks.task_id)";
-    let task_cutoff = now - (state.policy.maintenance.tasks_retention_days as i64 * 86400);
+    let task_cutoff = crate::retention_policy::cutoff_timestamp(
+        now,
+        state.policy.maintenance.tasks_retention_days,
+    );
     db.execute(
         &format!(
             "DELETE FROM tasks WHERE task_id IN (
@@ -782,7 +785,10 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
             .audit_db
             .get()
             .map_err(|e| anyhow!("audit db pool: {e}"))?;
-        let audit_cutoff = now - (state.policy.maintenance.audit_retention_days as i64 * 86400);
+        let audit_cutoff = crate::retention_policy::cutoff_timestamp(
+            now,
+            state.policy.maintenance.audit_retention_days,
+        );
         audit_db.execute(
             "DELETE FROM audit_logs WHERE id IN (
                  SELECT id FROM audit_logs
