@@ -81,6 +81,10 @@ pub(crate) fn test_audit_pool() -> DbPool {
 #[path = "db_pool_bootstrap_tests.rs"]
 mod pool_bootstrap_tests;
 
+#[cfg(test)]
+#[path = "db_sqlite_security_tests.rs"]
+mod sqlite_security_tests;
+
 pub(crate) fn sqlite_file_manager(
     path: &Path,
     busy_timeout_ms: u64,

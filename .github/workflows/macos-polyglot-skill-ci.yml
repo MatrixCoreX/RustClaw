@@ -487,6 +487,15 @@ jobs:
             --prefix http::memory_routes::tests:: \
             --require vector_status_remains_read_only_while_another_connection_holds_the_writer_lock
           cargo test --locked -p clawd --bin clawd http::memory_routes::tests:: -- --test-threads=1 --nocapture
+      - name: Verify patched bundled SQLite and all direct consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked -p clawd -p clawcli -p rss-fetch-skill -p db-basic-skill -p kb-skill -p fs-search-skill -p crypto-skill
+          cargo test --locked -p clawd --bin clawd db_init::sqlite_security_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix db_init::sqlite_security_tests:: \
+            --require bundled_sqlite_includes_wal_reset_fix
+          cargo test --locked -p clawd --bin clawd db_init::sqlite_security_tests:: -- --test-threads=1 --nocapture
       - name: Test SQLite file bootstrap before parallel pool connections
         shell: bash
         run: |
@@ -1391,6 +1400,15 @@ jobs:
             --prefix http::memory_routes::tests:: \
             --require vector_status_remains_read_only_while_another_connection_holds_the_writer_lock
           cargo test --locked -p clawd --bin clawd http::memory_routes::tests:: -- --test-threads=1 --nocapture
+      - name: Verify patched bundled SQLite and all direct consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked -p clawd -p clawcli -p rss-fetch-skill -p db-basic-skill -p kb-skill -p fs-search-skill -p crypto-skill
+          cargo test --locked -p clawd --bin clawd db_init::sqlite_security_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix db_init::sqlite_security_tests:: \
+            --require bundled_sqlite_includes_wal_reset_fix
+          cargo test --locked -p clawd --bin clawd db_init::sqlite_security_tests:: -- --test-threads=1 --nocapture
       - name: Test SQLite file bootstrap before parallel pool connections
         shell: bash
         run: |
