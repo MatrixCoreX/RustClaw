@@ -136,7 +136,7 @@ impl MemoryVectorIndex for ExactSqliteVectorIndex {
             &profile.profile_id,
             profile.generation,
         )?;
-        let fact_is_current = super::facts::current_fact_projection_sql();
+        let fact_is_current = super::facts::current_fact_projection_sql(db)?;
         let mut stmt = db.prepare(&format!(
             "SELECT v.retrieval_id, v.vector_blob, v.vector_checksum
              FROM memory_vector_rows v

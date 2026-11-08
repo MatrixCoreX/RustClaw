@@ -440,3 +440,48 @@ fn nearest_excludes_expired_canonical_fact_before_top_k_without_read_repair() {
     assert_eq!(fixture.fact_snapshot(expired), before);
     assert_eq!(fixture.projection_count(expired, &fixture.principal), 1);
 }
+
+#[test]
+fn legacy_fact_expiry_filter_preserves_the_unscoped_schema_without_read_repair() {
+    let db = Connection::open_in_memory().unwrap();
+    super::ensure_memory_fact_schema(&db).unwrap();
+    db.execute_batch(
+        "CREATE TABLE memory_retrieval_index(
+            id INTEGER PRIMARY KEY, source_kind TEXT, source_ref TEXT, user_key TEXT
+         );
+         INSERT INTO memory_facts(id,user_id,chat_id,user_key,fact_text,status,expires_at_ts)
+         VALUES (1,1,0,'legacy-owner','legacy fact','active',1);
+         INSERT INTO memory_retrieval_index VALUES(1,'memory_fact','memory_fact:1','legacy-owner');"
+    ).unwrap();
+    let before = db.total_changes();
+    let schema: Vec<(String, String)> = db
+        .prepare("SELECT name,sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY name")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+
+    let predicate = super::current_fact_projection_sql(&db).unwrap();
+    assert_eq!(
+        db.query_row(
+            &format!("SELECT COUNT(*) FROM memory_retrieval_index i WHERE {predicate}"),
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    assert_eq!(db.total_changes(), before);
+    let after: Vec<(String, String)> = db
+        .prepare("SELECT name,sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY name")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        after, schema,
+        "legacy reads must not add ownership columns or migrate schema"
+    );
+}

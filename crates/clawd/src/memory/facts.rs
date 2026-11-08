@@ -260,15 +260,32 @@ pub(crate) fn expire_due_memory_facts(db: &Connection, now_ts: i64) -> anyhow::R
 
 /// Read eligibility for linked facts; unresolved index links remain the explicit
 /// consistency/retention owner's responsibility, not a reason for read repair.
-pub(crate) fn current_fact_projection_sql() -> String {
-    format!(
+pub(crate) fn current_fact_projection_sql(db: &Connection) -> anyhow::Result<String> {
+    let (scoped, opaque_ids): (bool, bool) = db.query_row(
+        "SELECT
+           EXISTS(SELECT 1 FROM pragma_table_info('memory_facts') WHERE name='principal_id' COLLATE NOCASE)
+           AND EXISTS(SELECT 1 FROM pragma_table_info('memory_retrieval_index') WHERE name='principal_id' COLLATE NOCASE),
+           EXISTS(SELECT 1 FROM pragma_table_info('memory_facts') WHERE name='memory_id' COLLATE NOCASE)",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let identity_match = if scoped {
+        "(f.principal_id = i.principal_id
+          OR (f.principal_id IS NULL AND i.principal_id IS NULL AND f.user_key = i.user_key))"
+    } else {
+        "f.user_key = i.user_key"
+    };
+    let opaque_id_match = if opaque_ids {
+        "OR i.source_ref = f.memory_id"
+    } else {
+        ""
+    };
+    Ok(format!(
         "NOT EXISTS (
             SELECT 1 FROM memory_facts f
             WHERE i.source_kind = '{fact_source}'
-              AND (f.principal_id = i.principal_id
-                OR (f.principal_id IS NULL AND i.principal_id IS NULL
-                    AND f.user_key = i.user_key))
-              AND (i.source_ref = CAST(f.id AS TEXT) OR i.source_ref = f.memory_id
+              AND {identity_match}
+              AND (i.source_ref = CAST(f.id AS TEXT) {opaque_id_match}
                 OR i.source_ref = '{reference_prefix}' || CAST(f.id AS TEXT))
               AND (f.status <> '{active}' OR
                 (f.expires_at_ts IS NOT NULL
@@ -277,7 +294,7 @@ pub(crate) fn current_fact_projection_sql() -> String {
         fact_source = super::RETRIEVAL_SOURCE_MEMORY_FACT,
         reference_prefix = super::MEMORY_FACT_SOURCE_REF_PREFIX,
         active = MEMORY_FACT_STATUS_ACTIVE,
-    )
+    ))
 }
 
 fn normalized_or_default<'a>(value: &'a str, default: &'a str) -> &'a str {

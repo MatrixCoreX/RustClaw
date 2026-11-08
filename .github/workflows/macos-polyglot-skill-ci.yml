@@ -761,7 +761,8 @@ jobs:
             --require own_expired_fact_is_hidden_without_read_time_canonical_mutation \
             --require background_maintenance_expires_due_fact_and_retires_its_vector \
             --require failed_expiry_maintenance_rolls_back_fact_projection_and_source_deletions \
-            --require nearest_excludes_expired_canonical_fact_before_top_k_without_read_repair
+            --require nearest_excludes_expired_canonical_fact_before_top_k_without_read_repair \
+            --require legacy_fact_expiry_filter_preserves_the_unscoped_schema_without_read_repair
           cargo test --locked -p clawd --bin clawd memory::facts::recall_liveness_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         run: |
@@ -1758,7 +1759,8 @@ jobs:
             --require own_expired_fact_is_hidden_without_read_time_canonical_mutation \
             --require background_maintenance_expires_due_fact_and_retires_its_vector \
             --require failed_expiry_maintenance_rolls_back_fact_projection_and_source_deletions \
-            --require nearest_excludes_expired_canonical_fact_before_top_k_without_read_repair
+            --require nearest_excludes_expired_canonical_fact_before_top_k_without_read_repair \
+            --require legacy_fact_expiry_filter_preserves_the_unscoped_schema_without_read_repair
           cargo test --locked -p clawd --bin clawd memory::facts::recall_liveness_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         shell: bash

@@ -542,7 +542,7 @@ fn fetch_scoped_recent_candidates(
     access: &super::scope::ResolvedMemoryAccess,
     limit: usize,
 ) -> anyhow::Result<Vec<RetrievalRow>> {
-    let fact_is_current = super::facts::current_fact_projection_sql();
+    let fact_is_current = super::facts::current_fact_projection_sql(db)?;
     let mut stmt = db.prepare(&format!(
         "SELECT i.id, i.source_kind, i.memory_kind, i.role, i.search_text, i.vector_json,
                 i.embedding_model, i.embedding_dims, i.embedding_version, i.metadata_json,
@@ -583,7 +583,7 @@ fn fetch_scoped_candidate_by_id(
     retrieval_id: i64,
 ) -> anyhow::Result<Option<RetrievalRow>> {
     let (principal_id, principal_ref, conversation_ref, project_ref) = scoped_filter_params(access);
-    let fact_is_current = super::facts::current_fact_projection_sql();
+    let fact_is_current = super::facts::current_fact_projection_sql(db)?;
     db.query_row(
         &format!(
             "SELECT i.id, i.source_kind, i.memory_kind, i.role, i.search_text, i.vector_json,
@@ -1198,7 +1198,7 @@ fn fetch_recent_candidates(
     user_key: &str,
     limit: usize,
 ) -> anyhow::Result<Vec<RetrievalRow>> {
-    let fact_is_current = super::facts::current_fact_projection_sql();
+    let fact_is_current = super::facts::current_fact_projection_sql(db)?;
     let mut stmt = db.prepare(&format!(
         "SELECT i.id, i.source_kind, i.memory_kind, i.role, i.search_text, i.vector_json,
                 i.embedding_model, i.embedding_dims, i.embedding_version, i.metadata_json, i.salience, i.success_state,
@@ -1271,7 +1271,7 @@ fn fetch_fts_candidates(
     if query.is_empty() {
         return Ok(Vec::new());
     }
-    let fact_is_current = super::facts::current_fact_projection_sql();
+    let fact_is_current = super::facts::current_fact_projection_sql(db)?;
     let mut stmt = match db.prepare(&format!(
         "SELECT i.id, i.source_kind, i.memory_kind, i.role, i.search_text, i.vector_json,
                 i.embedding_model, i.embedding_dims, i.embedding_version, i.metadata_json, i.salience, i.success_state,
