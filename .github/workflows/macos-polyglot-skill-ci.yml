@@ -487,6 +487,20 @@ jobs:
             --prefix http::memory_routes::tests:: \
             --require vector_status_remains_read_only_while_another_connection_holds_the_writer_lock
           cargo test --locked -p clawd --bin clawd http::memory_routes::tests:: -- --test-threads=1 --nocapture
+      - name: Test initialized embedding schema writer availability
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::schema_read_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::schema_read_tests:: \
+            --require initialized_vector_schema_does_not_acquire_writer \
+            --require initialized_embedding_controls_do_not_acquire_writer \
+            --require circuit_status_read_does_not_acquire_writer \
+            --require vector_migration_digest_mismatch_is_rejected_without_writing \
+            --require control_migration_digest_mismatch_is_rejected_without_writing \
+            --require missing_migration_still_requires_real_write_admission \
+            --require missing_migration_is_applied_after_writer_release
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::schema_read_tests:: -- --test-threads=1 --nocapture
       - name: Test remaining memory write authority and policy fences
         shell: bash
         run: |
@@ -1363,6 +1377,20 @@ jobs:
             --prefix http::memory_routes::tests:: \
             --require vector_status_remains_read_only_while_another_connection_holds_the_writer_lock
           cargo test --locked -p clawd --bin clawd http::memory_routes::tests:: -- --test-threads=1 --nocapture
+      - name: Test initialized embedding schema writer availability
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::schema_read_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::schema_read_tests:: \
+            --require initialized_vector_schema_does_not_acquire_writer \
+            --require initialized_embedding_controls_do_not_acquire_writer \
+            --require circuit_status_read_does_not_acquire_writer \
+            --require vector_migration_digest_mismatch_is_rejected_without_writing \
+            --require control_migration_digest_mismatch_is_rejected_without_writing \
+            --require missing_migration_still_requires_real_write_admission \
+            --require missing_migration_is_applied_after_writer_release
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::schema_read_tests:: -- --test-threads=1 --nocapture
       - name: Test remaining memory write authority and policy fences
         shell: bash
         run: |

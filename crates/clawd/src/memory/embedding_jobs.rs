@@ -1024,6 +1024,10 @@ fn ensure_embedding_control_schema(db: &Connection) -> anyhow::Result<()> {
 mod tests;
 
 #[cfg(test)]
+#[path = "embedding_schema_read_tests.rs"]
+mod schema_read_tests;
+
+#[cfg(test)]
 #[path = "embedding_lease_renewal_tests.rs"]
 mod lease_renewal_tests;
 
