@@ -487,6 +487,20 @@ jobs:
             --prefix http::memory_routes::tests:: \
             --require vector_status_remains_read_only_while_another_connection_holds_the_writer_lock
           cargo test --locked -p clawd --bin clawd http::memory_routes::tests:: -- --test-threads=1 --nocapture
+      - name: Test SQLite file bootstrap before parallel pool connections
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd db_init::pool_bootstrap_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix db_init::pool_bootstrap_tests:: \
+            --require fresh_file_is_wal_before_parallel_pool_connections \
+            --require rollback_database_is_upgraded_before_pool_connections_without_losing_rows \
+            --require pooled_connection_initialization_does_not_repeat_journal_assignment \
+            --require verified_wal_bootstrap_preserves_an_active_writer_and_rows \
+            --require pooled_settings_keep_timeout_foreign_keys_and_constrained_memory_policy \
+            --require corrupt_file_is_rejected_before_any_pooled_connection_without_rewriting_it \
+            --require parallel_connections_keep_wal_and_each_connections_local_settings
+          cargo test --locked -p clawd --bin clawd db_init::pool_bootstrap_tests:: -- --test-threads=1 --nocapture
       - name: Test initialized embedding schema writer availability
         shell: bash
         run: |
@@ -1377,6 +1391,20 @@ jobs:
             --prefix http::memory_routes::tests:: \
             --require vector_status_remains_read_only_while_another_connection_holds_the_writer_lock
           cargo test --locked -p clawd --bin clawd http::memory_routes::tests:: -- --test-threads=1 --nocapture
+      - name: Test SQLite file bootstrap before parallel pool connections
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd db_init::pool_bootstrap_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix db_init::pool_bootstrap_tests:: \
+            --require fresh_file_is_wal_before_parallel_pool_connections \
+            --require rollback_database_is_upgraded_before_pool_connections_without_losing_rows \
+            --require pooled_connection_initialization_does_not_repeat_journal_assignment \
+            --require verified_wal_bootstrap_preserves_an_active_writer_and_rows \
+            --require pooled_settings_keep_timeout_foreign_keys_and_constrained_memory_policy \
+            --require corrupt_file_is_rejected_before_any_pooled_connection_without_rewriting_it \
+            --require parallel_connections_keep_wal_and_each_connections_local_settings
+          cargo test --locked -p clawd --bin clawd db_init::pool_bootstrap_tests:: -- --test-threads=1 --nocapture
       - name: Test initialized embedding schema writer availability
         shell: bash
         run: |
