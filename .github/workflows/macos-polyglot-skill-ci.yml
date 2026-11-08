@@ -494,7 +494,8 @@ jobs:
           cargo check --locked -p clawd -p clawcli -p rss-fetch-skill -p db-basic-skill -p kb-skill -p fs-search-skill -p crypto-skill
           cargo test --locked -p clawd --bin clawd db_init::sqlite_security_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
             --prefix db_init::sqlite_security_tests:: \
-            --require bundled_sqlite_includes_wal_reset_fix
+            --require bundled_sqlite_includes_wal_reset_fix \
+            --require unsigned_sqlite_conversions_remain_checked
           cargo test --locked -p clawd --bin clawd db_init::sqlite_security_tests:: -- --test-threads=1 --nocapture
       - name: Test SQLite file bootstrap before parallel pool connections
         shell: bash
@@ -1407,7 +1408,8 @@ jobs:
           cargo check --locked -p clawd -p clawcli -p rss-fetch-skill -p db-basic-skill -p kb-skill -p fs-search-skill -p crypto-skill
           cargo test --locked -p clawd --bin clawd db_init::sqlite_security_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
             --prefix db_init::sqlite_security_tests:: \
-            --require bundled_sqlite_includes_wal_reset_fix
+            --require bundled_sqlite_includes_wal_reset_fix \
+            --require unsigned_sqlite_conversions_remain_checked
           cargo test --locked -p clawd --bin clawd db_init::sqlite_security_tests:: -- --test-threads=1 --nocapture
       - name: Test SQLite file bootstrap before parallel pool connections
         shell: bash

@@ -94,7 +94,7 @@ reqwest-mcp = { package = "reqwest", version = "0.13", default-features = false,
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 rmcp = { version = "2.2.0", default-features = false, features = ["auth", "client", "transport-child-process", "transport-streamable-http-client-reqwest", "reqwest"] }
 # bundled：从源码编译 SQLite，交叉编译 aarch64 时无需目标平台 libsqlite3
-rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite = { version = "0.39", features = ["bundled", "fallible_uint"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 sha2 = "0.10"
