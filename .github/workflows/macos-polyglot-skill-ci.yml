@@ -751,6 +751,15 @@ jobs:
             --require failed_orphan_maintenance_rolls_back_other_retention_deletions \
             --require orphan_maintenance_does_not_install_an_uninitialized_optional_pipeline
           cargo test --locked -p clawd --bin clawd memory::vector_store::recall_liveness_tests:: -- --test-threads=1 --nocapture
+      - name: Test read-only recall with due canonical facts
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::facts::recall_liveness_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::facts::recall_liveness_tests:: \
+            --require ordinary_scoped_recall_does_not_expire_another_principals_fact \
+            --require warmed_scoped_recall_with_foreign_expiry_does_not_attempt_a_wal_writer \
+            --require own_expired_fact_is_hidden_without_read_time_canonical_mutation
+          cargo test --locked -p clawd --bin clawd memory::facts::recall_liveness_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         run: |
           set -euo pipefail
@@ -1736,6 +1745,15 @@ jobs:
             --require failed_orphan_maintenance_rolls_back_other_retention_deletions \
             --require orphan_maintenance_does_not_install_an_uninitialized_optional_pipeline
           cargo test --locked -p clawd --bin clawd memory::vector_store::recall_liveness_tests:: -- --test-threads=1 --nocapture
+      - name: Test read-only recall with due canonical facts
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::facts::recall_liveness_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::facts::recall_liveness_tests:: \
+            --require ordinary_scoped_recall_does_not_expire_another_principals_fact \
+            --require warmed_scoped_recall_with_foreign_expiry_does_not_attempt_a_wal_writer \
+            --require own_expired_fact_is_hidden_without_read_time_canonical_mutation
+          cargo test --locked -p clawd --bin clawd memory::facts::recall_liveness_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         shell: bash
         run: |

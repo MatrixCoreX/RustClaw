@@ -370,3 +370,7 @@ fn mark_facts_status(
 #[cfg(test)]
 #[path = "facts_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "facts_recall_liveness_tests.rs"]
+mod recall_liveness_tests;
