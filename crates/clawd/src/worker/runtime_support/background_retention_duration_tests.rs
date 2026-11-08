@@ -1,34 +1,8 @@
 use super::{cleanup_once, insert_task_with_kind, test_state};
 use rusqlite::params;
 
-fn isolated_state() -> crate::AppState {
-    let mut state = test_state();
-    let workspace = std::env::temp_dir().canonicalize().unwrap().join(format!(
-        "retention-maintenance-{}",
-        uuid::Uuid::new_v4().simple()
-    ));
-    let mut directory = std::fs::DirBuilder::new();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        directory.mode(0o700);
-    }
-    directory.create(&workspace).unwrap();
-    println!(
-        "retention_cleanup_fixture_workspace={}",
-        workspace.display()
-    );
-    // Keep the owned workspace as test evidence, never clean the shared temp root.
-    state.skill_rt.workspace_root = workspace.clone();
-    state.skill_rt.default_locator_search_dir = workspace;
-    state
-}
-
 fn cleanup(days: u64) -> (Vec<String>, Vec<String>) {
-    let mut state = isolated_state();
-    // The shared fixture creates retrieval tables after its startup seed.
-    // Apply the scope migration afterward, matching the real startup schema.
-    crate::memory::scope::ensure_memory_scope_schema(&state.core.db.get().unwrap()).unwrap();
+    let mut state = test_state();
     state.policy.maintenance.tasks_retention_days = days;
     state.policy.maintenance.audit_retention_days = days;
     state.policy.maintenance.tasks_max_rows = 100;

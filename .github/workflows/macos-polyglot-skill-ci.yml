@@ -487,6 +487,41 @@ jobs:
             --prefix http::memory_routes::tests:: \
             --require vector_status_remains_read_only_while_another_connection_holds_the_writer_lock
           cargo test --locked -p clawd --bin clawd http::memory_routes::tests:: -- --test-threads=1 --nocapture
+      - name: Test private maintenance fixtures and retained cleanup contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd worker::runtime_support::background_workers::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix worker::runtime_support::background_workers::tests:: \
+            --require terminal_delivery_retry_delay_is_bounded_and_increases \
+            --require cleanup_removes_cost_ledger_rows_after_task_retention_removes_owner \
+            --require cleanup_preserves_conversation_tasks_for_user_controlled_history \
+            --require cleanup_limits_each_expired_task_pass_to_a_fixed_batch \
+            --require cleanup_preserves_active_nonconversation_tasks_under_age_and_count_limits \
+            --require cleanup_preserves_cancellation_until_execution_settles \
+            --require cleanup_preserves_unfinished_terminal_delivery_under_both_policies \
+            --require cleanup_preserves_pending_conversation_replies_until_delivery_settles \
+            --require cleanup_preserves_scheduled_resume_anchors \
+            --require cleanup_preserves_child_graph_owners_and_results \
+            --require scheduled_wakeup_resumes_waiting_thread_without_enqueuing_duplicate_task \
+            --require scheduled_wakeup_enqueues_new_thread_after_previous_task_is_terminal \
+            --require legacy_scheduled_job_revalidates_admin_authority_on_each_wakeup \
+            --require blocking::cleanup_pool_wait_keeps_async_runtime_responsive \
+            --require blocking::schedule_pool_wait_keeps_async_runtime_responsive \
+            --require blocking::heartbeat_pool_wait_keeps_async_runtime_responsive \
+            --require blocking::blocking_ticks_preserve_results_errors_and_panics \
+            --require blocking::cancelled_waiter_does_not_replay_started_blocking_work \
+            --require blocking::delayed_heartbeat_cannot_renew_a_cancelled_or_reclaimed_task \
+            --require blocking::awaited_ticks_have_only_one_in_flight_operation_per_loop \
+            --require blocking::resume_lease::resume_lease_pool_wait_keeps_async_runtime_responsive \
+            --require blocking::resume_lease::running_execution_renews_its_complete_claim_chain_more_than_once \
+            --require blocking::resume_lease::cancellation_during_execution_loses_the_lease_without_returning_completion \
+            --require blocking::resume_lease::expired_claim_does_not_poll_the_execution_future \
+            --require duration_bounds::huge_task_and_audit_durations_do_not_delete_retained_rows \
+            --require duration_bounds::ordinary_and_zero_task_and_audit_durations_still_remove_expired_rows \
+            --require fixtures::cleanup_fixture_workspaces_are_private_and_distinct \
+            --require fixtures::cleanup_fixture_removes_only_its_own_orphan_artifacts
+          cargo test --locked -p clawd --bin clawd worker::runtime_support::background_workers::tests:: -- --test-threads=1 --nocapture
       - name: Test retention duration overflow without arbitrary caps
         shell: bash
         run: |
@@ -1422,6 +1457,41 @@ jobs:
             --prefix http::memory_routes::tests:: \
             --require vector_status_remains_read_only_while_another_connection_holds_the_writer_lock
           cargo test --locked -p clawd --bin clawd http::memory_routes::tests:: -- --test-threads=1 --nocapture
+      - name: Test private maintenance fixtures and retained cleanup contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd worker::runtime_support::background_workers::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix worker::runtime_support::background_workers::tests:: \
+            --require terminal_delivery_retry_delay_is_bounded_and_increases \
+            --require cleanup_removes_cost_ledger_rows_after_task_retention_removes_owner \
+            --require cleanup_preserves_conversation_tasks_for_user_controlled_history \
+            --require cleanup_limits_each_expired_task_pass_to_a_fixed_batch \
+            --require cleanup_preserves_active_nonconversation_tasks_under_age_and_count_limits \
+            --require cleanup_preserves_cancellation_until_execution_settles \
+            --require cleanup_preserves_unfinished_terminal_delivery_under_both_policies \
+            --require cleanup_preserves_pending_conversation_replies_until_delivery_settles \
+            --require cleanup_preserves_scheduled_resume_anchors \
+            --require cleanup_preserves_child_graph_owners_and_results \
+            --require scheduled_wakeup_resumes_waiting_thread_without_enqueuing_duplicate_task \
+            --require scheduled_wakeup_enqueues_new_thread_after_previous_task_is_terminal \
+            --require legacy_scheduled_job_revalidates_admin_authority_on_each_wakeup \
+            --require blocking::cleanup_pool_wait_keeps_async_runtime_responsive \
+            --require blocking::schedule_pool_wait_keeps_async_runtime_responsive \
+            --require blocking::heartbeat_pool_wait_keeps_async_runtime_responsive \
+            --require blocking::blocking_ticks_preserve_results_errors_and_panics \
+            --require blocking::cancelled_waiter_does_not_replay_started_blocking_work \
+            --require blocking::delayed_heartbeat_cannot_renew_a_cancelled_or_reclaimed_task \
+            --require blocking::awaited_ticks_have_only_one_in_flight_operation_per_loop \
+            --require blocking::resume_lease::resume_lease_pool_wait_keeps_async_runtime_responsive \
+            --require blocking::resume_lease::running_execution_renews_its_complete_claim_chain_more_than_once \
+            --require blocking::resume_lease::cancellation_during_execution_loses_the_lease_without_returning_completion \
+            --require blocking::resume_lease::expired_claim_does_not_poll_the_execution_future \
+            --require duration_bounds::huge_task_and_audit_durations_do_not_delete_retained_rows \
+            --require duration_bounds::ordinary_and_zero_task_and_audit_durations_still_remove_expired_rows \
+            --require fixtures::cleanup_fixture_workspaces_are_private_and_distinct \
+            --require fixtures::cleanup_fixture_removes_only_its_own_orphan_artifacts
+          cargo test --locked -p clawd --bin clawd worker::runtime_support::background_workers::tests:: -- --test-threads=1 --nocapture
       - name: Test retention duration overflow without arbitrary caps
         shell: bash
         run: |

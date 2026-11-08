@@ -3,6 +3,9 @@ use uuid::Uuid;
 
 use super::*;
 
+#[path = "background_test_fixtures.rs"]
+mod fixtures;
+
 #[path = "background_blocking_tests.rs"]
 mod blocking;
 
@@ -20,11 +23,13 @@ fn terminal_delivery_retry_delay_is_bounded_and_increases() {
 }
 
 fn test_state() -> crate::AppState {
-    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let mut state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    fixtures::isolate_workspace(&mut state);
     {
         let db = state.core.db.get().expect("get db");
         crate::memory::indexing::ensure_retrieval_schema(&db)
             .expect("ensure memory retrieval schema");
+        crate::memory::scope::ensure_memory_scope_schema(&db).expect("ensure memory scope schema");
         crate::repo::ensure_channel_delivery_outbox_schema(&db).expect("ensure terminal outbox");
         crate::repo::ensure_conversation_reply_item_schema(&db).expect("ensure reply outbox");
     }
