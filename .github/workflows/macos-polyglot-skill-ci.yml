@@ -736,6 +736,16 @@ jobs:
             --require controls::unknown_state_still_allows_export_and_user_requested_content_deletion \
             --require controls::host_available_observation_is_independent_of_main_pages_and_domain_budget
           cargo test --locked -p clawd --bin clawd memory::ux::budget_contract_tests:: -- --test-threads=1 --nocapture
+      - name: Test recall projection liveness and cross-principal read effects
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::vector_store::recall_liveness_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::vector_store::recall_liveness_tests:: \
+            --require nearest_excludes_missing_projection_before_top_k_without_cleanup \
+            --require nearest_excludes_mismatched_owner_and_scope_before_top_k \
+            --require nearest_filters_orphans_while_an_independent_wal_writer_is_held \
+            --require ordinary_recall_does_not_mutate_another_principals_orphan_vectors
+          cargo test --locked -p clawd --bin clawd memory::vector_store::recall_liveness_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         run: |
           set -euo pipefail
@@ -1706,6 +1716,16 @@ jobs:
             --require controls::unknown_state_still_allows_export_and_user_requested_content_deletion \
             --require controls::host_available_observation_is_independent_of_main_pages_and_domain_budget
           cargo test --locked -p clawd --bin clawd memory::ux::budget_contract_tests:: -- --test-threads=1 --nocapture
+      - name: Test recall projection liveness and cross-principal read effects
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::vector_store::recall_liveness_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::vector_store::recall_liveness_tests:: \
+            --require nearest_excludes_missing_projection_before_top_k_without_cleanup \
+            --require nearest_excludes_mismatched_owner_and_scope_before_top_k \
+            --require nearest_filters_orphans_while_an_independent_wal_writer_is_held \
+            --require ordinary_recall_does_not_mutate_another_principals_orphan_vectors
+          cargo test --locked -p clawd --bin clawd memory::vector_store::recall_liveness_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         shell: bash
         run: |

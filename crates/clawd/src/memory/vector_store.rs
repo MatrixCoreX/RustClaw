@@ -621,3 +621,7 @@ fn short_digest(value: &[u8]) -> String {
 #[cfg(test)]
 #[path = "vector_store_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "vector_recall_liveness_tests.rs"]
+mod recall_liveness_tests;
