@@ -3,6 +3,55 @@ use rusqlite::params;
 use crate::memory::capacity_test_fixtures::{persist_preference_sources, Fixture};
 use crate::memory::vector_store::LOCAL_PROFILE_ID;
 
+#[test]
+fn fairness_order_does_not_rescan_running_population_per_queued_job() {
+    let mut work = Vec::new();
+    for queued in [128, 256] {
+        let fixture = Fixture::memory();
+        let owner = seed_owner(&fixture, &fixture.key, queued * 2, 1);
+        let db = fixture.state().core.db.get().unwrap();
+        assert_eq!(
+            db.execute(
+                "UPDATE memory_embedding_jobs SET status='running',lease_owner='busy-worker',
+                    lease_expires_at_ts=?1,attempt=1 WHERE job_id IN (
+                    SELECT job_id FROM memory_embedding_jobs WHERE principal_id=?2
+                    ORDER BY retrieval_id LIMIT ?3)",
+                params![crate::now_ts_u64() as i64 + 300, owner, queued as i64],
+            )
+            .unwrap(),
+            queued
+        );
+        let before = db.total_changes();
+        let mut statement = db.prepare(super::EMBEDDING_CANDIDATE_SQL).unwrap();
+        let selected = statement
+            .query_map([crate::now_ts_u64() as i64], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(selected.len(), queued);
+        let steps = statement.get_status(rusqlite::StatementStatus::VmStep) as u64;
+        assert!(steps > 0);
+        assert_eq!(
+            db.total_changes(),
+            before,
+            "candidate ordering must remain read-only"
+        );
+        work.push(steps);
+    }
+    eprintln!(
+        "EMBEDDING_FAIRNESS_WORK_JSON {}",
+        serde_json::json!({
+            "small_queued":128,"small_running":128,"large_queued":256,"large_running":256,
+            "small_vm_steps":work[0],"large_vm_steps":work[1],
+            "SQLite_version":rusqlite::version()
+        })
+    );
+    assert!(
+        work[1] <= work[0] * 3,
+        "doubling queued and running jobs must not multiply their populations"
+    );
+}
+
 fn seed_owner(fixture: &Fixture, key: &str, count: usize, queued_at: i64) -> String {
     let db = fixture.state().core.db.get().unwrap();
     let principal = crate::repo::auth::principal_id_for_user_key(&db, key)

@@ -26,6 +26,36 @@ const CIRCUIT_MIGRATION_ID: &str = "017_memory_embedding_circuit_v1";
 const CIRCUIT_MIGRATION_SQL: &str =
     include_str!("../../../../migrations/017_memory_embedding_circuit.sql");
 
+// Aggregate active work once so fairness does not rescan it per queued row.
+const EMBEDDING_CANDIDATE_SQL: &str = "SELECT job.job_id, job.principal_id, job.profile_id,
+                job.consent_policy_digest, job.profile_generation,
+                COALESCE((
+                    SELECT MAX(snapshot.generation) FROM memory_vector_snapshots snapshot
+                    WHERE snapshot.principal_id = job.principal_id
+                      AND snapshot.profile_id = job.profile_id AND snapshot.state = 'active'
+                ), profile.generation)
+         FROM memory_embedding_jobs job
+         LEFT JOIN memory_embedding_profiles profile ON profile.profile_id = job.profile_id
+         LEFT JOIN (
+             SELECT principal_id, COUNT(*) AS active_jobs FROM memory_embedding_jobs
+             WHERE status = 'running' GROUP BY principal_id
+         ) running ON running.principal_id = job.principal_id
+         WHERE job.status IN ('queued', 'retry_wait') AND job.cancel_requested = 0
+           AND job.not_before_ts <= ?1
+           AND COALESCE(json_extract(job.checkpoint_json,'$.phase'),'') != 'response_received'
+           AND NOT EXISTS (
+                SELECT 1 FROM memory_embedding_circuits circuit
+                WHERE circuit.principal_id = job.principal_id
+                  AND circuit.profile_id = job.profile_id AND circuit.open_until_ts > ?1
+           )
+           AND NOT EXISTS (
+                SELECT 1 FROM memory_embedding_controls control
+                WHERE control.principal_id = job.principal_id
+                  AND control.profile_id = job.profile_id AND control.state = 'paused'
+           )
+         ORDER BY COALESCE(running.active_jobs, 0),
+                  job.not_before_ts, job.created_at_ts, job.job_id";
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct EmbeddingJob {
     job_id: String,
@@ -260,31 +290,7 @@ fn admitted_embedding_job_ids(
     if pressure.generation_availability() != GenerationAvailability::Available {
         return Ok(Vec::new());
     }
-    let mut statement = db.prepare(
-        "SELECT job.job_id, job.principal_id, job.profile_id,
-                job.consent_policy_digest, job.profile_generation,
-                COALESCE((
-                    SELECT MAX(snapshot.generation) FROM memory_vector_snapshots snapshot
-                    WHERE snapshot.principal_id = job.principal_id
-                      AND snapshot.profile_id = job.profile_id AND snapshot.state = 'active'
-                ), profile.generation)
-         FROM memory_embedding_jobs job
-         LEFT JOIN memory_embedding_profiles profile ON profile.profile_id = job.profile_id
-         WHERE job.status IN ('queued', 'retry_wait') AND job.cancel_requested = 0
-           AND job.not_before_ts <= ?1
-           AND COALESCE(json_extract(job.checkpoint_json,'$.phase'),'') != 'response_received'
-           AND NOT EXISTS (
-                SELECT 1 FROM memory_embedding_circuits circuit
-                WHERE circuit.principal_id = job.principal_id
-                  AND circuit.profile_id = job.profile_id AND circuit.open_until_ts > ?1
-           )
-           AND NOT EXISTS (
-                SELECT 1 FROM memory_embedding_controls control
-                WHERE control.principal_id = job.principal_id
-                  AND control.profile_id = job.profile_id AND control.state = 'paused'
-           )
-         ORDER BY job.not_before_ts, job.created_at_ts, job.job_id",
-    )?;
+    let mut statement = db.prepare(EMBEDDING_CANDIDATE_SQL)?;
     let candidates = statement.query_map([now], |row| {
         Ok((
             row.get::<_, String>(0)?,
