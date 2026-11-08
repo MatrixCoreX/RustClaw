@@ -275,25 +275,34 @@ pub(crate) fn current_fact_projection_sql(db: &Connection) -> anyhow::Result<Str
     } else {
         "f.user_key = i.user_key"
     };
+    let inactive_fact = format!(
+        "i.source_kind = '{fact_source}' AND {identity_match}
+              AND (f.status <> '{active}' OR
+                (f.expires_at_ts IS NOT NULL
+                 AND f.expires_at_ts <= CAST(strftime('%s', 'now') AS INTEGER)))",
+        fact_source = super::RETRIEVAL_SOURCE_MEMORY_FACT,
+        active = MEMORY_FACT_STATUS_ACTIVE,
+    );
     let opaque_id_match = if opaque_ids {
-        "OR i.source_ref = f.memory_id"
+        format!(
+            "UNION ALL SELECT 1 FROM memory_facts f
+             WHERE f.memory_id = i.source_ref AND {inactive_fact}"
+        )
     } else {
-        ""
+        String::new()
     };
+    // Narrow numeric candidates by primary key, then check exact reference spelling.
+    // Separate opaque lookup keeps ownership ORs from causing an owner-wide scan.
     Ok(format!(
         "NOT EXISTS (
             SELECT 1 FROM memory_facts f
-            WHERE i.source_kind = '{fact_source}'
-              AND {identity_match}
-              AND (i.source_ref = CAST(f.id AS TEXT) {opaque_id_match}
+            WHERE f.id = CAST(REPLACE(i.source_ref, '{reference_prefix}', '') AS INTEGER)
+              AND (i.source_ref = CAST(f.id AS TEXT)
                 OR i.source_ref = '{reference_prefix}' || CAST(f.id AS TEXT))
-              AND (f.status <> '{active}' OR
-                (f.expires_at_ts IS NOT NULL
-                 AND f.expires_at_ts <= CAST(strftime('%s', 'now') AS INTEGER)))
+              AND {inactive_fact}
+            {opaque_id_match}
         )",
-        fact_source = super::RETRIEVAL_SOURCE_MEMORY_FACT,
         reference_prefix = super::MEMORY_FACT_SOURCE_REF_PREFIX,
-        active = MEMORY_FACT_STATUS_ACTIVE,
     ))
 }
 

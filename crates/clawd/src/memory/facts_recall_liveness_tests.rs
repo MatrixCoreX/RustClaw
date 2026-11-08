@@ -188,6 +188,148 @@ fn canonical_fact_expiry_filter_avoids_owner_population_cross_product() {
 }
 
 #[test]
+fn indexed_fact_filter_preserves_exact_reference_owner_and_expiry_semantics() {
+    let db = Connection::open_in_memory().unwrap();
+    db.execute_batch(
+        "CREATE TABLE memory_facts(id INTEGER PRIMARY KEY, memory_id TEXT UNIQUE,
+            principal_id TEXT, user_key TEXT, status TEXT, expires_at_ts INTEGER);
+         CREATE TABLE memory_retrieval_index(id INTEGER PRIMARY KEY, source_kind TEXT,
+            source_ref TEXT, principal_id TEXT, user_key TEXT);",
+    )
+    .unwrap();
+    let facts = [
+        (
+            0_i64,
+            Some("memory_fact:2"),
+            Some("owner"),
+            "owner",
+            Some("expired"),
+            None,
+        ),
+        (
+            1,
+            Some("opaque-1"),
+            Some("owner"),
+            "owner",
+            Some("active"),
+            Some(0),
+        ),
+        (
+            2,
+            Some("0"),
+            Some("foreign"),
+            "foreign",
+            Some("expired"),
+            None,
+        ),
+        (-1, Some("mem_abc"), None, "owner", Some("active"), Some(0)),
+        (
+            i64::MAX,
+            None,
+            Some("owner"),
+            "owner",
+            Some("active"),
+            Some(i64::MAX),
+        ),
+        (
+            i64::MIN,
+            Some("memory_fact:-1"),
+            Some("owner"),
+            "owner",
+            None,
+            None,
+        ),
+    ];
+    for (id, memory_id, owner, key, status, expiry) in facts {
+        db.execute(
+            "INSERT INTO memory_facts VALUES(?1,?2,?3,?4,?5,?6)",
+            params![id, memory_id, owner, key, status, expiry],
+        )
+        .unwrap();
+    }
+    let references = [
+        Some("0"),
+        Some("-1"),
+        Some("1"),
+        Some("2"),
+        Some("memory_fact:0"),
+        Some("memory_fact:-1"),
+        Some("memory_fact:1"),
+        Some("01"),
+        Some("memory_fact:01"),
+        Some("memory_fact:memory_fact:1"),
+        Some("opaque-1"),
+        Some("mem_abc"),
+        Some("9223372036854775807"),
+        Some("9223372036854775808"),
+        Some("-9223372036854775808"),
+        Some("memory_fact:9223372036854775807"),
+        None,
+        Some(""),
+        Some("+1"),
+        Some("1.0"),
+        Some(" memory_fact:1"),
+        Some("memory_fact:1x"),
+    ];
+    for kind in ["memory_fact", "other"] {
+        for reference in references {
+            for owner in [Some("owner"), Some("foreign"), None] {
+                for key in [Some("owner"), Some("foreign"), None] {
+                    db.execute(
+                        "INSERT INTO memory_retrieval_index(source_kind,source_ref,principal_id,user_key)
+                         VALUES(?1,?2,?3,?4)",
+                        params![kind, reference, owner, key],
+                    )
+                    .unwrap();
+                }
+            }
+        }
+    }
+    // Frozen pre-optimization predicate is an independent effects oracle.
+    let original = "NOT EXISTS(SELECT 1 FROM memory_facts f
+        WHERE i.source_kind='memory_fact'
+          AND (f.principal_id=i.principal_id OR
+               (f.principal_id IS NULL AND i.principal_id IS NULL AND f.user_key=i.user_key))
+          AND (i.source_ref=CAST(f.id AS TEXT) OR i.source_ref=f.memory_id
+               OR i.source_ref='memory_fact:'||CAST(f.id AS TEXT))
+          AND (f.status<>'active' OR (f.expires_at_ts IS NOT NULL
+               AND f.expires_at_ts<=CAST(strftime('%s','now') AS INTEGER))))";
+    let selected = |predicate: &str| {
+        db.prepare(&format!(
+            "SELECT i.id FROM memory_retrieval_index i WHERE {predicate} ORDER BY i.id"
+        ))
+        .unwrap()
+        .query_map([], |row| row.get::<_, i64>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap()
+    };
+    let before = db.total_changes();
+    assert_eq!(
+        selected(original),
+        selected(&super::current_fact_projection_sql(&db).unwrap())
+    );
+    assert_eq!(
+        db.total_changes(),
+        before,
+        "no read-time repair or mutation"
+    );
+    let rows: i64 = db
+        .query_row("SELECT COUNT(*) FROM memory_retrieval_index", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(rows, 396);
+    let version: String = db
+        .query_row("SELECT sqlite_version()", [], |row| row.get(0))
+        .unwrap();
+    println!(
+        "FACT_REFERENCE_SQLITE_JSON {}",
+        serde_json::json!({"version":version,"projection_rows":rows,"same_effects_as_original":true})
+    );
+}
+
+#[test]
 fn ordinary_scoped_recall_does_not_expire_another_principals_fact() {
     let fixture = Fixture::new();
     fixture.fact(OWNER_KEY, "caller", "retained canonical caller sentinel");
