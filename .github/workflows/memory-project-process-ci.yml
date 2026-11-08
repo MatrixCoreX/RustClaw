@@ -94,6 +94,13 @@ jobs:
             --require circuit_blocked_unserved_owner_is_not_claimed_for_fairness \
             --require fairness_order_does_not_rescan_running_population_per_queued_job
           cargo test --locked -p clawd --bin clawd memory::embedding_jobs::claim_fairness_tests:: -- --test-threads=1 --nocapture
+      - name: Test generation claim work without population cross products
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::jobs::claim_work_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::jobs::claim_work_tests:: \
+            --require claim_order_work_does_not_multiply_queued_and_running_populations
+          cargo test --locked -p clawd --bin clawd memory::jobs::claim_work_tests:: -- --test-threads=1 --nocapture
       - name: Build exact native consumers
         run: |
           set -euo pipefail

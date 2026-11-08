@@ -14,6 +14,15 @@ use super::eligibility::{
 const MIGRATION_ID: &str = "011_durable_memory_jobs_v1";
 const MIGRATION_SQL: &str = include_str!("../../../../migrations/011_durable_memory_jobs.sql");
 
+const GENERATION_CANDIDATE_SQL: &str =
+    "SELECT j.job_id, j.principal_id, j.checkpoint_json FROM memory_jobs j
+         WHERE j.status IN ('queued', 'retry_wait')
+           AND j.cancel_requested = 0 AND j.not_before_ts <= ?1
+         ORDER BY (
+            SELECT COUNT(*) FROM memory_jobs active
+            WHERE active.principal_id = j.principal_id AND active.status = 'running'
+         ) ASC, j.not_before_ts ASC, j.created_at_ts ASC, j.job_id ASC";
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct MemoryJobSnapshot {
     pub(crate) job_id: String,
@@ -676,15 +685,7 @@ fn next_admitted_job(db: &Connection, now: i64) -> anyhow::Result<Option<String>
     };
     let storage_available =
         StoragePressure::load(db)?.generation_availability() == GenerationAvailability::Available;
-    let mut statement = db.prepare(
-        "SELECT j.job_id, j.principal_id, j.checkpoint_json FROM memory_jobs j
-         WHERE j.status IN ('queued', 'retry_wait')
-           AND j.cancel_requested = 0 AND j.not_before_ts <= ?1
-         ORDER BY (
-            SELECT COUNT(*) FROM memory_jobs active
-            WHERE active.principal_id = j.principal_id AND active.status = 'running'
-         ) ASC, j.not_before_ts ASC, j.created_at_ts ASC, j.job_id ASC",
-    )?;
+    let mut statement = db.prepare(GENERATION_CANDIDATE_SQL)?;
     let candidates = statement.query_map([now], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -1196,3 +1197,7 @@ mod completion_execution_tests;
 #[cfg(test)]
 #[path = "completion_provider_selection_tests.rs"]
 mod provider_selection_tests;
+
+#[cfg(test)]
+#[path = "jobs_claim_work_tests.rs"]
+mod claim_work_tests;
