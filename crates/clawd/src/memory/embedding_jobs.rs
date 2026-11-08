@@ -1048,3 +1048,7 @@ mod capacity_http_tests;
 #[cfg(test)]
 #[path = "embedding_capacity_race_tests.rs"]
 mod capacity_race_tests;
+
+#[cfg(test)]
+#[path = "embedding_claim_fairness_tests.rs"]
+mod claim_fairness_tests;
