@@ -141,6 +141,53 @@ impl Fixture {
 // Preserve private fixture databases on success and failure; no cleanup Drop.
 
 #[test]
+fn canonical_fact_expiry_filter_avoids_owner_population_cross_product() {
+    use rusqlite::StatementStatus;
+
+    let fixture = Fixture::new();
+    let db = fixture.state.core.db.get().unwrap();
+    let measure = |expected: i64| {
+        let before = db.total_changes();
+        let predicate = super::current_fact_projection_sql(&db).unwrap();
+        let mut statement = db
+            .prepare(&format!(
+                "SELECT COUNT(*) FROM memory_retrieval_index i
+                 WHERE i.principal_id = ?1 AND i.source_kind = 'memory_fact'
+                   AND {predicate}"
+            ))
+            .unwrap();
+        let selected: i64 = statement
+            .query_row([&fixture.principal], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            selected, expected,
+            "every current canonical fact is retained"
+        );
+        assert_eq!(db.total_changes(), before, "recall filtering is read-only");
+        let steps = statement.get_status(StatementStatus::VmStep);
+        assert!(steps > 0, "measure actual bundled SQLite work");
+        steps as u64
+    };
+    for index in 0..128 {
+        fixture.fact(OWNER_KEY, &format!("scaled-{index}"), "current scaled fact");
+    }
+    let small = measure(128);
+    for index in 128..256 {
+        fixture.fact(OWNER_KEY, &format!("scaled-{index}"), "current scaled fact");
+    }
+    let large = measure(256);
+    println!(
+        "FACT_RECALL_WORK_JSON {}",
+        serde_json::json!({"small_rows":128,"large_rows":256,
+            "small_vm_steps":small,"large_vm_steps":large})
+    );
+    assert!(
+        large <= small.saturating_mul(3),
+        "doubling current facts must not rescan the owner's entire fact population per projection: small={small} large={large}"
+    );
+}
+
+#[test]
 fn ordinary_scoped_recall_does_not_expire_another_principals_fact() {
     let fixture = Fixture::new();
     fixture.fact(OWNER_KEY, "caller", "retained canonical caller sentinel");

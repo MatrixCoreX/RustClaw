@@ -69,6 +69,13 @@ jobs:
           set -euo pipefail
           python3 -m pip install --only-binary=:all: PyYAML==6.0.2
           python3 -B -m unittest discover -s scripts/tests -p 'test_memory_project_process_probe.py'
+      - name: Test canonical fact recall work without owner-wide rescans
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::facts::recall_liveness_tests::canonical_fact_expiry_filter_avoids_owner_population_cross_product -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::facts::recall_liveness_tests:: \
+            --require canonical_fact_expiry_filter_avoids_owner_population_cross_product
+          cargo test --locked -p clawd --bin clawd memory::facts::recall_liveness_tests::canonical_fact_expiry_filter_avoids_owner_population_cross_product -- --exact --test-threads=1 --nocapture
       - name: Build exact native consumers
         run: |
           set -euo pipefail
