@@ -207,6 +207,8 @@ pub(crate) fn ensure_vector_pipeline_schema(db: &Connection) -> anyhow::Result<(
             applied == migration_manifest_digest(),
             "runtime_schema_migration_digest_mismatch:{MIGRATION_ID}"
         );
+        // A verified migration is a read path, not another schema write.
+        return Ok(());
     }
     if db.is_autocommit() {
         let tx = db.unchecked_transaction()?;

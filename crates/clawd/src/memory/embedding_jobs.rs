@@ -986,13 +986,14 @@ fn ensure_embedding_control_schema(db: &Connection) -> anyhow::Result<()> {
             applied == digest,
             "memory_embedding_control_digest_mismatch"
         );
-    }
-    db.execute_batch(CONTROL_MIGRATION_SQL)?;
-    db.execute(
-        "INSERT INTO runtime_schema_migrations(migration_id, schema_digest, applied_at)
+    } else {
+        db.execute_batch(CONTROL_MIGRATION_SQL)?;
+        db.execute(
+            "INSERT INTO runtime_schema_migrations(migration_id, schema_digest, applied_at)
          VALUES (?1, ?2, ?3) ON CONFLICT(migration_id) DO NOTHING",
-        params![CONTROL_MIGRATION_ID, digest, crate::now_ts()],
-    )?;
+            params![CONTROL_MIGRATION_ID, digest, crate::now_ts()],
+        )?;
+    }
     let circuit_digest = format!(
         "sha256:{:x}",
         Sha256::digest(CIRCUIT_MIGRATION_SQL.as_bytes())
@@ -1009,13 +1010,14 @@ fn ensure_embedding_control_schema(db: &Connection) -> anyhow::Result<()> {
             applied == circuit_digest,
             "memory_embedding_circuit_digest_mismatch"
         );
-    }
-    db.execute_batch(CIRCUIT_MIGRATION_SQL)?;
-    db.execute(
-        "INSERT INTO runtime_schema_migrations(migration_id, schema_digest, applied_at)
+    } else {
+        db.execute_batch(CIRCUIT_MIGRATION_SQL)?;
+        db.execute(
+            "INSERT INTO runtime_schema_migrations(migration_id, schema_digest, applied_at)
          VALUES (?1, ?2, ?3) ON CONFLICT(migration_id) DO NOTHING",
-        params![CIRCUIT_MIGRATION_ID, circuit_digest, crate::now_ts()],
-    )?;
+            params![CIRCUIT_MIGRATION_ID, circuit_digest, crate::now_ts()],
+        )?;
+    }
     Ok(())
 }
 
