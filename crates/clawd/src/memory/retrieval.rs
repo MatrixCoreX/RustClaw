@@ -847,13 +847,15 @@ fn fetch_scoped_fts_candidates(
     if query.is_empty() {
         return Ok(Vec::new());
     }
-    let mut stmt = db.prepare(
+    let fact_is_current = super::facts::current_fact_projection_sql(db)?;
+    let mut stmt = db.prepare(&format!(
         "SELECT i.id, i.source_kind, i.memory_kind, i.role, i.search_text, i.vector_json,
                 i.embedding_model, i.embedding_dims, i.embedding_version, i.metadata_json,
                 i.salience, i.success_state, COALESCE(i.updated_at_ts, i.created_at_ts, 0)
          FROM memory_retrieval_index_fts f
          JOIN memory_retrieval_index i ON i.id = f.rowid
          WHERE i.principal_id = ?1
+           AND {fact_is_current}
            AND ((i.scope_kind = 'principal' AND i.scope_ref = ?2)
              OR (i.scope_kind = 'conversation' AND ?3 IS NOT NULL AND i.scope_ref = ?3)
              OR (i.scope_kind = 'project' AND ?4 IS NOT NULL AND i.scope_ref = ?4))
@@ -863,8 +865,8 @@ fn fetch_scoped_fts_candidates(
              WHERE i.source_kind = ?6 AND i.source_memory_id = m.id
                AND m.memory_type = ?7
            )
-         LIMIT ?8",
-    )?;
+         LIMIT ?8"
+    ))?;
     let (principal_id, principal_ref, conversation_ref, project_ref) = scoped_filter_params(access);
     let rows = stmt.query_map(
         params![
