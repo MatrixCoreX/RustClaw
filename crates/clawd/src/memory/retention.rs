@@ -86,6 +86,7 @@ pub(crate) fn cleanup_memory_data(
            )",
         [],
     )?;
+    super::facts::expire_due_memory_facts(&transaction, now_ts)?;
     let deleted_index_rows = transaction.execute(
         "DELETE FROM memory_retrieval_index
          WHERE (source_kind = 'memory' AND source_memory_id IS NOT NULL

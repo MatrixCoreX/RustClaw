@@ -264,3 +264,179 @@ fn own_expired_fact_is_hidden_without_read_time_canonical_mutation() {
     );
     assert_eq!(fixture.projection_count(expiring, &fixture.principal), 1);
 }
+
+fn seed_fact_vector(
+    fixture: &Fixture,
+    fact_id: i64,
+    position: usize,
+) -> (
+    i64,
+    crate::memory::vector_store::MemoryEmbeddingProfile,
+    Vec<f32>,
+) {
+    use crate::memory::vector_store::{ExactSqliteVectorIndex, MemoryVectorIndex, VectorWrite};
+    let db = fixture.state.core.db.get().unwrap();
+    let profile =
+        crate::memory::vector_store::register_configured_profile(&db, &fixture.state.policy.memory)
+            .unwrap();
+    let id = db
+        .query_row(
+            "SELECT id FROM memory_retrieval_index WHERE principal_id=?1
+         AND source_kind='memory_fact' AND source_ref=?2",
+            params![
+                fixture.principal,
+                crate::memory::retrieval_source_ref_for_memory_fact(fact_id)
+            ],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
+    let mut vector = vec![0.0; profile.dimensions];
+    vector[position] = 1.0;
+    ExactSqliteVectorIndex
+        .upsert(
+            &db,
+            &profile,
+            &VectorWrite {
+                retrieval_id: id,
+                principal_id: &fixture.principal,
+                scope_kind: "principal",
+                scope_ref: &fixture.principal,
+                projection_digest: "sha256:expiry-liveness",
+                vector: &vector,
+            },
+        )
+        .unwrap();
+    (id, profile, vector)
+}
+
+#[test]
+fn background_maintenance_expires_due_fact_and_retires_its_vector() {
+    let fixture = Fixture::new();
+    let fact = fixture.fact(
+        OWNER_KEY,
+        "expiring",
+        "retained canonical expiring sentinel",
+    );
+    let (projection, _, _) = seed_fact_vector(&fixture, fact, 0);
+    fixture.expire_later(fact);
+    let db = fixture.state.core.db.get().unwrap();
+
+    crate::memory::retention::cleanup_memory_data(
+        &db,
+        &fixture.state.policy.memory,
+        crate::now_ts_u64() as i64,
+    )
+    .unwrap();
+
+    assert_eq!(
+        db.query_row(
+            "SELECT status FROM memory_facts WHERE id=?1",
+            [fact],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        "expired"
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT COUNT(*) FROM memory_retrieval_index WHERE id=?1",
+            [projection],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT status FROM memory_vector_rows WHERE retrieval_id=?1",
+            [projection],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        "tombstone"
+    );
+}
+
+#[test]
+fn failed_expiry_maintenance_rolls_back_fact_projection_and_source_deletions() {
+    let fixture = Fixture::new();
+    let fact = fixture.fact(
+        OWNER_KEY,
+        "expiring",
+        "retained canonical expiring sentinel",
+    );
+    fixture.expire_later(fact);
+    let before = fixture.fact_snapshot(fact);
+    {
+        let db = fixture.state.core.db.get().unwrap();
+        db.execute(
+            "INSERT INTO memories(memory_id,user_id,chat_id,user_key,principal_id,scope_kind,
+             scope_ref,channel,role,content,created_at,created_at_ts)
+             VALUES ('expiry-rollback-source',1,0,?1,?2,'principal',?2,
+                     'ui','user','retention rollback witness','0',0)",
+            params![OWNER_KEY, fixture.principal],
+        )
+        .unwrap();
+        db.execute_batch(
+            "CREATE TRIGGER reject_expiry_projection_delete BEFORE DELETE ON memory_retrieval_index
+             WHEN OLD.source_kind='memory_fact'
+             BEGIN SELECT RAISE(ABORT,'fixture_expiry_projection_delete_rejected'); END;",
+        )
+        .unwrap();
+        let error = crate::memory::retention::cleanup_memory_data(
+            &db,
+            &fixture.state.policy.memory,
+            crate::now_ts_u64() as i64,
+        )
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("fixture_expiry_projection_delete_rejected"));
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM memories WHERE memory_id='expiry-rollback-source'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1,
+            "earlier retention writes must roll back with failed expiry"
+        );
+    }
+    assert_eq!(fixture.fact_snapshot(fact), before);
+    assert_eq!(fixture.projection_count(fact, &fixture.principal), 1);
+}
+
+#[test]
+fn nearest_excludes_expired_canonical_fact_before_top_k_without_read_repair() {
+    use crate::memory::vector_store::{ExactSqliteVectorIndex, MemoryVectorIndex};
+    let fixture = Fixture::new();
+    let valid = fixture.fact(OWNER_KEY, "valid", "retained canonical valid sentinel");
+    let expired = fixture.fact(
+        OWNER_KEY,
+        "expiring",
+        "retained canonical expiring sentinel",
+    );
+    let (live_projection, _, _) = seed_fact_vector(&fixture, valid, 1);
+    let (_, profile, query) = seed_fact_vector(&fixture, expired, 0);
+    fixture.expire_later(expired);
+    let before = fixture.fact_snapshot(expired);
+    {
+        let db = fixture.state.core.db.get().unwrap();
+        let changes = db.total_changes();
+        let access =
+            crate::memory::scope::resolve_memory_access(&db, &fixture.principal, None, None)
+                .unwrap();
+        let neighbors = ExactSqliteVectorIndex
+            .nearest(&db, &access, &profile, &query, 1)
+            .unwrap();
+        assert_eq!(neighbors.len(), 1);
+        assert_eq!(
+            neighbors[0].retrieval_id, live_projection,
+            "an expired higher-scoring fact must not consume the top-k budget"
+        );
+        assert_eq!(db.total_changes(), changes);
+    }
+    assert_eq!(fixture.fact_snapshot(expired), before);
+    assert_eq!(fixture.projection_count(expired, &fixture.principal), 1);
+}

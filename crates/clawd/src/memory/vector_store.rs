@@ -12,11 +12,8 @@ pub(crate) const LOCAL_PROFILE_ID: &str = "memory_embedding:local_default";
 pub(crate) const PROJECTION_VERSION: &str = "memory_searchable_projection_v2";
 const VECTOR_FORMAT: &str = "f32le_v1";
 const VECTOR_MAGIC: &[u8; 5] = b"MVEC\x01";
-const LIVE_PROJECTION_EXISTS: &str = "EXISTS (
-    SELECT 1 FROM memory_retrieval_index i
-    WHERE i.id = v.retrieval_id AND i.principal_id = v.principal_id
-      AND i.scope_kind = v.scope_kind AND i.scope_ref = v.scope_ref
-)";
+const PROJECTION_IDENTITY_MATCH: &str = "i.id = v.retrieval_id AND i.principal_id = v.principal_id
+    AND i.scope_kind = v.scope_kind AND i.scope_ref = v.scope_ref";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct MemoryEmbeddingProfile {
@@ -139,11 +136,13 @@ impl MemoryVectorIndex for ExactSqliteVectorIndex {
             &profile.profile_id,
             profile.generation,
         )?;
+        let fact_is_current = super::facts::current_fact_projection_sql();
         let mut stmt = db.prepare(&format!(
-            "SELECT retrieval_id, vector_blob, vector_checksum
+            "SELECT v.retrieval_id, v.vector_blob, v.vector_checksum
              FROM memory_vector_rows v
+             JOIN memory_retrieval_index i ON {PROJECTION_IDENTITY_MATCH}
              WHERE v.principal_id = ?1 AND v.profile_id = ?2 AND v.generation = ?3
-               AND v.status = 'active' AND {LIVE_PROJECTION_EXISTS}
+               AND v.status = 'active' AND {fact_is_current}
                AND ((v.scope_kind = 'principal' AND v.scope_ref = ?4)
                  OR (v.scope_kind = 'conversation' AND ?5 IS NOT NULL AND v.scope_ref = ?5)
                  OR (v.scope_kind = 'project' AND ?6 IS NOT NULL AND v.scope_ref = ?6))"
@@ -197,7 +196,9 @@ impl MemoryVectorIndex for ExactSqliteVectorIndex {
         let changed = db.execute(
             &format!(
                 "UPDATE memory_vector_rows AS v SET status = 'tombstone', updated_at_ts = ?1
-                 WHERE v.status = 'active' AND NOT {LIVE_PROJECTION_EXISTS}"
+                 WHERE v.status = 'active' AND NOT EXISTS (
+                   SELECT 1 FROM memory_retrieval_index i WHERE {PROJECTION_IDENTITY_MATCH}
+                 )"
             ),
             [crate::now_ts_u64() as i64],
         )?;

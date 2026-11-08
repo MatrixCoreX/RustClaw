@@ -249,7 +249,6 @@ fn retrieve_indexed_memories_with_project_ref(
 ) -> anyhow::Result<IndexedRecall> {
     let scope_user_key = super::effective_user_key(user_key, user_id, chat_id);
     let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
-    crate::memory::facts::expire_due_memory_facts(&db, crate::now_ts_u64() as i64)?;
     let principal_id = crate::repo::auth::principal_id_for_user_key(&db, &scope_user_key)?;
     let scoped_reader = super::scope::table_has_scope_contract(&db, "memory_retrieval_index")?;
     let mut access = principal_id
@@ -543,12 +542,14 @@ fn fetch_scoped_recent_candidates(
     access: &super::scope::ResolvedMemoryAccess,
     limit: usize,
 ) -> anyhow::Result<Vec<RetrievalRow>> {
-    let mut stmt = db.prepare(
+    let fact_is_current = super::facts::current_fact_projection_sql();
+    let mut stmt = db.prepare(&format!(
         "SELECT i.id, i.source_kind, i.memory_kind, i.role, i.search_text, i.vector_json,
                 i.embedding_model, i.embedding_dims, i.embedding_version, i.metadata_json,
                 i.salience, i.success_state, COALESCE(i.updated_at_ts, i.created_at_ts, 0)
          FROM memory_retrieval_index i
          WHERE i.principal_id = ?1
+           AND {fact_is_current}
            AND ((i.scope_kind = 'principal' AND i.scope_ref = ?2)
              OR (i.scope_kind = 'conversation' AND ?3 IS NOT NULL AND i.scope_ref = ?3)
              OR (i.scope_kind = 'project' AND ?4 IS NOT NULL AND i.scope_ref = ?4))
@@ -558,8 +559,8 @@ fn fetch_scoped_recent_candidates(
                AND m.memory_type = ?6
            )
          ORDER BY COALESCE(i.updated_at_ts, i.created_at_ts, 0) DESC, i.id DESC
-         LIMIT ?7",
-    )?;
+         LIMIT ?7"
+    ))?;
     let (principal_id, principal_ref, conversation_ref, project_ref) = scoped_filter_params(access);
     let rows = stmt.query_map(
         params![
@@ -582,12 +583,15 @@ fn fetch_scoped_candidate_by_id(
     retrieval_id: i64,
 ) -> anyhow::Result<Option<RetrievalRow>> {
     let (principal_id, principal_ref, conversation_ref, project_ref) = scoped_filter_params(access);
+    let fact_is_current = super::facts::current_fact_projection_sql();
     db.query_row(
-        "SELECT i.id, i.source_kind, i.memory_kind, i.role, i.search_text, i.vector_json,
+        &format!(
+            "SELECT i.id, i.source_kind, i.memory_kind, i.role, i.search_text, i.vector_json,
                 i.embedding_model, i.embedding_dims, i.embedding_version, i.metadata_json,
                 i.salience, i.success_state, COALESCE(i.updated_at_ts, i.created_at_ts, 0)
          FROM memory_retrieval_index i
          WHERE i.id = ?1 AND i.principal_id = ?2
+           AND {fact_is_current}
            AND ((i.scope_kind = 'principal' AND i.scope_ref = ?3)
              OR (i.scope_kind = 'conversation' AND ?4 IS NOT NULL AND i.scope_ref = ?4)
              OR (i.scope_kind = 'project' AND ?5 IS NOT NULL AND i.scope_ref = ?5))
@@ -595,7 +599,8 @@ fn fetch_scoped_candidate_by_id(
              SELECT 1 FROM memories m
              WHERE i.source_kind = ?6 AND i.source_memory_id = m.id
                AND m.memory_type = ?7
-           )",
+           )"
+        ),
         params![
             retrieval_id,
             principal_id,
@@ -1193,7 +1198,8 @@ fn fetch_recent_candidates(
     user_key: &str,
     limit: usize,
 ) -> anyhow::Result<Vec<RetrievalRow>> {
-    let mut stmt = db.prepare(
+    let fact_is_current = super::facts::current_fact_projection_sql();
+    let mut stmt = db.prepare(&format!(
         "SELECT i.id, i.source_kind, i.memory_kind, i.role, i.search_text, i.vector_json,
                 i.embedding_model, i.embedding_dims, i.embedding_version, i.metadata_json, i.salience, i.success_state,
                 COALESCE(i.updated_at_ts, i.created_at_ts, 0)
@@ -1202,6 +1208,7 @@ fn fetch_recent_candidates(
              (i.user_id = ?1 AND i.chat_id = ?2 AND COALESCE(i.user_key, '') = ?3)
              OR (i.source_kind IN (?4, ?5) AND COALESCE(i.user_key, '') = ?3)
          )
+           AND {fact_is_current}
            AND NOT EXISTS (
              SELECT 1
              FROM memories m
@@ -1210,8 +1217,8 @@ fn fetch_recent_candidates(
                AND m.memory_type = ?7
            )
          ORDER BY COALESCE(i.updated_at_ts, i.created_at_ts, 0) DESC, i.id DESC
-         LIMIT ?8",
-    )?;
+         LIMIT ?8"
+    ))?;
     let rows = stmt.query_map(
         params![
             user_id,
@@ -1264,7 +1271,8 @@ fn fetch_fts_candidates(
     if query.is_empty() {
         return Ok(Vec::new());
     }
-    let mut stmt = match db.prepare(
+    let fact_is_current = super::facts::current_fact_projection_sql();
+    let mut stmt = match db.prepare(&format!(
         "SELECT i.id, i.source_kind, i.memory_kind, i.role, i.search_text, i.vector_json,
                 i.embedding_model, i.embedding_dims, i.embedding_version, i.metadata_json, i.salience, i.success_state,
                 COALESCE(i.updated_at_ts, i.created_at_ts, 0)
@@ -1274,6 +1282,7 @@ fn fetch_fts_candidates(
            OR (i.source_kind = ?4 AND COALESCE(i.user_key, '') = ?3)
            OR (i.source_kind = ?5 AND COALESCE(i.user_key, '') = ?3))
            AND f.memory_retrieval_index_fts MATCH ?6
+           AND {fact_is_current}
            AND NOT EXISTS (
              SELECT 1
              FROM memories m
@@ -1281,8 +1290,8 @@ fn fetch_fts_candidates(
                AND i.source_memory_id = m.id
                AND m.memory_type = ?8
            )
-         LIMIT ?9",
-    ) {
+         LIMIT ?9"
+    )) {
         Ok(stmt) => stmt,
         Err(_) => return Ok(Vec::new()),
     };

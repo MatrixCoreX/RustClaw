@@ -258,6 +258,28 @@ pub(crate) fn expire_due_memory_facts(db: &Connection, now_ts: i64) -> anyhow::R
     Ok(ids.len())
 }
 
+/// Read eligibility for linked facts; unresolved index links remain the explicit
+/// consistency/retention owner's responsibility, not a reason for read repair.
+pub(crate) fn current_fact_projection_sql() -> String {
+    format!(
+        "NOT EXISTS (
+            SELECT 1 FROM memory_facts f
+            WHERE i.source_kind = '{fact_source}'
+              AND (f.principal_id = i.principal_id
+                OR (f.principal_id IS NULL AND i.principal_id IS NULL
+                    AND f.user_key = i.user_key))
+              AND (i.source_ref = CAST(f.id AS TEXT) OR i.source_ref = f.memory_id
+                OR i.source_ref = '{reference_prefix}' || CAST(f.id AS TEXT))
+              AND (f.status <> '{active}' OR
+                (f.expires_at_ts IS NOT NULL
+                 AND f.expires_at_ts <= CAST(strftime('%s', 'now') AS INTEGER)))
+        )",
+        fact_source = super::RETRIEVAL_SOURCE_MEMORY_FACT,
+        reference_prefix = super::MEMORY_FACT_SOURCE_REF_PREFIX,
+        active = MEMORY_FACT_STATUS_ACTIVE,
+    )
+}
+
 fn normalized_or_default<'a>(value: &'a str, default: &'a str) -> &'a str {
     let value = value.trim();
     if value.is_empty() {
