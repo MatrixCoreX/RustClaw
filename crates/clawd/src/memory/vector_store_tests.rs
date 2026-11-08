@@ -75,6 +75,7 @@ fn exact_backend_scales_to_the_configured_scope_ceiling_without_candidate_trunca
     let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let mut db = state.core.db.get().expect("db");
     crate::memory::indexing::ensure_retrieval_schema(&db).unwrap();
+    crate::memory::scope::ensure_memory_scope_schema(&db).unwrap();
     let profile = super::register_configured_profile(&db, &state.policy.memory).unwrap();
     let principal_id = "principal-vector-scale";
     let row_count = state.policy.memory.max_rows.max(1);
@@ -88,6 +89,18 @@ fn exact_backend_scales_to_the_configured_scope_ceiling_without_candidate_trunca
     let unrelated_checksum = super::digest_bytes(&unrelated_blob);
     let tx = db.transaction().unwrap();
     {
+        let mut projection = tx
+            .prepare(
+                "INSERT INTO memory_retrieval_index(
+                    id,source_kind,user_id,chat_id,user_key,principal_id,scope_kind,
+                    scope_ref,memory_kind,search_text,topic_tags,vector_json,
+                    embedding_model,embedding_dims,embedding_version,metadata_json,
+                    created_at_ts,updated_at_ts
+                 ) VALUES (?1,'memory_fact',1,0,?2,?2,'principal',?2,
+                           'semantic_fact','scale projection','','[]',
+                           'pending',0,'pending','{}',1,1)",
+            )
+            .unwrap();
         let mut insert = tx
             .prepare(
                 "INSERT INTO memory_vector_rows(
@@ -101,6 +114,9 @@ fn exact_backend_scales_to_the_configured_scope_ceiling_without_candidate_trunca
             .unwrap();
         for index in 1..=row_count {
             let is_target = index == row_count;
+            projection
+                .execute(rusqlite::params![index as i64, principal_id])
+                .unwrap();
             insert
                 .execute(rusqlite::params![
                     index as i64,

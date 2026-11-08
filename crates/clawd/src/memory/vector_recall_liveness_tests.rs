@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Duration};
+use std::{cell::Cell, path::PathBuf, time::Duration};
 
 use rusqlite::{params, Connection};
 
@@ -246,4 +246,232 @@ fn ordinary_recall_does_not_mutate_another_principals_orphan_vectors() {
         before,
         "one user's recall must not perform global mutation of another user's vectors"
     );
+}
+
+thread_local! {
+    static BUSY_CALLBACKS: Cell<usize> = const { Cell::new(0) };
+}
+
+fn count_busy_attempt(_attempt: i32) -> bool {
+    BUSY_CALLBACKS.with(|count| count.set(count.get() + 1));
+    false
+}
+
+#[test]
+fn warmed_ordinary_recall_does_not_attempt_an_independent_wal_writer() {
+    let fixture = Fixture::new();
+    {
+        let first = fixture.state.core.db.get().unwrap();
+        let second = fixture.state.core.db.get().unwrap();
+        first.busy_handler(Some(count_busy_attempt)).unwrap();
+        second.busy_handler(Some(count_busy_attempt)).unwrap();
+    }
+    let writer = Connection::open(fixture.root.join("fixture.sqlite")).unwrap();
+    writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+    BUSY_CALLBACKS.with(|count| count.set(0));
+    {
+        let db = fixture.state.core.db.get().unwrap();
+        let error = db
+            .execute("DELETE FROM memory_vector_rows WHERE 0", [])
+            .unwrap_err();
+        assert_eq!(
+            error.sqlite_error_code(),
+            Some(rusqlite::ErrorCode::DatabaseBusy)
+        );
+    }
+    assert!(
+        BUSY_CALLBACKS.with(Cell::get) > 0,
+        "the actual SQLite busy handler must be observable"
+    );
+    BUSY_CALLBACKS.with(|count| count.set(0));
+    crate::memory::retrieval::retrieve_indexed_memories_for_scope(
+        &fixture.state,
+        Some("recall-liveness-owner"),
+        1,
+        0,
+        None,
+        "ordinary recall",
+    )
+    .unwrap();
+    assert_eq!(
+        BUSY_CALLBACKS.with(Cell::get),
+        0,
+        "an ordinary warmed recall must not attempt a maintenance write, even when no rows change"
+    );
+    assert!(!writer.is_autocommit());
+    writer.execute_batch("ROLLBACK").unwrap();
+}
+
+fn canonical_fact(fixture: &Fixture, owner_key: &str, owner: &str) -> i64 {
+    let now = crate::now_ts_u64() as i64;
+    let fact = crate::memory::facts::MemoryFactUpsert::from_long_term_summary(
+        "liveness",
+        "retained",
+        "stable-value",
+        "retained canonical fact",
+        1.0,
+        "fixture-source",
+        &[],
+        "fixture evidence",
+        None,
+    );
+    let db = fixture.state.core.db.get().unwrap();
+    let fact_id = crate::memory::facts::upsert_memory_fact_card(&db, 1, 0, owner_key, &fact, now)
+        .unwrap()
+        .unwrap();
+    let id = db.query_row(
+        "SELECT id FROM memory_retrieval_index WHERE principal_id=?1 AND source_kind='memory_fact' AND source_ref=?2",
+        params![owner, crate::memory::retrieval_source_ref_for_memory_fact(fact_id)],
+        |row| row.get::<_, i64>(0),
+    ).unwrap();
+    drop(db);
+    fixture.vector(id, owner, &fixture.query);
+    id
+}
+
+fn vector_snapshot(db: &Connection, id: i64) -> (String, Vec<u8>, String, i64) {
+    db.query_row(
+        "SELECT status,vector_blob,vector_checksum,updated_at_ts FROM memory_vector_rows WHERE retrieval_id=?1",
+        [id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    ).unwrap()
+}
+
+#[test]
+fn background_maintenance_preserves_canonical_fact_and_retires_only_orphans() {
+    let fixture = Fixture::new();
+    let live = canonical_fact(&fixture, "recall-liveness-owner", &fixture.principal);
+    fixture.vector(99, &fixture.other_principal, &fixture.query);
+    fixture.projection(
+        98,
+        &fixture.other_principal,
+        "principal",
+        &fixture.other_principal,
+    );
+    fixture.vector(98, &fixture.principal, &fixture.query);
+    let db = fixture.state.core.db.get().unwrap();
+    let before = vector_snapshot(&db, live);
+    let now = crate::now_ts_u64() as i64;
+    crate::memory::retention::cleanup_memory_data(&db, &fixture.state.policy.memory, now).unwrap();
+    assert_eq!(
+        vector_snapshot(&db, live),
+        before,
+        "a healthy canonical fact with its actual versioned source ref must remain searchable"
+    );
+    for id in [98, 99] {
+        assert_eq!(vector_snapshot(&db, id).0, "tombstone");
+    }
+    assert_eq!(
+        db.query_row(
+            "SELECT COUNT(*) FROM memory_retrieval_index WHERE id=?1",
+            [live],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap(),
+        1
+    );
+    let before = vector_snapshot(&db, 99);
+    crate::memory::retention::cleanup_memory_data(&db, &fixture.state.policy.memory, now + 1)
+        .unwrap();
+    assert_eq!(
+        vector_snapshot(&db, 99),
+        before,
+        "already retired vectors are not rewritten"
+    );
+}
+
+#[test]
+fn background_maintenance_retires_fact_projection_owned_by_the_wrong_principal() {
+    let fixture = Fixture::new();
+    let live = canonical_fact(&fixture, "recall-liveness-other", &fixture.other_principal);
+    let db = fixture.state.core.db.get().unwrap();
+    let source_ref: String = db
+        .query_row(
+            "SELECT source_ref FROM memory_retrieval_index WHERE id=?1",
+            [live],
+            |row| row.get(0),
+        )
+        .unwrap();
+    drop(db);
+    fixture.projection(99, &fixture.principal, "principal", &fixture.principal);
+    fixture.vector(99, &fixture.principal, &fixture.query);
+    let db = fixture.state.core.db.get().unwrap();
+    db.execute(
+        "UPDATE memory_retrieval_index SET source_ref=?1 WHERE id=99",
+        [source_ref],
+    )
+    .unwrap();
+    let before = vector_snapshot(&db, live);
+    crate::memory::retention::cleanup_memory_data(
+        &db,
+        &fixture.state.policy.memory,
+        crate::now_ts_u64() as i64,
+    )
+    .unwrap();
+    assert_eq!(vector_snapshot(&db, live), before);
+    assert_eq!(vector_snapshot(&db, 99).0, "tombstone");
+    assert_eq!(
+        db.query_row(
+            "SELECT COUNT(*) FROM memory_retrieval_index WHERE id=99",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn failed_orphan_maintenance_rolls_back_other_retention_deletions() {
+    let fixture = Fixture::new();
+    fixture.vector(99, &fixture.other_principal, &fixture.query);
+    let db = fixture.state.core.db.get().unwrap();
+    db.execute(
+        "INSERT INTO memories(memory_id,user_id,chat_id,user_key,principal_id,scope_kind,
+         scope_ref,channel,role,content,created_at,created_at_ts)
+         VALUES ('rollback-source',1,0,'recall-liveness-owner',?1,'principal',?1,
+                 'ui','user','retention rollback witness','0',0)",
+        [&fixture.principal],
+    )
+    .unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER reject_orphan_retirement BEFORE UPDATE OF status ON memory_vector_rows
+         WHEN OLD.retrieval_id=99 BEGIN SELECT RAISE(ABORT,'fixture_orphan_retirement_rejected'); END;",
+    ).unwrap();
+    let before = vector_snapshot(&db, 99);
+    let error = crate::memory::retention::cleanup_memory_data(
+        &db,
+        &fixture.state.policy.memory,
+        crate::now_ts_u64() as i64,
+    )
+    .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("fixture_orphan_retirement_rejected"));
+    assert!(db.is_autocommit());
+    assert_eq!(vector_snapshot(&db, 99), before);
+    assert_eq!(
+        db.query_row(
+            "SELECT COUNT(*) FROM memories WHERE memory_id='rollback-source'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap(),
+        1,
+        "unrelated earlier retention deletes must roll back atomically"
+    );
+}
+
+#[test]
+fn orphan_maintenance_does_not_install_an_uninitialized_optional_pipeline() {
+    let db = Connection::open_in_memory().unwrap();
+    db.execute_batch(
+        "CREATE TABLE runtime_schema_migrations(migration_id TEXT PRIMARY KEY,schema_digest TEXT,applied_at TEXT);",
+    ).unwrap();
+    let before = db.total_changes();
+    assert_eq!(super::maintain_orphaned_vectors(&db).unwrap(), 0);
+    assert_eq!(db.total_changes(), before);
+    assert_eq!(db.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'memory_vector_%' OR name LIKE 'memory_embedding_%'", [],
+        |row| row.get::<_, i64>(0),
+    ).unwrap(), 0);
 }

@@ -275,7 +275,6 @@ fn retrieve_indexed_memories_with_project_ref(
         let query =
             super::embedding::embed_text_locally_for_principal(anchor_prompt, embedding_principal)?;
         let index = super::vector_store::ExactSqliteVectorIndex;
-        let _ = index.tombstone_orphans(&db);
         if let Ok(neighbors) = index.nearest(
             &db,
             access,

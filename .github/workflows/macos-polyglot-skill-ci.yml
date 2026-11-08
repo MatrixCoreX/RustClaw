@@ -744,7 +744,12 @@ jobs:
             --require nearest_excludes_missing_projection_before_top_k_without_cleanup \
             --require nearest_excludes_mismatched_owner_and_scope_before_top_k \
             --require nearest_filters_orphans_while_an_independent_wal_writer_is_held \
-            --require ordinary_recall_does_not_mutate_another_principals_orphan_vectors
+            --require ordinary_recall_does_not_mutate_another_principals_orphan_vectors \
+            --require warmed_ordinary_recall_does_not_attempt_an_independent_wal_writer \
+            --require background_maintenance_preserves_canonical_fact_and_retires_only_orphans \
+            --require background_maintenance_retires_fact_projection_owned_by_the_wrong_principal \
+            --require failed_orphan_maintenance_rolls_back_other_retention_deletions \
+            --require orphan_maintenance_does_not_install_an_uninitialized_optional_pipeline
           cargo test --locked -p clawd --bin clawd memory::vector_store::recall_liveness_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         run: |
@@ -1724,7 +1729,12 @@ jobs:
             --require nearest_excludes_missing_projection_before_top_k_without_cleanup \
             --require nearest_excludes_mismatched_owner_and_scope_before_top_k \
             --require nearest_filters_orphans_while_an_independent_wal_writer_is_held \
-            --require ordinary_recall_does_not_mutate_another_principals_orphan_vectors
+            --require ordinary_recall_does_not_mutate_another_principals_orphan_vectors \
+            --require warmed_ordinary_recall_does_not_attempt_an_independent_wal_writer \
+            --require background_maintenance_preserves_canonical_fact_and_retires_only_orphans \
+            --require background_maintenance_retires_fact_projection_owned_by_the_wrong_principal \
+            --require failed_orphan_maintenance_rolls_back_other_retention_deletions \
+            --require orphan_maintenance_does_not_install_an_uninitialized_optional_pipeline
           cargo test --locked -p clawd --bin clawd memory::vector_store::recall_liveness_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         shell: bash

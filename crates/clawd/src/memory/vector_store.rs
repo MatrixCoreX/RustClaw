@@ -12,6 +12,11 @@ pub(crate) const LOCAL_PROFILE_ID: &str = "memory_embedding:local_default";
 pub(crate) const PROJECTION_VERSION: &str = "memory_searchable_projection_v2";
 const VECTOR_FORMAT: &str = "f32le_v1";
 const VECTOR_MAGIC: &[u8; 5] = b"MVEC\x01";
+const LIVE_PROJECTION_EXISTS: &str = "EXISTS (
+    SELECT 1 FROM memory_retrieval_index i
+    WHERE i.id = v.retrieval_id AND i.principal_id = v.principal_id
+      AND i.scope_kind = v.scope_kind AND i.scope_ref = v.scope_ref
+)";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct MemoryEmbeddingProfile {
@@ -134,15 +139,15 @@ impl MemoryVectorIndex for ExactSqliteVectorIndex {
             &profile.profile_id,
             profile.generation,
         )?;
-        let mut stmt = db.prepare(
+        let mut stmt = db.prepare(&format!(
             "SELECT retrieval_id, vector_blob, vector_checksum
-             FROM memory_vector_rows
-             WHERE principal_id = ?1 AND profile_id = ?2 AND generation = ?3
-               AND status = 'active'
-               AND ((scope_kind = 'principal' AND scope_ref = ?4)
-                 OR (scope_kind = 'conversation' AND ?5 IS NOT NULL AND scope_ref = ?5)
-                 OR (scope_kind = 'project' AND ?6 IS NOT NULL AND scope_ref = ?6))",
-        )?;
+             FROM memory_vector_rows v
+             WHERE v.principal_id = ?1 AND v.profile_id = ?2 AND v.generation = ?3
+               AND v.status = 'active' AND {LIVE_PROJECTION_EXISTS}
+               AND ((v.scope_kind = 'principal' AND v.scope_ref = ?4)
+                 OR (v.scope_kind = 'conversation' AND ?5 IS NOT NULL AND v.scope_ref = ?5)
+                 OR (v.scope_kind = 'project' AND ?6 IS NOT NULL AND v.scope_ref = ?6))"
+        ))?;
         let rows = stmt.query_map(
             params![
                 access.principal_id,
@@ -190,15 +195,23 @@ impl MemoryVectorIndex for ExactSqliteVectorIndex {
 
     fn tombstone_orphans(&self, db: &Connection) -> anyhow::Result<usize> {
         let changed = db.execute(
-            "UPDATE memory_vector_rows SET status = 'tombstone', updated_at_ts = ?1
-             WHERE status = 'active' AND NOT EXISTS (
-                SELECT 1 FROM memory_retrieval_index i
-                WHERE i.id = memory_vector_rows.retrieval_id
-             )",
+            &format!(
+                "UPDATE memory_vector_rows AS v SET status = 'tombstone', updated_at_ts = ?1
+                 WHERE v.status = 'active' AND NOT {LIVE_PROJECTION_EXISTS}"
+            ),
             [crate::now_ts_u64() as i64],
         )?;
         Ok(changed)
     }
+}
+
+/// Explicit maintenance only; an absent optional pipeline is not permission to install it.
+pub(crate) fn maintain_orphaned_vectors(db: &Connection) -> anyhow::Result<usize> {
+    if migration_digest(db)?.is_none() {
+        return Ok(0);
+    }
+    ensure_vector_pipeline_schema(db)?;
+    ExactSqliteVectorIndex.tombstone_orphans(db)
 }
 
 pub(crate) fn ensure_vector_pipeline_schema(db: &Connection) -> anyhow::Result<()> {

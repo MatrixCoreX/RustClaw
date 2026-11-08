@@ -99,10 +99,12 @@ pub(crate) fn cleanup_memory_data(
             OR (source_kind = 'memory_fact' AND source_ref IS NOT NULL
                 AND NOT EXISTS (
                     SELECT 1 FROM memory_facts f
-                    WHERE CAST(f.id AS TEXT) = memory_retrieval_index.source_ref
-                       OR f.memory_id = memory_retrieval_index.source_ref
+                    WHERE f.principal_id = memory_retrieval_index.principal_id
+                      AND (CAST(f.id AS TEXT) = memory_retrieval_index.source_ref
+                        OR f.memory_id = memory_retrieval_index.source_ref
+                        OR ?1 || CAST(f.id AS TEXT) = memory_retrieval_index.source_ref)
                 ))",
-        [],
+        [super::MEMORY_FACT_SOURCE_REF_PREFIX],
     )?;
     let _ = transaction.execute(
         "DELETE FROM memory_retrieval_index_fts
@@ -121,6 +123,7 @@ pub(crate) fn cleanup_memory_data(
         [candidate_cutoff],
     )?;
 
+    super::vector_store::maintain_orphaned_vectors(&transaction)?;
     refresh_principal_usage(&transaction, config, now_ts)?;
     let (state, observed_bytes) = refresh_storage_pressure(&transaction, config, now_ts)?;
     record_retention_ledger(
