@@ -231,7 +231,9 @@ async fn provider_recovery_resumes_persisted_verification_without_replaying_tool
         )
         .unwrap();
     let persisted: Value = serde_json::from_str(&persisted).unwrap();
-    let checkpoint = persisted["task_checkpoint"].clone();
+    let cp = crate::task_lifecycle::task_checkpoint_from_result_json(&persisted)
+        .expect("production checkpoint decoder must recover the persisted verification binding");
+    let checkpoint = serde_json::to_value(&cp).unwrap();
     assert!(checkpoint["boundary_context"]["verification_resume"].is_object());
     assert_eq!(
         checkpoint["boundary_context"]["agent_loop_resume_state"]["stage"],
@@ -247,7 +249,6 @@ async fn provider_recovery_resumes_persisted_verification_without_replaying_tool
         "UPDATE tasks SET lease_owner=?2,lease_expires_at=?3,claim_attempt=?4 WHERE task_id=?1 AND lease_owner IS NULL",
         rusqlite::params![task.task_id,state.worker.worker_id,i64::MAX,task.claim_attempt],
     ).unwrap(),1);
-    let cp = serde_json::from_value(checkpoint).unwrap();
     let waiting = try_resume(&state, &task, "fixture", None, &cp, &mut prior)
         .await
         .unwrap()
