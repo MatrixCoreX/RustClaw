@@ -68,6 +68,7 @@ pub(super) fn answer_contract_for_reply(
 }
 
 pub(in crate::agent_engine) fn checkpoint_handoff_reply_with_verification(
+    state: &AppState,
     task: &ClaimedTask,
     user_text: &str,
     loop_state: &LoopState,
@@ -88,6 +89,8 @@ pub(in crate::agent_engine) fn checkpoint_handoff_reply_with_verification(
         target.answer_verification_candidate = source.answer_verification_candidate.clone();
         target.answer_verification_checkpoint = source.answer_verification_checkpoint.clone();
         target.capability_results = source.capability_results.clone();
+        // Bind before the outer finalizer's generic waiting-checkpoint early return.
+        crate::answer_verifier::checkpoint_unavailable_verification(state, task, target);
     }
     handoff
 }

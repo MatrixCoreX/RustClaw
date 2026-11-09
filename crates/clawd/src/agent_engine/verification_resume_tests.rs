@@ -199,7 +199,7 @@ async fn provider_recovery_resumes_persisted_verification_without_replaying_tool
         .unwrap()
     );
     let handoff = super::super::loop_control::checkpoint_handoff_reply_with_verification(
-        &task, "fixture", &prior, None, &source,
+        &state, &task, "fixture", &prior, None, &source,
     );
     // Enter the real outer finalizer. A generic waiting checkpoint must not
     // short-circuit persistence before the verification binding is prepared.

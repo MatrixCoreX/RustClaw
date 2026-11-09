@@ -3,6 +3,7 @@ use crate::task_journal::{TaskJournal, TaskJournalAnswerVerifierSummary, TaskJou
 
 #[test]
 fn provider_checkpoint_handoff_retains_unavailable_verification_instead_of_erasing_it() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = ClaimedTask {
         claim_attempt: 1,
         task_id: "verification-handoff".into(),
@@ -23,9 +24,10 @@ fn provider_checkpoint_handoff_retains_unavailable_verification_instead_of_erasi
         },
         "candidate",
     );
-    let snapshot = std::sync::Arc::new(json!({"task_checkpoint": {
-        "boundary_context": {"completed_review": true}
-    }}));
+    let mut payload =
+        crate::agent_engine::verification_checkpoint_payload(&task, &LoopState::default());
+    payload["task_checkpoint"]["boundary_context"]["completed_review"] = json!(true);
+    let snapshot = std::sync::Arc::new(payload);
     journal.answer_verification_checkpoint = Some(snapshot.clone());
     journal
         .capability_results
@@ -36,6 +38,7 @@ fn provider_checkpoint_handoff_retains_unavailable_verification_instead_of_erasi
         ));
     let prior = AskReply::non_llm("candidate".into()).with_task_journal(journal);
     let handoff = checkpoint_handoff_reply_with_verification(
+        &state,
         &task,
         "fixture",
         &LoopState::default(),
@@ -47,10 +50,14 @@ fn provider_checkpoint_handoff_retains_unavailable_verification_instead_of_erasi
         journal.answer_verification_candidate.as_deref(),
         Some("candidate")
     );
-    assert!(std::sync::Arc::ptr_eq(
-        journal.answer_verification_checkpoint.as_ref().unwrap(),
-        &snapshot,
-    ));
+    assert!(journal.answer_verification_checkpoint_prepared);
+    assert!(journal.answer_verification_checkpoint.is_none());
+    let checkpoint = journal.task_checkpoint.as_ref().unwrap();
+    assert_eq!(checkpoint["boundary_context"]["completed_review"], true);
+    assert_eq!(
+        checkpoint["boundary_context"]["verification_resume"]["candidate"],
+        "candidate"
+    );
     assert_eq!(journal.capability_results.len(), 1);
     assert_eq!(journal.capability_results[0].data["reviewed"], true);
     let record = journal.answer_verification.unwrap();

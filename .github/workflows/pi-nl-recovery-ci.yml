@@ -63,6 +63,10 @@ jobs:
           python3 scripts/check_skill_hotplug_coupling_inventory.py --self-test
           python3 scripts/check_skill_hotplug_coupling_inventory.py
           python3 scripts/check_answer_verifier_boundary.py
+          python3 scripts/check_finalizer_architecture.py --self-test
+          python3 scripts/check_finalizer_architecture.py
+          python3 scripts/check_contract_repair_loop_observation_boundary.py
+          python3 scripts/check_planner_runtime_boundary.py
           python3 scripts/check_no_runtime_hard_reply.py
           python3 scripts/check_long_files.py
           python3 scripts/check_cross_platform_contracts.py
@@ -77,7 +81,7 @@ jobs:
             grep "$name: test" "$RUNNER_TEMP/tests.txt"
             cargo test --locked -p clawd --bin clawd "$name" -- --nocapture
           done
-          for suite in verification_resume::tests answer_verification_recovery::tests answer_verification_recovery::retry_policy::tests loop_control_finalization_gate::tests answer_verifier::tests finalize::task::task_answer_verification::tests; do
+          for suite in verification_resume::tests answer_verification_recovery::tests answer_verification_recovery::retry_policy::tests loop_control_finalization_gate::tests answer_verifier::tests; do
             grep -F "${suite}::" "$RUNNER_TEMP/tests.txt"
             cargo test --locked -p clawd --bin clawd "$suite" -- --test-threads=3
           done

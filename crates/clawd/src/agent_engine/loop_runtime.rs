@@ -374,6 +374,7 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             &mut blocked_loop_state,
         )? {
             return Ok(checkpoint_handoff_reply_with_verification(
+                state,
                 task,
                 &effective_user_text,
                 &blocked_loop_state,
@@ -403,6 +404,7 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             &mut pre_verifier_recovery_loop_state,
         )? {
             return Ok(checkpoint_handoff_reply_with_verification(
+                state,
                 task,
                 &effective_user_text,
                 &pre_verifier_recovery_loop_state,
@@ -430,6 +432,7 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             &mut blocked_loop_state,
         )? {
             return Ok(checkpoint_handoff_reply_with_verification(
+                state,
                 task,
                 &effective_user_text,
                 &blocked_loop_state,
@@ -502,6 +505,7 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                 &mut blocked_loop_state,
             )? {
                 return Ok(checkpoint_handoff_reply_with_verification(
+                    state,
                     task,
                     &effective_user_text,
                     &blocked_loop_state,
