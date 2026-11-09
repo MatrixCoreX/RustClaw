@@ -80,6 +80,7 @@ from small_screen_formatters import (
     fmt_bytes,
     fmt_duration,
 )
+from small_screen_font_cache import clear_measurement_fonts
 from small_screen_market_service import (
     DEFAULT_A_SHARE_REFRESH_SEC,
     DEFAULT_CRYPTO_REFRESH_SEC,
@@ -1640,6 +1641,7 @@ class SmallScreenApp:
             self._cancel_job("_bancor_refresh_job")
 
     def _prepare_for_ui_rebuild(self):
+        clear_measurement_fonts(self.root)
         self._teardown_current_view()
         self._teardown_gallery_view()
         self._stop_market_jobs()
@@ -1787,6 +1789,7 @@ class SmallScreenApp:
         self.overview_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=8, pady=4)
         self.gallery_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
         self.weather_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
+        self.weather_frame.bind("<Button-1>", lambda _evt: self._select_weather_detail(0))
         self.crypto_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
         self.bancor_frame = tk.Frame(self.switch_container, bg=self._c("bg"), padx=12, pady=6)
         self.stock_frame = tk.Frame(self.switch_container, bg=self._c("bg"))
@@ -5743,8 +5746,6 @@ class SmallScreenApp:
             self._weather_refresh_btn.config(state=tk.DISABLED)
 
         weather = self._weather_data or {}
-        bind_reset_today(self.weather_frame)
-
         if not weather:
             empty_text = self._t("weather_loading")
             if self._weather_error:

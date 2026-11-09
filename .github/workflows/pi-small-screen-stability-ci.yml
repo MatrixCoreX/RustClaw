@@ -1,0 +1,88 @@
+name: Pi small-screen graphical resource stability
+
+"on":
+  push:
+    branches: ["ci/pi-small-screen-x11-*"]
+  pull_request:
+    paths: ["pi_app/**", ".github/workflows/pi-small-screen-stability-ci.yml"]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  graphical-resources:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 2
+      - name: Install native Tk test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3-tk python3-pil xvfb xauth fonts-noto-cjk
+      - name: Check source and workflow contracts
+        run: |
+          /usr/bin/python3 -B scripts/check_github_action_pins.py
+          git diff --check
+      - name: Test all small-screen modules and real X11 resource lifecycle
+        env:
+          APP_PRODUCT_IDENTITY_CONFIG: ${{ github.workspace }}/configs/product_identity.toml
+        run: |
+          set -o pipefail
+          xvfb-run -a /usr/bin/python3 -B -m unittest discover -s pi_app -p 'test_*.py' -v 2>&1 | tee "$RUNNER_TEMP/pi-small-screen-tests.log"
+      - name: Package the tested small-screen Python component
+        run: |
+          /usr/bin/python3 -B - <<'PY'
+          import hashlib, io, json, os, pathlib, subprocess, tarfile
+          def git(*args):
+              return subprocess.check_output(["git", *args])
+          commit = git("rev-parse", "HEAD").decode().strip()
+          assert commit == os.environ["GITHUB_SHA"]
+          base = git("rev-parse", "HEAD^").decode().strip()
+          output = pathlib.Path(os.environ["RUNNER_TEMP"]) / "small-screen-component"
+          output.mkdir()
+          payloads = {}
+          files = []
+          for path in sorted(pathlib.Path("pi_app").glob("*.py")):
+              if path.name.startswith("test_"):
+                  continue
+              assert path.is_file() and not path.is_symlink()
+              relative = path.as_posix()
+              body = path.read_bytes()
+              assert body == git("show", commit + ":" + relative)
+              old = subprocess.run(["git", "show", base + ":" + relative], capture_output=True)
+              previous = hashlib.sha256(old.stdout).hexdigest() if old.returncode == 0 else None
+              files.append({"path": relative, "sha256": hashlib.sha256(body).hexdigest(), "previous_sha256": previous, "size": len(body)})
+              payloads[relative] = body
+          manifest = {"schema_version": 1, "component": "pi-small-screen-python", "source_commit": commit, "base_source_commit": base, "files": files, "native_runtime_included": False}
+          payloads["component_manifest.json"] = (json.dumps(manifest, indent=2) + "\n").encode()
+          asset = output / ("agent-small-screen-" + commit[:12] + ".tar.gz")
+          with tarfile.open(asset, "w:gz") as archive:
+              for name, body in payloads.items():
+                  info = tarfile.TarInfo(name)
+                  info.size, info.mode, info.mtime = len(body), 0o644, 0
+                  archive.addfile(info, io.BytesIO(body))
+          asset.with_name(asset.name + ".sha256").write_text(hashlib.sha256(asset.read_bytes()).hexdigest() + "  " + asset.name + "\n")
+          (output / "component_manifest.json").write_bytes(payloads["component_manifest.json"])
+          PY
+      - name: Attest the tested component source
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-path: ${{ runner.temp }}/small-screen-component/*.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pi-small-screen-component-${{ github.sha }}
+          path: ${{ runner.temp }}/small-screen-component/
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: pi-small-screen-tests-${{ github.sha }}
+          path: ${{ runner.temp }}/pi-small-screen-tests.log

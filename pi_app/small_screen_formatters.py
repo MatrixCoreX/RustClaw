@@ -1,11 +1,13 @@
-import tkinter.font as tkfont
+from small_screen_font_cache import measurement_font
 
 
 def _line_clamp_text(text, font, wraplength, max_lines=3, ellipsis="..."):
     content = str(text or "")
     if max_lines <= 0:
         return content
-    measure_font = tkfont.Font(font=font)
+    if not content:
+        return "\n" * (max_lines - 1)
+    measure_font = measurement_font(font)
     wrapped_lines = []
     for raw_line in content.split("\n"):
         if raw_line == "":
