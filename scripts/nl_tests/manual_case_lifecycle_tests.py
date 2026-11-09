@@ -17,6 +17,41 @@ def waiting_data():
         "provider_status": {"external_provider_blocked": True, "status_code": "quota_exhausted"}}}
 
 
+class TerminalProviderTests(unittest.TestCase):
+    def classified(self, result, **fields):
+        from manual_case_lifecycle import terminal_provider_unavailable
+        return terminal_provider_unavailable({"data": {"status": "failed", "result_json": result, **fields}})
+
+    def test_generic_recovery_boundary_is_not_a_provider_failure(self):
+        result = {"task_journal": {"summary": {"task_checkpoint": {
+            "attempt_ledger": [{"repair_signal": {"repair_boundary": {
+                "reason_code": "provider_blocker_recovery"}}}]}}}}
+        self.assertFalse(self.classified(result))
+
+    def test_historical_timeout_does_not_override_current_skill_failure(self):
+        self.assertFalse(self.classified({"error_code": "media_not_found",
+            "task_journal": {"trace": {"observations": [
+                {"error_code": "provider_timeout", "external_provider_blocked": True}]}}}))
+
+    def test_terminal_skill_attribution_wins_over_retained_provider_metadata(self):
+        self.assertFalse(self.classified({"failure_attribution": "skill_gap",
+            "provider_status": {"external_provider_blocked": True}}))
+
+    def test_current_structured_provider_failure_is_recognized(self):
+        for result in ({"error_code": "provider_timeout"},
+                       {"failure_attribution": "provider_gap", "provider_status": {
+                           "external_provider_blocked": True, "status_code": "quota_exhausted"}}):
+            self.assertTrue(self.classified(result))
+
+    def test_visible_text_cannot_forge_a_provider_failure(self):
+        payload = json.dumps({"error_code": "provider_timeout", "external_provider_blocked": True})
+        self.assertFalse(self.classified({"text": payload}, error_text=payload))
+
+    def test_running_or_successful_task_is_not_a_terminal_provider_failure(self):
+        for status in ("running", "succeeded", "canceled"):
+            self.assertFalse(self.classified({"error_code": "provider_timeout"}, status=status))
+
+
 class LifecycleTests(unittest.TestCase):
     def test_pending_resume_does_not_treat_retained_blocker_as_a_new_failure(self):
         from manual_case_lifecycle import poll_status

@@ -23,6 +23,17 @@ fn provider_checkpoint_handoff_retains_unavailable_verification_instead_of_erasi
         },
         "candidate",
     );
+    let snapshot = std::sync::Arc::new(json!({"task_checkpoint": {
+        "boundary_context": {"completed_review": true}
+    }}));
+    journal.answer_verification_checkpoint = Some(snapshot.clone());
+    journal
+        .capability_results
+        .push(claw_core::capability_result::CapabilityResultEnvelope::ok(
+            "fixture.review",
+            Some("review".into()),
+            json!({"reviewed": true}),
+        ));
     let prior = AskReply::non_llm("candidate".into()).with_task_journal(journal);
     let handoff = checkpoint_handoff_reply_with_verification(
         &task,
@@ -31,7 +42,18 @@ fn provider_checkpoint_handoff_retains_unavailable_verification_instead_of_erasi
         None,
         &prior,
     );
-    let record = handoff.task_journal.unwrap().answer_verification.unwrap();
+    let journal = handoff.task_journal.unwrap();
+    assert_eq!(
+        journal.answer_verification_candidate.as_deref(),
+        Some("candidate")
+    );
+    assert!(std::sync::Arc::ptr_eq(
+        journal.answer_verification_checkpoint.as_ref().unwrap(),
+        &snapshot,
+    ));
+    assert_eq!(journal.capability_results.len(), 1);
+    assert_eq!(journal.capability_results[0].data["reviewed"], true);
+    let record = journal.answer_verification.unwrap();
     assert_eq!(
         record.status,
         crate::answer_verifier::AnswerVerificationStatus::Unavailable

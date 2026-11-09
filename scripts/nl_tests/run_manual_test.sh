@@ -387,72 +387,7 @@ PY
 }
 
 final_result_provider_unavailable() {
-  python3 - "$1" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-data = obj.get("data") or {}
-result = data.get("result_json") or {}
-if str(data.get("status") or "") not in {"failed", "timeout"}:
-    raise SystemExit(1)
-
-def walk(value):
-    if isinstance(value, dict):
-        yield value
-        for child in value.values():
-            yield from walk(child)
-    elif isinstance(value, list):
-        for child in value:
-            yield from walk(child)
-
-def decoded_object(value):
-    if not isinstance(value, str):
-        return None
-    value = value.strip()
-    if not value.startswith("{"):
-        return None
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
-
-journal_summary = ((result.get("task_journal") or {}).get("summary") or {})
-machine_objects = list(walk(result))
-for candidate in (
-    result.get("text"),
-    journal_summary.get("final_answer"),
-    data.get("error_text"),
-):
-    parsed = decoded_object(candidate)
-    if parsed is not None:
-        machine_objects.extend(walk(parsed))
-
-for item in machine_objects:
-    external_blocked = item.get("external_provider_blocked") is True
-    attribution = str(item.get("failure_attribution") or "").strip().lower()
-    codes = {
-        str(item.get(field) or "").strip().lower()
-        for field in (
-            "error_code",
-            "provider_blocker_status_code",
-            "reason_code",
-            "status_code",
-        )
-    }
-    provider_code = any(
-        code == "rate_limited"
-        or code.startswith("provider_")
-        or code.startswith("llm_provider_")
-        for code in codes
-    )
-    if provider_code or (external_blocked and attribution == "provider_gap"):
-        raise SystemExit(0)
-
-raise SystemExit(1)
-PY
+  python3 "${SCRIPT_DIR}/manual_case_lifecycle.py" "$1" --terminal-provider
 }
 
 final_result_needs_confirmation() {

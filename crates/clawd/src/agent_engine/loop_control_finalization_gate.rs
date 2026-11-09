@@ -67,7 +67,7 @@ pub(super) fn answer_contract_for_reply(
     })
 }
 
-pub(super) fn checkpoint_handoff_reply_with_verification(
+pub(in crate::agent_engine) fn checkpoint_handoff_reply_with_verification(
     task: &ClaimedTask,
     user_text: &str,
     loop_state: &LoopState,
@@ -82,6 +82,12 @@ pub(super) fn checkpoint_handoff_reply_with_verification(
     ) {
         target.answer_verification = source.answer_verification.clone();
         target.answer_verifier_summary = source.answer_verifier_summary.clone();
+        // Finalization can add reviewed artifacts after the loop snapshot was
+        // taken. Resume the same candidate against that exact evidence rather
+        // than falling back to planning and losing the completed delivery.
+        target.answer_verification_candidate = source.answer_verification_candidate.clone();
+        target.answer_verification_checkpoint = source.answer_verification_checkpoint.clone();
+        target.capability_results = source.capability_results.clone();
     }
     handoff
 }

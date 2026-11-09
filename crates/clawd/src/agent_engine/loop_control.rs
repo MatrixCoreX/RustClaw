@@ -391,6 +391,7 @@ mod loop_control_structured_clarify;
 mod loop_control_verifier_retry_commit;
 
 use loop_control_answer_recovery::*;
+pub(in crate::agent_engine) use loop_control_finalization_gate::checkpoint_handoff_reply_with_verification;
 use loop_control_finalization_gate::*;
 pub(in crate::agent_engine) use loop_control_observe_round::observation_round_needs_planner;
 use loop_control_observe_round::{

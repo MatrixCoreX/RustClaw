@@ -180,9 +180,18 @@ async fn provider_recovery_resumes_persisted_verification_without_replaying_tool
         },
         "candidate",
     );
-    let mut value = verification_checkpoint_payload(&task, &prior)["task_checkpoint"].clone();
-    bind_checkpoint(&state, &task, &journal, &mut value);
-    let cp = serde_json::from_value(value).unwrap();
+    // Exercise the real provider-blocker handoff, not a manually bound shortcut.
+    let source = AskReply::non_llm("candidate".into()).with_task_journal(journal);
+    let handoff = super::super::loop_control::checkpoint_handoff_reply_with_verification(
+        &task, "fixture", &prior, None, &source,
+    );
+    let mut journal = handoff.task_journal.unwrap();
+    assert!(crate::answer_verifier::checkpoint_unavailable_verification(
+        &state,
+        &task,
+        &mut journal,
+    ));
+    let cp = serde_json::from_value(journal.task_checkpoint.unwrap()).unwrap();
     let waiting = try_resume(&state, &task, "fixture", None, &cp, &mut prior)
         .await
         .unwrap()

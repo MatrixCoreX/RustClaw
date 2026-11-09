@@ -1,0 +1,126 @@
+name: Pi NL recovery verification
+
+"on":
+  push:
+    branches: ["ci/pi-nl-repair-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_BUILD_JOBS: "3"
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - name: Prepare native dependencies
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq pkg-config clang libclang-dev protobuf-compiler ripgrep
+          else
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install protobuf ripgrep
+          fi
+          python3 -m pip install -r scripts/nl_tests/requirements.txt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          key: ${{ runner.os == 'Linux' && 'linux-runtime-read' || 'macos-runtime-read' }}
+          prefix-key: v1-rust-cargo-profiles
+          cache-targets: "false"
+          cache-directories: |
+            target/debug
+            target/release
+          cache-bin: "false"
+          cache-on-failure: "false"
+      - name: Test skill retry progress and canonical NL lifecycle
+        run: |
+          python3 -m unittest discover -s optional_skills/media_download/tests
+          for suite in manual_case_lifecycle_tests.py manual_case_observation_tests.py manual_case_assertions_tests.py; do
+            python3 -m unittest discover -s scripts/nl_tests -p "$suite"
+          done
+          python3 scripts/nl_tests/print_llm_raw_trace.py --self-test
+          python3 scripts/nl_tests/check_llm_raw_trace_runner_contract.py --self-test
+          python3 scripts/nl_tests/check_llm_raw_trace_runner_contract.py
+          python3 scripts/check_task_lifecycle_contracts.py
+          python3 scripts/check_task_event_context_team_contracts.py
+          python3 scripts/check_skill_storage_ownership.py --self-test
+          python3 scripts/check_skill_storage_ownership.py
+          python3 scripts/check_skill_hotplug_coupling_inventory.py --self-test
+          python3 scripts/check_skill_hotplug_coupling_inventory.py
+          python3 scripts/check_answer_verifier_boundary.py
+          python3 scripts/check_no_runtime_hard_reply.py
+          python3 scripts/check_long_files.py
+          python3 scripts/check_cross_platform_contracts.py
+          python3 scripts/check_product_identity_coupling.py --self-test
+          python3 scripts/check_product_identity_coupling.py
+          python3 scripts/check_no_policy_boundary_hard_reply.py
+          python3 scripts/check_repair_no_user_text_fields.py
+      - name: Test real verification handoff, persistence and revoked authority
+        run: |
+          cargo test --locked -p clawd --bin clawd -- --list > "$RUNNER_TEMP/tests.txt"
+          for name in provider_checkpoint_handoff_retains_unavailable_verification_instead_of_erasing_it provider_recovery_resumes_persisted_verification_without_replaying_tools; do
+            grep "$name: test" "$RUNNER_TEMP/tests.txt"
+            cargo test --locked -p clawd --bin clawd "$name" -- --nocapture
+          done
+          for suite in verification_resume::tests answer_verification_recovery::tests answer_verification_retry::tests loop_control_finalization_gate::tests answer_verifier::tests; do
+            cargo test --locked -p clawd --bin clawd "$suite" -- --test-threads=3
+          done
+
+  pi-component:
+    needs: regression
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      CARGO_BUILD_JOBS: "3"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Prepare cross tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config make perl clang libclang-dev protobuf-compiler
+          rustup target add aarch64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          key: release-aarch64-unknown-linux-gnu
+          prefix-key: v1-rust-cargo-profiles
+          cache-targets: "false"
+          cache-directories: |
+            target/debug
+            target/release
+            target/aarch64-unknown-linux-gnu/debug
+            target/aarch64-unknown-linux-gnu/release
+          cache-bin: "false"
+          cache-on-failure: "false"
+      - name: Build exact tested Pi backend and package tested skill source
+        run: |
+          INSTALL_DEPS=0 bash scripts/archive/cross-build/cross-build-pi.sh --target pi64 --package clawd --no-ui --skip-deps -- --locked
+          python3 scripts/verify_release_binary.py target/aarch64-unknown-linux-gnu/release/clawd aarch64-unknown-linux-gnu
+          stage="$RUNNER_TEMP/component-stage"
+          mkdir -p "$stage/target/release" "$RUNNER_TEMP/component-artifact"
+          install -m 755 target/aarch64-unknown-linux-gnu/release/clawd "$stage/target/release/clawd"
+          git archive HEAD optional_skills/media_download scripts/nl_tests | tar -x -C "$stage"
+          printf '%s\n' "$GITHUB_SHA" > "$stage/source-commit"
+          (cd "$stage" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          tar -czf "$RUNNER_TEMP/component-artifact/agent-pi-nl-${GITHUB_SHA}.tar.gz" -C "$stage" .
+          (cd "$RUNNER_TEMP/component-artifact" && sha256sum *.tar.gz > SHA256SUMS)
+      - uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-path: ${{ runner.temp }}/component-artifact/*.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pi-nl-component-${{ github.sha }}
+          path: ${{ runner.temp }}/component-artifact/
+          if-no-files-found: error

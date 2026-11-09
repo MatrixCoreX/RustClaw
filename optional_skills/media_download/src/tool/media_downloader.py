@@ -7367,6 +7367,7 @@ def gather_candidates_for_request_with_retries(
         ArticleContent | None,
         list[str],
     ] | None = None
+    previous_empty: tuple[str, str | None] | None = None
     for attempt in range(1, max_attempts + 1):
         raise_if_task_cancelled()
         print(f"parse_attempt: {attempt}/{max_attempts}", file=sys.stderr)
@@ -7412,6 +7413,11 @@ def gather_candidates_for_request_with_retries(
             return result
         if platform == "tiktok" and tiktok_access.access_outcome_is_terminal(_logs):
             return result
+        empty_identity = (platform, _item_id)
+        if previous_empty == empty_identity:
+            print(f"parse_stalled: unchanged empty result for platform={platform}", file=sys.stderr)
+            return result
+        previous_empty = empty_identity
         if attempt < max_attempts:
             print(
                 f"parse_failed: attempt {attempt}/{max_attempts}: "
