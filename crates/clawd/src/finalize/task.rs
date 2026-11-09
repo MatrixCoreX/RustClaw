@@ -6,7 +6,9 @@ use crate::{repo, AppState};
 
 #[path = "task_answer_verification.rs"]
 mod task_answer_verification;
-use task_answer_verification::apply_exact_observation_machine_field_delivery;
+use task_answer_verification::{
+    apply_exact_observation_machine_field_delivery, prepare_verification_checkpoint_for_model_wait,
+};
 #[path = "task_answer_verifier_failure.rs"]
 mod task_answer_verifier_failure;
 #[path = "task_content_evidence_delivery.rs"]
@@ -546,6 +548,10 @@ pub(crate) async fn finalize_ask_result(
                 return Ok(());
             }
             if journal_has_checkpointed_nonterminal_lifecycle(&journal) {
+                // The generic provider handoff already owns a waiting checkpoint.
+                // Bind the completed verification candidate before this early
+                // persistence path, not only in the later terminal-answer path.
+                prepare_verification_checkpoint_for_model_wait(state, task, &mut journal);
                 let answer_text = crate::intercept_response_text_for_delivery(&answer.text);
                 let answer_messages = answer
                     .messages

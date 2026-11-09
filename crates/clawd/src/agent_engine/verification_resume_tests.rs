@@ -182,16 +182,72 @@ async fn provider_recovery_resumes_persisted_verification_without_replaying_tool
     );
     // Exercise the real provider-blocker handoff, not a manually bound shortcut.
     let source = AskReply::non_llm("candidate".into()).with_task_journal(journal);
+    state.note_task_provider_blocker(
+        &task.task_id,
+        crate::TaskProviderBlocker {
+            provider: "verification-fixture".into(),
+            status_code: "provider_transport_error".into(),
+            retry_after_seconds: 1,
+            external_provider_blocked: true,
+            message_key: "agent.answer_verification.unavailable".into(),
+        },
+    );
+    assert!(
+        super::super::model_blocker_checkpoint::checkpoint_blocked_model_error(
+            &state, &task, &mut prior,
+        )
+        .unwrap()
+    );
     let handoff = super::super::loop_control::checkpoint_handoff_reply_with_verification(
         &task, "fixture", &prior, None, &source,
     );
-    let mut journal = handoff.task_journal.unwrap();
-    assert!(crate::answer_verifier::checkpoint_unavailable_verification(
+    // Enter the real outer finalizer. A generic waiting checkpoint must not
+    // short-circuit persistence before the verification binding is prepared.
+    crate::finalize::finalize_ask_result(
         &state,
         &task,
-        &mut journal,
-    ));
-    let cp = serde_json::from_value(journal.task_checkpoint.unwrap()).unwrap();
+        &json!({"text":"fixture"}),
+        "fixture",
+        "fixture",
+        None,
+        "fixture",
+        None,
+        &[],
+        None,
+        Ok(handoff),
+    )
+    .await
+    .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    let persisted: String = state
+        .core
+        .db
+        .get()
+        .unwrap()
+        .query_row(
+            "SELECT result_json FROM tasks WHERE task_id=?1",
+            [&task.task_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let persisted: Value = serde_json::from_str(&persisted).unwrap();
+    let checkpoint = persisted["task_checkpoint"].clone();
+    assert!(checkpoint["boundary_context"]["verification_resume"].is_object());
+    assert_eq!(
+        checkpoint["boundary_context"]["agent_loop_resume_state"]["stage"],
+        "verification"
+    );
+    assert_eq!(
+        checkpoint["boundary_context"]["verification_resume"]["candidate"],
+        "candidate"
+    );
+    // Model the next worker claim after the production persistence path released it.
+    task.claim_attempt += 1;
+    assert_eq!(state.core.db.get().unwrap().execute(
+        "UPDATE tasks SET lease_owner=?2,lease_expires_at=?3,claim_attempt=?4 WHERE task_id=?1 AND lease_owner IS NULL",
+        rusqlite::params![task.task_id,state.worker.worker_id,i64::MAX,task.claim_attempt],
+    ).unwrap(),1);
+    let cp = serde_json::from_value(checkpoint).unwrap();
     let waiting = try_resume(&state, &task, "fixture", None, &cp, &mut prior)
         .await
         .unwrap()

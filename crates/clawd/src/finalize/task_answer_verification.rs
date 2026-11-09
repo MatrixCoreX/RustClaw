@@ -1,5 +1,29 @@
 use crate::task_journal::TaskJournal;
 
+pub(super) fn prepare_verification_checkpoint_for_model_wait(
+    state: &crate::AppState,
+    task: &crate::ClaimedTask,
+    journal: &mut TaskJournal,
+) -> bool {
+    let lifecycle = journal.task_lifecycle.as_ref();
+    if lifecycle
+        .and_then(|value| value.get("state"))
+        .and_then(serde_json::Value::as_str)
+        != Some("waiting")
+    {
+        return false;
+    }
+    let reason = lifecycle
+        .and_then(|value| value.get("resume_reason"))
+        .and_then(serde_json::Value::as_str);
+    if reason != Some(claw_core::provider_failure_policy::PROVIDER_WAIT_RESUME_REASON)
+        && reason != Some("resource_admission_wait")
+    {
+        return false;
+    }
+    crate::answer_verifier::checkpoint_unavailable_verification(state, task, journal)
+}
+
 pub(super) fn apply_exact_observation_machine_field_delivery(
     route_result: &crate::IntentOutputContract,
     journal: &mut TaskJournal,
@@ -31,3 +55,7 @@ pub(super) fn apply_exact_observation_machine_field_delivery(
     );
     true
 }
+
+#[cfg(test)]
+#[path = "task_answer_verification_tests.rs"]
+mod tests;

@@ -77,7 +77,7 @@ jobs:
             grep "$name: test" "$RUNNER_TEMP/tests.txt"
             cargo test --locked -p clawd --bin clawd "$name" -- --nocapture
           done
-          for suite in verification_resume::tests answer_verification_recovery::tests answer_verification_recovery::retry_policy::tests loop_control_finalization_gate::tests answer_verifier::tests; do
+          for suite in verification_resume::tests answer_verification_recovery::tests answer_verification_recovery::retry_policy::tests loop_control_finalization_gate::tests answer_verifier::tests finalize::task::task_answer_verification::tests; do
             grep -F "${suite}::" "$RUNNER_TEMP/tests.txt"
             cargo test --locked -p clawd --bin clawd "$suite" -- --test-threads=3
           done
