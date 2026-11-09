@@ -80,6 +80,7 @@ from small_screen_formatters import (
     fmt_bytes,
     fmt_duration,
 )
+from small_screen_font_cache import clear_measurement_fonts
 from small_screen_market_service import (
     DEFAULT_A_SHARE_REFRESH_SEC,
     DEFAULT_CRYPTO_REFRESH_SEC,
@@ -1640,6 +1641,7 @@ class SmallScreenApp:
             self._cancel_job("_bancor_refresh_job")
 
     def _prepare_for_ui_rebuild(self):
+        clear_measurement_fonts(self.root)
         self._teardown_current_view()
         self._teardown_gallery_view()
         self._stop_market_jobs()

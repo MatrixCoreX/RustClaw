@@ -1,0 +1,39 @@
+name: Pi small-screen graphical resource stability
+
+"on":
+  push:
+    branches: ["ci/pi-small-screen-x11-*"]
+  pull_request:
+    paths: ["pi_app/**", ".github/workflows/pi-small-screen-stability-ci.yml"]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  graphical-resources:
+    runs-on: ubuntu-24.04
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install native Tk test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3-tk python3-pil xvfb xauth fonts-noto-cjk
+      - name: Check source and workflow contracts
+        run: |
+          /usr/bin/python3 -B scripts/check_github_action_pins.py
+          git diff --check
+      - name: Test all small-screen modules and real X11 resource lifecycle
+        env:
+          APP_PRODUCT_IDENTITY_CONFIG: ${{ github.workspace }}/configs/product_identity.toml
+        run: |
+          set -o pipefail
+          xvfb-run -a /usr/bin/python3 -B -m unittest discover -s pi_app -p 'test_*.py' -v 2>&1 | tee "$RUNNER_TEMP/pi-small-screen-tests.log"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: pi-small-screen-tests-${{ github.sha }}
+          path: ${{ runner.temp }}/pi-small-screen-tests.log
