@@ -75,6 +75,7 @@ pub(crate) fn build_checkpoint_resume_state(
             .collect::<Vec<_>>(),
         "active_capability_scopes": loop_state.active_capability_scopes,
         "output_contract": loop_state.output_contract,
+        "round_traces": loop_state.round_traces,
         "last_output": loop_state.last_output,
         "history_compact": history_compact,
         "task_observations": task_observations,
@@ -139,6 +140,14 @@ pub(crate) fn restore_checkpoint_resume_state(
         .and_then(|value| serde_json::from_value::<crate::IntentOutputContract>(value.clone()).ok())
     {
         loop_state.output_contract = Some(output_contract);
+    }
+    if loop_state.round_traces.is_empty() {
+        if let Some(rounds) = resume_state.get("round_traces").and_then(|value| {
+            serde_json::from_value::<Vec<crate::task_journal::TaskJournalRoundTrace>>(value.clone())
+                .ok()
+        }) {
+            loop_state.round_traces = rounds;
+        }
     }
 
     if let Some(last_output) = string_field(resume_state, "last_output") {
@@ -260,6 +269,9 @@ fn extend_unique_values(target: &mut Vec<Value>, values: Vec<Value>) {
     }
 }
 
+#[cfg(test)]
+#[path = "checkpoint_round_trace_tests.rs"]
+mod round_trace_tests;
 #[cfg(test)]
 #[path = "checkpoint_resume_state_tests.rs"]
 mod tests;

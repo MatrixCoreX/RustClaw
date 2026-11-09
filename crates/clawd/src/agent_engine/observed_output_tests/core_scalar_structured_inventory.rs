@@ -894,6 +894,7 @@ fn names_only_inventory_direct_answer_does_not_need_llm_synthesis() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: String::new(),
             execution_recipe_summary: None,
@@ -958,6 +959,7 @@ fn names_only_inventory_free_shape_defers_to_llm_synthesis() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: String::new(),
             execution_recipe_summary: None,
@@ -1017,6 +1019,7 @@ fn dirs_only_inventory_names_by_kind_can_direct_answer_observation_only_plan() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: String::new(),
             execution_recipe_summary: None,

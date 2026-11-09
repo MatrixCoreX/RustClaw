@@ -34,6 +34,7 @@ fn synthesize_direct_fallback_blocks_multiline_raw_read_range_when_plan_requests
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: String::new(),
             execution_recipe_summary: None,

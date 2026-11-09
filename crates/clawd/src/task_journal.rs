@@ -59,9 +59,9 @@ use task_journal_summary_trace::{
     budget_profile_json, capability_resolution_source, cost_budget_json, finalizer_summary_json,
     next_requested_capability, output_contract_json, plan_summary_json, plan_trace_json,
     raw_plan_steps, requested_capability_sequence, rollout_attribution_json,
-    round_capability_resolution_records_json, step_action_kind, step_trace_json, task_metrics_json,
-    turn_analysis_json, verify_repair_signals_json, verify_summary_json, verify_trace_json,
-    RequestedPlanCapability,
+    round_capability_resolution_records_json, round_decision_envelope_json, step_action_kind,
+    step_trace_json, task_metrics_json, turn_analysis_json, verify_repair_signals_json,
+    verify_summary_json, verify_trace_json, RequestedPlanCapability,
 };
 pub(crate) use task_journal_trace_storage::retained_capability_results_complete;
 use task_journal_trace_storage::*;
@@ -211,7 +211,7 @@ impl TaskJournalFinalizerFallback {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct TaskJournalVerifyIssue {
     pub(crate) step_id: String,
     pub(crate) kind: crate::verifier::VerifyIssueKind,
@@ -219,7 +219,7 @@ pub(crate) struct TaskJournalVerifyIssue {
     pub(crate) missing_fields: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct TaskJournalVerifySummary {
     pub(crate) mode: crate::verifier::VerifyMode,
     pub(crate) approved: bool,
@@ -230,12 +230,14 @@ pub(crate) struct TaskJournalVerifySummary {
     pub(crate) issues: Vec<TaskJournalVerifyIssue>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct TaskJournalRoundTrace {
     pub(crate) round_no: usize,
     pub(crate) goal: String,
     pub(crate) execution_recipe_summary: Option<String>,
     pub(crate) plan_result: Option<crate::PlanResult>,
+    #[serde(default)]
+    pub(crate) effective_output_contract: Option<crate::IntentOutputContract>,
     pub(crate) verify_result: Option<TaskJournalVerifySummary>,
 }
 
@@ -1074,7 +1076,8 @@ impl TaskJournal {
         }
         if self.answer_verification.is_none() {
             self.answer_verification = other.answer_verification.clone();
-            self.answer_verification_checkpoint_prepared = other.answer_verification_checkpoint_prepared;
+            self.answer_verification_checkpoint_prepared =
+                other.answer_verification_checkpoint_prepared;
         }
         if self.answer_verification_checkpoint.is_none() {
             self.answer_verification_checkpoint = other.answer_verification_checkpoint.clone();
@@ -1310,10 +1313,7 @@ impl TaskJournal {
                 .as_ref()
                 .map(|contract| evidence_coverage_trace_json(contract, self)),
             "rounds": self.rounds.iter().map(|round| {
-                let decision_envelope = round
-                    .plan_result
-                    .as_ref()
-                    .map(agent_loop_round_plan_contract_envelope_json);
+                let decision_envelope = round_decision_envelope_json(round);
                 let first_action_decision = decision_envelope
                     .as_ref()
                     .and_then(|value| value.get("decision"))
@@ -1346,6 +1346,9 @@ impl TaskJournal {
                         .plan_result
                         .as_ref()
                         .map(plan_trace_json),
+                    "proposed_output_contract": round.plan_result.as_ref()
+                        .and_then(|plan| plan.output_contract.as_ref()).map(output_contract_json),
+                    "effective_output_contract": round.effective_output_contract.as_ref().map(output_contract_json),
                     "verify_result": round.verify_result.as_ref().map(|verify| {
                         verify_trace_json(verify, round.plan_result.as_ref())
                     }),

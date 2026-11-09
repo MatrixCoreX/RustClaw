@@ -136,6 +136,7 @@ fn execution_summary_is_not_attached_before_final_delivery() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "list recent logs".to_string(),
             execution_recipe_summary: None,
@@ -239,6 +240,7 @@ fn execution_summary_is_not_attached_for_japanese_request() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "logs ディレクトリのファイル名を3つだけ一覧して。".to_string(),
             execution_recipe_summary: None,
@@ -283,6 +285,7 @@ fn execution_summary_suppressed_for_scalar_value_contract() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "extract package name".to_string(),
             execution_recipe_summary: None,
@@ -523,6 +526,7 @@ fn execution_summary_is_not_attached_for_multiple_execution_steps() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "tell joke and print pwd".to_string(),
             execution_recipe_summary: None,
@@ -578,6 +582,7 @@ fn execution_summary_message_builder_returns_none_for_english_requests() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "list recent logs".to_string(),
             execution_recipe_summary: None,
@@ -615,6 +620,7 @@ fn execution_summary_builder_stays_disabled_for_shifted_rounds() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "pack archive".to_string(),
             execution_recipe_summary: None,
@@ -641,6 +647,7 @@ fn execution_summary_builder_stays_disabled_for_shifted_rounds() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 2,
             goal: "verify archive".to_string(),
             execution_recipe_summary: None,
@@ -691,6 +698,7 @@ fn execution_summary_builder_stays_disabled_when_global_step_ids_shift() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "read old config field".to_string(),
             execution_recipe_summary: None,
@@ -707,6 +715,7 @@ fn execution_summary_builder_stays_disabled_when_global_step_ids_shift() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 2,
             goal: "edit config field".to_string(),
             execution_recipe_summary: None,
@@ -785,6 +794,7 @@ fn virtual_tool_execution_summary_builder_stays_disabled_when_plan_used_call_ski
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "compare file sizes".to_string(),
             execution_recipe_summary: None,
@@ -861,6 +871,7 @@ fn execution_summary_is_not_attached_for_exact_observed_passthrough_delivery() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "print pwd".to_string(),
             execution_recipe_summary: None,
@@ -928,6 +939,7 @@ fn execution_summary_suppressed_for_strict_content_excerpt_contract() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "read tail".to_string(),
             execution_recipe_summary: None,
@@ -1160,6 +1172,7 @@ fn execution_summary_is_not_attached_for_failed_file_token_delivery() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "send file".to_string(),
             execution_recipe_summary: None,
@@ -1206,6 +1219,7 @@ fn execution_summary_suppressed_for_successful_file_token_delivery() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "send file".to_string(),
             execution_recipe_summary: None,

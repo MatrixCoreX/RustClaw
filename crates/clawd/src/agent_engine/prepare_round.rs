@@ -515,6 +515,7 @@ pub(super) fn push_round_trace(
                 .is_active()
                 .then(|| loop_state.execution_recipe.phase_summary_line()),
             plan_result: Some(prepared_round.plan_result.clone()),
+            effective_output_contract: prepared_round.effective_output_contract.clone(),
             verify_result: Some(build_round_verify_summary(&prepared_round.verify_result)),
         });
 }

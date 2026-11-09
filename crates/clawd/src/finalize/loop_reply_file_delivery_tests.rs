@@ -14,6 +14,7 @@ fn file_delivery_fallback_uses_ranked_inventory_after_placeholder_plan() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "deliver selected file from directory".to_string(),
             execution_recipe_summary: None,
@@ -517,6 +518,7 @@ fn file_delivery_fallback_uses_last_inventory_selection_from_placeholder_plan() 
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "deliver selected file from directory".to_string(),
             execution_recipe_summary: None,

@@ -30,7 +30,7 @@ use templates::{
     TemplatePlaceholderScope,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum VerifyMode {
     ObserveOnly,
     Enforce,
@@ -51,7 +51,7 @@ impl VerifyMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum VerifyIssueKind {
     SkillNotVisible,
     CapabilityUnavailable,

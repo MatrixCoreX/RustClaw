@@ -98,6 +98,7 @@ fn direct_structured_observed_answer_defers_when_plan_requested_synthesis() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "read then summarize".to_string(),
             execution_recipe_summary: None,
@@ -129,6 +130,7 @@ fn direct_structured_observed_answer_uses_names_only_inventory_despite_synthesis
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "list_names".to_string(),
             execution_recipe_summary: None,
@@ -164,6 +166,7 @@ fn direct_structured_observed_answer_uses_dirs_only_inventory_despite_synthesis_
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "list_dirs".to_string(),
             execution_recipe_summary: None,

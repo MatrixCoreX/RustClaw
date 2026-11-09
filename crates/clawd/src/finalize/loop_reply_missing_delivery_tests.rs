@@ -88,6 +88,7 @@ async fn observed_execution_without_delivery_reply_omits_raw_summary() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "list recent logs".to_string(),
             execution_recipe_summary: None,
@@ -325,6 +326,7 @@ async fn observed_execution_without_delivery_skips_summary_for_extract_field_res
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "read package name".to_string(),
             execution_recipe_summary: None,

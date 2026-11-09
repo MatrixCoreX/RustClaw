@@ -774,6 +774,14 @@ pub(super) fn budget_profile_json(journal: &TaskJournal) -> Option<&str> {
         .find_map(|item| item.budget_profile.as_deref())
 }
 
+pub(super) fn round_decision_envelope_json(round: &TaskJournalRoundTrace) -> Option<Value> {
+    let mut plan = round.plan_result.clone()?;
+    if let Some(contract) = round.effective_output_contract.as_ref() {
+        plan.output_contract = Some(contract.clone());
+    }
+    Some(agent_loop_round_plan_contract_envelope_json(&plan))
+}
+
 pub(super) fn round_capability_resolution_records_json(
     round: &TaskJournalRoundTrace,
 ) -> Vec<Value> {

@@ -108,6 +108,7 @@ fn loop_state_with_plan(plan: crate::PlanResult) -> super::super::LoopState {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: plan.goal.clone(),
             execution_recipe_summary: None,

@@ -707,6 +707,8 @@ fn trace_json_includes_round_source_of_truth_machine_fields() {
     });
     journal.record_final_stop_signal("max_tool_calls");
     journal.rounds.push(TaskJournalRoundTrace {
+        effective_output_contract: None,
+        effective_output_contract: None,
         round_no: 1,
         goal: "inspect workspace".to_string(),
         plan_result: Some(plan),
@@ -867,6 +869,7 @@ fn trace_json_matches_repeated_round_step_ids_by_execution_order_and_skill() {
         }));
     }
     journal.rounds.push(TaskJournalRoundTrace {
+        effective_output_contract: None,
         round_no: 1,
         goal: "current_phase=inspect".to_string(),
         execution_recipe_summary: None,

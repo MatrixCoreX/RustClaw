@@ -73,6 +73,7 @@ async fn content_evidence_step_failure_answer_preserves_plan_path_without_locato
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "read protected file".to_string(),
             execution_recipe_summary: None,
@@ -344,6 +345,7 @@ async fn content_evidence_db_query_error_is_completion() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "query missing table".to_string(),
             execution_recipe_summary: None,

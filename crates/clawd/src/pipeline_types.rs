@@ -262,7 +262,7 @@ impl<'a> MachineTokenMarkers<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum PlanKind {
     Native,
     Single,
@@ -281,7 +281,7 @@ impl PlanKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct PlanStep {
     pub(crate) step_id: String,
     pub(crate) action_type: String,
@@ -292,7 +292,7 @@ pub(crate) struct PlanStep {
     pub(crate) why: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct PlanResult {
     pub(crate) goal: String,
     pub(crate) missing_slots: Vec<String>,

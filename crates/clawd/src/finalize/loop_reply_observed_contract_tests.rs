@@ -754,6 +754,7 @@ fn grounded_terminal_respond_replaces_structured_json_delivery() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 2,
             goal: String::new(),
             execution_recipe_summary: None,
@@ -856,6 +857,7 @@ fn grounded_terminal_respond_rejects_ungrounded_content() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 2,
             goal: String::new(),
             execution_recipe_summary: None,

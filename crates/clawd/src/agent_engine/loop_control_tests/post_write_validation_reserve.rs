@@ -73,6 +73,7 @@ fn post_write_validation_reserve_adds_missing_readbacks_before_latest_validation
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "add safe_div and validate".to_string(),
             execution_recipe_summary: None,
@@ -222,6 +223,7 @@ fn post_write_validation_reserve_reads_test_again_after_late_rewrite() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 6,
             goal: "validate rewritten tests".to_string(),
             execution_recipe_summary: None,
@@ -313,6 +315,7 @@ fn readback_only_code_validation_reserve_runs_unexecuted_probe_only() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 3,
             goal: "validate existing safe_div".to_string(),
             execution_recipe_summary: None,
@@ -393,6 +396,7 @@ fn readback_only_code_validation_reserve_uses_structured_machine_selector() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 2,
             goal: "validate existing safe_div".to_string(),
             execution_recipe_summary: None,
@@ -479,6 +483,7 @@ fn readback_only_code_validation_reserve_ignores_plain_read_without_validation()
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "read files".to_string(),
             execution_recipe_summary: None,

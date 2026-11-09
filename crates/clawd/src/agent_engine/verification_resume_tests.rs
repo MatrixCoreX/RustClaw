@@ -61,6 +61,9 @@ fn exact_candidate_request_revision_and_evidence_are_required() {
     let mut corrupt = cp.clone();
     corrupt.completed_side_effect_refs.clear();
     assert!(binding_matches(&corrupt, &task, "fixture", &Value::Null).is_none());
+    let mut corrupt = cp.clone();
+    corrupt.boundary_context["agent_loop_resume_state"]["round_traces"] = json!([{"round_no":99}]);
+    assert!(binding_matches(&corrupt, &task, "fixture", &Value::Null).is_none());
     let mut changed = task.clone();
     changed.payload_json = json!({"text":"new"}).to_string();
     assert!(binding_matches(&cp, &changed, "fixture", &Value::Null).is_none());
@@ -147,6 +150,22 @@ async fn provider_recovery_resumes_persisted_verification_without_replaying_tool
     task.user_key = Some(identity.user_key.clone());
     state.core.db.get().unwrap().execute("INSERT INTO tasks(task_id,user_id,chat_id,user_key,principal_id,channel,kind,payload_json,status,created_at,updated_at,lease_owner,claim_attempt) VALUES (?1,1,2,?2,?3,'ui','ask',?4,'running','1','1',?5,1)",rusqlite::params![task.task_id,identity.user_key,identity.principal_id,task.payload_json,state.worker.worker_id]).unwrap();
     let mut prior = LoopState::default();
+    prior
+        .round_traces
+        .push(crate::task_journal::TaskJournalRoundTrace {
+            round_no: 1,
+            plan_result: Some(crate::PlanResult {
+                goal: "fixture".into(),
+                missing_slots: Vec::new(),
+                needs_confirmation: false,
+                output_contract: None,
+                steps: Vec::new(),
+                planner_notes: String::new(),
+                plan_kind: crate::PlanKind::Single,
+                raw_plan_text: String::new(),
+            }),
+            ..Default::default()
+        });
     prior.tool_calls_total = 1;
     prior.total_steps_executed = 1;
     prior
@@ -264,6 +283,12 @@ async fn provider_recovery_resumes_persisted_verification_without_replaying_tool
     assert_eq!(reply.text, "candidate");
     let journal = reply.task_journal.as_ref().unwrap();
     assert_eq!(journal.step_results.len(), 1);
+    assert_eq!(journal.rounds.len(), 1);
+    assert_eq!(journal.rounds[0].round_no, 1);
+    assert_eq!(
+        journal.to_trace_json()["rounds"][0]["decision_envelope"]["source"],
+        "planner_round_action"
+    );
     assert_eq!(
         journal.answer_verification.as_ref().unwrap().status,
         crate::answer_verifier::AnswerVerificationStatus::Passed

@@ -77,11 +77,11 @@ jobs:
       - name: Test real verification handoff, persistence and revoked authority
         run: |
           cargo test --locked -p clawd --bin clawd -- --list > "$RUNNER_TEMP/tests.txt"
-          for name in provider_checkpoint_handoff_retains_unavailable_verification_instead_of_erasing_it provider_recovery_resumes_persisted_verification_without_replaying_tools task_allows_privileged_tools_for_admin_only authenticated_admin_yolo_keeps_host_permission_switches; do
+          for name in provider_checkpoint_handoff_retains_unavailable_verification_instead_of_erasing_it provider_recovery_resumes_persisted_verification_without_replaying_tools checkpoint_round_history_and_contract_evidence_survive_repeated_resumes old_checkpoint_without_round_history_does_not_fabricate_trace round_trace_distinguishes_proposed_contract_from_committed_contract task_allows_privileged_tools_for_admin_only authenticated_admin_yolo_keeps_host_permission_switches; do
             grep "$name: test" "$RUNNER_TEMP/tests.txt"
             cargo test --locked -p clawd --bin clawd "$name" -- --nocapture
           done
-          for suite in verification_resume::tests answer_verification_recovery::tests answer_verification_recovery::retry_policy::tests loop_control_finalization_gate::tests answer_verifier::tests; do
+          for suite in verification_resume::tests answer_verification_recovery::tests answer_verification_recovery::retry_policy::tests loop_control_finalization_gate::tests checkpoint_resume_state::tests prepare_round::tests answer_verifier::tests; do
             grep -F "${suite}::" "$RUNNER_TEMP/tests.txt"
             cargo test --locked -p clawd --bin clawd "$suite" -- --test-threads=3
           done

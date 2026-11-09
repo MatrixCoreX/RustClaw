@@ -1023,6 +1023,7 @@ fn direct_scalar_finalize_preserves_planned_count_inventory_breakdown() {
     loop_state
         .round_traces
         .push(crate::task_journal::TaskJournalRoundTrace {
+            effective_output_contract: None,
             round_no: 1,
             goal: "count files and directories".to_string(),
             execution_recipe_summary: None,

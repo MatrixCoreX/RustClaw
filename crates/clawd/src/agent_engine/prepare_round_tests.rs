@@ -53,6 +53,71 @@ fn committed_output_contract_cannot_be_relaxed_by_a_later_round() {
 }
 
 #[test]
+fn round_trace_distinguishes_proposed_contract_from_committed_contract() {
+    let committed = crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        selection: crate::pipeline_types::OutputSelectionContract {
+            output_field_labels: vec!["code".into()],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let proposed = crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Scalar,
+        ..Default::default()
+    };
+    let plan = crate::PlanResult {
+        goal: "fixture".into(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        output_contract: Some(proposed.clone()),
+        steps: Vec::new(),
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Incremental,
+        raw_plan_text: String::new(),
+    };
+    let prepared = super::PreparedRoundActions {
+        actions: Vec::new(),
+        action_conversation_relations: Vec::new(),
+        plan_result: plan,
+        effective_output_contract: select_effective_output_contract(
+            Some(&committed),
+            Some(&proposed),
+        ),
+        verify_result: crate::verifier::VerifyResult {
+            mode: crate::verifier::VerifyMode::Enforce,
+            approved: true,
+            blocked_reason: None,
+            shadow_blocked_reason: None,
+            permission_decision: serde_json::Value::Null,
+            approved_steps: Vec::new(),
+            needs_confirmation: false,
+            rewritten_steps: Vec::new(),
+            issues: Vec::new(),
+            capability_resolutions: Vec::new(),
+        },
+    };
+    let mut state = super::LoopState::default();
+    state.round_no = 2;
+    super::push_round_trace(&mut state, "fixture", &prepared);
+    let round = &state.round_traces[0];
+    assert_eq!(
+        round
+            .plan_result
+            .as_ref()
+            .unwrap()
+            .output_contract
+            .as_ref()
+            .unwrap()
+            .response_shape,
+        crate::OutputResponseShape::Scalar
+    );
+    let effective = round.effective_output_contract.as_ref().unwrap();
+    assert_eq!(effective.response_shape, crate::OutputResponseShape::Strict);
+    assert_eq!(effective.selection.output_field_labels, vec!["code"]);
+}
+
+#[test]
 fn later_round_can_monotonically_strengthen_an_unclassified_free_contract() {
     let committed = crate::IntentOutputContract {
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
