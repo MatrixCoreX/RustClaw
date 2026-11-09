@@ -101,6 +101,9 @@ jobs:
       CARGO_BUILD_JOBS: "3"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
       - name: Prepare cross tools
         run: |
           sudo apt-get update -qq
