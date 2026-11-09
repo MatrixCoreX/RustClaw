@@ -45,9 +45,10 @@ jobs:
       - name: Test skill retry progress and canonical NL lifecycle
         run: |
           python3 -m unittest discover -s optional_skills/media_download/tests
-          for suite in manual_case_lifecycle_tests.py manual_case_observation_tests.py manual_case_assertions_tests.py; do
+          for suite in manual_case_lifecycle_tests.py manual_case_observation_tests.py; do
             python3 -m unittest discover -s scripts/nl_tests -p "$suite"
           done
+          python3 scripts/nl_tests/manual_case_assertions_tests.py
           python3 scripts/nl_tests/print_llm_raw_trace.py --self-test
           python3 scripts/nl_tests/check_llm_raw_trace_runner_contract.py --self-test
           python3 scripts/nl_tests/check_llm_raw_trace_runner_contract.py
@@ -68,10 +69,19 @@ jobs:
       - name: Test real verification handoff, persistence and revoked authority
         run: |
           cargo test --locked -p clawd --bin clawd -- --list > "$RUNNER_TEMP/tests.txt"
-          for name in provider_checkpoint_handoff_retains_unavailable_verification_instead_of_erasing_it provider_recovery_resumes_persisted_verification_without_replaying_tools; do
+          for name in provider_checkpoint_handoff_retains_unavailable_verification_instead_of_erasing_it provider_recovery_resumes_persisted_verification_without_replaying_tools task_allows_privileged_tools_for_admin_only authenticated_admin_yolo_keeps_host_permission_switches; do
             grep "$name: test" "$RUNNER_TEMP/tests.txt"
             cargo test --locked -p clawd --bin clawd "$name" -- --nocapture
           done
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        if: runner.os == 'Linux'
+        with:
+          node-version: "22"
+      - name: Verify both product configurations and UI projections
+        if: runner.os == 'Linux'
+        run: |
+          npm ci --ignore-scripts --prefix UI
+          bash scripts/product_identity_tests.sh --with-ui
           for suite in verification_resume::tests answer_verification_recovery::tests answer_verification_retry::tests loop_control_finalization_gate::tests answer_verifier::tests; do
             cargo test --locked -p clawd --bin clawd "$suite" -- --test-threads=3
           done
