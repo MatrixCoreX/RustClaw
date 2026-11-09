@@ -8,6 +8,10 @@ name: Pi NL recovery verification
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   regression:
     strategy:
@@ -73,6 +77,9 @@ jobs:
             grep "$name: test" "$RUNNER_TEMP/tests.txt"
             cargo test --locked -p clawd --bin clawd "$name" -- --nocapture
           done
+          for suite in verification_resume::tests answer_verification_recovery::tests answer_verification_retry::tests loop_control_finalization_gate::tests answer_verifier::tests; do
+            cargo test --locked -p clawd --bin clawd "$suite" -- --test-threads=3
+          done
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         if: runner.os == 'Linux'
         with:
@@ -82,9 +89,6 @@ jobs:
         run: |
           npm ci --ignore-scripts --prefix UI
           bash scripts/product_identity_tests.sh --with-ui
-          for suite in verification_resume::tests answer_verification_recovery::tests answer_verification_retry::tests loop_control_finalization_gate::tests answer_verifier::tests; do
-            cargo test --locked -p clawd --bin clawd "$suite" -- --test-threads=3
-          done
 
   pi-component:
     needs: regression
