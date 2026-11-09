@@ -15,6 +15,26 @@ pub(crate) fn normalize_delivery_message(state: &AppState, text: &str) -> Option
     if crate::finalize::looks_like_tool_call_artifact(trimmed) {
         return None;
     }
+    // Delivery tokens are line records, not one path spanning the whole reply.
+    // Keep unrelated prose/paragraphs and valid later files when one path is absent.
+    if trimmed.contains('\n')
+        && trimmed
+            .lines()
+            .any(|line| crate::finalize::parse_delivery_token(line).is_some())
+    {
+        let lines = trimmed
+            .lines()
+            .filter_map(|line| {
+                if crate::finalize::parse_delivery_token(line).is_some() {
+                    normalize_delivery_message(state, line)
+                } else {
+                    Some(line.to_string())
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        return (!lines.trim().is_empty()).then_some(lines);
+    }
     if let Some((_kind, path)) = crate::finalize::parse_delivery_file_token(trimmed) {
         if looks_like_placeholder_delivery_payload(path) {
             return Some(normalized);

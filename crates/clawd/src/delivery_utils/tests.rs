@@ -1845,3 +1845,6 @@ fn chinese_filename_supports_normalized_contains_match_project_scan() {
 
 #[path = "batch_directory_delivery_tests.rs"]
 mod batch_directory_delivery_tests;
+
+#[path = "multi_attachment_delivery_tests.rs"]
+mod multi_attachment_delivery_tests;

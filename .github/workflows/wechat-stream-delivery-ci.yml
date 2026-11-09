@@ -82,10 +82,10 @@ jobs:
           set -euo pipefail
           cargo test --locked -p wechatd -- --test-threads=4 --nocapture
           cargo test --locked -p clawd --bin clawd -- --list > "$RUNNER_TEMP/delivery-tests.txt"
-          for case in channel_send::tests::local_io_failure_keeps_per_file_reason_and_other_accepted_parts delivery_service::tests::local_media_io_failure_keeps_known_reason_without_becoming_a_provider_error; do
+          for case in channel_send::tests::local_io_failure_keeps_per_file_reason_and_other_accepted_parts delivery_service::tests::local_media_io_failure_keeps_known_reason_without_becoming_a_provider_error delivery_utils::tests::multi_attachment_delivery_tests::token_only_multiline_reply_preserves_every_attachment_in_order; do
             grep -Fx "$case: test" "$RUNNER_TEMP/delivery-tests.txt"
           done
-          for suite in channel_send::tests delivery_service::; do
+          for suite in channel_send::tests delivery_service:: delivery_utils::tests task_artifacts::tests; do
             cargo test --locked -p clawd --bin clawd "$suite" -- --test-threads=4 --nocapture
           done
       - name: Build verified local runtime without publishing any release
