@@ -1,7 +1,7 @@
 //! Weixin CDN download/upload (`cdn-url.ts`, `cdn-upload.ts`, `upload.ts`, `send.ts`).
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -14,7 +14,6 @@ use reqwest::Client;
 use serde::Deserialize;
 use serde::Serialize;
 use tokio::io::AsyncReadExt;
-use tokio_util::io::ReaderStream;
 use tracing::{info, warn};
 
 use crate::contract::{
@@ -23,9 +22,9 @@ use crate::contract::{
 };
 use crate::crypto::{
     aes_ecb_padded_size, decrypt_aes_128_ecb, decrypt_aes_128_ecb_file, encrypt_aes_128_ecb,
-    encrypt_aes_128_ecb_file,
 };
 use crate::http::{post_ilink_json, BaseInfo, IlinkAuth};
+use claw_core::channel_media_io::{ChannelMediaIoError, MediaIoOperation};
 
 const DEFAULT_API_TIMEOUT_MS: u64 = 15_000;
 const CDN_UPLOAD_MAX_RETRIES: u32 = 3;
@@ -335,6 +334,14 @@ pub struct UploadedCdnBlob {
     pub ciphertext_size: usize,
 }
 
+struct CdnFileUpload<'a> {
+    plaintext_path: &'a Path,
+    plaintext_size: u64,
+    plaintext_md5: &'a str,
+    aes_key: &'a [u8; 16],
+    ciphertext_size: u64,
+}
+
 pub async fn upload_plaintext_to_cdn(
     client: &Client,
     ilink_base_url: &str,
@@ -444,7 +451,7 @@ pub async fn upload_file_to_cdn(
         media_type: upload_media_type,
         to_user_id: to_user_id.to_string(),
         rawsize: rawsize_i64,
-        rawfilemd5,
+        rawfilemd5: rawfilemd5.clone(),
         filesize: filesize_i64,
         thumb_rawsize: None,
         thumb_rawfilemd5: None,
@@ -467,59 +474,50 @@ pub async fn upload_file_to_cdn(
     if upload_full_url.is_none() && upload_param.is_none() {
         return Err("getuploadurl: missing upload_full_url/upload_param".to_string());
     }
-    let encrypted_path = temporary_path(&std::env::temp_dir(), "channel-cdn-upload");
-    let result = async {
-        let (actual_rawsize, actual_filesize) =
-            encrypt_aes_128_ecb_file(plaintext_path, &encrypted_path, &aeskey_bytes).await?;
-        if actual_rawsize != rawsize || actual_filesize != filesize {
-            return Err("outbound media changed while preparing upload".to_string());
-        }
-        let cdn_url = upload_full_url.unwrap_or_else(|| {
-            build_cdn_upload_url(
-                cdn_base_url.trim_end_matches('/'),
-                upload_param.as_deref().unwrap_or_default(),
-                &filekey,
-            )
-        });
-        let download_encrypted_query_param = upload_cdn_ciphertext_file(
-            client,
-            &cdn_url,
-            &encrypted_path,
-            filesize,
-            true,
-            "cdn upload",
+    let cdn_url = upload_full_url.unwrap_or_else(|| {
+        build_cdn_upload_url(
+            cdn_base_url.trim_end_matches('/'),
+            upload_param.as_deref().unwrap_or_default(),
+            &filekey,
         )
-        .await?
-        .ok_or_else(|| "cdn upload: missing x-encrypted-param".to_string())?;
-        Ok(UploadedCdnBlob {
-            filekey,
-            download_encrypted_query_param,
-            aeskey_hex,
-            plaintext_size,
-            ciphertext_size,
-        })
-    }
-    .await;
-    let _ = tokio::fs::remove_file(encrypted_path).await;
-    result
+    });
+    let upload = CdnFileUpload {
+        plaintext_path,
+        plaintext_size: rawsize,
+        plaintext_md5: &rawfilemd5,
+        aes_key: &aeskey_bytes,
+        ciphertext_size: filesize,
+    };
+    let download_encrypted_query_param =
+        upload_cdn_ciphertext_file(client, &cdn_url, &upload, true, "cdn upload")
+            .await?
+            .ok_or_else(|| "cdn upload: missing x-encrypted-param".to_string())?;
+    Ok(UploadedCdnBlob {
+        filekey,
+        download_encrypted_query_param,
+        aeskey_hex,
+        plaintext_size,
+        ciphertext_size,
+    })
 }
 
 async fn file_size_and_md5(path: &Path) -> Result<(u64, String), String> {
     let expected_size = tokio::fs::metadata(path)
         .await
-        .map_err(|error| format!("outbound media metadata: {error}"))?
+        .map_err(|error| {
+            ChannelMediaIoError::from_io(MediaIoOperation::Inspect, &error).to_string()
+        })?
         .len();
-    let mut file = tokio::fs::File::open(path)
-        .await
-        .map_err(|error| format!("outbound media open: {error}"))?;
+    let mut file = tokio::fs::File::open(path).await.map_err(|error| {
+        ChannelMediaIoError::from_io(MediaIoOperation::Open, &error).to_string()
+    })?;
     let mut hash = Md5::new();
     let mut actual_size = 0_u64;
     let mut buffer = vec![0_u8; 64 * 1024];
     loop {
-        let read = file
-            .read(&mut buffer)
-            .await
-            .map_err(|error| format!("outbound media read: {error}"))?;
+        let read = file.read(&mut buffer).await.map_err(|error| {
+            ChannelMediaIoError::from_io(MediaIoOperation::Read, &error).to_string()
+        })?;
         if read == 0 {
             break;
         }
@@ -527,7 +525,7 @@ async fn file_size_and_md5(path: &Path) -> Result<(u64, String), String> {
         actual_size = actual_size.saturating_add(read as u64);
     }
     if actual_size != expected_size {
-        return Err("outbound media changed while hashing".to_string());
+        return Err(ChannelMediaIoError::input_changed().to_string());
     }
     Ok((actual_size, format!("{:x}", hash.finalize())))
 }
@@ -615,8 +613,7 @@ async fn upload_cdn_ciphertext(
 async fn upload_cdn_ciphertext_file(
     client: &Client,
     cdn_url: &str,
-    ciphertext_path: &Path,
-    ciphertext_size: u64,
+    upload: &CdnFileUpload<'_>,
     require_download_param: bool,
     label: &str,
 ) -> Result<Option<String>, String> {
@@ -625,8 +622,7 @@ async fn upload_cdn_ciphertext_file(
         let res = match upload_cdn_ciphertext_file_attempt(
             client,
             cdn_url,
-            ciphertext_path,
-            ciphertext_size,
+            upload,
             label,
             CDN_UPLOAD_STALL_TIMEOUT,
             CDN_UPLOAD_ACTIVITY_CHECK_INTERVAL,
@@ -635,6 +631,9 @@ async fn upload_cdn_ciphertext_file(
         {
             Ok(response) => response,
             Err(error) => {
+                if ChannelMediaIoError::decode(&error).is_some() {
+                    return Err(error);
+                }
                 last_err = error;
                 warn!("wechat-ilink: {}", last_err);
                 continue;
@@ -715,18 +714,25 @@ impl UploadActivity {
 async fn upload_cdn_ciphertext_file_attempt(
     client: &Client,
     cdn_url: &str,
-    ciphertext_path: &Path,
-    ciphertext_size: u64,
+    upload: &CdnFileUpload<'_>,
     label: &str,
     stall_timeout: Duration,
     activity_check_interval: Duration,
 ) -> Result<reqwest::Response, String> {
-    let file = tokio::fs::File::open(ciphertext_path)
-        .await
-        .map_err(|error| format!("{label}: open encrypted body {error}"))?;
+    let validated = Arc::new(AtomicBool::new(false));
+    let source = crate::upload_crypto::encrypted_file_stream(
+        upload.plaintext_path,
+        upload.plaintext_size,
+        upload.plaintext_md5,
+        upload.aes_key,
+        Arc::clone(&validated),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    let ciphertext_size = upload.ciphertext_size;
     let uploaded_bytes = Arc::new(AtomicU64::new(0));
     let progress = Arc::clone(&uploaded_bytes);
-    let stream = ReaderStream::new(file).map(move |chunk| {
+    let stream = source.map(move |chunk| {
         if let Ok(bytes) = &chunk {
             progress.fetch_add(bytes.len() as u64, Ordering::Relaxed);
         }
@@ -752,7 +758,10 @@ async fn upload_cdn_ciphertext_file_attempt(
     loop {
         tokio::select! {
             result = &mut request => {
-                return result.map_err(|error| {
+                let response = result.map_err(|error| {
+                    if let Some(local) = ChannelMediaIoError::find_in_chain(&error) {
+                        return local.to_string();
+                    }
                     let kind = if error.is_timeout() {
                         claw_core::channel_provider_error::ChannelProviderTransportKind::Timeout
                     } else if error.is_connect() {
@@ -769,7 +778,16 @@ async fn upload_cdn_ciphertext_file_attempt(
                         &error.to_string(),
                     )
                     .to_string()
-                });
+                })?;
+                if response.status().is_success()
+                    && (!validated.load(Ordering::Acquire)
+                        || uploaded_bytes.load(Ordering::Relaxed) != ciphertext_size)
+                {
+                    return Err(claw_core::channel_provider_error::ChannelProviderError::invalid_response(
+                        "wechat_ilink", "upload_media", "upload_body_not_fully_consumed",
+                    ).to_string());
+                }
+                return Ok(response);
             }
             _ = monitor.tick() => {
                 let transferred = uploaded_bytes.load(Ordering::Relaxed);

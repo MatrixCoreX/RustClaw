@@ -1,6 +1,25 @@
 use super::*;
 use serde_json::json;
 
+#[test]
+fn local_media_io_failure_keeps_known_reason_without_becoming_a_provider_error() {
+    use claw_core::channel_media_io::{ChannelMediaIoError, MediaIoOperation};
+    for kind in [
+        std::io::ErrorKind::QuotaExceeded,
+        std::io::ErrorKind::StorageFull,
+        std::io::ErrorKind::PermissionDenied,
+    ] {
+        let local =
+            ChannelMediaIoError::from_io(MediaIoOperation::Read, &std::io::Error::from(kind));
+        let (code, key, diagnostic, provider, retry) = delivery_failure_fields(&local.to_string());
+        assert_eq!(code, local.error_code());
+        assert_eq!(key, local.message_key());
+        assert!(diagnostic.starts_with("delivery-local:"));
+        assert!(provider.is_none());
+        assert!(!retry);
+    }
+}
+
 fn task(payload: &Value) -> ClaimedTask {
     ClaimedTask {
         claim_attempt: 1,

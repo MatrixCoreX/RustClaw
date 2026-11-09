@@ -565,6 +565,15 @@ fn accepted_delivery_receipt(
 }
 
 fn delivery_failure_fields(error_text: &str) -> (String, String, String, Option<String>, bool) {
+    if let Some(error) = claw_core::channel_media_io::ChannelMediaIoError::decode(error_text) {
+        return (
+            error.error_code().to_string(),
+            error.message_key().to_string(),
+            format!("delivery-local:{}", Uuid::new_v4().simple()),
+            None,
+            false,
+        );
+    }
     let provider_error = ChannelProviderError::decode(error_text)
         .or_else(|| failure_notice::decode_local_media_error(error_text));
     let error_code = provider_error

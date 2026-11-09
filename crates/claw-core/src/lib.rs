@@ -13,6 +13,7 @@ pub mod channel_http;
 pub mod channel_i18n;
 pub mod channel_ingress;
 pub mod channel_media_download;
+pub mod channel_media_io;
 pub mod channel_media_limits;
 pub mod channel_notice;
 pub mod channel_open_platform;

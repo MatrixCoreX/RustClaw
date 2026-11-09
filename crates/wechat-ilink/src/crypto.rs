@@ -8,7 +8,7 @@ use cipher::generic_array::GenericArray;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::Path;
 
-const FILE_CRYPTO_CHUNK_BYTES: usize = 256 * 1024;
+pub(crate) const FILE_CRYPTO_CHUNK_BYTES: usize = 256 * 1024;
 
 /// Parse `CDNMedia.aes_key` (base64): raw 16 bytes or base64 of 32-char hex ASCII.
 pub fn parse_aes_key_base64(aes_key_base64: &str, label: &str) -> Result<[u8; 16], String> {

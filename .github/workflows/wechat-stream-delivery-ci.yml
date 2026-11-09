@@ -1,0 +1,117 @@
+name: WeChat streamed attachment delivery verification
+
+"on":
+  push:
+    branches: ["ci/wechat-stream-delivery-repair-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  delivery:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            cache: linux-runtime-read
+          - os: macos-15
+            cache: macos-runtime-read
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      CARGO_BUILD_JOBS: "3"
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - name: Prepare native dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq pkg-config clang libclang-dev protobuf-compiler ripgrep
+          else
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install protobuf ripgrep
+          fi
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          key: ${{ matrix.cache }}
+          prefix-key: v1-rust-cargo-profiles
+          env-vars: "CARGO CC CFLAGS CXX CMAKE RUST MACOSX_DEPLOYMENT_TARGET SDKROOT"
+          cache-targets: "false"
+          cache-directories: |
+            target/debug
+            target/release
+          cache-bin: "false"
+          cache-on-failure: "false"
+      - name: Check channel contracts and product independence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/check_long_files.py
+          python3 scripts/check_cross_platform_contracts.py
+          for checker in channel_i18n_completeness channel_provider_error_contracts channel_thin_adapter_contracts channel_delivery_history_contracts channel_delivery_token_contracts product_identity_coupling; do
+            python3 "scripts/check_${checker}.py" --self-test
+            python3 "scripts/check_${checker}.py"
+          done
+          python3 scripts/check_no_runtime_hard_reply.py
+          python3 scripts/check_historical_hardcoded_language.py --fail-on-runtime --fail-on-ui-visible
+          python3 scripts/check_no_policy_boundary_hard_reply.py
+          npm ci --ignore-scripts --prefix UI
+          bash scripts/product_identity_tests.sh --with-ui
+      - name: Test exact AES bytes, native HTTP uploads, retries and unusable temporary directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p wechat-ilink -- --test-threads=4 --nocapture
+          cargo test --locked -p claw-core channel_media_io:: -- --nocapture
+      - name: Test receipts, partial sends, model notices and channel daemon
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p wechatd -- --test-threads=4 --nocapture
+          cargo test --locked -p clawd --bin clawd -- --list > "$RUNNER_TEMP/delivery-tests.txt"
+          for case in channel_send::tests::local_io_failure_keeps_per_file_reason_and_other_accepted_parts delivery_service::tests::local_media_io_failure_keeps_known_reason_without_becoming_a_provider_error; do
+            grep -Fx "$case: test" "$RUNNER_TEMP/delivery-tests.txt"
+          done
+          for suite in channel_send::tests delivery_service::; do
+            cargo test --locked -p clawd --bin clawd "$suite" -- --test-threads=4 --nocapture
+          done
+      - name: Build verified local runtime without publishing any release
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --release -p clawd --bin clawd -p wechatd --bin wechatd
+          artifact_root="$RUNNER_TEMP/wechat-stream-artifact"
+          mkdir -p "$artifact_root/runtime"
+          install -m 755 target/release/clawd "$artifact_root/runtime/clawd"
+          install -m 755 target/release/wechatd "$artifact_root/runtime/wechatd"
+          printf '%s\n' "$GITHUB_SHA" > "$artifact_root/runtime/source-commit"
+          printf '%s\n' 'wechat-ilink-all channel-media-io channel-send delivery-service delivery-failure-notice wechatd' > "$artifact_root/runtime/verified-gates"
+          (cd "$artifact_root/runtime" && sha256sum clawd wechatd source-commit verified-gates > SHA256SUMS)
+          tar -czf "$artifact_root/runtime-${GITHUB_SHA}.tar.gz" -C "$artifact_root" runtime
+          (cd "$artifact_root" && sha256sum "runtime-${GITHUB_SHA}.tar.gz" > "runtime-${GITHUB_SHA}.tar.gz.sha256")
+      - name: Attest exact tested Linux runtime
+        if: runner.os == 'Linux'
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-path: ${{ runner.temp }}/wechat-stream-artifact/runtime-${{ github.sha }}.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: runner.os == 'Linux'
+        with:
+          name: wechat-stream-runtime-${{ github.sha }}
+          path: ${{ runner.temp }}/wechat-stream-artifact/*
+          if-no-files-found: error
+          retention-days: 14

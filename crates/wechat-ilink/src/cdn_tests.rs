@@ -21,6 +21,82 @@ use super::{
 use crate::crypto::encrypt_aes_128_ecb;
 use crate::http::IlinkAuth;
 
+#[tokio::test]
+async fn file_upload_stream_retries_identical_validated_ciphertext_without_staging() {
+    use md5::{Digest, Md5};
+    let (addr, state) = spawn_test_server().await;
+    *state.upload_failures_left.lock().unwrap() = 1;
+    let path = unique_temp_file("stream-retry", "zip");
+    let plaintext = (0..1024 * 1024 + 31)
+        .map(|n| (n % 251) as u8)
+        .collect::<Vec<_>>();
+    tokio::fs::write(&path, &plaintext).await.unwrap();
+    let base = format!("http://{addr}");
+    send_weixin_file_from_file(
+        &Client::new(),
+        &base,
+        "test-token",
+        IlinkAuth {
+            sk_route_tag: "",
+            wechat_uin_base64: "",
+        },
+        &base,
+        "peer",
+        Some("context"),
+        None,
+        &path,
+        "bundle.zip",
+        "test-channel",
+        30_000,
+    )
+    .await
+    .unwrap();
+    let metadata = state.getuploadurl_body.lock().unwrap().clone().unwrap();
+    let key: [u8; 16] = hex::decode(metadata["aeskey"].as_str().unwrap())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    assert_eq!(
+        metadata["rawsize"].as_u64().unwrap(),
+        plaintext.len() as u64
+    );
+    assert_eq!(
+        metadata["rawfilemd5"].as_str().unwrap(),
+        format!("{:x}", Md5::digest(&plaintext))
+    );
+    let expected = encrypt_aes_128_ecb(&plaintext, &key).unwrap();
+    let bodies = state.upload_bodies.lock().unwrap();
+    assert_eq!(bodies.len(), 2);
+    assert_eq!(bodies[0], expected);
+    assert_eq!(bodies[1], expected);
+    assert_eq!(
+        *state.upload_lengths.lock().unwrap(),
+        vec![expected.len() as u64; 2]
+    );
+    assert!(state.sendmessage_body.lock().unwrap().is_some());
+    tokio::fs::remove_file(path).await.unwrap();
+}
+
+#[tokio::test]
+async fn request_body_preserves_typed_local_io_reason_through_http_error_chain() {
+    use claw_core::channel_media_io::{ChannelMediaIoError, MediaIoOperation};
+    let (addr, _) = spawn_test_server().await;
+    let local = ChannelMediaIoError::from_io(
+        MediaIoOperation::Read,
+        &std::io::Error::from(std::io::ErrorKind::QuotaExceeded),
+    );
+    let stream = futures_util::stream::once(async move { Err::<Vec<u8>, _>(local) });
+    let error = Client::new()
+        .post(format!("http://{addr}/upload"))
+        .body(reqwest::Body::wrap_stream(stream))
+        .send()
+        .await
+        .unwrap_err();
+    let decoded = ChannelMediaIoError::find_in_chain(&error)
+        .expect("typed local cause must survive HTTP body wrapping");
+    assert_eq!(decoded.error_code(), "channel.media.local_quota_exceeded");
+}
+
 #[derive(Clone, Default)]
 struct TestState {
     getuploadurl_body: Arc<Mutex<Option<Value>>>,
@@ -28,6 +104,9 @@ struct TestState {
     upload_queries: Arc<Mutex<Vec<String>>>,
     upload_full_url: Arc<Mutex<Option<String>>>,
     download_body: Arc<Mutex<Vec<u8>>>,
+    upload_bodies: Arc<Mutex<Vec<Vec<u8>>>>,
+    upload_lengths: Arc<Mutex<Vec<u64>>>,
+    upload_failures_left: Arc<Mutex<usize>>,
 }
 
 async fn handle_getuploadurl(State(state): State<TestState>, body: Bytes) -> impl IntoResponse {
@@ -48,7 +127,34 @@ async fn handle_getuploadurl(State(state): State<TestState>, body: Bytes) -> imp
     }))
 }
 
-async fn handle_upload(State(state): State<TestState>, uri: Uri) -> impl IntoResponse {
+async fn handle_upload(
+    State(state): State<TestState>,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    state.upload_bodies.lock().unwrap().push(body.to_vec());
+    state.upload_lengths.lock().unwrap().push(
+        headers
+            .get("content-length")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .parse()
+            .unwrap(),
+    );
+    let fail = {
+        let mut count = state.upload_failures_left.lock().unwrap();
+        if *count > 0 {
+            *count -= 1;
+            true
+        } else {
+            false
+        }
+    };
+    if fail {
+        return (StatusCode::SERVICE_UNAVAILABLE, "retry fixture").into_response();
+    }
     state
         .upload_queries
         .lock()
@@ -71,6 +177,7 @@ async fn handle_upload(State(state): State<TestState>, uri: Uri) -> impl IntoRes
         ],
         "",
     )
+        .into_response()
 }
 
 async fn handle_download(State(state): State<TestState>) -> impl IntoResponse {

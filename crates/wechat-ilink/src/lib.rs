@@ -3,6 +3,7 @@ pub mod cdn;
 pub mod contract;
 pub mod crypto;
 pub mod http;
+mod upload_crypto;
 
 pub use cdn::{
     build_cdn_download_url, build_cdn_upload_url, download_decrypted_media,

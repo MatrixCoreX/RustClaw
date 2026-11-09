@@ -1,5 +1,44 @@
 use super::*;
 
+#[tokio::test]
+async fn local_io_failure_keeps_per_file_reason_and_other_accepted_parts() {
+    use claw_core::channel_media_io::{ChannelMediaIoError, MediaIoOperation};
+    let local = ChannelMediaIoError::from_io(
+        MediaIoOperation::Read,
+        &std::io::Error::new(std::io::ErrorKind::QuotaExceeded, "private exception path"),
+    );
+    let (_, progress) = capture_channel_send_progress(async {
+        record_provider_message_id("accepted-text");
+        let mut first_error = None;
+        assert!(!record_wechat_part_result::<()>(
+            &mut first_error,
+            Err(local.to_string()),
+            "file",
+            0,
+            None
+        ));
+        assert!(record_wechat_part_result(
+            &mut first_error,
+            Ok(()),
+            "file",
+            1,
+            None
+        ));
+        record_provider_message_id("accepted-next-file");
+    })
+    .await;
+    assert_eq!(
+        progress.provider_message_ids,
+        vec!["accepted-text", "accepted-next-file"]
+    );
+    assert_eq!(progress.part_failures.len(), 1);
+    let failure = &progress.part_failures[0];
+    assert_eq!(failure.error_code, "channel.media.local_quota_exceeded");
+    assert_eq!(failure.message_key, "channel.error.delivery_failed");
+    assert!(failure.actual_bytes.is_none() && failure.max_bytes.is_none());
+    assert!(!failure.error_code.contains("private"));
+}
+
 #[test]
 fn wechat_delivery_part_ids_are_stable_and_part_scoped() {
     let first = wechat_delivery_client_id("delivery:task-1:terminal", "text", 0);

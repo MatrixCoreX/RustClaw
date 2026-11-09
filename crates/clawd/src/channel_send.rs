@@ -165,6 +165,14 @@ fn record_provider_message_ids(provider_message_ids: &[String]) {
 }
 
 fn local_media_failure_fields(raw: &str) -> Option<(String, String, Option<u64>, Option<u64>)> {
+    if let Some(error) = claw_core::channel_media_io::ChannelMediaIoError::decode(raw) {
+        return Some((
+            error.error_code().to_string(),
+            error.message_key().to_string(),
+            None,
+            None,
+        ));
+    }
     let record = raw
         .strip_prefix("channel_media_preflight_failed:")
         .or_else(|| raw.strip_prefix("whatsapp_cloud_media_preflight_failed:"))?;
