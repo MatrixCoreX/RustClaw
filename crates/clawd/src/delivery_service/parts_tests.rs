@@ -97,6 +97,46 @@ fn wechat_part_plan_keeps_transcripts_ahead_of_slow_video_without_size_dependent
     );
 }
 
+#[test]
+fn normalized_multifile_reply_pins_two_distinct_file_parts_and_content_digests() {
+    let (state, task, _, mut envelope) = fixture();
+    envelope.channel = ChannelKind::Wechat;
+    let root = std::env::temp_dir().join(format!("delivery-multifile-{}", Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let files = [
+        root.join("image_bundle.zip"),
+        root.join("background_audio.mp3"),
+    ];
+    for (file, bytes) in files.iter().zip([b"zip".as_slice(), b"audio".as_slice()]) {
+        std::fs::write(file, bytes).unwrap();
+    }
+    let tokens = files
+        .iter()
+        .map(|path| format!("FILE:{}", path.canonicalize().unwrap().display()))
+        .collect::<Vec<_>>();
+    envelope.text_segments[0].text =
+        crate::delivery_utils::normalize_delivery_message(&state, &tokens.join("\n")).unwrap();
+    let projected = texts(&state, &envelope).unwrap();
+    assert_eq!(projected, tokens);
+    let plan = load_or_create_plan(&state, &task, &envelope, &projected).unwrap();
+    assert_eq!(plan.file_digests.len(), 2);
+    assert_eq!(
+        plan.file_digests[0].as_deref(),
+        Some(digest(b"zip").as_str())
+    );
+    assert_eq!(
+        plan.file_digests[1].as_deref(),
+        Some(digest(b"audio").as_str())
+    );
+    let first = part_envelope(&envelope, &plan, 0, &projected[0]);
+    let second = part_envelope(&envelope, &plan, 1, &projected[1]);
+    assert_ne!(first.idempotency_key, second.idempotency_key);
+    for file in files {
+        std::fs::remove_file(file).unwrap();
+    }
+    std::fs::remove_dir(root).unwrap();
+}
+
 #[derive(Clone, Default)]
 struct Mock {
     text: Arc<AtomicUsize>,

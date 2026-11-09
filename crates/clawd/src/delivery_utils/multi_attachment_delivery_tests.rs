@@ -68,7 +68,16 @@ fn missing_token_does_not_remove_other_existing_attachments() {
 fn normalized_reply_materializes_both_files_without_relaxing_artifact_validation() {
     let (root, state, tokens) = fixture();
     let text = super::super::normalize_delivery_message(&state, &tokens.join("\n")).unwrap();
-    let result = serde_json::json!({"text":text,"messages":[text]});
+    // The broker accepts typed artifact/output evidence, not display-text parsing.
+    let outputs = super::super::extract_delivery_file_tokens(&text)
+        .iter()
+        .map(|token| {
+            serde_json::json!({
+                "path": super::super::extract_file_path_from_delivery_token(token).unwrap()
+            })
+        })
+        .collect::<Vec<_>>();
+    let result = serde_json::json!({"text":text,"messages":[text],"outputs":outputs});
     let result = crate::task_artifacts::materialize_task_result_artifacts(
         root.path(),
         "multiple-delivery-records",
