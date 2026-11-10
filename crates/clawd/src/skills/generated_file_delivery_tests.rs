@@ -40,7 +40,7 @@ fn ordinary_writes_do_not_publish_and_delivery_snapshots_are_immutable() {
     assert!(extra.is_none());
     let mut outputs = Vec::new();
     for content in ["old version", "corrected version"] {
-        let mut extra = None;
+        let mut extra = Some(json!({"action":"write_text"}));
         publish(
             &root,
             "task-a",

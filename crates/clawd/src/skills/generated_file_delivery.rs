@@ -52,6 +52,14 @@ pub(super) fn publish(
     if args.get("deliver_to_user").and_then(Value::as_bool) != Some(true) {
         return Ok(());
     }
+    if extra
+        .as_ref()
+        .and_then(|value| value.get("action"))
+        .and_then(Value::as_str)
+        != Some("write_text")
+    {
+        return Ok(());
+    }
     let content = args
         .get("content")
         .and_then(Value::as_str)

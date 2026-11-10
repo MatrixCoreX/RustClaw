@@ -455,6 +455,7 @@ async fn synthesize_reviewed_transcript(
     )
     .map_err(|_| "transcript_revision_prompt_unavailable".to_string())?;
     let mut reviewed_chunks = Vec::with_capacity(chunks.len());
+    let current_request = crate::language_policy::task_user_request_for_prompt(task, user_text);
     let mut confidence = 1.0_f64;
     for (index, chunk) in chunks.iter().enumerate() {
         let chunk_index = (index + 1).to_string();
@@ -463,7 +464,7 @@ async fn synthesize_reviewed_transcript(
             &template,
             &[
                 ("__TARGET_LANGUAGE__", &target_language),
-                ("__CURRENT_USER_REQUEST__", user_text),
+                ("__CURRENT_USER_REQUEST__", &current_request),
                 ("__CHUNK_INDEX__", &chunk_index),
                 ("__CHUNK_COUNT__", &chunk_count),
                 ("__RAW_TRANSCRIPT__", chunk),

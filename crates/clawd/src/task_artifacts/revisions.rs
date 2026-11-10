@@ -31,6 +31,9 @@ pub(super) fn select_current_revisions(
                     };
                     // A later explicit publication of the same content is current again.
                     suppressed.remove(&id);
+                    if let Some(digest) = artifact.get("sha256").and_then(Value::as_str) {
+                        suppressed.remove(&format!("a_{}", &digest[..32]));
+                    }
                     if let Some(refs) = artifact
                         .pointer("/metadata/replaces_artifact_refs")
                         .and_then(Value::as_array)

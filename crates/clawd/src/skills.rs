@@ -1670,14 +1670,12 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
                 resource_lease.take(),
             )
             .await?;
-            if skill_name == "write_file" {
-                generated_file_delivery::publish(
-                    &execution_state.skill_rt.workspace_root,
-                    &task.task_id,
-                    &args,
-                    &mut extra,
-                )?;
-            }
+            generated_file_delivery::publish(
+                &execution_state.skill_rt.workspace_root,
+                &task.task_id,
+                &args,
+                &mut extra,
+            )?;
             if skill_name == "workspace_patch" {
                 extra = append_extra_artifact_refs(
                     serde_json::from_str::<Value>(&text).ok(),
