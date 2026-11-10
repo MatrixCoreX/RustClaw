@@ -45,7 +45,7 @@ fn explicit_file_revision_replaces_old_review_but_preserves_unrelated_delivery()
     fs::write(&image, b"image-fixture").unwrap();
     let old_ref = claw_core::task_delivery_artifacts::canonical_task_artifact_ref(
         task_id,
-        old["id"].as_str().unwrap(),
+        &format!("a_{}", &old["sha256"].as_str().unwrap()[..32]),
     )
     .unwrap();
     let current = generated_revision(workspace.path(), task_id, "correct English", vec![old_ref]);

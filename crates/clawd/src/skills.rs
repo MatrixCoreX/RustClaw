@@ -1671,7 +1671,7 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
             )
             .await?;
             generated_file_delivery::publish(
-                &execution_state.skill_rt.workspace_root,
+                &state.skill_rt.workspace_root,
                 &task.task_id,
                 &args,
                 &mut extra,
