@@ -72,9 +72,9 @@ pub(super) fn publish(
         .ok_or("file_delivery_filename_missing")?;
     let digest = format!("{:x}", Sha256::digest(content.as_bytes()));
     // Each revision has its own path. Old refs cannot silently change content.
-    let namespace = format!("generated-file-{}", &digest[..32]);
+    let snapshot_filename = format!("{digest}.txt");
     let mut published = crate::skill_output_artifact::publish_task_text_artifact(
-        workspace, task_id, &namespace, filename, content,
+        workspace, task_id, "generated-file", &snapshot_filename, content,
         json!({"producer": "filesystem_text_delivery", "replaces_artifact_refs": args.get("replaces_artifact_refs").cloned().unwrap_or(json!([]))}),
     ).map_err(|_| "file_delivery_publication_failed")?;
     let artifact = published
@@ -82,6 +82,9 @@ pub(super) fn publish(
         .as_object_mut()
         .ok_or("file_delivery_artifact_invalid")?;
     artifact.insert("filename".into(), json!(filename));
+    artifact
+        .get_mut("metadata")
+        .ok_or("file_delivery_metadata_missing")?["filename"] = json!(filename);
     let snapshot = workspace.join(
         artifact["path"]
             .as_str()

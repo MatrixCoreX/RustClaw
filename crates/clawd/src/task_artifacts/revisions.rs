@@ -74,7 +74,6 @@ fn verified_revision_id(workspace: &Path, task_id: &str, artifact: &Value) -> Op
     if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
-    let namespace = format!("generated-file-{}", &digest[..32]);
     let expected_id = format!("a_{}", &digest[..32]);
     if artifact.get("id")?.as_str()? != expected_id {
         return None;
@@ -83,7 +82,7 @@ fn verified_revision_id(workspace: &Path, task_id: &str, artifact: &Value) -> Op
     let root = workspace
         .join(claw_core::workspace_state::WORKSPACE_STATE_DIR_NAME)
         .join("artifacts")
-        .join(namespace)
+        .join("generated-file")
         .join(machine_path_component(task_id, "task"));
     if source.parent()? != root || sha256_file(&source).ok()?.as_str() != digest {
         return None;

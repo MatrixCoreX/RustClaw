@@ -10,18 +10,19 @@ struct TempWorkspace(PathBuf);
 
 fn generated_revision(workspace: &Path, task_id: &str, text: &str, replaces: Vec<String>) -> Value {
     let digest = format!("{:x}", Sha256::digest(text.as_bytes()));
-    let namespace = format!("generated-file-{}", &digest[..32]);
+    let snapshot_filename = format!("{digest}.txt");
     let mut artifact = crate::skill_output_artifact::publish_task_text_artifact(
         workspace,
         task_id,
-        &namespace,
-        "result.txt",
+        "generated-file",
+        &snapshot_filename,
         text,
         json!({"producer":"filesystem_text_delivery", "replaces_artifact_refs":replaces}),
     )
     .unwrap()
     .artifact_ref;
     artifact["owner_task_id"] = json!(task_id);
+    artifact["filename"] = json!("result.txt");
     artifact["id"] = json!(format!("a_{}", &digest[..32]));
     artifact["visibility"] = json!("user_delivery");
     artifact
