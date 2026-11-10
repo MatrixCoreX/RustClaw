@@ -120,7 +120,39 @@ fn invalid_revision_never_suppresses_valid_prior_artifact() {
                 .any(|manifest| manifest.id == "old"),
             "{invalid}"
         );
+        if invalid == "tampered" {
+            let repeated =
+                materialize_task_result_artifacts(workspace.path(), "task-a", &output).unwrap();
+            let repeated: Value = serde_json::from_str(&repeated).unwrap();
+            assert_eq!(
+                manifests_from_result(Some(&repeated)).len(),
+                1,
+                "invalid copy must not be rediscovered"
+            );
+        }
     }
+}
+
+#[test]
+fn invalid_candidate_never_overwrites_an_existing_valid_delivery() {
+    let workspace = TempWorkspace::new();
+    let source = workspace.path().join("bad.txt");
+    let destination = workspace.path().join("published.txt");
+    fs::write(&source, b"bad candidate").unwrap();
+    fs::write(&destination, b"valid previous delivery").unwrap();
+    let expected = ArtifactSource {
+        id: None,
+        path: source.display().to_string(),
+        filename: None,
+        mime_type: None,
+        size_bytes: None,
+        sha256: Some(sha256_file(&destination).unwrap()),
+    };
+    assert!(publish_artifact_file(&source, &destination, &expected)
+        .unwrap()
+        .is_none());
+    assert_eq!(fs::read(&destination).unwrap(), b"valid previous delivery");
+    assert_eq!(fs::read_dir(workspace.path()).unwrap().count(), 2);
 }
 
 impl TempWorkspace {

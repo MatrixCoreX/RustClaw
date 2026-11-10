@@ -90,10 +90,8 @@ pub(crate) fn materialize_task_result_artifacts(
         if !seen_paths.insert(source_key) {
             continue;
         }
-        let metadata = match source_path.metadata() {
-            Ok(metadata) if metadata.is_file() && metadata.len() <= max_artifact_bytes() => {
-                metadata
-            }
+        match source_path.metadata() {
+            Ok(metadata) if metadata.is_file() && metadata.len() <= max_artifact_bytes() => (),
             _ => continue,
         };
         candidate_count += 1;
@@ -120,17 +118,12 @@ pub(crate) fn materialize_task_result_artifacts(
         }
         let mime_type = normalized_mime_type(source.mime_type.as_deref(), &filename);
         let destination = delivery_artifact_path(&workspace, task_id, &artifact_id, &filename);
-        let sha256 = publish_artifact_file(&source_path, &destination)?;
-        if source
-            .sha256
-            .as_ref()
-            .is_some_and(|expected| expected != &sha256)
-            || source
-                .size_bytes
-                .is_some_and(|expected| expected != metadata.len())
-        {
+        let Some((sha256, size_bytes)) =
+            publish_artifact_file(&source_path, &destination, &source)?
+        else {
+            seen_ids.remove(&artifact_id);
             continue;
-        }
+        };
         if !seen_digests.insert(sha256.clone()) {
             if source_path != destination {
                 fs::remove_file(&destination)?;
@@ -150,7 +143,7 @@ pub(crate) fn materialize_task_result_artifacts(
             filename,
             kind: artifact_kind(&mime_type).to_string(),
             mime_type: mime_type.clone(),
-            size_bytes: metadata.len(),
+            size_bytes,
             sha256,
             download_url: base_url.clone(),
             preview_url: inline_preview_allowed(&mime_type)
@@ -880,13 +873,21 @@ fn find_delivery_file_by_digest(
     None
 }
 
-fn publish_artifact_file(source: &Path, destination: &Path) -> io::Result<String> {
+fn publish_artifact_file(
+    source: &Path,
+    destination: &Path,
+    expected: &ArtifactSource,
+) -> io::Result<Option<(String, u64)>> {
     if source == destination {
-        return sha256_file(source);
+        let sha256 = sha256_file(source)?;
+        let size = source.metadata()?.len();
+        return Ok(artifact_digest_matches(expected, &sha256, size).then_some((sha256, size)));
     }
     if let (Ok(source), Ok(destination)) = (source.canonicalize(), destination.canonicalize()) {
         if source == destination {
-            return sha256_file(&source);
+            let sha256 = sha256_file(&source)?;
+            let size = source.metadata()?.len();
+            return Ok(artifact_digest_matches(expected, &sha256, size).then_some((sha256, size)));
         }
     }
     let parent = destination
@@ -895,16 +896,27 @@ fn publish_artifact_file(source: &Path, destination: &Path) -> io::Result<String
     fs::create_dir_all(parent)?;
     let temp = parent.join(format!(".artifact-{}.tmp", uuid::Uuid::new_v4()));
     let result = copy_and_hash(source, &temp).and_then(|sha256| {
-        if destination.exists() {
-            fs::remove_file(destination)?;
+        let size = temp.metadata()?.len();
+        if !artifact_digest_matches(expected, &sha256, size) {
+            return Ok(None);
         }
+        // Validate the private temporary copy before the atomic replacement.
+        // Invalid candidates must not overwrite or become preserved deliveries.
         fs::rename(&temp, destination)?;
-        Ok(sha256)
+        Ok(Some((sha256, size)))
     });
-    if result.is_err() {
+    if result.is_err() || result.as_ref().is_ok_and(Option::is_none) {
         let _ = fs::remove_file(temp);
     }
     result
+}
+
+fn artifact_digest_matches(expected: &ArtifactSource, sha256: &str, size: u64) -> bool {
+    expected
+        .sha256
+        .as_deref()
+        .is_none_or(|digest| digest == sha256)
+        && expected.size_bytes.is_none_or(|bytes| bytes == size)
 }
 
 fn copy_and_hash(source: &Path, destination: &Path) -> io::Result<String> {
