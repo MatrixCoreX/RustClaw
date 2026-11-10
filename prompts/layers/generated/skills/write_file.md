@@ -23,6 +23,7 @@ Independent base skill for writing file contents. Use `{"type":"call_skill","ski
 
 ## Output
 - Confirmation with path and byte count.
+- When the user requests a file attachment, set `deliver_to_user=true` on a complete overwrite. This publishes an immutable task-owned UTF-8 attachment and returns its canonical `artifact_ref`; a path or `FILE:` in a reply alone does not publish it. Ordinary edits omit this flag. For a corrected deliverable, include `replaces_artifact_refs` containing the exact canonical refs of obsolete attachments from this same task; retain unrelated successful files. Never invent refs or replace another task's artifact. Append mode cannot publish: write the complete final content instead.
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.

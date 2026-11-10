@@ -2,7 +2,7 @@ name: Pi NL recovery verification
 
 "on":
   push:
-    branches: ["ci/pi-nl-repair-*"]
+    branches: ["ci/pi-nl-repair-*", "ci/artifact-delivery-contract-*"]
   workflow_dispatch:
 
 permissions:
@@ -14,6 +14,10 @@ concurrency:
 
 jobs:
   regression:
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -74,6 +78,13 @@ jobs:
           python3 scripts/check_product_identity_coupling.py
           python3 scripts/check_no_policy_boundary_hard_reply.py
           python3 scripts/check_repair_no_user_text_fields.py
+          python3 scripts/check_no_nl_hardmatch.py
+          python3 scripts/check_policy_decision_tokens.py
+          python3 scripts/check_historical_hardcoded_language.py --fail-on-runtime --fail-on-ui-visible
+          python3 scripts/check_registry_policy_contracts.py
+          python3 scripts/check_skill_registry_parity.py --mode all --strict
+          python3 scripts/check_skill_registry_aliases.py
+          python3 scripts/check_skill_prompts.py
       - name: Test real verification handoff, persistence and revoked authority
         run: |
           cargo test --locked -p clawd --bin clawd -- --list > "$RUNNER_TEMP/tests.txt"
@@ -85,6 +96,11 @@ jobs:
             grep -F "${suite}::" "$RUNNER_TEMP/tests.txt"
             cargo test --locked -p clawd --bin clawd "$suite" -- --test-threads=3
           done
+          for suite in generated_file_delivery::tests task_artifacts::tests capability_result_synthesis::tests delivery_manifest_gap::tests; do
+            grep -F "${suite}::" "$RUNNER_TEMP/tests.txt"
+            cargo test --locked -p clawd --bin clawd "$suite" -- --test-threads=3
+          done
+          cargo test --locked -p clawd --bin clawd builtin_write_file -- --nocapture
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         if: runner.os == 'Linux'
         with:
@@ -94,6 +110,28 @@ jobs:
         run: |
           npm ci --ignore-scripts --prefix UI
           bash scripts/product_identity_tests.sh --with-ui
+      - name: Build exact verified workstation component
+        if: runner.os == 'Linux'
+        run: |
+          cargo build --locked --release -p clawd
+          stage="$RUNNER_TEMP/native-component-stage"
+          mkdir -p "$stage/target/release" "$RUNNER_TEMP/native-component-artifact"
+          install -m 755 target/release/clawd "$stage/target/release/clawd"
+          git archive HEAD configs/skills_registry.toml prompts/layers/generated/skills/fs_basic.md prompts/layers/generated/skills/write_file.md prompts/layers/overlays/transcript_revision_prompt.md | tar -x -C "$stage"
+          printf '%s\n' "$GITHUB_SHA" > "$stage/source-commit"
+          (cd "$stage" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          tar -czf "$RUNNER_TEMP/native-component-artifact/agent-native-${GITHUB_SHA}.tar.gz" -C "$stage" .
+          (cd "$RUNNER_TEMP/native-component-artifact" && sha256sum *.tar.gz > SHA256SUMS)
+      - uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        if: runner.os == 'Linux'
+        with:
+          subject-path: ${{ runner.temp }}/native-component-artifact/*.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: runner.os == 'Linux'
+        with:
+          name: native-nl-component-${{ github.sha }}
+          path: ${{ runner.temp }}/native-component-artifact/
+          if-no-files-found: error
 
   pi-component:
     needs: regression
@@ -133,7 +171,7 @@ jobs:
           stage="$RUNNER_TEMP/component-stage"
           mkdir -p "$stage/target/release" "$RUNNER_TEMP/component-artifact"
           install -m 755 target/aarch64-unknown-linux-gnu/release/clawd "$stage/target/release/clawd"
-          git archive HEAD optional_skills/media_download scripts/nl_tests | tar -x -C "$stage"
+          git archive HEAD optional_skills/media_download scripts/nl_tests configs/skills_registry.toml prompts/layers/generated/skills/fs_basic.md prompts/layers/generated/skills/write_file.md prompts/layers/overlays/transcript_revision_prompt.md | tar -x -C "$stage"
           printf '%s\n' "$GITHUB_SHA" > "$stage/source-commit"
           (cd "$stage" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
           tar -czf "$RUNNER_TEMP/component-artifact/agent-pi-nl-${GITHUB_SHA}.tar.gz" -C "$stage" .

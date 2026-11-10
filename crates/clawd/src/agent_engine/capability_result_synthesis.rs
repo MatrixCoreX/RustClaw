@@ -463,6 +463,7 @@ async fn synthesize_reviewed_transcript(
             &template,
             &[
                 ("__TARGET_LANGUAGE__", &target_language),
+                ("__CURRENT_USER_REQUEST__", user_text),
                 ("__CHUNK_INDEX__", &chunk_index),
                 ("__CHUNK_COUNT__", &chunk_count),
                 ("__RAW_TRANSCRIPT__", chunk),

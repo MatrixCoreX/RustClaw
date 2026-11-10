@@ -10,6 +10,9 @@ use sha2::{Digest, Sha256};
 
 use claw_core::task_delivery_artifacts::trusted_async_job_terminal_final_result;
 
+#[path = "task_artifacts/revisions.rs"]
+mod revisions;
+
 pub(crate) const TASK_ARTIFACT_SCHEMA_VERSION: u32 = 2;
 const LEGACY_TASK_ARTIFACT_SCHEMA_VERSION: u32 = 1;
 const MAX_TASK_ARTIFACTS: usize = 128;
@@ -60,6 +63,7 @@ pub(crate) fn materialize_task_result_artifacts(
     collect_published_transcript_sources(&workspace, task_id, &mut sources);
     collect_published_image_text_sources(&workspace, task_id, &mut sources);
     collect_preserved_task_delivery_sources(&workspace, task_id, &mut sources);
+    revisions::select_current_revisions(&workspace, task_id, &result, &mut sources);
     if sources.is_empty() {
         return Ok(raw_result.to_string());
     }
@@ -117,6 +121,16 @@ pub(crate) fn materialize_task_result_artifacts(
         let mime_type = normalized_mime_type(source.mime_type.as_deref(), &filename);
         let destination = delivery_artifact_path(&workspace, task_id, &artifact_id, &filename);
         let sha256 = publish_artifact_file(&source_path, &destination)?;
+        if source
+            .sha256
+            .as_ref()
+            .is_some_and(|expected| expected != &sha256)
+            || source
+                .size_bytes
+                .is_some_and(|expected| expected != metadata.len())
+        {
+            continue;
+        }
         if !seen_digests.insert(sha256.clone()) {
             if source_path != destination {
                 fs::remove_file(&destination)?;

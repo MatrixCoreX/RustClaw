@@ -304,11 +304,15 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                     "mode",
                     "create_parents",
                     "parents",
+                    "deliver_to_user",
+                    "replaces_artifact_refs",
                 ],
             )?;
             let path = required_string(map, "path")?;
             let content = required_string(map, "content")?;
             let append = write_file_append_flag(map).map_err(pre_dispatch_replan_error)?;
+            super::generated_file_delivery::validate(map, builtin_task_id(task), append)
+                .map_err(pre_dispatch_replan_error)?;
             let create_parents =
                 write_file_create_parents_flag(map).map_err(pre_dispatch_replan_error)?;
             let effective_path =

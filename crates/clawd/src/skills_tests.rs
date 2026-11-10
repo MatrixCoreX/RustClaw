@@ -15,7 +15,8 @@ use crate::{
 };
 use claw_core::config::{AgentConfig, ToolsConfig};
 use rusqlite::params;
-use serde_json::json;
+use serde_json::{json, Value};
+use sha2::Digest;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -598,6 +599,45 @@ async fn builtin_write_file_outcome_exposes_structured_extra() {
     assert_eq!(
         append_extra.get("append").and_then(|value| value.as_bool()),
         Some(true)
+    );
+}
+
+#[tokio::test]
+async fn builtin_write_file_delivery_reaches_real_task_artifact_storage() {
+    let root = TempDirGuard::new("builtin_generated_attachment");
+    let mut state = test_state("zh-CN");
+    install_real_registry(&mut state);
+    state.skill_rt.workspace_root = root.path().to_path_buf();
+    let task = test_task(json!({"kind":"run_skill"}));
+    let write = super::run_skill_with_runner_outcome(
+        &state,
+        &task,
+        "write_file",
+        json!({
+            "path":"验收结果.txt","content":"exact UTF-8 内容\n","deliver_to_user":true
+        }),
+    )
+    .await
+    .expect("write and publish");
+    let extra = write.extra.unwrap();
+    assert_eq!(extra["artifacts"][0]["owner_task_id"], task.task_id);
+    let result = json!({"task_journal":{"trace":{"capability_results":[{"status":"ok","data":{"extra":extra}}]}}});
+    let materialized = crate::task_artifacts::materialize_task_result_artifacts(
+        root.path(),
+        &task.task_id,
+        &result.to_string(),
+    )
+    .unwrap();
+    let value: Value = serde_json::from_str(&materialized).unwrap();
+    let artifacts = value["artifacts"].as_array().unwrap();
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(artifacts[0]["filename"], "验收结果.txt");
+    assert_eq!(
+        artifacts[0]["sha256"],
+        format!(
+            "{:x}",
+            sha2::Sha256::digest("exact UTF-8 内容\n".as_bytes())
+        )
     );
 }
 

@@ -8,6 +8,119 @@ use super::*;
 
 struct TempWorkspace(PathBuf);
 
+fn generated_revision(workspace: &Path, task_id: &str, text: &str, replaces: Vec<String>) -> Value {
+    let digest = format!("{:x}", Sha256::digest(text.as_bytes()));
+    let namespace = format!("generated-file-{}", &digest[..32]);
+    let mut artifact = crate::skill_output_artifact::publish_task_text_artifact(
+        workspace,
+        task_id,
+        &namespace,
+        "result.txt",
+        text,
+        json!({"producer":"filesystem_text_delivery", "replaces_artifact_refs":replaces}),
+    )
+    .unwrap()
+    .artifact_ref;
+    artifact["owner_task_id"] = json!(task_id);
+    artifact["visibility"] = json!("user_delivery");
+    artifact
+}
+
+#[test]
+fn explicit_file_revision_replaces_old_review_but_preserves_unrelated_delivery() {
+    let workspace = TempWorkspace::new();
+    let task_id = "revision-task";
+    let old = crate::skill_output_artifact::publish_task_text_artifact(
+        workspace.path(),
+        task_id,
+        "transcript-review",
+        "transcript.txt",
+        "old translation",
+        json!({}),
+    )
+    .unwrap()
+    .artifact_ref;
+    let image = workspace.path().join("image.png");
+    fs::write(&image, b"image-fixture").unwrap();
+    let old_ref = claw_core::task_delivery_artifacts::canonical_task_artifact_ref(
+        task_id,
+        old["id"].as_str().unwrap(),
+    )
+    .unwrap();
+    let current = generated_revision(workspace.path(), task_id, "correct English", vec![old_ref]);
+    let result = json!({"task_journal":{"trace":{"capability_results":[
+        {"status":"ok","artifacts":[old, {"path":image}]},
+        {"status":"ok","artifacts":[current]}
+    ]}}});
+    let materialized =
+        materialize_task_result_artifacts(workspace.path(), task_id, &result.to_string()).unwrap();
+    let value: Value = serde_json::from_str(&materialized).unwrap();
+    let manifests = manifests_from_result(Some(&value));
+    assert_eq!(manifests.len(), 2);
+    assert!(manifests
+        .iter()
+        .any(|manifest| manifest.filename == "image.png"));
+    let text = manifests
+        .iter()
+        .find(|manifest| manifest.filename == "result.txt")
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(delivery_artifact_path(
+            workspace.path(),
+            task_id,
+            &text.id,
+            &text.filename
+        ))
+        .unwrap(),
+        "correct English"
+    );
+    assert!(!manifests
+        .iter()
+        .any(|manifest| manifest.id.starts_with("transcript-review:")));
+    // Re-materialization must not resurrect an old preserved delivery copy.
+    let repeat =
+        materialize_task_result_artifacts(workspace.path(), task_id, &materialized).unwrap();
+    assert_eq!(
+        manifests_from_result(Some(&serde_json::from_str::<Value>(&repeat).unwrap())),
+        manifests
+    );
+}
+
+#[test]
+fn invalid_revision_never_suppresses_valid_prior_artifact() {
+    for invalid in ["tampered", "missing", "cross_task"] {
+        let workspace = TempWorkspace::new();
+        let old_path = workspace.path().join("old.txt");
+        fs::write(&old_path, b"old valid").unwrap();
+        let mut current = generated_revision(
+            workspace.path(),
+            "task-a",
+            "current",
+            vec!["artifact:task/task-a/old".into()],
+        );
+        let path = workspace.path().join(current["path"].as_str().unwrap());
+        match invalid {
+            "tampered" => fs::write(path, b"tampered bytes").unwrap(),
+            "missing" => fs::remove_file(path).unwrap(),
+            _ => current["owner_task_id"] = json!("task-b"),
+        }
+        let result = json!({"task_journal":{"trace":{"capability_results":[
+            {"status":"ok","artifacts":[{"id":"old","path":old_path}]},
+            {"status":"ok","artifacts":[current]}
+        ]}}});
+        let output =
+            materialize_task_result_artifacts(workspace.path(), "task-a", &result.to_string())
+                .unwrap();
+        let value: Value = serde_json::from_str(&output).unwrap();
+        assert!(
+            manifests_from_result(Some(&value))
+                .iter()
+                .any(|manifest| manifest.id == "old"),
+            "{invalid}"
+        );
+    }
+}
+
 impl TempWorkspace {
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!(
