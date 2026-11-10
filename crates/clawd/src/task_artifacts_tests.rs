@@ -22,6 +22,7 @@ fn generated_revision(workspace: &Path, task_id: &str, text: &str, replaces: Vec
     .unwrap()
     .artifact_ref;
     artifact["owner_task_id"] = json!(task_id);
+    artifact["id"] = json!(format!("a_{}", &digest[..32]));
     artifact["visibility"] = json!("user_delivery");
     artifact
 }

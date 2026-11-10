@@ -91,10 +91,8 @@ pub(super) fn publish(
     artifact.insert("size_bytes".into(), json!(content.len()));
     artifact.insert("visibility".into(), json!("user_delivery"));
     artifact.insert("owner_task_id".into(), json!(task_id));
-    let id = artifact["id"]
-        .as_str()
-        .ok_or("file_delivery_artifact_id_missing")?
-        .to_string();
+    let id = format!("a_{}", &digest[..32]);
+    artifact.insert("id".into(), json!(id));
     artifact.insert(
         "artifact_ref".into(),
         json!(claw_core::task_delivery_artifacts::canonical_task_artifact_ref(task_id, &id)),

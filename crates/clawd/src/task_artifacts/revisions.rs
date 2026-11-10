@@ -75,7 +75,7 @@ fn verified_revision_id(workspace: &Path, task_id: &str, artifact: &Value) -> Op
         return None;
     }
     let namespace = format!("generated-file-{}", &digest[..32]);
-    let expected_id = format!("{namespace}:{}", &digest[..24]);
+    let expected_id = format!("a_{}", &digest[..32]);
     if artifact.get("id")?.as_str()? != expected_id {
         return None;
     }
