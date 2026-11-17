@@ -59,6 +59,26 @@ pub(crate) fn start_task_heartbeat(
     stop_tx
 }
 
+pub(super) fn execution_watchdog_graces(state: &AppState) -> (Duration, Duration) {
+    let task = Duration::from_secs(
+        state
+            .worker
+            .worker_task_heartbeat_seconds
+            .max(5)
+            .saturating_mul(4)
+            .max(300),
+    );
+    // A valid resume lease must get a chance to renew before a tick is declared stale.
+    let tick = Duration::from_secs(
+        state
+            .worker
+            .worker_running_no_progress_timeout_seconds
+            .max(60),
+    )
+    .max(task);
+    (task, tick)
+}
+
 pub(crate) fn spawn_worker(state: AppState, poll_interval_ms: u64, concurrency: usize) {
     let worker_count = concurrency.max(1);
     info!(
@@ -76,20 +96,7 @@ pub(crate) fn spawn_worker(state: AppState, poll_interval_ms: u64, concurrency: 
         .supervision
         .configure(monitors.clone(), recovery.clone());
     let pulse = Duration::from_secs(state.worker.worker_task_heartbeat_seconds.max(5));
-    let task_grace = Duration::from_secs(
-        state
-            .worker
-            .worker_task_heartbeat_seconds
-            .max(5)
-            .saturating_mul(4)
-            .max(300),
-    );
-    let tick_grace = Duration::from_secs(
-        state
-            .worker
-            .worker_running_no_progress_timeout_seconds
-            .max(60),
-    );
+    let (task_grace, tick_grace) = execution_watchdog_graces(&state);
     for monitor in monitors {
         let state_cloned = state.clone();
         super::worker_supervision::spawn_managed_loop(

@@ -33,6 +33,16 @@ impl Drop for ActiveFuture {
     }
 }
 
+#[test]
+fn slow_resume_renewals_are_inside_the_watchdog_grace() {
+    let mut state = AppState::test_default_with_fixture_provider();
+    state.worker.worker_task_heartbeat_seconds = 120;
+    state.worker.worker_running_no_progress_timeout_seconds = 60;
+    let (task, tick) = super::super::background_workers::execution_watchdog_graces(&state);
+    assert_eq!(task, Duration::from_secs(480));
+    assert_eq!(tick, task);
+}
+
 #[tokio::test]
 async fn panic_restarts_worker_instead_of_silently_losing_it() {
     let monitor = WorkerMonitor::new();
