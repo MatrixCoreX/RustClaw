@@ -519,7 +519,7 @@ clawcli goal clear task-123
 - `clawcli skills` 读取 registry-backed 技能元数据；`clawcli capabilities` 读取扁平化 `/v1/capabilities` 机器端点。脚本消费时请加 `--json`。
 - `clawcli llm-trace <task_id> [--raw] [--limit N]` 读取 task debug endpoint，并用 `llm_call_ref=LLM#1..N` 输出每轮 LLM 调用编号、flow/code attribution、provider/model/status、usage token，以及可选 raw request/response 字段。
 - `clawcli replay export/run/diff` 使用脱敏的 recorded-only bundle 调试和 CI 对比，不调用 live 模型或工具；`replay run --coverage` 查看记录覆盖，`replay run --view llm|tools|checkpoints|summary` 只看指定类型证据，`replay diff` 输出 `route_changed`、`plan_changed`、`permission_changed`、`final_status_changed` 等分类 token。
-- worker 恢复循环正常运行时，普通 stale `running` 任务会变成 `timeout`；处于 `waiting` 或 `background` 的 paused checkpoint 仍保留 `running`，以便恢复逻辑按 checkpoint id 认领。守护进程存活或健康接口显示 `worker_state=running`，并不单独证明恢复 tick 正常推进，详见[执行器停滞排查](docs/architecture/16-runtime-resource-recovery.zh-CN.md#存储耗尽与执行停滞)。
+- 独立巡检在普通执行器忙碌时仍检查过期任务。普通 stale `running` 任务会变成 `timeout`；处于 `waiting` 或 `background` 的 paused checkpoint 仍保留 `running`，以便恢复逻辑按 checkpoint id 认领。健康接口报告真实执行器心跳和成功巡检状态，详见[执行器停滞排查](docs/architecture/16-runtime-resource-recovery.zh-CN.md#存储耗尽与执行停滞)。
 - async 长尾工具应启动外部 job、写入 `pending_async_job`、建立 checkpoint，并先发布包含 `checkpoint_id`、`poll_ref`、`next_check_after` 的 accepted 机器回复；当 provider 或 dry-run adapter 支持时，poll 和 cancel 也应作为结构化 capability 暴露。后续由 worker recovery 通过 `poll_async_job` 继续轮询。
 - terminal async poll projection 会保留已有 ask 可见回复；如果 ask 任务只有机器 executor 输出，则补一个包含 `checkpoint_id`、`poll_ref`、`task_id` 和 `final_result_json` 的机器 JSON 回复。
 - seeded resume 会恢复持久化的 `TaskBudgetSlice`、累计模型/工具/token/成本/耗时、continuation index、observations、artifact refs、repair 状态和已完成 side-effect fingerprints，再重新进入 agent loop。健康任务只要持续产生结构化进度就可以继续；真正停止由重复/停滞、取消、policy 或管理员硬上限决定。
@@ -649,7 +649,9 @@ swap 余量；该选项默认关闭，也不会允许多个重任务同时消耗
 
 磁盘耗尽属于单独的持久化故障：释放空间不会自动重启停滞的执行器，也不代表任务已经重跑。
 应同时检查文件系统容量、任务进度和 checkpoint 状态，保留活跃技能包与用户数据；仍不能推进时
-再按安装方式受控恢复服务。详细指南说明当前健康检查和 worker 监督的边界。
+再按安装方式受控恢复服务。执行器在 panic 或执行心跳丢失后重建；有效的任务心跳和恢复租约
+续期保护正常长任务。记忆配额只统计记忆自身的逻辑数据字节，排除任务归档和 SQLite 空闲页。
+详细指南说明恢复保护与边界。
 
 ## 身份与访问控制
 

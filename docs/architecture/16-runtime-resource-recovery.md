@@ -70,12 +70,22 @@ policy or an automatic cleanup service. Check free bytes and inodes on both the 
 and the system volume when writes fail. A successful status query does not prove that a task can
 persist its journal, checkpoint or result.
 
-Current health reporting has an important limit: `/v1/health` reports `worker_state=running` without
-measuring a recent worker-loop tick, and channel health can report a live polling process while task
-execution is stalled. Stale-task recovery is invoked from the worker loop before a new claim. It is
-not an independent watchdog that can restart that loop. A service manager's `Restart=on-failure`
-also requires the managed process to fail; a live process with a non-progressing executor does not
-satisfy that condition.
+`/v1/health` derives `worker_state` from supervised execution loops and reports `worker_supervision`:
+configured/live/stalled worker counts, restarts, heartbeat ages, and the last successful recovery
+sweep or machine error code. Channel polling health remains a separate signal. A supervised sweep
+checks stale tasks independently of ordinary workers, with one blocking sweep in flight at a time.
+
+A worker panic or missing execution heartbeat cancels the owned execution future and restarts the
+loop with bounded backoff. Valid task heartbeats and renewable resume leases protect long work;
+there is no new global task deadline. Cleanup is fenced by the exact claim attempt, and checkpoint,
+receipt and side-effect reconciliation rules still govern continuation. An uninterruptible synchronous
+operation must finish before its replacement starts; supervision does not forcibly kill it or overlap
+another invocation. Storage failures still require restoring writable capacity.
+
+Memory pressure quotas measure logical payload in memory-owned tables and FTS shadow storage,
+excluding the pressure record itself, task/event archives, unrelated tables and SQLite free pages.
+This is a memory-domain quota, not physical filesystem usage. Startup recounts pressure before
+starting memory jobs without deleting records or changing user settings; retention also recounts it.
 
 ```mermaid
 flowchart TD
@@ -106,8 +116,8 @@ For an operator:
    delivery parts; never replay them solely because a client timed out.
 
 See [task state and context](03-task-state-context.md) and the installation-specific operations in
-[USAGE.md](../../USAGE.md). Independent executor supervision and automatic stale-loop restart are
-not guarantees of the current implementation.
+[USAGE.md](../../USAGE.md). If heartbeat or recovery ages keep growing despite supervision, preserve
+evidence and use controlled service recovery after checking persisted side effects.
 
 ## Administrator Overrides
 

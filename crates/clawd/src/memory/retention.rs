@@ -111,24 +111,7 @@ pub(crate) fn cleanup_memory_data(
     );
 
     refresh_principal_usage(&transaction, config, now_ts)?;
-    let observed_bytes = sqlite_observed_bytes(&transaction)?;
-    let state = pressure_state(observed_bytes, config.storage_soft_limit_bytes.max(1));
-    transaction.execute(
-        "UPDATE memory_storage_pressure
-         SET state = ?1, reason_code = ?2, observed_bytes = ?3,
-             revision = revision + 1, updated_at_ts = ?4
-         WHERE singleton_id = 1",
-        params![
-            state,
-            if state == "normal" {
-                None::<&str>
-            } else {
-                Some("memory_storage_soft_limit")
-            },
-            observed_bytes.min(i64::MAX as u64) as i64,
-            now_ts,
-        ],
-    )?;
+    let (observed_bytes, state) = refresh_storage_pressure(&transaction, config, now_ts)?;
     record_retention_ledger(
         &transaction,
         "source_transcript",
@@ -267,10 +250,25 @@ fn refresh_principal_usage(
     Ok(())
 }
 
-fn sqlite_observed_bytes(db: &Connection) -> anyhow::Result<u64> {
-    let page_count = db.query_row("PRAGMA page_count", [], |row| row.get::<_, u64>(0))?;
-    let page_size = db.query_row("PRAGMA page_size", [], |row| row.get::<_, u64>(0))?;
-    Ok(page_count.saturating_mul(page_size))
+pub(crate) fn refresh_storage_pressure(
+    db: &Connection,
+    config: &MemoryConfig,
+    now_ts: i64,
+) -> anyhow::Result<(u64, &'static str)> {
+    let observed_bytes = super::storage_accounting::observed_memory_bytes(db)?;
+    let state = pressure_state(observed_bytes, config.storage_soft_limit_bytes.max(1));
+    let changed = db.execute(
+        "UPDATE memory_storage_pressure SET state = ?1, reason_code = ?2, observed_bytes = ?3,
+             revision = revision + 1, updated_at_ts = ?4 WHERE singleton_id = 1",
+        params![
+            state,
+            (state != "normal").then_some("memory_storage_soft_limit"),
+            observed_bytes.min(i64::MAX as u64) as i64,
+            now_ts
+        ],
+    )?;
+    anyhow::ensure!(changed == 1, "memory_storage_pressure_record_missing");
+    Ok((observed_bytes, state))
 }
 
 fn pressure_state(observed: u64, soft_limit: u64) -> &'static str {

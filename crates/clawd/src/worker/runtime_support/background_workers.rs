@@ -33,16 +33,21 @@ pub(crate) fn start_task_heartbeat(
 ) -> oneshot::Sender<()> {
     let interval_secs = state.worker.worker_task_heartbeat_seconds.max(5);
     let worker_id = state.worker.worker_id.clone();
+    let monitor = super::worker_supervision::current_monitor();
     let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
     tokio::spawn(async move {
         loop {
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {
-                    if let Err(err) = task_heartbeat_tick(state.clone(), task_id.clone(), claim_attempt).await {
-                        warn!(
+                    match task_heartbeat_tick(state.clone(), task_id.clone(), claim_attempt).await {
+                        Ok(true) => {
+                            if let Some(monitor) = &monitor { monitor.task_heartbeat(&task_id); }
+                        }
+                        Ok(false) => break,
+                        Err(err) => warn!(
                             "task heartbeat update failed: worker_id={} task_id={} interval_secs={} err={}",
                             worker_id, task_id, interval_secs, err
-                        );
+                        ),
                     }
                 }
                 _ = &mut stop_rx => {
@@ -62,20 +67,60 @@ pub(crate) fn spawn_worker(state: AppState, poll_interval_ms: u64, concurrency: 
         worker_count,
         poll_interval_ms.max(10)
     );
-    for worker_idx in 0..worker_count {
+    let monitors = (0..worker_count)
+        .map(|_| crate::runtime::worker_health::WorkerMonitor::new())
+        .collect::<Vec<_>>();
+    let recovery = crate::runtime::worker_health::WorkerMonitor::new();
+    state
+        .worker
+        .supervision
+        .configure(monitors.clone(), recovery.clone());
+    let pulse = Duration::from_secs(state.worker.worker_task_heartbeat_seconds.max(5));
+    let task_grace = Duration::from_secs(
+        state
+            .worker
+            .worker_task_heartbeat_seconds
+            .max(5)
+            .saturating_mul(4)
+            .max(300),
+    );
+    let tick_grace = Duration::from_secs(
+        state
+            .worker
+            .worker_running_no_progress_timeout_seconds
+            .max(60),
+    );
+    for monitor in monitors {
         let state_cloned = state.clone();
-        tokio::spawn(async move {
-            loop {
-                if let Err(err) = super::super::worker_once(&state_cloned).await {
-                    error!(
-                        "Worker tick failed (worker_id={} worker_idx={}): {}",
-                        state_cloned.worker.worker_id, worker_idx, err
-                    );
-                }
-                tokio::time::sleep(Duration::from_millis(poll_interval_ms.max(10))).await;
-            }
-        });
+        super::worker_supervision::spawn_managed_loop(
+            monitor,
+            pulse,
+            task_grace,
+            tick_grace,
+            Duration::from_millis(poll_interval_ms.max(10)),
+            move || {
+                let state = state_cloned.clone();
+                async move { super::super::worker_once(&state).await }
+            },
+        );
     }
+    let recovery_state = state.clone();
+    super::worker_supervision::spawn_managed_loop(
+        recovery,
+        pulse,
+        task_grace,
+        tick_grace,
+        Duration::from_secs(
+            state
+                .worker
+                .worker_running_recovery_check_interval_seconds
+                .max(10),
+        ),
+        move || {
+            let state = recovery_state.clone();
+            async move { super::recovery_flow::maybe_recover_stale_running_tasks_only(&state).await }
+        },
+    );
 }
 
 pub(crate) fn spawn_cleanup_worker(state: AppState) {

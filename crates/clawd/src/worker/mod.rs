@@ -168,9 +168,7 @@ pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
             }
         };
 
-        let _task_cancellation = state.worker.register_active_task(&task.task_id);
-        let heartbeat_stop =
-            start_task_heartbeat(state.clone(), task.task_id.clone(), task.claim_attempt);
+        let task_guard = runtime_support::ActiveTaskGuard::start(state, &task.task_id, task.claim_attempt);
         // A claimed task has no implicit global wall-clock deadline. Durable
         // jobs hand off through checkpoints, while explicit deadlines,
         // cancellation, adapter/tool timeouts and stale-lease recovery remain
@@ -208,8 +206,7 @@ pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
         } else {
             process_claimed_task_by_kind(state, &task, &mut payload).await
         };
-        let _ = heartbeat_stop.send(());
-        state.worker.unregister_active_task(&task.task_id);
+        task_guard.finish();
 
         match task_result {
             Ok(()) => {}
@@ -628,7 +625,8 @@ pub(crate) async fn process_run_skill_task(
     task: &crate::ClaimedTask,
     payload: &Value,
 ) -> anyhow::Result<()> {
-    let _result_write_guard = crate::task_result_retention::write_gate::begin_writing(state, &task.task_id).await?;
+    let _result_write_guard =
+        crate::task_result_retention::write_gate::begin_writing(state, &task.task_id).await?;
     let prepared_input = prepare_run_skill_input(payload);
 
     if crate::task_result_retention::retains_shared_outcome(state, &task.task_id, payload) {

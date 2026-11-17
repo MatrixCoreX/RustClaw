@@ -33,6 +33,34 @@ fn auth_headers(key: &'static str) -> HeaderMap {
     headers
 }
 
+#[tokio::test]
+async fn health_exposes_supervision_state_instead_of_a_fixed_running_label() {
+    use crate::runtime::worker_health::WorkerMonitor;
+    let (state, _root) = fixture();
+    state.seed_test_auth_identity("fixture-health-admin", "admin");
+    let (_, Json(response)) =
+        health(State(state.clone()), auth_headers("fixture-health-admin")).await;
+    let response = response.data.unwrap();
+    assert_eq!(response.worker_state, "starting");
+    assert_eq!(response.worker_supervision.unwrap().configured_workers, 0);
+    let worker = WorkerMonitor::new();
+    let recovery = WorkerMonitor::new();
+    state
+        .worker
+        .supervision
+        .configure(vec![worker.clone()], recovery.clone());
+    worker.pulse();
+    recovery.pulse();
+    state.worker.supervision.recovery_finished(true);
+    worker
+        .stalled
+        .store(true, std::sync::atomic::Ordering::Release);
+    let (_, Json(response)) = health(State(state), auth_headers("fixture-health-admin")).await;
+    let response = response.data.unwrap();
+    assert_eq!(response.worker_state, "stalled");
+    assert_eq!(response.worker_supervision.unwrap().stalled_workers, 1);
+}
+
 async fn observe_pool_wait(key: &'static str, expected_status: StatusCode) {
     let (state, _root) = fixture();
     state.seed_test_auth_identity("fixture-health-admin", "admin");

@@ -18,6 +18,28 @@ use super::{
 pub(crate) async fn maybe_recover_stale_running_tasks_runtime(
     state: &AppState,
 ) -> anyhow::Result<()> {
+    maybe_recover_stale_running_tasks_only(state).await?;
+    let now = now_ts_u64();
+    let lease_seconds = resume_execution_lease_seconds(state);
+    prepare_due_paused_checkpoint_resume_work(state, now, lease_seconds)?;
+    plan_ready_paused_checkpoint_resume_executors(state, now, lease_seconds)?;
+    record_planned_paused_checkpoint_resume_handoffs(state, now)?;
+    dispatch_handoff_paused_checkpoint_resume_executions(state, now, lease_seconds)?;
+    execute_dispatched_paused_checkpoint_resume_executions(state, now, lease_seconds).await?;
+    project_recorded_paused_checkpoint_resume_dispatch_results(state, now, lease_seconds)?;
+    Ok(())
+}
+
+struct RecoveryFlight(std::sync::Arc<crate::runtime::worker_health::WorkerSupervision>);
+impl Drop for RecoveryFlight {
+    fn drop(&mut self) {
+        self.0
+            .recovery_in_flight
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
+pub(super) async fn maybe_recover_stale_running_tasks_only(state: &AppState) -> anyhow::Result<()> {
     let now = now_ts_u64();
     let interval = state
         .worker
@@ -31,13 +53,34 @@ pub(crate) async fn maybe_recover_stale_running_tasks_runtime(
             .map_err(|_| anyhow!("running recovery lock poisoned"))?;
         if now.saturating_sub(*guard) < interval {
             false
+        } else if state
+            .worker
+            .supervision
+            .recovery_in_flight
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .is_err()
+        {
+            false
         } else {
             *guard = now;
             true
         }
     };
-    if should_run_stale_recovery {
-        let recovered = recover_stale_running_tasks_by_no_progress(state)?;
+    if !should_run_stale_recovery {
+        return Ok(());
+    }
+    let flight = RecoveryFlight(state.worker.supervision.clone());
+    let state = state.clone();
+    super::background_workers::run_blocking_tick("stale_task_recovery", move || {
+        let _flight = flight;
+        let result = recover_stale_running_tasks_by_no_progress(&state);
+        state.worker.supervision.recovery_finished(result.is_ok());
+        let recovered = result?;
         if !recovered.is_empty() {
             warn!(
                 "runtime stale-running recovery applied: recovered {} running tasks (no_progress_timeout={}s)",
@@ -45,15 +88,8 @@ pub(crate) async fn maybe_recover_stale_running_tasks_runtime(
                 state.worker.worker_running_no_progress_timeout_seconds
             );
         }
-    }
-    let lease_seconds = resume_execution_lease_seconds(state);
-    prepare_due_paused_checkpoint_resume_work(state, now, lease_seconds)?;
-    plan_ready_paused_checkpoint_resume_executors(state, now, lease_seconds)?;
-    record_planned_paused_checkpoint_resume_handoffs(state, now)?;
-    dispatch_handoff_paused_checkpoint_resume_executions(state, now, lease_seconds)?;
-    execute_dispatched_paused_checkpoint_resume_executions(state, now, lease_seconds).await?;
-    project_recorded_paused_checkpoint_resume_dispatch_results(state, now, lease_seconds)?;
-    Ok(())
+        Ok(())
+    }).await
 }
 
 pub(super) fn resume_execution_lease_seconds(state: &AppState) -> i64 {

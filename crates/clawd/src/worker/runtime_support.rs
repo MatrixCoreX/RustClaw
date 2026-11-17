@@ -1,10 +1,12 @@
 #[path = "runtime_support/background_workers.rs"]
 mod background_workers;
+#[path = "runtime_support/worker_supervision.rs"]
+mod worker_supervision;
 pub(crate) use background_workers::{
     spawn_channel_terminal_delivery_worker, spawn_cleanup_worker,
     spawn_conversation_reply_delivery_worker, spawn_schedule_worker, spawn_worker,
-    start_task_heartbeat,
 };
+pub(crate) use worker_supervision::ActiveTaskGuard;
 
 #[path = "runtime_support/dispatch_result.rs"]
 mod dispatch_result;

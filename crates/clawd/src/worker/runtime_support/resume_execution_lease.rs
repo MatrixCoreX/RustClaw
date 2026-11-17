@@ -18,13 +18,19 @@ where
     F: Future<Output = T>,
 {
     let lease_seconds = lease_seconds.max(1);
+    let monitor = super::worker_supervision::current_monitor();
     let mut confirmed_expires_at = claimed
         .lease_expires_at
         .min(claimed.handoff_claim_expires_at)
         .min(claimed.dispatch_claim_expires_at);
     let initial_now = now_ts_u64() as i64;
     match renew_resume_execution_lease(state, claimed, initial_now, lease_seconds).await {
-        Ok(true) => confirmed_expires_at = initial_now.saturating_add(lease_seconds),
+        Ok(true) => {
+            confirmed_expires_at = initial_now.saturating_add(lease_seconds);
+            if let Some(monitor) = &monitor {
+                monitor.execution_heartbeat();
+            }
+        }
         Ok(false) => return Ok(RenewableResumeExecution::LeaseLost),
         Err(error) if confirmed_expires_at > initial_now => warn!(
             task_id = %claimed.task_id,
@@ -57,6 +63,7 @@ where
                 ).await {
                     Ok(true) => {
                         confirmed_expires_at = heartbeat_at.saturating_add(lease_seconds);
+                        if let Some(monitor) = &monitor { monitor.execution_heartbeat(); }
                         interval_seconds
                     }
                     Ok(false) => return Ok(RenewableResumeExecution::LeaseLost),

@@ -1242,6 +1242,7 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
             schedule,
         },
         worker: crate::WorkerConfig {
+            supervision: Arc::new(runtime::worker_health::WorkerSupervision::default()),
             worker_id,
             started_at: Instant::now(),
             queue_limit: config.worker.queue_limit,
@@ -1333,6 +1334,26 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
     let restored_resource_leases = resource_scheduler::restore_durable_resource_leases(&state);
     info!(restored_resource_leases, "durable_resource_leases_restored");
     resource_scheduler::spawn_resource_pressure_monitor(state.clone());
+    // Recount only memory-owned payload, recovering obsolete whole-database pressure
+    // before reconciling or starting automatic memory jobs. This performs no retention.
+    match state
+        .core
+        .db
+        .get()
+        .map_err(anyhow::Error::from)
+        .and_then(|db| {
+            memory::retention::refresh_storage_pressure(
+                &db,
+                &state.policy.memory,
+                now_ts_u64() as i64,
+            )
+        }) {
+        Ok((observed_bytes, pressure_state)) => info!(
+            observed_bytes,
+            pressure_state, "memory_storage_pressure_recounted"
+        ),
+        Err(error) => warn!(%error, "memory_storage_pressure_recount_failed"),
+    }
     spawn_worker(
         state.clone(),
         config.worker.poll_interval_ms,

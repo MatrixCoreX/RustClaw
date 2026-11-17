@@ -464,6 +464,7 @@ impl PolicyConfig {
 /// 行为参数都要改 12 个 fixture。集中后 fixtures 只调一次 `test_default()`。
 #[derive(Clone)]
 pub(crate) struct WorkerConfig {
+    pub(crate) supervision: Arc<super::worker_health::WorkerSupervision>,
     pub(crate) worker_id: String,
     pub(crate) started_at: Instant,
     pub(crate) queue_limit: usize,
@@ -594,6 +595,7 @@ impl WorkerConfig {
     pub(crate) fn test_default() -> Self {
         Self {
             worker_id: "worker:test-default".to_string(),
+            supervision: Arc::new(super::worker_health::WorkerSupervision::default()),
             started_at: Instant::now(),
             queue_limit: 1,
             remote_executor: claw_core::config::RemoteExecutorConfig::default(),

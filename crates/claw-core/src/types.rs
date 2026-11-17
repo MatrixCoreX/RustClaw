@@ -284,10 +284,26 @@ pub struct TaskQueryResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkerSupervisionHealth {
+    pub state: String,
+    pub configured_workers: usize,
+    pub live_workers: usize,
+    pub stalled_workers: usize,
+    pub restart_count: u64,
+    pub last_worker_heartbeat_age_seconds: Option<u64>,
+    pub recovery_alive: bool,
+    pub last_recovery_heartbeat_age_seconds: Option<u64>,
+    pub last_recovery_success_age_seconds: Option<u64>,
+    pub recovery_last_error_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthResponse {
     pub version: String,
     pub queue_length: usize,
     pub worker_state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_supervision: Option<WorkerSupervisionHealth>,
     pub uptime_seconds: u64,
     pub memory_rss_bytes: Option<u64>,
     /// 当前处于 running 状态的任务数量

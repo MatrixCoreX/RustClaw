@@ -383,10 +383,27 @@ async fn health(
         );
     }
     gateway_instance_statuses.extend(gateway_instance_statuses_by_scope.into_values());
+    let worker_supervision = state.worker.supervision.snapshot(
+        std::time::Duration::from_secs(
+            state
+                .worker
+                .worker_task_heartbeat_seconds
+                .max(5)
+                .saturating_mul(3),
+        ),
+        std::time::Duration::from_secs(
+            state
+                .worker
+                .worker_running_recovery_check_interval_seconds
+                .max(10)
+                .saturating_mul(3),
+        ),
+    );
     let data = HealthResponse {
         version: env!("CARGO_PKG_VERSION").to_string(),
         queue_length,
-        worker_state: "running".to_string(),
+        worker_state: worker_supervision.state.clone(),
+        worker_supervision: Some(worker_supervision),
         uptime_seconds: state.worker.started_at.elapsed().as_secs(),
         memory_rss_bytes: processes.current_rss_bytes(),
         running_length,

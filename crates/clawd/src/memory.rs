@@ -18,6 +18,7 @@ pub(crate) mod retrieval_async;
 pub(crate) mod scope;
 pub(crate) mod service;
 pub(crate) mod settings;
+mod storage_accounting;
 pub(crate) mod use_policy;
 pub(crate) mod ux;
 pub(crate) mod vector_store;

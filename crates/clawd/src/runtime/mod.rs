@@ -8,6 +8,7 @@ pub(crate) mod provider_runtime;
 mod skill_views;
 pub(crate) mod state;
 pub(crate) mod types;
+pub(crate) mod worker_health;
 
 #[cfg(test)]
 #[path = "policy_tests.rs"]
