@@ -12,6 +12,28 @@
 
 客户端或 HTTP 等待超时本身不会终止已经持久化的任务。Worker 使用带 fencing 语义的 lease 与 heartbeat；需要续跑的工作通过 checkpoint 和机器生命周期字段表达。
 
+## 检查点轮次历史与输出合同
+
+`agent_loop_resume_state` 在输出合同、已完成观测、预算和副作用指纹之外，还保留已记录的
+`round_traces`。恢复时只填充空的内存轮次历史，重复应用同一 checkpoint 不会重复追加轮次。
+缺少这些字段的旧 checkpoint 仍可读取，不会补造从未记录的历史。
+
+记录存在时，每轮 trace 区分 planner 提出的 `proposed_output_contract` 与运行时生效的
+`effective_output_contract`；存在生效合同时，`decision_envelope` 使用它生成。可选生效合同
+缺失时在 trace 中记为 `null`。公开和持久化 trace 投影仍受大小与完整性边界限制；保存轮次历史不代表
+无限保存日志，也不授权重复执行已经完成的步骤。
+
+```mermaid
+flowchart LR
+    A[已记录轮次与执行证据] --> B[持久化 checkpoint<br/>round_traces + 输出合同 + 预算]
+    B --> C[用新的 fenced claim 恢复 checkpoint]
+    C --> D[只恢复一次已有轮次]
+    D --> E{Checkpoint 阶段}
+    E -->|verification| F[重查绑定的候选答案<br/>复用已完成执行证据]
+    E -->|其他已保存阶段| G[继续原有阶段]
+    D --> H[有界 journal trace<br/>提出与生效合同 + decision_envelope]
+```
+
 ## 验证状态与授权回查
 
 任务 journal 的 summary 与 trace 分别记录 `execution_status` 和 `answer_verification`。

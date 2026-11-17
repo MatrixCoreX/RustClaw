@@ -108,7 +108,8 @@ flowchart TD
     BJ --> BK{会话是否有活跃任务}
     BK -->|是| BL[绑定同一任务<br/>唤醒循环 + 中断过期模型轮次]
     BK -->|否| BM[原子认领创建权<br/>只创建一个前台 ask 任务]
-    BL --> BA
+    BL --> BR[返回输入收据<br/>原 task_id + disposition]
+    BL -->|下一个安全轮次或 checkpoint 恢复| J
     BM --> BA
     B -->|显式任务 / 自动化 / run_skill| BT[POST /v1/tasks]
     BT --> BA[认证后的任务执行策略<br/>服务端拥有的机器 envelope]
@@ -171,6 +172,7 @@ flowchart TD
     ASP --> AB
     ASP --> AD
     AD --> AE[CLI / UI watch + report]
+    BR -.-> AE
     AD --> AF[教学模式时间线<br/>按轮次选择 trace + 原始 JSON 详情]
     Z -. 可选 .-> AC[后台记忆刷新]
 ```
@@ -376,14 +378,28 @@ Agent Runtime 记忆分为短期对话记录、结构化用户偏好、长期事
 - `embedding_dims`
 - `embedding_version`
 
-默认 provider 是离线可用的 `local-hash-v1`。如果配置了不可用或不支持的 embedding provider，运行时会回退到 local hash。只有索引行的 embedding metadata 与当前 provider spec 匹配时才使用 cosine scoring；不匹配时会回退到词法、显著性、时间和成功状态评分。可以在 `configs/memory.toml` 设置 `reindex_on_startup = true`，或从空索引启动，来重建短期记录、偏好和事实卡的运行时检索索引。KB 文档行保留在独立的 KB 私有库中，通过专属连接池参与召回。
+默认 provider 是离线可用的 `local-hash-v3`，使用 Unicode 归一化与有界 token 投影。只有存储的 embedding metadata 与当前 profile 匹配时才使用 cosine scoring。运行时记忆行不匹配时仍可参与非向量评分，直至索引重建；KB 投影不匹配时明确报告 stale，通过可恢复的 shadow generation 重建并原子激活。可以在 `configs/memory.toml` 设置 `reindex_on_startup = true`，或从空索引启动，来重建短期记录、偏好和事实卡的运行时检索索引。KB 文档行与向量 generation 保留在独立的 KB 私有库中，通过专属连接池参与召回。
 
 ### 知识库设计流程
 
 `kb` 技能是用户管理文档知识库的路径。它和其他普通能力一样接入：`ask` 任务由 agent loop 规划 `call_capability("kb.*")`，直接 API 调用可以用 `kind=run_skill` 加 `skill_name=kb`。运行时不会在 planner 前按用户自然语言特殊判断知识库意图；它只解析和校验 registry capability metadata，然后通过同一套 runner skill 协议派发。
 
 
-详细流程见：[任务状态与上下文](docs/architecture/03-task-state-context.zh-CN.md)和[技能独立存储](docs/architecture/08-skill-owned-storage.zh-CN.md)。
+```mermaid
+flowchart LR
+    A[用户文件] --> B[类型化提取<br/>文本、HTML、PDF、Office]
+    B --> C[按结构分块<br/>页、章节、工作表、幻灯片]
+    C --> D[(KB 私有规范存储)]
+    D --> E[FTS 候选]
+    D --> F[活跃向量 generation<br/>精确评分或有界 ANN]
+    E --> G[先过滤再限量<br/>混合融合与多样性选择]
+    F --> G
+    G --> H[RetrievalHitV2 证据映射<br/>instruction_authority = none]
+    H --> I[模型选择运行时签发的证据 ID]
+    I --> J[运行时校验 revision 与摘要<br/>输出中性引用]
+```
+
+详细流程见：[RAG 知识检索](docs/architecture/17-rag-knowledge-retrieval.zh-CN.md)、[任务状态与上下文](docs/architecture/03-task-state-context.zh-CN.md)和[技能独立存储](docs/architecture/08-skill-owned-storage.zh-CN.md)。
 
 关键边界：
 
@@ -391,6 +407,19 @@ Agent Runtime 记忆分为短期对话记录、结构化用户偏好、长期事
 - `kb.search`、`kb.list_namespaces`、`kb.stats` 是 observe-mode 能力，返回 `namespace`、`hits`、`names`、`document_count`、`chunk_count` 等结构化机器字段。
 - namespace 快照和 `kb_doc` 检索行只写入 `[database].skill_data_root` 下的 KB 私有库（通常是 `data/skills/kb/state.db`）。运行时召回会查询该连接池，不会再把 KB 行复制到主运行时数据库。
 - KB 行按 `user_key` 和 workspace 文件作用域管理，不绑定单个 chat thread。后续只有 memory use policy 允许时才进入 planner/chat/skill 上下文，且当前用户输入始终优先。
+- 摄取支持 UTF-8 文本、Markdown、JSON/JSONL、CSV/TSV、可见 HTML、PDF 文本层和 DOCX/XLSX/PPTX 结构，不执行宏、脚本、嵌入对象或远程资源。扫描 PDF 需要明确选择 OCR 能力。
+- 分块保留行、章节、页、工作表或幻灯片定位。检索先按所有者、namespace、路径、类型和时间过滤，再融合词法与当前向量 generation；没有相关证据时正常返回空结果。
+- 离线 `local-hash-v3` 是确定性投影，不承诺通用跨语言语义。Profile、parser 或 chunker 变化时先构建可恢复的 shadow generation，校验后原子切换，不混用不兼容版本。
+- 检索命中是 `instruction_authority=none` 的不可信数据。模型只能选择运行时签发的证据 ID；输出引用前再次核对所有者、revision、摘要和相对来源位置。
+
+普通设备摄取默认限制为 500 个文件、64 MiB 源数据、10,000 个块和 20 秒协作切片；受限设备
+默认 64 个文件、16 MiB、2,048 个块和 10 秒。未完成工作返回持久化 continuation。向量候选集
+较小时精确评分，超过边界使用可重建的 ANN 投影；容量、并发写入、路径越界、格式、解包比例和
+解析资源都有结构化限制。
+
+备份知识库时停止写入，或对完整技能私有库执行一致的 SQLite 备份，正确处理适用的 `-wal` 状态。
+恢复后检查完整性、namespace、job 与 generation 状态，再从机器 checkpoint 继续摄取或重建。
+删除文档或 namespace 会事务化删除对应规范块与投影；禁用或卸载技能默认保留私有数据。
 
 ### 用户控制
 
@@ -490,10 +519,11 @@ clawcli goal clear task-123
 - `clawcli skills` 读取 registry-backed 技能元数据；`clawcli capabilities` 读取扁平化 `/v1/capabilities` 机器端点。脚本消费时请加 `--json`。
 - `clawcli llm-trace <task_id> [--raw] [--limit N]` 读取 task debug endpoint，并用 `llm_call_ref=LLM#1..N` 输出每轮 LLM 调用编号、flow/code attribution、provider/model/status、usage token，以及可选 raw request/response 字段。
 - `clawcli replay export/run/diff` 使用脱敏的 recorded-only bundle 调试和 CI 对比，不调用 live 模型或工具；`replay run --coverage` 查看记录覆盖，`replay run --view llm|tools|checkpoints|summary` 只看指定类型证据，`replay diff` 输出 `route_changed`、`plan_changed`、`permission_changed`、`final_status_changed` 等分类 token。
-- 普通 stale `running` 任务会变成 `timeout`；处于 `waiting` 或 `background` 的 paused checkpoint 仍保留 `running`，以便恢复逻辑按 checkpoint id 认领。
+- worker 恢复循环正常运行时，普通 stale `running` 任务会变成 `timeout`；处于 `waiting` 或 `background` 的 paused checkpoint 仍保留 `running`，以便恢复逻辑按 checkpoint id 认领。守护进程存活或健康接口显示 `worker_state=running`，并不单独证明恢复 tick 正常推进，详见[执行器停滞排查](docs/architecture/16-runtime-resource-recovery.zh-CN.md#存储耗尽与执行停滞)。
 - async 长尾工具应启动外部 job、写入 `pending_async_job`、建立 checkpoint，并先发布包含 `checkpoint_id`、`poll_ref`、`next_check_after` 的 accepted 机器回复；当 provider 或 dry-run adapter 支持时，poll 和 cancel 也应作为结构化 capability 暴露。后续由 worker recovery 通过 `poll_async_job` 继续轮询。
 - terminal async poll projection 会保留已有 ask 可见回复；如果 ask 任务只有机器 executor 输出，则补一个包含 `checkpoint_id`、`poll_ref`、`task_id` 和 `final_result_json` 的机器 JSON 回复。
 - seeded resume 会恢复持久化的 `TaskBudgetSlice`、累计模型/工具/token/成本/耗时、continuation index、observations、artifact refs、repair 状态和已完成 side-effect fingerprints，再重新进入 agent loop。健康任务只要持续产生结构化进度就可以继续；真正停止由重复/停滞、取消、policy 或管理员硬上限决定。
+- checkpoint 还保留 `round_traces`。恢复已有轮次时不会重复追加；有界 trace 视图区分 `proposed_output_contract` 与 `effective_output_contract`，存在有效合同时由它生成 `decision_envelope`。旧 checkpoint 不会被补造历史轮次，详见[检查点轮次历史](docs/architecture/03-task-state-context.zh-CN.md#检查点轮次历史与输出合同)。
 - runtime recovery 和 projection 只移动 `status_code`、`message_key`、`executor_state`、`resume_directive`、`job_id`、artifact refs 等机器字段。用户可见 prose 由 finalizer、i18n、UI 或模型渲染。
 - Lease/heartbeat 模型见 `docs/task_lifecycle_lease_model.md`；foreground 与 resume-executor 的每次写入都由 task row 的精确 `(lease_owner, claim_attempt)` 隔离。heartbeat 只能续租当前 claim，checkpoint recovery 会推进 generation，旧 worker 不能再发布 claimed process event 或覆盖终态结果。
 
@@ -616,6 +646,10 @@ flowchart LR
 热循环，也不会把宿主临时资源不足误报成技能失败。低内存设备可以显式配置仅供重任务串行使用的
 swap 余量；该选项默认关闭，也不会允许多个重任务同时消耗这部分余量。资源档位、管理员覆盖、
 可观测性和验收证据见[运行期资源准入与恢复](docs/architecture/16-runtime-resource-recovery.zh-CN.md)。
+
+磁盘耗尽属于单独的持久化故障：释放空间不会自动重启停滞的执行器，也不代表任务已经重跑。
+应同时检查文件系统容量、任务进度和 checkpoint 状态，保留活跃技能包与用户数据；仍不能推进时
+再按安装方式受控恢复服务。详细指南说明当前健康检查和 worker 监督的边界。
 
 ## 身份与访问控制
 

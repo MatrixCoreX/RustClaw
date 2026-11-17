@@ -63,6 +63,52 @@ translate an English or Chinese error sentence back into control state. Raw cgro
 IDs, request bodies, credentials, and private artifacts are excluded from ordinary status output and
 diagnostic exports.
 
+## Storage Exhaustion and Stalled Workers
+
+The resource tiers above govern memory and execution slots. They are not a disk-space admission
+policy or an automatic cleanup service. Check free bytes and inodes on both the runtime data volume
+and the system volume when writes fail. A successful status query does not prove that a task can
+persist its journal, checkpoint or result.
+
+Current health reporting has an important limit: `/v1/health` reports `worker_state=running` without
+measuring a recent worker-loop tick, and channel health can report a live polling process while task
+execution is stalled. Stale-task recovery is invoked from the worker loop before a new claim. It is
+not an independent watchdog that can restart that loop. A service manager's `Restart=on-failure`
+also requires the managed process to fail; a live process with a non-progressing executor does not
+satisfy that condition.
+
+```mermaid
+flowchart TD
+    A[Task stops progressing beyond its configured limits] --> B{Can runtime storage persist writes?}
+    B -->|no| C[Reclaim verified unused old packages<br/>preserve active bindings and user data]
+    C --> B
+    B -->|yes| D{Valid waiting or background checkpoint?}
+    D -->|yes| E[Inspect machine blocker and next_check_after<br/>continue the same task when eligible]
+    D -->|no| F[Check executor heartbeat and recovery ticks]
+    F --> G[Preserve logs and task evidence<br/>review completed side effects]
+    G --> H[Controlled recovery of the installed runtime]
+    H --> I[Verify same-task progress and delivery receipt]
+    E --> I
+```
+
+For an operator:
+
+1. Keep the original `task_id`. Compare persisted progress and lease timestamps with the configured
+   heartbeat/no-progress policy, and inspect `task_lifecycle` before treating a waiting task as stuck.
+2. Preserve configuration, credentials, databases and their WAL state, logs, user artifacts, current
+   generations and leased skill versions. Reclaim only verified unused old packages; directory age
+   alone does not establish that an installed version is unused.
+3. After reclaiming space, verify writes and task progress again. Free space alone does not restart
+   an executor or imply a successful retry. If control and status remain available but eligible tasks
+   still do not advance, preserve evidence and use the existing installation's controlled restart.
+4. Let a still-queued task be claimed under its existing ID. Resume a checkpoint through its machine
+   recovery contract. Before resubmitting terminal work, check completed side effects and accepted
+   delivery parts; never replay them solely because a client timed out.
+
+See [task state and context](03-task-state-context.md) and the installation-specific operations in
+[USAGE.md](../../USAGE.md). Independent executor supervision and automatic stale-loop restart are
+not guarantees of the current implementation.
+
 ## Administrator Overrides
 
 The optional `[runtime_resources]` table in `configs/config.toml` is the only threshold override.

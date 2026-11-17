@@ -14,6 +14,30 @@ A client or HTTP timeout does not by itself terminate a persisted task. Workers
 use fenced leases and heartbeats, while resumable work is represented by
 checkpoints and machine lifecycle fields.
 
+## Checkpoint Round History and Output Contracts
+
+`agent_loop_resume_state` retains the recorded `round_traces` alongside the output contract,
+completed observations, budgets and side-effect fingerprints. Restoration fills an empty in-memory
+round history; applying the same checkpoint again does not append duplicate rounds. An older
+checkpoint without these fields remains readable without inventing a history it never recorded.
+
+When present, each trace round distinguishes the planner's `proposed_output_contract` from the
+runtime's `effective_output_contract`. Its `decision_envelope` uses the effective contract when
+available. A missing optional effective contract is reported as `null` in the trace. Public/persisted trace projections
+still obey their size and completeness limits; retaining round history is not an unbounded log or
+permission to execute completed steps again.
+
+```mermaid
+flowchart LR
+    A[Recorded rounds + execution evidence] --> B[Persist checkpoint<br/>round_traces + output contract + budgets]
+    B --> C[Recover checkpoint under a new fenced claim]
+    C --> D[Restore recorded rounds once]
+    D --> E{Checkpoint stage}
+    E -->|verification| F[Recheck bound candidate<br/>reuse completed execution evidence]
+    E -->|other saved stage| G[Continue the recorded stage]
+    D --> H[Bounded journal trace<br/>proposed and effective contracts + decision_envelope]
+```
+
 ## Verification and Authorized Recall
 
 `task_journal.summary` and `trace` expose independent `execution_status` and

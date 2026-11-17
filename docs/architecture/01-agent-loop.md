@@ -15,9 +15,15 @@ should be answered, clarified, or executed.
 
 ```mermaid
 flowchart TD
-    A[Channel / UI / API] --> B[Durable conversation input]
-    B --> C[Return input receipt<br/>bind active task or create one ask task]
-    C --> D[Worker claim and recovery tick]
+    A[Channel / UI / API] --> IN{Ingress kind}
+    IN -->|ordinary message| B[Durable conversation input + receipt]
+    B --> C{Active conversation task?}
+    C -->|yes| CI[Bind to the same task<br/>instruction revision + execution epoch]
+    CI -->|next safe round or checkpoint resume| I
+    C -->|no| CT[Claim creation once<br/>persist one foreground ask task]
+    IN -->|explicit task / automation / run_skill| ET[POST /v1/tasks<br/>authenticated task boundary]
+    CT --> D[Worker recovery tick + queued task claim]
+    ET --> D
     D --> E{Task kind}
     E -->|ask| F[Materialize text, audio, and attachments]
     F --> G[TurnBoundaryEnvelope<br/>identity + explicit facts + policy budgets]

@@ -1,10 +1,10 @@
 # Agent Runtime Architecture Guide
 
 GitHub does not provide true pagination inside a README. Agent Runtime therefore
-keeps only the primary agent-loop overview in the repository README and
-organizes the detailed diagrams as the ordered pages below.
+keeps overview diagrams in the repository README and organizes the detailed
+flows and their implementation boundaries as the ordered pages below.
 
-GitHub 的 README 不支持真正的页内分页。Agent Runtime 因此只在仓库 README 保留主 Agent Loop 总览图，并把详细流程按以下顺序拆成独立页面。
+GitHub 的 README 不支持真正的页内分页。Agent Runtime 因此在仓库 README 保留各部分总览图，把详细流程及其实现边界按以下顺序拆成独立页面。
 
 | Page | English | 中文 |
 | --- | --- | --- |

@@ -126,7 +126,8 @@ flowchart TD
     BJ --> BK{Active conversation task?}
     BK -->|yes| BL[Bind to the same task<br/>wake loop + interrupt stale model turn]
     BK -->|no| BM[Atomically claim creation<br/>create one foreground ask task]
-    BL --> BA
+    BL --> BR[Return input receipt<br/>existing task_id + disposition]
+    BL -->|next safe round or checkpoint resume| J
     BM --> BA
     B -->|explicit task / automation / run_skill| BT[POST /v1/tasks]
     BT --> BA[Authenticated task execution policy<br/>server-owned machine envelope]
@@ -189,6 +190,7 @@ flowchart TD
     ASP --> AB
     ASP --> AD
     AD --> AE[CLI / UI watch + report]
+    BR -.-> AE
     AD --> AF[Teaching mode timeline<br/>per-turn trace selection + raw JSON details]
     Z -. optional .-> AC[Background memory refresh]
 ```
@@ -561,10 +563,11 @@ clawcli goal clear task-123
 - `clawcli skills` reads registry-backed skill metadata; `clawcli capabilities` and `clawcli permission capability` read flattened capability/policy metadata. Add `--json` when another script should consume the response.
 - `clawcli replay export/run/diff` supports redacted `recorded_only` replay bundles for debugging and CI comparison without live model or tool calls; `replay run --coverage` exposes recorded coverage, `replay run --view llm|tools|checkpoints|summary` filters recorded evidence, and `replay diff` includes taxonomy tokens such as `route_changed`, `plan_changed`, `permission_changed`, and `final_status_changed`. See `docs/clawcli_exec_replay.md`.
 
-- Stale ordinary `running` tasks become `timeout`; paused checkpoints in `waiting` or `background` stay `running` so recovery can claim them by checkpoint id.
+- While worker recovery is running, stale ordinary `running` tasks become `timeout`; paused checkpoints in `waiting` or `background` stay `running` so recovery can claim them by checkpoint id. A live daemon or a `worker_state=running` health label alone does not prove that recovery ticks are progressing; see [stalled-worker diagnosis](docs/architecture/16-runtime-resource-recovery.md#storage-exhaustion-and-stalled-workers).
 - Async long-tail tools should start an external job, write `pending_async_job`, checkpoint, and publish an accepted machine reply with `checkpoint_id`, `poll_ref`, and `next_check_after`. Poll and cancel actions should be exposed as structured capabilities when the provider or dry-run adapter can support them. Worker recovery later polls through `poll_async_job`.
 - Terminal async poll projection preserves an existing visible ask reply. If the ask task has only machine executor output, projection adds a machine JSON reply with `checkpoint_id`, `poll_ref`, `task_id`, and `final_result_json`.
 - Seeded resume restores the persisted `TaskBudgetSlice`, cumulative model/tool/token/cost/elapsed counters, continuation index, observations, artifact refs, repair state, and completed side-effect fingerprints before re-entering the agent loop. A healthy task continues while it produces structured progress; repeat/stagnation, cancellation, policy, or administrator hard ceilings stop it.
+- Checkpoints also retain `round_traces`. Recovery restores recorded rounds without duplicating them; bounded trace views distinguish `proposed_output_contract` from `effective_output_contract`, and `decision_envelope` uses the effective contract when available. Older checkpoints do not gain fabricated round history. See [checkpoint round history](docs/architecture/03-task-state-context.md#checkpoint-round-history-and-output-contracts).
 - Runtime recovery and projection code moves only machine fields such as `status_code`, `message_key`, `executor_state`, `resume_directive`, `job_id`, and artifact refs. User-facing prose is rendered later by finalizer, i18n, UI, or the model.
 - Lease/heartbeat model: see `docs/task_lifecycle_lease_model.md`; every foreground and resume-executor write is fenced by the exact task-row `(lease_owner, claim_attempt)`. Heartbeat only renews that claim, checkpoint recovery advances the generation, and stale workers cannot publish claimed process events or terminal results.
 
@@ -678,6 +681,11 @@ shortage as a skill failure. Low-memory hosts may explicitly configure serialize
 is disabled by default and never allows concurrent heavy work to consume that allowance. See
 [runtime resource admission and recovery](docs/architecture/16-runtime-resource-recovery.md) for
 resource tiers, administrator overrides, observability, and validation evidence.
+
+Disk exhaustion is a separate persistence failure: freeing space does not itself restart a stalled
+executor or replay a task. Check filesystem capacity, task progress and checkpoint state together;
+preserve active packages and user data, then use a controlled service recovery if work still cannot
+advance. The detailed guide documents the current health-check and worker-supervision limits.
 
 ## Identity and Access
 

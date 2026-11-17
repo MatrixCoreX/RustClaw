@@ -12,9 +12,15 @@
 
 ```mermaid
 flowchart TD
-    A[渠道 / UI / API] --> B[持久化会话输入]
-    B --> C[返回 input 收据<br/>绑定活跃任务或创建一个 ask 任务]
-    C --> D[Worker 认领与恢复检查]
+    A[渠道 / UI / API] --> IN{入口类型}
+    IN -->|普通消息| B[持久化会话输入与收据]
+    B --> C{会话是否有活跃任务}
+    C -->|是| CI[绑定同一任务<br/>instruction revision + execution epoch]
+    CI -->|下一个安全轮次或 checkpoint 恢复| I
+    C -->|否| CT[只认领一次创建权<br/>持久化一个前台 ask 任务]
+    IN -->|显式任务 / 自动化 / run_skill| ET[POST /v1/tasks<br/>认证后的任务边界]
+    CT --> D[Worker 恢复检查与 queued 任务认领]
+    ET --> D
     D --> E{任务类型}
     E -->|ask| F[物化文本、语音与附件]
     F --> G[TurnBoundaryEnvelope<br/>身份 + 显式事实 + 策略预算]
