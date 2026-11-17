@@ -6,7 +6,10 @@ use rusqlite::Connection;
 fn fixture() -> Connection {
     let db = Connection::open_in_memory().unwrap();
     db.execute_batch(crate::INIT_SQL).unwrap();
+    crate::db_init::ensure_schedule_schema(&db).unwrap();
     crate::db_init::ensure_memory_schema(&db).unwrap();
+    crate::db_init::ensure_channel_schema(&db).unwrap();
+    crate::repo::auth::ensure_key_auth_schema(&db).unwrap();
     crate::memory::scope::ensure_memory_scope_schema(&db).unwrap();
     crate::memory::jobs::ensure_memory_job_schema(&db).unwrap();
     crate::memory::indexing::ensure_retrieval_schema(&db).unwrap();
@@ -18,7 +21,7 @@ fn unrelated_journal_growth_does_not_block_memory_generation() {
     let db = fixture();
     let baseline = observed_memory_bytes(&db).unwrap();
     let config = MemoryConfig {
-        storage_soft_limit_bytes: baseline + 4096,
+        storage_soft_limit_bytes: baseline.saturating_mul(4).max(4096),
         ..MemoryConfig::default()
     };
     db.execute_batch(
@@ -26,6 +29,7 @@ fn unrelated_journal_growth_does_not_block_memory_generation() {
          INSERT INTO task_payload_fixture VALUES (zeroblob(4194304));",
     )
     .unwrap();
+    db.execute("UPDATE memory_storage_pressure SET state='explicit_write_blocked', observed_bytes=1073741824 WHERE singleton_id=1", []).unwrap();
     let file_bytes: u64 = db
         .query_row(
             "SELECT page_count * page_size FROM pragma_page_count, pragma_page_size",
@@ -45,7 +49,7 @@ fn owned_payload_blocks_and_deletion_recovers_without_vacuum() {
     let db = fixture();
     let baseline = observed_memory_bytes(&db).unwrap();
     let config = MemoryConfig {
-        storage_soft_limit_bytes: baseline + 4096,
+        storage_soft_limit_bytes: baseline.saturating_mul(4).max(4096),
         ..MemoryConfig::default()
     };
     db.execute_batch(
