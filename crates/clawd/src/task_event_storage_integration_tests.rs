@@ -63,12 +63,15 @@ fn packed_large_artifacts_are_lossless_and_corruption_is_visible() {
     .unwrap()
     .unwrap();
     let id = event["artifact_refs"][0]["artifact_id"].as_str().unwrap();
-    assert_eq!(
-        read_event_artifact(&state, "packed-artifact", id)
-            .unwrap()
-            .unwrap(),
-        payload
+    let restored = read_event_artifact(&state, "packed-artifact", id)
+        .unwrap()
+        .unwrap();
+    // Transport adds versioned progress evidence before persistence.
+    assert!(
+        restored["data"] == payload["data"],
+        "artifact content must round-trip"
     );
+    assert!(restored["operation_progress"].is_object());
     let db = state.core.db.get().unwrap();
     let (version,stored,logical):(i64,i64,i64)=db.query_row("SELECT storage_version,length(payload_json)+coalesce(length(storage_blob),0),payload_bytes FROM task_event_artifacts WHERE artifact_id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
     assert_eq!(version, 2);

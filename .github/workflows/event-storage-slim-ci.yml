@@ -75,6 +75,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cargo test --locked -p clawd --bin task-event-maintenance -- --test-threads=3
+          python3 -m unittest discover -s scripts/tests -p test_large_db_memory_probe.py
           cargo test --locked -p clawd --bin clawd -- --list > "$RUNNER_TEMP/reliability-tests.txt"
           for suite in event_json_storage::tests task_event_storage_maintenance::tests task_event_transport::tests http::task_events::tests task_result_retention::tests repo::distributed_task_cleanup::tests http::ui_routes::aipp_tests worker::runtime_support::background_workers::tests; do
             grep -F "${suite}::" "$RUNNER_TEMP/reliability-tests.txt"
