@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import hashlib
+import struct
+import zlib
 import pathlib
 import sqlite3
 import time
@@ -84,18 +87,46 @@ def busiest_event_task(connection: sqlite3.Connection) -> tuple[str | None, int]
     return (str(row[0]), int(row[1])) if row else (None, 0)
 
 
+def decode_stored_event(raw: str, version: int, blob: bytes | None) -> Any:
+    if version in (0, 1):
+        return json.loads(raw)
+    if version != 2 or blob is None or not 45 <= len(blob) <= 16 * 1024 * 1024 + 45:
+        raise ValueError("event_storage_blob_invalid")
+    length = struct.unpack("<Q", blob[5:13])[0]
+    if blob[:4] != b"EVJ1" or blob[4] > 1 or length > 16 * 1024 * 1024:
+        raise ValueError("event_storage_header_invalid")
+    decoder = zlib.decompressobj()
+    decoded = decoder.decompress(blob[45:], length + 1)
+    if len(decoded) != length or not decoder.eof or decoder.unused_data or decoder.unconsumed_tail:
+        raise ValueError("event_storage_length_mismatch")
+    if hashlib.sha256(decoded).digest() != blob[13:45]:
+        raise ValueError("event_storage_digest_mismatch")
+    event = json.loads(decoded)
+    projection = {}
+    if blob[4]:
+        projection = {"payload": {k: event.get("payload", {})[k] for k in ("skill", "requested_action_ref") if k in event.get("payload", {})}}
+        if "event_kind" in event:
+            projection["event_kind"] = event["event_kind"]
+    if json.loads(raw) != projection:
+        raise ValueError("event_storage_projection_mismatch")
+    return event
+
+
 def event_page(connection: sqlite3.Connection, task_id: str | None) -> list[Any]:
     if task_id is None:
         return []
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(task_event_archive)")}
+    version = "storage_version" if "storage_version" in columns else "0"
+    blob = "storage_blob" if "storage_blob" in columns else "NULL"
     rows = connection.execute(
-        """SELECT event_json
+        f"""SELECT event_json, {version}, {blob}
            FROM task_event_archive
            WHERE task_id = ? AND seq > 0
            ORDER BY seq ASC
            LIMIT 1024""",
         (task_id,),
     ).fetchall()
-    return [json.loads(row[0]) for row in rows]
+    return [decode_stored_event(*row) for row in rows]
 
 
 def artifact_page(connection: sqlite3.Connection) -> list[tuple[Any, ...]]:

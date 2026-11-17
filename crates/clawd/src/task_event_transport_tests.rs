@@ -2,6 +2,9 @@ use serde_json::json;
 
 use super::*;
 
+#[path = "task_event_storage_integration_tests.rs"]
+mod storage;
+
 fn state() -> crate::AppState {
     crate::AppState::test_default_with_fixture_provider()
 }

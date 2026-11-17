@@ -41,18 +41,21 @@ pub(crate) fn insert_event(
     event_json: &str,
     created_at_ms: u64,
 ) -> anyhow::Result<()> {
+    let stored = crate::event_json_storage::encode(event_json, true)?;
     tx.execute(
         "INSERT OR IGNORE INTO task_event_archive (
             task_id, seq, event_hash, previous_event_hash, event_json,
-            payload_schema_version, redaction_policy, created_at_ms
-         ) VALUES (?1, ?2, ?3, ?4, ?5, 1, 'task_event_redaction_v1', ?6)",
+            payload_schema_version, redaction_policy, created_at_ms, storage_version, storage_blob
+         ) VALUES (?1, ?2, ?3, ?4, ?5, 1, 'task_event_redaction_v1', ?6, ?7, ?8)",
         params![
             task_id,
             seq,
             event_hash,
             previous_event_hash,
-            event_json,
-            created_at_ms
+            stored.json,
+            created_at_ms,
+            stored.version,
+            stored.blob
         ],
     )?;
     if seq % ARCHIVE_SNAPSHOT_INTERVAL == 0 || event_kind == "task_final" {
@@ -104,18 +107,21 @@ pub(crate) fn backfill_hot_suffix(tx: &Transaction<'_>, task_id: &str) -> anyhow
         for (seq, event_hash, event_json, created_at_ms) in rows {
             let archived_event_json =
                 normalize_archived_event_json(&event_json, &event_hash, previous_hash.as_deref())?;
+            let stored = crate::event_json_storage::encode(&archived_event_json, true)?;
             tx.execute(
                 "INSERT OR IGNORE INTO task_event_archive (
                     task_id, seq, event_hash, previous_event_hash, event_json,
-                    payload_schema_version, redaction_policy, created_at_ms
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, 1, 'task_event_redaction_v1', ?6)",
+                    payload_schema_version, redaction_policy, created_at_ms, storage_version, storage_blob
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, 1, 'task_event_redaction_v1', ?6, ?7, ?8)",
                 params![
                     task_id,
                     seq,
                     event_hash,
                     previous_hash.as_deref(),
-                    archived_event_json,
-                    created_at_ms
+                    stored.json,
+                    created_at_ms,
+                    stored.version,
+            stored.blob
                 ],
             )?;
             previous_hash = Some(event_hash);
@@ -149,20 +155,27 @@ pub(crate) fn replay_after(
         |row| Ok((row.get::<_, Option<u64>>(0)?, row.get::<_, Option<u64>>(1)?)),
     )?;
     let mut statement = db.prepare(
-        "SELECT event_json
+        "SELECT event_json, storage_version, storage_blob
          FROM task_event_archive
          WHERE task_id = ?1 AND seq > ?2
          ORDER BY seq ASC
          LIMIT ?3",
     )?;
     let rows = statement.query_map(params![task_id, cursor, limit], |row| {
-        row.get::<_, String>(0)
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, Option<Vec<u8>>>(2)?,
+        ))
     })?;
     let mut events = Vec::new();
     for row in rows {
-        if let Ok(event) = serde_json::from_str::<Value>(&row?) {
-            events.push(event);
-        }
+        let (raw, version, blob) = row?;
+        events.push(crate::event_json_storage::read(
+            &raw,
+            version,
+            blob.as_deref(),
+        )?);
     }
     Ok(ArchivedReplay {
         events,
@@ -239,7 +252,7 @@ fn persist_snapshot(
     }
     let rows = {
         let mut statement = tx.prepare(
-            "SELECT seq, event_hash, event_json
+            "SELECT seq, event_hash, event_json, storage_version, storage_blob
              FROM task_event_archive
              WHERE task_id = ?1 AND seq BETWEEN ?2 AND ?3
              ORDER BY seq ASC",
@@ -250,6 +263,8 @@ fn persist_snapshot(
                     row.get::<_, u64>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, Option<Vec<u8>>>(4)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -264,10 +279,11 @@ fn persist_snapshot(
     let mut latest_timestamp_ms = None;
     let mut latest_task_status = None;
     let mut latest_execution_state = None;
-    for (_, event_hash, event_json) in &rows {
+    for (_, event_hash, event_json, version, blob) in &rows {
         range_hasher.update(event_hash.as_bytes());
         range_hasher.update(b"\n");
-        if let Ok(event) = serde_json::from_str::<Value>(event_json) {
+        {
+            let event = crate::event_json_storage::read(event_json, *version, blob.as_deref())?;
             if let Some(kind) = event
                 .get("event_kind")
                 .or_else(|| event.get("event_type"))

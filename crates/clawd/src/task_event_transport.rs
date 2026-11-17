@@ -102,6 +102,7 @@ CREATE INDEX IF NOT EXISTS idx_task_event_archive_skill_execution
 
 pub(crate) fn ensure_event_schema(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     db.execute_batch(INIT_TASK_EVENT_SQL)?;
+    crate::task_event_storage_maintenance::ensure_schema(db)?;
     db.execute_batch(SKILL_EXECUTION_INDEX_SQL)
 }
 
@@ -271,16 +272,29 @@ fn publish_event_internal(
             crate::task_event_archive::backfill_hot_suffix(&tx, task_id)?;
             if let Some(existing) = tx
                 .query_row(
-                    "SELECT event_json
+                    "SELECT event_json, storage_version, storage_blob
                      FROM task_event_archive
                      WHERE task_id = ?1 AND event_hash = ?2",
                     params![task_id, event_hash],
-                    |row| row.get::<_, String>(0),
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, Option<Vec<u8>>>(2)?,
+                        ))
+                    },
                 )
                 .optional()?
             {
                 tx.commit()?;
-                return Ok((serde_json::from_str(&existing).ok(), None));
+                return Ok((
+                    Some(crate::event_json_storage::read(
+                        &existing.0,
+                        existing.1,
+                        existing.2.as_deref(),
+                    )?),
+                    None,
+                ));
             }
             let seq = tx.query_row(
                 "SELECT COALESCE(MAX(seq), 0) + 1
@@ -390,9 +404,9 @@ pub(crate) fn replay_events_after(
                 EVENT_REPLAY_LIMIT,
             )?
         };
-        let archive_recovered = hot_oldest_seq.is_some_and(|oldest| {
-            cursor > 0 && cursor < oldest.saturating_sub(1) && !cursor_expired
-        });
+        let archive_recovered = !cursor_expired
+            && cursor > 0
+            && hot_oldest_seq.is_none_or(|oldest| cursor < oldest.saturating_sub(1));
         return Ok(ReplayBatch {
             events: archived.events,
             cursor_expired,
@@ -445,17 +459,32 @@ pub(crate) fn latest_skill_progress_event(
 ) -> anyhow::Result<Option<Value>> {
     let db = state.core.db.get().context("task progress event db pool")?;
     ensure_event_schema(&db)?;
-    let mut statement = db.prepare(
-        "SELECT event_json FROM task_event_stream
-         WHERE task_id = ?1 ORDER BY seq DESC LIMIT ?2",
-    )?;
+    let archived = db
+        .query_row(
+            "SELECT 1 FROM task_event_archive WHERE task_id=?1 LIMIT 1",
+            [task_id],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    let (table, version, blob) = if archived {
+        ("task_event_archive", "storage_version", "storage_blob")
+    } else {
+        ("task_event_stream", "0", "NULL")
+    };
+    let mut statement = db.prepare(&format!(
+        "SELECT event_json, {version}, {blob} FROM {table} WHERE task_id = ?1 ORDER BY seq DESC LIMIT ?2"
+    ))?;
     let rows = statement.query_map(params![task_id, EVENT_REPLAY_LIMIT], |row| {
-        row.get::<_, String>(0)
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, Option<Vec<u8>>>(2)?,
+        ))
     })?;
     for row in rows {
-        let Ok(event) = serde_json::from_str::<Value>(&row?) else {
-            continue;
-        };
+        let (raw, version, blob) = row?;
+        let event = crate::event_json_storage::read(&raw, version, blob.as_deref())?;
         if event.get("event_type").and_then(Value::as_str) != Some("skill_progress") {
             continue;
         }
@@ -492,13 +521,21 @@ pub(crate) fn read_event_artifact(
     ensure_event_schema(&db)?;
     let payload = db
         .query_row(
-            "SELECT payload_json FROM task_event_artifacts
+            "SELECT payload_json, storage_version, storage_blob FROM task_event_artifacts
              WHERE task_id = ?1 AND artifact_id = ?2",
             params![task_id, artifact_id],
-            |row| row.get::<_, String>(0),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<Vec<u8>>>(2)?,
+                ))
+            },
         )
         .optional()?;
-    Ok(payload.and_then(|value| serde_json::from_str(&value).ok()))
+    payload
+        .map(|(raw, version, blob)| crate::event_json_storage::read(&raw, version, blob.as_deref()))
+        .transpose()
 }
 
 #[cfg(test)]
@@ -759,18 +796,21 @@ fn persist_large_payload_if_needed(
         return Ok((payload, artifact_refs));
     }
     let artifact_id = format!("task_event_payload_{}", bytes_hash(&serialized));
+    let stored = crate::event_json_storage::encode(std::str::from_utf8(&serialized)?, false)?;
     let db = state.core.db.get().context("task event artifact db pool")?;
     ensure_event_schema(&db)?;
     db.execute(
         "INSERT OR IGNORE INTO task_event_artifacts
-         (task_id, artifact_id, payload_json, payload_bytes, created_at_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+         (task_id, artifact_id, payload_json, payload_bytes, created_at_ms, storage_version, storage_blob)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             task_id,
             artifact_id,
-            String::from_utf8_lossy(&serialized),
+            stored.json,
             serialized.len() as u64,
-            timestamp_ms
+            timestamp_ms,
+            stored.version,
+            stored.blob
         ],
     )?;
     let artifact_ref = json!({

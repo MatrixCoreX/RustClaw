@@ -738,7 +738,7 @@ fn advance_scheduled_job(
 }
 
 fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
-    let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+    let mut db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
 
     let now = now_ts_u64() as i64;
 
@@ -858,6 +858,26 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
         )?;
     }
 
+    match crate::task_event_storage_maintenance::compact_batch(&mut db, 128) {
+        Ok(report) if report.rows > 0 => info!(
+            rows = report.rows,
+            compressed_rows = report.compressed_rows,
+            logical_bytes = report.logical_bytes,
+            stored_bytes = report.stored_bytes,
+            "event_storage_compaction_completed"
+        ),
+        Ok(_) => {}
+        Err(error) => warn!(%error, "event_storage_compaction_failed"),
+    }
+    match crate::task_event_storage_maintenance::prune_hot_batch(
+        &mut db,
+        now.saturating_sub(86_400).saturating_mul(1000),
+        128,
+    ) {
+        Ok(rows) if rows > 0 => info!(rows, "event_hot_cache_pruned"),
+        Ok(_) => {}
+        Err(error) => warn!(%error, "event_hot_cache_prune_failed"),
+    }
     let memory_cleanup =
         crate::memory::retention::cleanup_memory_data(&db, &state.policy.memory, now)?;
     crate::memory::ux::scrub_expired_deletion_grace(&db, now)?;
