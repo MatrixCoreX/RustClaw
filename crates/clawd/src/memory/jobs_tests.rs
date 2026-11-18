@@ -473,11 +473,42 @@ fn legacy_retry_cannot_touch_another_principal_or_a_progressed_job() {
         .is_empty());
 }
 
+struct VendorModelFixture(std::path::PathBuf);
+impl Drop for VendorModelFixture {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn vendor_model_state() -> (crate::AppState, VendorModelFixture) {
+    let root = std::env::temp_dir().join(format!(
+        "agent-runtime-memory-model-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir(&root).unwrap();
+    let path = root.join("config.toml");
+    std::fs::write(&path, "[server]\nrequest_timeout_seconds=30\n[database]\nsqlite_path='fixture.db'\nbusy_timeout_ms=1000\nskill_data_root='skills'\n[worker]\nconcurrency=1\n[llm]\nselected_vendor='minimax'\nselected_model='fixture-memory-model'\n[llm.minimax]\nbase_url='http://127.0.0.1:1/v1'\napi_key='fixture-not-real'\nmodel='fixture-memory-model'\n").unwrap();
+    let config = claw_core::config::AppConfig::load(path.to_str().unwrap()).unwrap();
+    let mut state = operations_state();
+    state.reload_ctx.config_path_for_reload = path.to_string_lossy().into_owned();
+    state.core.llm_providers = crate::llm_gateway::build_providers_for_selection(
+        &config,
+        Some("minimax"),
+        Some("fixture-memory-model"),
+    );
+    assert_eq!(state.core.llm_providers.len(), 1);
+    assert_eq!(
+        state.core.llm_providers[0].config.provider_type,
+        "openai_compat"
+    );
+    (state, VendorModelFixture(root))
+}
+
 #[test]
 fn verified_legacy_jobs_requeue_once_with_consent_and_an_audited_model_binding() {
     use super::super::settings::{update_memory_settings, MemorySettingsUpdateRequest};
     use claw_core::types::AuthIdentity;
-    let state = operations_state();
+    let (state, _vendor_fixture) = vendor_model_state();
     state.seed_test_auth_identity("fixture-key", "user");
     let db = state.core.db.get().unwrap();
     let principal = crate::repo::auth::principal_id_for_user_key(&db, "fixture-key")
@@ -553,11 +584,50 @@ fn verified_legacy_jobs_requeue_once_with_consent_and_an_audited_model_binding()
         recovery::retry_unavailable(&state, &principal).unwrap()["requeued_jobs"],
         0
     );
+    // Replay the deployed protocol/vendor bug: no source/model side effect occurred.
+    let db = state.core.db.get().unwrap();
+    db.execute("UPDATE memory_jobs SET status='failed',error_code='memory_job_provider_unavailable',attempt=1", []).unwrap();
+    drop(db);
+    assert_eq!(
+        recovery::retry_unavailable(&state, &principal).unwrap()["requeued_jobs"],
+        ids.len()
+    );
     for job in recovery::list(&state, &principal).unwrap() {
         assert_eq!(job.status, "queued");
         assert_eq!(job.attempt, 0);
         assert_ne!(job.provider_type, "unavailable");
+        let task = load_source_task(&state, &job).unwrap();
+        let payload: Value = serde_json::from_str(&task.payload_json).unwrap();
+        assert_eq!(payload["_agent_model_selection"]["provider"], "minimax");
+        validate_pinned_model(&state, &task, &job).unwrap();
         let checkpoint: Value = serde_json::from_str(&job.checkpoint_json).unwrap();
         assert_eq!(checkpoint["legacy_repair"]["previous_attempts"], 5);
+        assert_eq!(
+            checkpoint["model_binding_repair"]["reason_code"],
+            "provider_protocol_binding_corrected"
+        );
+        assert_eq!(checkpoint["model_binding_repair"]["previous_attempts"], 1);
     }
+}
+
+#[test]
+fn pinned_vendor_identity_does_not_select_a_transport_protocol() {
+    let (state, _vendor_fixture) = vendor_model_state();
+    insert_operations_job(&state, "failed");
+    let db = state.core.db.get().unwrap();
+    let mut job = load_job(&db, "operations-job").unwrap().unwrap();
+    drop(db);
+    let snapshot = provider_snapshot(Some(state.core.llm_providers[0].clone()));
+    job.provider_name = snapshot.0;
+    job.provider_type = snapshot.1;
+    job.model_name = snapshot.2;
+    job.model_capability_digest = snapshot.3;
+    let task = load_source_task(&state, &job).unwrap();
+    validate_pinned_model(&state, &task, &job).unwrap();
+    let payload: Value = serde_json::from_str(&task.payload_json).unwrap();
+    assert_eq!(payload["_agent_model_selection"]["provider"], "minimax");
+    assert_ne!(
+        payload["_agent_model_selection"]["provider"],
+        job.provider_type
+    );
 }

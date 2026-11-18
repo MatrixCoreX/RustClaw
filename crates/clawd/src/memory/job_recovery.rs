@@ -29,7 +29,9 @@ pub(crate) fn retry_unavailable(
     let jobs = {
         let db = state.core.db.get()?;
         let mut stmt = db.prepare("SELECT job_id FROM memory_jobs WHERE principal_id = ?1 AND status = 'failed'
-            AND provider_name = 'unavailable' AND provider_type = 'unavailable' AND model_name = 'unavailable'
+            AND ((provider_name = 'unavailable' AND provider_type = 'unavailable' AND model_name = 'unavailable')
+              OR (error_code = 'memory_job_provider_unavailable'
+                AND json_extract(checkpoint_json, '$.legacy_repair.reason_code') = 'legacy_empty_model_binding'))
             AND progress_current = 0 AND cancel_requested = 0 ORDER BY created_at_ts, job_id LIMIT 100")?;
         let ids = stmt
             .query_map([principal], |row| row.get::<_, String>(0))?
@@ -41,12 +43,7 @@ pub(crate) fn retry_unavailable(
             .collect::<anyhow::Result<Vec<_>>>()?
     };
     for mut job in jobs {
-        if job.status != "failed"
-            || job.provider_name != "unavailable"
-            || job.provider_type != "unavailable"
-            || job.model_name != "unavailable"
-            || job.cancel_requested
-        {
+        if job.status != "failed" || job.cancel_requested {
             continue;
         }
         let db = state.core.db.get()?;
@@ -98,7 +95,15 @@ pub(crate) fn retry_unavailable(
                 !load_user_source_bundle(state, &job)?.trim().is_empty(),
                 permanent("memory_job_source_range_missing")
             );
-            provider_snapshot_for_job(state, &task, &settings, &job.job_kind)
+            let snapshot = provider_snapshot_for_job(state, &task, &settings, &job.job_kind)?;
+            let mut pinned = job.clone();
+            pinned.provider_name = snapshot.0.clone();
+            pinned.provider_type = snapshot.1.clone();
+            pinned.model_name = snapshot.2.clone();
+            pinned.model_capability_digest = snapshot.3.clone();
+            let pinned_task = load_source_task(state, &pinned)?;
+            validate_pinned_model(state, &pinned_task, &pinned)?;
+            Ok(snapshot)
         })();
         let db = state.core.db.get()?;
         let now = crate::now_ts_u64() as i64;
@@ -107,12 +112,16 @@ pub(crate) fn retry_unavailable(
                 requeued += db.execute("UPDATE memory_jobs SET provider_name = ?2, provider_type = ?3,
                     model_name = ?4, model_capability_digest = ?5, status = 'queued', attempt = 0,
                     error_code = NULL, retryable = 1, finished_at_ts = NULL, not_before_ts = ?6,
-                    updated_at_ts = ?6, checkpoint_json = json_set(checkpoint_json, '$.legacy_repair', json(?7))
+                    updated_at_ts = ?6, checkpoint_json = json_set(checkpoint_json,
+                        '$.legacy_repair', json(COALESCE(json_extract(checkpoint_json, '$.legacy_repair'), ?7)),
+                        '$.model_binding_repair', json(?7))
                     WHERE job_id = ?1 AND principal_id = ?8 AND status = 'failed' AND cancel_requested = 0
-                    AND progress_current = 0 AND provider_name = 'unavailable' AND provider_type = 'unavailable'
-                    AND model_name = 'unavailable'",
+                    AND progress_current = 0
+                    AND ((provider_name = 'unavailable' AND provider_type = 'unavailable' AND model_name = 'unavailable')
+                      OR (error_code = 'memory_job_provider_unavailable'
+                        AND json_extract(checkpoint_json, '$.legacy_repair.reason_code') = 'legacy_empty_model_binding'))",
                     params![job.job_id, name, provider, model, digest, now,
-                        json!({"reason_code":"legacy_empty_model_binding", "previous_attempts":job.attempt,
+                        json!({"reason_code":if job.provider_name == "unavailable" { "legacy_empty_model_binding" } else { "provider_protocol_binding_corrected" }, "previous_attempts":job.attempt,
                             "previous_error_code":job.error_code, "repaired_at_ts":now}).to_string(), principal])?;
             }
             Err(error) => {

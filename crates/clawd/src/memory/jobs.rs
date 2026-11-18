@@ -520,7 +520,8 @@ fn provider_snapshot_for_job(
         .llm_providers
         .iter()
         .find(|runtime| {
-            runtime.config.provider_type == configured_provider
+            (crate::runtime::llm_vendor_name(runtime) == configured_provider
+                || runtime.config.name == configured_provider)
                 && runtime.config.model == configured_model
         })
         .cloned()
@@ -697,6 +698,28 @@ fn memory_job_claim_needs_write(db: &Connection, now: i64) -> anyhow::Result<boo
     )?)
 }
 
+fn validate_pinned_model(
+    state: &crate::AppState,
+    task: &crate::ClaimedTask,
+    job: &MemoryJobSnapshot,
+) -> anyhow::Result<()> {
+    let selected_provider = state
+        .task_llm_providers(task)
+        .into_iter()
+        .next()
+        .ok_or_else(|| permanent("memory_job_provider_unavailable"))?;
+    let (_, _, selected_model, selected_capability_digest) =
+        provider_snapshot(Some(selected_provider.clone()));
+    anyhow::ensure!(
+        selected_provider.config.name == job.provider_name
+            && selected_provider.config.provider_type == job.provider_type
+            && selected_model == job.model_name
+            && selected_capability_digest == job.model_capability_digest,
+        permanent("memory_job_model_snapshot_mismatch")
+    );
+    Ok(())
+}
+
 async fn execute_claimed_job(
     state: &crate::AppState,
     job: &MemoryJobSnapshot,
@@ -705,19 +728,7 @@ async fn execute_claimed_job(
         return Err(permanent("memory_job_cancelled"));
     }
     let task = load_source_task(state, job)?;
-    let selected_provider = state
-        .task_llm_providers(&task)
-        .into_iter()
-        .next()
-        .ok_or_else(|| permanent("memory_job_provider_unavailable"))?;
-    let (_, _, selected_model, selected_capability_digest) =
-        provider_snapshot(Some(selected_provider.clone()));
-    anyhow::ensure!(
-        selected_provider.config.name == job.provider_name
-            && selected_model == job.model_name
-            && selected_capability_digest == job.model_capability_digest,
-        permanent("memory_job_model_snapshot_mismatch")
-    );
+    validate_pinned_model(state, &task, job)?;
     let current = super::settings::resolve_task_memory_settings(state, &task)?
         .ok_or_else(|| permanent("memory_job_settings_unavailable"))?;
     anyhow::ensure!(
@@ -879,7 +890,8 @@ fn load_source_task(
                     "_agent_model_selection".to_string(),
                     json!({
                         "schema_version": 1,
-                        "provider": job.provider_type,
+                        "provider": claw_core::llm_provider_descriptors::credential_vendor_name(&job.provider_name)
+                            .unwrap_or(&job.provider_name),
                         "model": job.model_name,
                         "authority": "server_validated_model_catalog",
                     }),
