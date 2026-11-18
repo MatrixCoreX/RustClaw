@@ -1190,7 +1190,7 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
             )
             .env("AGENT_INTERNAL_NNI_TOKEN", token);
     }
-    super::runner_support::project_selected_connection_environment(
+    runner_support::project_selected_connection_environment(
         selected_llm_connection.as_ref(),
         |name, value| match value {
             Some(value) => {
