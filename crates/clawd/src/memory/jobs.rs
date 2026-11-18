@@ -798,7 +798,15 @@ async fn execute_claimed_job(
         permanent("memory_job_settings_snapshot_changed")
     );
     validate_pinned_model(state, &task, job)?;
-    let selected_provider = provider_for_job(state, &task, &current, &job.job_kind)?
+    // Compare the current source-task choice before applying the execution pin.
+    // Otherwise the pin itself could conceal a changed default/background model.
+    let mut source_task = task.clone();
+    source_task.payload_json = state.core.db.get()?.query_row(
+        "SELECT payload_json FROM tasks WHERE task_id=?1 AND principal_id=?2",
+        params![task.task_id, job.principal_id],
+        |row| row.get(0),
+    )?;
+    let selected_provider = provider_for_job(state, &source_task, &current, &job.job_kind)?
         .ok_or_else(|| permanent("memory_job_provider_unavailable"))?;
     let (selected_name, selected_protocol, selected_model, selected_capability_digest) =
         provider_snapshot(Some(selected_provider.clone()));

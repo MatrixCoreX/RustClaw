@@ -7,7 +7,7 @@ use crate::memory::growth_availability::{self, GrowthDecision, ProbePhase};
 mod support;
 
 #[test]
-fn unrelated_main_growth_can_pause_background_without_blocking_manual_content() {
+fn unrelated_main_growth_does_not_pause_background_or_block_manual_content() {
     let mut fixture = support::fixture(false);
     let limit = {
         let db = fixture.state().core.db.get().unwrap();
@@ -29,7 +29,7 @@ fn unrelated_main_growth_can_pause_background_without_blocking_manual_content() 
     let report = support::report(&db, &fixture).0;
     assert_eq!(
         report.capacity_decision,
-        crate::memory::capacity::GenerationAvailability::StoragePaused
+        crate::memory::capacity::GenerationAvailability::Available
     );
     assert_eq!(report.manual_growth.decision, GrowthDecision::Available);
     assert_eq!(

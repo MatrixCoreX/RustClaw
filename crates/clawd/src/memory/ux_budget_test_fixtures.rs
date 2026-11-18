@@ -84,8 +84,10 @@ pub(super) fn hard(fixture: &mut Fixture) {
     limit(fixture, value);
     let db = fixture.state().core.db.get().unwrap();
     assert_eq!(
-        crate::memory::capacity::StoragePressure::load(&db).unwrap(),
-        crate::memory::capacity::StoragePressure::ExplicitWriteBlocked
+        crate::memory::storage_budget::Snapshot::load(&db)
+            .unwrap()
+            .limit,
+        value
     );
     assert!(domain(&db, fixture) >= value);
 }

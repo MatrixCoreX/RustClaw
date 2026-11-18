@@ -117,7 +117,7 @@ test("capacity panel keeps diagnostics collapsed and does not call an undated ob
   assert(text.includes("存储状态尚未取得有效采样"));
   assert(!text.includes("容量检查未阻止自动生成"));
   assert.equal(renderer.root.findByType("details").props.open, undefined);
-  assert(!text.includes("数据库软阈值"), "ordinary users do not get global diagnostics");
+  assert(!text.includes("记忆数据软阈值"), "ordinary users do not get global diagnostics");
   await act(async () => { renderer.unmount(); });
 });
 

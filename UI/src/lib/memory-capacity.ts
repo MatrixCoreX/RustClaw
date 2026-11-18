@@ -25,7 +25,7 @@ export interface MemoryCapacity {
   quota: { scope: "source_transcript_content_rows_and_bytes"; decision: CapacityDecision;
     counters: null | Record<"used_rows" | "max_rows" | "used_bytes" | "max_bytes"
       | "spent_and_pending_logical_microunits" | "max_logical_microunits", string> };
-  pressure: { state: string; measurement_scope: "main_sqlite_allocated_pages_not_memory_domain_or_host_free_space";
+  pressure: { state: string; measurement_scope: "memory_owned_logical_payload_bytes";
     observed_at_ts: number | null; revision: number | null;
     observed_bytes: ByteMeasurement; configured_soft_limit_bytes: ByteMeasurement };
   measurements: Record<"own_source_transcript_payload_bytes" | "main_sqlite_allocated_page_bytes"
@@ -118,7 +118,7 @@ export function parseMemoryCapacity(value: unknown, expectedPolicy: string): Mem
   const pressure = value.pressure;
   const observed = value.measurements;
   if (!oneOf(pressure.state, ["normal", "derived_cleanup", "backfill_paused", "automatic_generation_paused", "explicit_write_blocked", "missing", "unknown"])
-    || pressure.measurement_scope !== "main_sqlite_allocated_pages_not_memory_domain_or_host_free_space"
+    || pressure.measurement_scope !== "memory_owned_logical_payload_bytes"
     || !(pressure.observed_at_ts === null || integer(pressure.observed_at_ts))
     || !(pressure.revision === null || integer(pressure.revision))
     || !measurement(pressure.observed_bytes) || !measurement(pressure.configured_soft_limit_bytes)

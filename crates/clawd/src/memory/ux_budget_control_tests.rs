@@ -27,7 +27,7 @@ fn unrelated_main_database_growth_does_not_reject_memory_growth_below_domain_bud
     let db = fixture.state().core.db.get().unwrap();
     assert_eq!(
         crate::memory::capacity::StoragePressure::load(&db).unwrap(),
-        crate::memory::capacity::StoragePressure::ExplicitWriteBlocked
+        crate::memory::capacity::StoragePressure::Normal
     );
     let result = correct_memory(
         &db,
@@ -44,7 +44,7 @@ fn unrelated_main_database_growth_does_not_reject_memory_growth_below_domain_bud
     assert_eq!(result.status, "corrected");
     assert!(support::domain(&db, &fixture) <= budget);
     assert!(
-        !crate::memory::retention::automatic_generation_allowed(&db, &fixture.principal).unwrap()
+        crate::memory::retention::automatic_generation_allowed(&db, &fixture.principal).unwrap()
     );
 }
 

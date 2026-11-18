@@ -202,7 +202,7 @@ fn observe_with_domain_sampler(
             pressure: PressureObservation {
                 state,
                 measurement_scope:
-                    "main_sqlite_allocated_pages_not_memory_domain_or_host_free_space",
+                    "memory_owned_logical_payload_bytes",
                 observed_at_ts: at.filter(|value| *value > 0),
                 revision,
                 observed_bytes,

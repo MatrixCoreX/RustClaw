@@ -130,5 +130,17 @@ class ProcessProbeTests(unittest.TestCase):
                 self.assertFalse(required_job(broken))
 
 
+class ReadinessTests(unittest.TestCase):
+    def test_ready_listener_requires_live_foreground_workers(self):
+        for state in ["running", "degraded"]:
+            self.assertTrue(probe.ready_health({"data":{"worker_state":state,
+                "worker_supervision":{"configured_workers":1,"live_workers":1}}}))
+        for state, configured, live in [("starting",1,1),("stalled",1,1),("running",0,0),
+                                         ("running",2,1),("running",True,True)]:
+            self.assertFalse(probe.ready_health({"data":{"worker_state":state,
+                "worker_supervision":{"configured_workers":configured,"live_workers":live}}}))
+        self.assertFalse(probe.ready_health({}))
+
+
 if __name__ == "__main__":
     unittest.main()

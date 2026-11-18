@@ -147,7 +147,7 @@ fn btree_measurement_includes_memory_indexes_but_not_freelist_or_host_space() {
     );
     assert_eq!(
         after.pressure.measurement_scope,
-        "main_sqlite_allocated_pages_not_memory_domain_or_host_free_space"
+        "memory_owned_logical_payload_bytes"
     );
 }
 

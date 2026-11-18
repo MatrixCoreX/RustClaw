@@ -34,9 +34,9 @@ responses or callbacks from reviving a previous account's observations.
   Recorded usage and live source payload bytes are separate observations.
 - Spent plus pending background logical work is the existing logical counter,
   not provider-token or currency billing.
-- The current pressure producer measures allocated pages in the entire main
+- The current pressure producer measures logical payload bytes owned by memory in the main
   SQLite database. Its soft threshold is not an account quota or a measurement
-  of the memory domain or actual filesystem exhaustion.
+  of assigned btree allocation or actual filesystem exhaustion.
 - Administrators can separately inspect allocated main-database pages,
   memory-domain table/index btrees, SQLite freelist bytes, and space available
   to the process user on the filesystem containing the database path.

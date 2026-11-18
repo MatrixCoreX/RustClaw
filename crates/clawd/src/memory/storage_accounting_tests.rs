@@ -13,6 +13,15 @@ fn fixture() -> Connection {
     crate::memory::scope::ensure_memory_scope_schema(&db).unwrap();
     crate::memory::jobs::ensure_memory_job_schema(&db).unwrap();
     crate::memory::indexing::ensure_retrieval_schema(&db).unwrap();
+    crate::memory::retention::initialize_storage_pressure(&db, &MemoryConfig::default(), 1)
+        .unwrap();
+    crate::memory::retention::ensure_principal_quota(
+        &db,
+        &MemoryConfig::default(),
+        "fixture-principal",
+        1,
+    )
+    .unwrap();
     db
 }
 

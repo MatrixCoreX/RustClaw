@@ -63,8 +63,8 @@ export function MemoryCapacityPanel({ t, lang, ...options }: Props) {
             [t("记忆域表和索引占用", "Memory-domain tables and indexes"), data.measurements.memory_domain_assigned_btree_bytes],
             [t("数据库内部空闲页", "Free pages inside SQLite"), data.measurements.sqlite_freelist_page_bytes],
             [t("数据库所在文件系统可用空间", "Available space on the database filesystem"), data.measurements.database_path_filesystem_available_bytes],
-            [t("后台上次观察的数据库大小", "Database size at the last pressure observation"), data.pressure.observed_bytes],
-            [t("数据库软阈值（不是用户配额）", "Database soft threshold, not an account quota"), data.pressure.configured_soft_limit_bytes],
+            [t("后台上次观察的记忆数据大小", "Memory payload at the last pressure observation"), data.pressure.observed_bytes],
+            [t("记忆数据软阈值（不是用户配额）", "Memory payload soft threshold, not an account quota"), data.pressure.configured_soft_limit_bytes],
           ] as const).filter(([, metric]) => metric.status !== "admin_only").map(([label, metric]) =>
             <div key={label}><dt>{label}</dt><dd className="mt-1">{bytes(metric)}</dd></div>)}
           {data.manual_growth && data.manual_growth.configured_limit_bytes.status !== "admin_only" ? <div>

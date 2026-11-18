@@ -9,7 +9,7 @@ This record is configuration evidence, not consent, authorization or enablement.
 
 The measurements have separate meanings:
 
-- Whole-main-database allocated pages continue to protect background work.
+- Memory-owned logical payload bytes protect background work; unrelated task journals and free pages do not consume that budget.
 - Memory-domain DBSTAT btrees include source/canonical tables, private history,
   import previews, indexes and FTS shadows. Explicit content growth is checked
   against this actual allocation before mutation and before commit.

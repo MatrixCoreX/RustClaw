@@ -65,6 +65,18 @@ def validate_result(result):
             and result["old_binary_upgrade_proven"] is False, "scope_not_broadened")
 
 
+def ready_health(body):
+    data = body.get("data", {})
+    supervision = data.get("worker_supervision", {})
+    configured = supervision.get("configured_workers")
+    live = supervision.get("live_workers")
+    # This probe verifies foreground startup and project-schema reads. A failed
+    # optional background tick is reported separately and is not listener failure.
+    return (data.get("worker_state") in {"running", "degraded"}
+            and type(configured) is int and configured > 0
+            and type(live) is int and live == configured)
+
+
 def copy_sources(repository, source, workspace):
     names = subprocess.check_output(
         ["git", "ls-tree", "-r", "--name-only", source], cwd=repository, text=True,
@@ -199,7 +211,7 @@ class Host:
                     self.admin = keys[0][0] if len(keys) == 1 else None
                 if self.admin:
                     status, body = self.api("/v1/health")
-                    if status == 200 and body.get("data", {}).get("worker_state") == "running":
+                    if status == 200 and ready_health(body):
                         return
             except (sqlite3.Error, OSError, urllib.error.URLError):
                 pass

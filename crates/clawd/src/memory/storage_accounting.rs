@@ -9,7 +9,7 @@ pub(super) fn observed_memory_bytes(db: &Connection) -> anyhow::Result<u64> {
          WHERE type = 'table'
            AND (name IN ('memories', 'long_term_memories', 'user_preferences')
                 OR substr(name, 1, 7) = 'memory_')
-           AND name != 'memory_storage_pressure'
+           AND name NOT IN ('memory_storage_pressure', 'memory_storage_budget')
            AND upper(ltrim(COALESCE(sql, ''))) NOT LIKE 'CREATE VIRTUAL TABLE%'
          ORDER BY name",
     )?;

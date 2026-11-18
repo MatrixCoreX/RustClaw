@@ -18,7 +18,7 @@ export function report(policy = settings()): MemoryCapacity {
   return { schema_version: 1, sampled_at_ts: 100, settings: policy, capacity_decision: "available",
     quota: { scope: "source_transcript_content_rows_and_bytes", decision: "available", counters: {
       used_rows: "0", max_rows: "100", used_bytes: "0", max_bytes: "1000", spent_and_pending_logical_microunits: "0", max_logical_microunits: "10000",
-    } }, pressure: { state: "normal", measurement_scope: "main_sqlite_allocated_pages_not_memory_domain_or_host_free_space",
+    } }, pressure: { state: "normal", measurement_scope: "memory_owned_logical_payload_bytes",
       observed_at_ts: 100, revision: 1, observed_bytes: adminOnly, configured_soft_limit_bytes: adminOnly },
     measurements: { own_source_transcript_payload_bytes: { status: "measured", bytes: "0" }, main_sqlite_allocated_page_bytes: adminOnly,
       memory_domain_assigned_btree_bytes: adminOnly, sqlite_freelist_page_bytes: adminOnly, database_path_filesystem_available_bytes: adminOnly } };

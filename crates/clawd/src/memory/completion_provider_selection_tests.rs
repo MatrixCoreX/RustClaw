@@ -79,6 +79,14 @@ async fn current_model_replacement_never_silently_retargets_a_queued_job() {
         let provider =
             std::sync::Arc::make_mut(&mut fixture.fixture.state_mut().core.llm_providers[0]);
         provider.config.model = "replacement-model".into();
+        // A real model replacement updates the authoritative persisted catalog.
+        // Mutating only a runtime cache leaves the original configured model available.
+        let path = &fixture.fixture.state().reload_ctx.config_path_for_reload;
+        let mut config: toml::Value =
+            toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        config["llm"]["selected_model"] = toml::Value::String("replacement-model".into());
+        config["llm"]["custom"]["model"] = toml::Value::String("replacement-model".into());
+        std::fs::write(path, toml::to_string(&config).unwrap()).unwrap();
     }
     assert_snapshot_denial(&fixture).await;
 }
