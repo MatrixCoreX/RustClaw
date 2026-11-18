@@ -89,6 +89,8 @@ fn package_lease_receiver_refuses_readonly_handles_without_mutating_flags() {
     let lease = File::open(root.path().join("version.lock")).unwrap();
     let observer = lease.try_clone().unwrap();
     let before = unsafe { libc::fcntl(observer.as_raw_fd(), libc::F_GETFL) };
+    let descriptor_before = unsafe { libc::fcntl(observer.as_raw_fd(), libc::F_GETFD) };
+    assert!(before >= 0 && descriptor_before >= 0);
     let (sender, receiver) = UnixStream::pair().unwrap();
     let receiver = LaunchChannel::new(receiver).unwrap();
     let value = serde_json::to_value(PackageLeaseFrame {
@@ -103,9 +105,23 @@ fn package_lease_receiver_refuses_readonly_handles_without_mutating_flags() {
         receiver.receive_package_lease(&expected, BINDING, deadline()),
         LaunchChannelFailure::InvalidDescriptor,
     );
+    let after = unsafe { libc::fcntl(observer.as_raw_fd(), libc::F_GETFL) };
+    assert!(after >= 0);
+    // Darwin F_GETFL also exposes socket-GC FMARK/FDEFER bookkeeping. Compare
+    // all documented caller-controlled access/status flags, not those marks.
+    #[cfg(target_os = "macos")]
+    let mask = libc::O_ACCMODE
+        | libc::O_APPEND
+        | libc::O_NONBLOCK
+        | libc::O_ASYNC
+        | libc::O_SYNC
+        | libc::O_DSYNC;
+    #[cfg(not(target_os = "macos"))]
+    let mask = !0;
+    assert_eq!(after & mask, before & mask);
     assert_eq!(
-        unsafe { libc::fcntl(observer.as_raw_fd(), libc::F_GETFL) },
-        before
+        unsafe { libc::fcntl(observer.as_raw_fd(), libc::F_GETFD) },
+        descriptor_before
     );
 }
 

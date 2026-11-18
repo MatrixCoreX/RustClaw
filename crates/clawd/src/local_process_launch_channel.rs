@@ -25,6 +25,14 @@ use crate::process_invocation::ProcessInvocation;
 const MAX_LAUNCH_BYTES: usize = 32 * 1024 * 1024;
 const MAX_LAUNCH_ITEMS: usize = MAX_LAUNCH_BYTES / 32;
 const MAX_HANDLES: usize = 4;
+// XNU externalizes the complete SCM_RIGHTS block before copying out a bounded
+// control buffer. Receive its UIPC_MAX_CMSG_FD bound, then enforce our protocol
+// limit, so an oversized transfer cannot leave unreported descriptors behind.
+// https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/uipc_usrreq.c
+#[cfg(target_os = "macos")]
+const RECEIVE_HANDLES: usize = 512;
+#[cfg(not(target_os = "macos"))]
+const RECEIVE_HANDLES: usize = MAX_HANDLES;
 const MAGIC: &[u8; 4] = b"LCH1";
 const STARTUP_MAGIC: &[u8; 4] = b"OST1";
 const BOOTSTRAP_MAGIC: &[u8; 4] = b"OBT1";
@@ -335,7 +343,8 @@ impl LaunchChannel {
     ) -> Result<usize, LaunchChannelFailure> {
         loop {
             self.wait_readable(deadline)?;
-            let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(MAX_HANDLES))];
+            let mut space =
+                [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(RECEIVE_HANDLES))];
             let mut ancillary = RecvAncillaryBuffer::new(&mut space);
             #[cfg(target_os = "linux")]
             let flags = RecvFlags::CMSG_CLOEXEC | RecvFlags::DONTWAIT;
@@ -359,36 +368,30 @@ impl LaunchChannel {
                     return Err(io_failure(error));
                 }
             };
-            if message
+            let mut invalid = message
                 .flags
-                .intersects(ReturnFlags::CTRUNC | ReturnFlags::TRUNC)
-            {
+                .intersects(ReturnFlags::CTRUNC | ReturnFlags::TRUNC);
+            if invalid {
                 #[cfg(test)]
                 diagnostics_tests::receive_flags(bytes.len(), message.flags.bits() as u64);
-                return Err(LaunchChannelFailure::InvalidDescriptor);
             }
             let mut handles = handles;
             for message in ancillary.drain() {
                 match message {
                     RecvAncillaryMessage::ScmRights(rights) => {
                         for fd in rights {
-                            let destination = handles
-                                .as_mut()
-                                .ok_or(LaunchChannelFailure::InvalidDescriptor)?;
-                            if destination.len() >= MAX_HANDLES {
-                                return Err(LaunchChannelFailure::InvalidDescriptor);
+                            if invalid {
+                                drop(fd);
+                            } else if retain_received_handle(fd, &mut handles).is_err() {
+                                invalid = true;
                             }
-                            // Linux obtains CLOEXEC atomically. The dedicated Mac
-                            // helper sets it before it may create any child.
-                            let flags = fcntl_getfd(&fd)
-                                .map_err(|_| LaunchChannelFailure::InvalidDescriptor)?;
-                            fcntl_setfd(&fd, flags | FdFlags::CLOEXEC)
-                                .map_err(|_| LaunchChannelFailure::InvalidDescriptor)?;
-                            destination.push(fd);
                         }
                     }
-                    _ => return Err(LaunchChannelFailure::InvalidDescriptor),
+                    _ => invalid = true,
                 }
+            }
+            if invalid {
+                return Err(LaunchChannelFailure::InvalidDescriptor);
             }
             return if message.bytes == 0 {
                 #[cfg(test)]
@@ -446,6 +449,22 @@ impl LaunchChannel {
         }
         Ok(())
     }
+}
+
+fn retain_received_handle(
+    fd: OwnedFd,
+    handles: &mut Option<&mut Vec<OwnedFd>>,
+) -> Result<(), LaunchChannelFailure> {
+    let destination = handles
+        .as_mut()
+        .filter(|destination| destination.len() < MAX_HANDLES)
+        .ok_or(LaunchChannelFailure::InvalidDescriptor)?;
+    // CLOEXEC is per descriptor; never change shared open-file status flags.
+    let flags = fcntl_getfd(&fd).map_err(|_| LaunchChannelFailure::InvalidDescriptor)?;
+    fcntl_setfd(&fd, flags | FdFlags::CLOEXEC)
+        .map_err(|_| LaunchChannelFailure::InvalidDescriptor)?;
+    destination.push(fd);
+    Ok(())
 }
 
 #[cfg(test)]

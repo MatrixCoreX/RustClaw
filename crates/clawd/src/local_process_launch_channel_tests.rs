@@ -423,11 +423,21 @@ fn owner_launch_channel_closes_all_rights_on_bad_frames_and_ancillary_truncation
         drop(output);
         drop(sender);
         assert!(receiver.receive(&expected, deadline()).is_err());
-        assert_eq!(
-            input.read(&mut [0; 1]).unwrap(),
-            0,
-            "leaked writer in case={case}"
-        );
+        let end = Instant::now() + Duration::from_secs(3);
+        loop {
+            match input.read(&mut [0; 1]) {
+                Ok(0) => break,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                    ) && Instant::now() < end =>
+                {
+                    std::thread::sleep(Duration::from_millis(5))
+                }
+                outcome => panic!("leaked writer in case={case}: {outcome:?}"),
+            }
+        }
     }
 }
 
