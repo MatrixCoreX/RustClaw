@@ -748,9 +748,10 @@ fn validate_pinned_model(
     task: &crate::ClaimedTask,
     job: &MemoryJobSnapshot,
 ) -> anyhow::Result<()> {
-    let settings = super::settings::resolve_task_memory_settings(state, task)?
-        .ok_or_else(|| permanent("memory_job_settings_unavailable"))?;
-    let selected_provider = provider_for_job(state, task, &settings, &job.job_kind)?
+    let selected_provider = state
+        .task_llm_providers(task)
+        .into_iter()
+        .next()
         .ok_or_else(|| permanent("memory_job_provider_unavailable"))?;
     let (_, _, selected_model, selected_capability_digest) =
         provider_snapshot(Some(selected_provider.clone()));
@@ -1027,6 +1028,21 @@ fn fail_or_retry_job(
             true,
             "resource_admission",
         )),
+        // The provider response is durable. A rolled-back canonical write can
+        // retry from those exact bytes, while preflight/schema/storage failures
+        // retain their terminal classification and never repeat a provider call.
+        super::job_completion::JobPhase::ResponsePersisted
+            if matches!(
+                failure.error_code.as_str(),
+                "memory_job_database_busy"
+                    | "memory_job_database_failed"
+                    | "memory_job_internal_failure"
+            ) =>
+        {
+            let mut resumable = failure.clone();
+            resumable.retryable = true;
+            Some(resumable)
+        }
         _ => None,
     };
     let failure = phase_failure.as_ref().unwrap_or(failure);
