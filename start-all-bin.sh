@@ -167,6 +167,10 @@ FEISHU_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/feishu.toml" "feish
 LARK_ENABLED="$(read_enabled "$SCRIPT_DIR/configs/channels/lark.toml" "lark" "0")"
 
 preflight_failed=0
+if ! python3 "$SCRIPT_DIR/scripts/rotate_component_log.py" --help >/dev/null 2>&1; then
+  echo "Required log rotation helper is unavailable." >&2
+  preflight_failed=1
+fi
 require_binary "$CLAWD_BIN" "clawd" || preflight_failed=1
 require_binary "$SKILL_RUNNER_ABS" "skill-runner" || preflight_failed=1
 require_binary "$SKILL_RECEIPT_CLI" "skill receipt verifier" || preflight_failed=1

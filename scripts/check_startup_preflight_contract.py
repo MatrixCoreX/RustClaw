@@ -37,6 +37,10 @@ def build_fixture(root: Path) -> Path:
     )
 
     write(
+        root / "scripts/rotate_component_log.py",
+        (ROOT / "scripts/rotate_component_log.py").read_text(encoding="utf-8"),
+    )
+    write(
         root / "scripts/version_info.sh",
         "print_app_version() { :; }\n",
         executable=True,
@@ -98,6 +102,20 @@ def build_fixture(root: Path) -> Path:
 
 
 def main() -> int:
+    with tempfile.TemporaryDirectory(prefix="agent-runtime-log-helper-preflight-") as raw:
+        root = Path(raw)
+        script = build_fixture(root)
+        (root / "scripts/rotate_component_log.py").unlink()
+        write(root / "configs/channels/telegram.toml", "[telegram_bot]\nenabled = false\n")
+        env = os.environ.copy()
+        env["HOME"] = str(root / "home")
+        env["APP_RUNTIME_ENV_SCRIPT"] = str(root / "missing-runtime-env.sh")
+        result = subprocess.run(["bash", str(script), "release"], cwd=root, env=env,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=20, check=False)
+        if result.returncode == 0 or "log rotation helper is unavailable" not in result.stdout or (root / "stop-called").exists():
+            print("STARTUP_PREFLIGHT_CONTRACT failed: missing log helper was not rejected before stopping processes")
+            return 1
+
     with tempfile.TemporaryDirectory(prefix="agent-runtime-startup-preflight-") as raw:
         root = Path(raw)
         script = build_fixture(root)
