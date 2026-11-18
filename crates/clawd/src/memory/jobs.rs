@@ -943,7 +943,7 @@ fn load_source_task(
         [source_task_id],
         |row| {
             let principal_id = row.get::<_, Option<String>>(9)?;
-            let task = crate::ClaimedTask {
+            let mut task = crate::ClaimedTask {
                 claim_attempt: 0,
                 task_id: row.get(0)?,
                 user_id: row.get(1)?,
