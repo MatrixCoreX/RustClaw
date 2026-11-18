@@ -24,3 +24,17 @@ fn small_disks_keep_absolute_reserve_and_large_disks_scale_it() {
     assert!(volume("fixture", Some(GIB), Some(10 * GIB)).critical_reserve_bytes >= GIB / 2);
     assert!(volume("fixture", Some(10 * GIB), Some(1000 * GIB)).critical_reserve_bytes >= 10 * GIB);
 }
+
+#[test]
+fn system_disk_is_monitored_independently_of_the_configured_temporary_directory() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let snapshot = collect(&state);
+    assert!(snapshot
+        .volumes
+        .iter()
+        .any(|volume| volume.role == "system"));
+    assert!(snapshot
+        .volumes
+        .iter()
+        .any(|volume| volume.role == "workspace"));
+}

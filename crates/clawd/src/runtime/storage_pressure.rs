@@ -44,6 +44,8 @@ fn sample(role: &str, path: &Path) -> StorageVolumeHealth {
 
 pub(crate) fn collect(state: &crate::AppState) -> StoragePressureHealth {
     let mut volumes = vec![
+        // Protect the system filesystem even when TMPDIR and data live on another volume.
+        sample("system", Path::new(std::path::MAIN_SEPARATOR_STR)),
         sample("workspace", &state.skill_rt.workspace_root),
         sample("temporary", &std::env::temp_dir()),
     ];

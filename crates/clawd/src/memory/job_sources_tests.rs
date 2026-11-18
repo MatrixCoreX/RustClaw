@@ -3,6 +3,7 @@ use super::*;
 #[test]
 fn reconciliation_never_takes_latest_chat_rows_from_a_different_turn() {
     let db = super::super::tests::setup_db();
+    super::super::ensure_memory_job_schema(&db).unwrap();
     db.execute("INSERT INTO tasks(task_id,user_id,chat_id,user_key,principal_id,channel,kind,payload_json,status,created_at,updated_at)
         VALUES ('verified-source',1,2,'fixture-key','principal-fixture','ui','ask','{\"text\":\"authentic user input\"}','succeeded','100','100')", []).unwrap();
     db.execute(
@@ -47,6 +48,7 @@ fn reconciliation_never_takes_latest_chat_rows_from_a_different_turn() {
 #[test]
 fn ambiguous_nearby_answers_are_not_guessed() {
     let db = super::super::tests::setup_db();
+    super::super::ensure_memory_job_schema(&db).unwrap();
     db.execute("INSERT INTO tasks(task_id,user_id,chat_id,user_key,principal_id,channel,kind,payload_json,status,created_at,updated_at)
         VALUES ('ambiguous-source',1,2,'fixture-key','principal-fixture','ui','ask','{\"text\":\"input\"}','succeeded','100','100')", []).unwrap();
     db.execute(

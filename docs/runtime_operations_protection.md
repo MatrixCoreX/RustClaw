@@ -1,6 +1,6 @@
 # Runtime operations protection
 
-The host samples workspace, temporary, runtime-database and audit-database filesystems every 15 seconds. SQLite memory databases do not require a disk probe. Disk status is additive telemetry at authenticated `GET /v1/health` (`storage_pressure`), and the console displays a localized warning.
+The host samples system, workspace, temporary, runtime-database and audit-database filesystems every 15 seconds. SQLite memory databases do not require a disk probe. Disk status is additive telemetry at authenticated `GET /v1/health` (`storage_pressure`), and the console displays a localized warning.
 
 Warning reserve is the larger of 2 GiB or 3% of filesystem capacity. Critical reserve is the larger of 512 MiB or 1%. At critical or unavailable status, dispatch rechecks storage before starting capabilities whose approved action metadata permits filesystem writes (or does not establish read-only behavior). This check precedes execution isolation and artifact creation. Read-only capabilities, status, cancellation and recovery remain available; existing executions are not replayed. Background memory and embedding claims pause until storage admits writes. This reserve protects control-plane writes; it is not a per-file quota or a promise to abort an already running download.
 
