@@ -3,6 +3,19 @@ pub(crate) mod conversation_input_events;
 pub(crate) mod conversation_inputs;
 pub(crate) mod memory_job_routes;
 pub(crate) mod memory_routes;
+
+#[cfg(test)]
+mod memory_import_http_tests;
+
+#[cfg(test)]
+mod memory_capacity_read_race_tests;
+#[cfg(test)]
+#[path = "memory_capacity_read_race_test_fixtures.rs"]
+mod memory_read_race_fixtures;
+#[cfg(test)]
+mod memory_read_boundary_tests;
+#[cfg(test)]
+mod memory_project_read_tests;
 pub(crate) mod task_artifacts;
 pub(crate) mod task_context;
 pub(crate) mod task_delivery;

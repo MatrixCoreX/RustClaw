@@ -19,6 +19,7 @@ fn setup_db() -> Connection {
     crate::repo::auth::ensure_principal_identity_schema(&db).expect("principal schema");
     crate::repo::ensure_principal_ownership_schema(&db).expect("ownership schema");
     crate::memory::scope::ensure_memory_scope_schema(&db).expect("scope schema");
+    crate::memory::ux::ensure_memory_ux_schema(&db).expect("explicit fixture UX startup");
     db
 }
 
@@ -57,15 +58,21 @@ fn rebuild_retrieval_index_restores_memory_preference_and_fact_rows() {
     let db = setup_db();
     db.execute(
         "INSERT INTO memories
-         (user_id, chat_id, user_key, channel, role, content, created_at, created_at_ts, memory_type, salience, is_instructional, safety_flag)
-         VALUES (?1, ?2, ?3, 'ui', 'user', '用户正在测试记忆索引重建', '1000', ?4, 'generic', 0.8, 0, 'normal')",
+         (memory_id,principal_id,scope_kind,scope_ref,user_id, chat_id, user_key, channel, role, content, created_at, created_at_ts, memory_type, salience, is_instructional, safety_flag)
+         VALUES ('memory_indexing_fixture',
+                 (SELECT principal_id FROM auth_keys WHERE user_key=?3),'principal',
+                 (SELECT principal_id FROM auth_keys WHERE user_key=?3),
+                 ?1, ?2, ?3, 'ui', 'user', '用户正在测试记忆索引重建', '1000', ?4, 'generic', 0.8, 0, 'normal')",
         params![7, 11, "user:test", 1000_i64],
     )
     .expect("insert memory");
     db.execute(
         "INSERT INTO user_preferences
-         (user_id, chat_id, user_key, pref_key, pref_value, confidence, source, updated_at, updated_at_ts)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+         (memory_id,principal_id,scope_kind,scope_ref,user_id, chat_id, user_key, pref_key, pref_value, confidence, source, updated_at, updated_at_ts)
+         VALUES ('memory_indexing_preference',
+                 (SELECT principal_id FROM auth_keys WHERE user_key=?3),'principal',
+                 (SELECT principal_id FROM auth_keys WHERE user_key=?3),
+                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             7,
             11,
@@ -206,9 +213,11 @@ fn failed_rebuild_preserves_the_previous_index_generation() {
     .expect("insert previous generation sentinel");
     db.execute(
         "INSERT INTO user_preferences
-         (user_id, chat_id, user_key, pref_key, pref_value, confidence, source,
+         (memory_id,principal_id,user_id, chat_id, user_key, pref_key, pref_value, confidence, source,
           updated_at, updated_at_ts, scope_kind, scope_ref)
-         VALUES (7, 11, 'user:test', 'invalid_scope', 'value', 0.9,
+         VALUES ('memory_invalid_scope',
+                 (SELECT principal_id FROM auth_keys WHERE user_key='user:test'),
+                 7, 11, 'user:test', 'invalid_scope', 'value', 0.9,
                  'test', '1000', 1000, 'conversation', NULL)",
         [],
     )

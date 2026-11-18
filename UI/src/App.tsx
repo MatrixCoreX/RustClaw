@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ConsoleLayout } from "./components/ConsoleLayout";
 import { RenderErrorBoundary } from "./components/RenderErrorBoundary";
 import { FactoryResetModal } from "./components/FactoryResetModal";
@@ -158,6 +158,9 @@ export default function App() {
     const saved = window.localStorage.getItem(STORAGE_KEYS.lang);
     return saved === "en" ? "en" : "zh";
   });
+  useLayoutEffect(() => {
+    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+  }, [lang]);
   const [themeMode, setThemeMode] = useState<"light" | "dark">(() =>
     window.localStorage.getItem(STORAGE_KEYS.themeMode) === "light" ? "light" : "dark",
   );
@@ -463,6 +466,7 @@ export default function App() {
     memoryError,
     memoryMessage,
     memoryActionLoading,
+    memoryImportProgress,
     memorySettingsSaving,
     memorySettingScope,
     memoryClearScope,
@@ -480,6 +484,8 @@ export default function App() {
     undoMemoryMutation,
     exportMemory,
     importMemory,
+    resumeMemoryImport,
+    cancelMemoryImport,
     clearMemoryScope,
     updateMemorySetting,
     updateMemoryExternalPolicy,
@@ -2668,6 +2674,7 @@ export default function App() {
           {currentPage === "memory" ? (
             <MemoryPage
               key={activeUiRequestScope}
+              requestScope={activeUiRequestScope}
               lang={lang}
               t={t}
               memoryLoading={memoryLoading}
@@ -2687,6 +2694,7 @@ export default function App() {
               memoryFacts={memoryFacts}
               memoryRecent={memoryRecent}
               memoryActionLoading={memoryActionLoading}
+              memoryImportProgress={memoryImportProgress}
               memorySettingsSaving={memorySettingsSaving}
               memoryClearScope={memoryClearScope}
               memoryPage={memoryPage}
@@ -2703,6 +2711,8 @@ export default function App() {
               onUndoMemoryMutation={undoMemoryMutation}
               onExportMemory={exportMemory}
               onImportMemory={importMemory}
+              onResumeMemoryImport={resumeMemoryImport}
+              onCancelMemoryImport={cancelMemoryImport}
               onClearMemoryScope={clearMemoryScope}
               onUpdateMemorySetting={updateMemorySetting}
               onUpdateMemoryExternalPolicy={updateMemoryExternalPolicy}

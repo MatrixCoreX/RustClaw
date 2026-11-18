@@ -16,6 +16,7 @@ fn setup_db() -> Connection {
     crate::repo::auth::ensure_principal_identity_schema(&db).expect("principal schema");
     crate::repo::ensure_principal_ownership_schema(&db).expect("ownership schema");
     crate::memory::scope::ensure_memory_scope_schema(&db).expect("scope schema");
+    crate::memory::ux::ensure_memory_ux_schema(&db).expect("explicit fixture UX startup");
     db
 }
 

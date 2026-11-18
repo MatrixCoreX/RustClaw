@@ -109,3 +109,28 @@ pub(crate) async fn background_write_admitted(state: &crate::AppState) -> bool {
 #[cfg(test)]
 #[path = "storage_pressure_tests.rs"]
 mod tests;
+
+/// Observe the memory domain before automatic jobs start, without retention.
+pub(crate) fn refresh_memory_pressure_before_workers(state: &crate::AppState) {
+    // Recount only memory-owned payload, recovering obsolete whole-database pressure
+    // before reconciling or starting automatic memory jobs. This performs no retention.
+    match state
+        .core
+        .db
+        .get()
+        .map_err(anyhow::Error::from)
+        .and_then(|db| {
+            crate::memory::retention::refresh_storage_pressure(
+                &db,
+                &state.policy.memory,
+                crate::now_ts_u64() as i64,
+            )
+        }) {
+        Ok((observed_bytes, pressure_state)) => tracing::info!(
+            observed_bytes,
+            pressure_state,
+            "memory_storage_pressure_recounted"
+        ),
+        Err(error) => tracing::warn!(%error, "memory_storage_pressure_recount_failed"),
+    }
+}

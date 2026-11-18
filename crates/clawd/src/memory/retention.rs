@@ -1,5 +1,5 @@
 use claw_core::config::MemoryConfig;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,14 +17,14 @@ pub(crate) fn cleanup_memory_data(
     config: &MemoryConfig,
     now_ts: i64,
 ) -> anyhow::Result<MemoryRetentionReport> {
-    super::scope::ensure_memory_scope_schema(db)?;
-    super::jobs::ensure_memory_job_schema(db)?;
+    super::jobs::require_memory_job_schema(db)?;
     super::indexing::ensure_retrieval_schema(db)?;
     let transaction = db.unchecked_transaction()?;
-    let source_cutoff = now_ts.saturating_sub(config.retention_days as i64 * 86_400);
-    let long_term_cutoff = now_ts.saturating_sub(config.long_term_retention_days as i64 * 86_400);
+    let source_cutoff = crate::retention_policy::cutoff_timestamp(now_ts, config.retention_days);
+    let long_term_cutoff =
+        crate::retention_policy::cutoff_timestamp(now_ts, config.long_term_retention_days);
     let candidate_cutoff =
-        now_ts.saturating_sub(config.raw_candidate_retention_days as i64 * 86_400);
+        crate::retention_policy::cutoff_timestamp(now_ts, config.raw_candidate_retention_days);
 
     let mut deleted_source_rows = transaction.execute(
         "DELETE FROM memories
@@ -86,6 +86,7 @@ pub(crate) fn cleanup_memory_data(
            )",
         [],
     )?;
+    super::facts::expire_due_memory_facts(&transaction, now_ts)?;
     let deleted_index_rows = transaction.execute(
         "DELETE FROM memory_retrieval_index
          WHERE (source_kind = 'memory' AND source_memory_id IS NOT NULL
@@ -99,10 +100,12 @@ pub(crate) fn cleanup_memory_data(
             OR (source_kind = 'memory_fact' AND source_ref IS NOT NULL
                 AND NOT EXISTS (
                     SELECT 1 FROM memory_facts f
-                    WHERE CAST(f.id AS TEXT) = memory_retrieval_index.source_ref
-                       OR f.memory_id = memory_retrieval_index.source_ref
+                    WHERE f.principal_id = memory_retrieval_index.principal_id
+                      AND (CAST(f.id AS TEXT) = memory_retrieval_index.source_ref
+                        OR f.memory_id = memory_retrieval_index.source_ref
+                        OR ?1 || CAST(f.id AS TEXT) = memory_retrieval_index.source_ref)
                 ))",
-        [],
+        [super::MEMORY_FACT_SOURCE_REF_PREFIX],
     )?;
     let _ = transaction.execute(
         "DELETE FROM memory_retrieval_index_fts
@@ -110,8 +113,20 @@ pub(crate) fn cleanup_memory_data(
         [],
     );
 
+    // Successful commits remove staging immediately. Preserve live retries;
+    // closed-job remnants share the existing candidate retention policy.
+    transaction.execute(
+        "DELETE FROM memory_generation_outputs
+        WHERE created_at_ts < ?1 AND EXISTS (
+            SELECT 1 FROM memory_jobs WHERE memory_jobs.job_id = memory_generation_outputs.job_id
+              AND memory_jobs.status IN ('completed', 'cancelled', 'failed')
+        )",
+        [candidate_cutoff],
+    )?;
+
+    super::vector_store::maintain_orphaned_vectors(&transaction)?;
     refresh_principal_usage(&transaction, config, now_ts)?;
-    let (observed_bytes, state) = refresh_storage_pressure(&transaction, config, now_ts)?;
+    let (state, observed_bytes) = observe_storage_pressure(&transaction, config, now_ts)?;
     record_retention_ledger(
         &transaction,
         "source_transcript",
@@ -140,42 +155,61 @@ pub(crate) fn cleanup_memory_data(
         deleted_long_term_rows,
         deleted_candidate_rows,
         deleted_index_rows,
-        storage_pressure_state: state.to_string(),
+        storage_pressure_state: state,
         observed_bytes,
     })
+}
+
+/// Explicit startup observation: no retention deletes or quota-policy repair.
+pub(crate) fn initialize_storage_pressure(
+    db: &Connection,
+    config: &MemoryConfig,
+    now_ts: i64,
+) -> anyhow::Result<()> {
+    super::jobs::require_memory_job_schema(db)?;
+    let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+    super::storage_budget::initialize_schema(&tx)?;
+    observe_storage_pressure(&tx, config, now_ts)?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn observe_storage_pressure(
+    db: &Connection,
+    config: &MemoryConfig,
+    now_ts: i64,
+) -> anyhow::Result<(String, u64)> {
+    anyhow::ensure!(
+        !db.is_autocommit(),
+        "memory_pressure_observation_requires_transaction"
+    );
+    let observed_bytes = super::storage_accounting::observed_memory_bytes(db)?;
+    let state = pressure_state(observed_bytes, config.storage_soft_limit_bytes.max(1));
+    db.execute(
+        "INSERT INTO memory_storage_pressure(singleton_id,state,reason_code,observed_bytes,revision,updated_at_ts)
+         VALUES (1,?1,?2,?3,1,?4)
+         ON CONFLICT(singleton_id) DO UPDATE SET state=excluded.state,
+             reason_code=excluded.reason_code,observed_bytes=excluded.observed_bytes,
+             revision=memory_storage_pressure.revision+1,updated_at_ts=excluded.updated_at_ts",
+        params![state, if state == "normal" { None::<&str> } else { Some("memory_storage_soft_limit") },
+            observed_bytes.min(i64::MAX as u64) as i64, now_ts],
+    )?;
+    super::storage_budget::refresh(db, config)?;
+    Ok((state.to_string(), observed_bytes))
 }
 
 pub(crate) fn automatic_generation_allowed(
     db: &Connection,
     principal_id: &str,
 ) -> anyhow::Result<bool> {
-    let state = db
-        .query_row(
-            "SELECT state FROM memory_storage_pressure WHERE singleton_id = 1",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-        .unwrap_or_else(|| "normal".to_string());
-    if matches!(
-        state.as_str(),
-        "automatic_generation_paused" | "explicit_write_blocked"
-    ) {
-        return Ok(false);
-    }
-    let quota_available = db
-        .query_row(
-            "SELECT used_rows < max_rows AND used_bytes < max_bytes
-                    AND used_background_cost_microunits < max_background_cost_microunits
-             FROM memory_principal_quotas WHERE principal_id = ?1",
-            [principal_id],
-            |row| row.get::<_, bool>(0),
-        )
-        .optional()?
-        .unwrap_or(true);
-    Ok(quota_available)
+    Ok(
+        super::capacity::automatic_generation_availability(db, principal_id)?
+            == super::capacity::GenerationAvailability::Available,
+    )
 }
 
+/// Explicit policy initialization only. Operational callers use the update-only
+/// refresh below; this constructor is owned by startup/new-identity lifecycle.
 pub(crate) fn ensure_principal_quota(
     db: &Connection,
     config: &MemoryConfig,
@@ -211,29 +245,34 @@ pub(crate) fn ensure_principal_quota(
     Ok(())
 }
 
+pub(crate) fn refresh_existing_principal_usage(
+    db: &Connection,
+    principal: &str,
+    now: i64,
+) -> anyhow::Result<()> {
+    db.execute(
+        "UPDATE memory_principal_quotas SET
+            used_rows=(SELECT COUNT(*) FROM memories WHERE principal_id=?1),
+            used_bytes=(SELECT COALESCE(SUM(LENGTH(CAST(content AS BLOB))),0) FROM memories WHERE principal_id=?1),
+            updated_at_ts=?2 WHERE principal_id=?1",
+        params![principal,now],
+    )?;
+    Ok(())
+}
+
 fn refresh_principal_usage(
     db: &Connection,
-    config: &MemoryConfig,
+    _config: &MemoryConfig,
     now_ts: i64,
 ) -> anyhow::Result<()> {
     db.execute(
-        "INSERT INTO memory_principal_quotas(
-            principal_id, max_rows, max_bytes, max_background_cost_microunits,
-            used_rows, used_bytes, used_background_cost_microunits, revision, updated_at_ts
-         )
-         SELECT principal_id, ?1, ?2, ?3, COUNT(*), COALESCE(SUM(LENGTH(CAST(content AS BLOB))), 0), 0, 1, ?4
-         FROM memories WHERE principal_id IS NOT NULL GROUP BY principal_id
-         ON CONFLICT(principal_id) DO UPDATE SET
-            used_rows = excluded.used_rows, used_bytes = excluded.used_bytes,
-            updated_at_ts = excluded.updated_at_ts",
-        params![
-            config.max_rows.max(1) as i64,
-            config.principal_max_bytes.min(i64::MAX as u64) as i64,
-            config
-                .principal_background_cost_microunits
-                .min(i64::MAX as u64) as i64,
-            now_ts,
-        ],
+        "UPDATE memory_principal_quotas AS q
+         SET used_rows=u.source_rows,used_bytes=u.source_bytes,updated_at_ts=?1
+         FROM (
+            SELECT principal_id,COUNT(*) AS source_rows,COALESCE(SUM(LENGTH(CAST(content AS BLOB))),0) AS source_bytes
+            FROM memories WHERE principal_id IS NOT NULL GROUP BY principal_id
+         ) u WHERE q.principal_id=u.principal_id",
+        [now_ts],
     )?;
     // GROUP BY has no row for an emptied principal. Clear only stale usage;
     // configured policy, revision and already-spent background cost survive.
@@ -254,21 +293,15 @@ pub(crate) fn refresh_storage_pressure(
     db: &Connection,
     config: &MemoryConfig,
     now_ts: i64,
-) -> anyhow::Result<(u64, &'static str)> {
-    let observed_bytes = super::storage_accounting::observed_memory_bytes(db)?;
-    let state = pressure_state(observed_bytes, config.storage_soft_limit_bytes.max(1));
-    let changed = db.execute(
-        "UPDATE memory_storage_pressure SET state = ?1, reason_code = ?2, observed_bytes = ?3,
-             revision = revision + 1, updated_at_ts = ?4 WHERE singleton_id = 1",
-        params![
-            state,
-            (state != "normal").then_some("memory_storage_soft_limit"),
-            observed_bytes.min(i64::MAX as u64) as i64,
-            now_ts
-        ],
-    )?;
-    anyhow::ensure!(changed == 1, "memory_storage_pressure_record_missing");
-    Ok((observed_bytes, state))
+) -> anyhow::Result<(u64, String)> {
+    if !db.is_autocommit() {
+        let (state, observed) = observe_storage_pressure(db, config, now_ts)?;
+        return Ok((observed, state));
+    }
+    let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+    let (state, observed) = observe_storage_pressure(&tx, config, now_ts)?;
+    tx.commit()?;
+    Ok((observed, state))
 }
 
 fn pressure_state(observed: u64, soft_limit: u64) -> &'static str {

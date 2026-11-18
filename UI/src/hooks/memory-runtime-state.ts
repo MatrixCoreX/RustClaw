@@ -2,6 +2,7 @@ import type {
   MemoryFactItem, MemoryOverviewResponse, MemoryPageResult, MemoryPreferenceItem,
   MemoryRecentItem, MemorySettingsResult, MemoryVectorStatus, RemoteMemoryDisclosure,
 } from "../types/api";
+import type { MemoryImportProgress } from "../lib/memory-import-upload";
 
 export type MemoryOwner = () => boolean;
 export type MemoryClearScope = "recent" | "all";
@@ -28,6 +29,7 @@ export interface MemoryView {
   memoryError: string | null;
   memoryMessage: string | null;
   memoryActionLoading: string | null;
+  memoryImportProgress: MemoryImportProgress | null;
   memorySettingsSaving: boolean;
   memorySettingScope: MemorySettingScope;
   memoryClearScope: MemoryClearScope;
@@ -42,7 +44,7 @@ export function emptyMemoryView(owner: MemoryOwner): MemoryView {
   return {
     owner, settingsConversationId: null, requestedPage: 1,
     memoryOverview: null, memorySettings: null, memoryPreferences: [], memoryFacts: [], memoryRecent: [],
-    memoryLoading: false, memoryError: null, memoryMessage: null, memoryActionLoading: null,
+    memoryLoading: false, memoryError: null, memoryMessage: null, memoryActionLoading: null, memoryImportProgress: null,
     memorySettingsSaving: false, memorySettingScope: "principal", memoryClearScope: "recent",
     memoryPage: null, memoryRemoteDisclosure: null, memoryVectorStatus: null, memoryUndoRevisionId: null,
     memoryFilters: { search: "", scope: "", origin: "", kind: "", status: "", freshness: "" },

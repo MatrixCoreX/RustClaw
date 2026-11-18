@@ -77,6 +77,50 @@ pub(crate) fn test_audit_pool() -> DbPool {
     pool
 }
 
+#[cfg(test)]
+#[path = "db_pool_bootstrap_tests.rs"]
+mod pool_bootstrap_tests;
+
+#[cfg(test)]
+#[path = "db_sqlite_security_tests.rs"]
+mod sqlite_security_tests;
+
+pub(crate) fn sqlite_file_manager(
+    path: &Path,
+    busy_timeout_ms: u64,
+) -> anyhow::Result<SqliteConnectionManager> {
+    // WAL is persistent file state. Complete its transition before starting
+    // parallel pool connections, while retaining the configured busy policy.
+    let bootstrap = Connection::open(path)?;
+    bootstrap.busy_timeout(Duration::from_millis(busy_timeout_ms))?;
+    let mode: String = bootstrap.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
+    if !mode.eq_ignore_ascii_case("wal") {
+        let mode: String =
+            bootstrap.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get(0))?;
+        anyhow::ensure!(
+            mode.eq_ignore_ascii_case("wal"),
+            "sqlite_wal_mode_unavailable:{mode}"
+        );
+    }
+    drop(bootstrap);
+    let resource_profile = crate::runtime_memory::sqlite_resource_profile();
+    Ok(SqliteConnectionManager::file(path).with_init(move |conn| {
+        configure_pooled_sqlite_connection(conn, busy_timeout_ms, resource_profile)
+    }))
+}
+
+fn configure_pooled_sqlite_connection(
+    conn: &Connection,
+    busy_timeout_ms: u64,
+    resource_profile: crate::runtime_memory::SqliteResourceProfile,
+) -> rusqlite::Result<()> {
+    conn.busy_timeout(Duration::from_millis(busy_timeout_ms))?;
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    crate::runtime_memory::apply_sqlite_resource_profile(conn, resource_profile)?;
+    Ok(())
+}
+
 pub(crate) fn init_db(config: &AppConfig) -> anyhow::Result<DbPool> {
     let database_path = Path::new(&config.database.sqlite_path);
     if let Some(parent) = database_path.parent() {
@@ -86,18 +130,7 @@ pub(crate) fn init_db(config: &AppConfig) -> anyhow::Result<DbPool> {
     }
     apply_private_sqlite_permissions(database_path)?;
 
-    let busy_ms = config.database.busy_timeout_ms;
-    let resource_profile = crate::runtime_memory::sqlite_resource_profile();
-    let manager = SqliteConnectionManager::file(&config.database.sqlite_path).with_init(
-        move |conn: &mut Connection| {
-            conn.busy_timeout(Duration::from_millis(busy_ms))?;
-            conn.pragma_update(None, "journal_mode", "WAL")?;
-            conn.pragma_update(None, "synchronous", "NORMAL")?;
-            conn.pragma_update(None, "foreign_keys", "ON")?;
-            crate::runtime_memory::apply_sqlite_resource_profile(conn, resource_profile)?;
-            Ok(())
-        },
-    );
+    let manager = sqlite_file_manager(database_path, config.database.busy_timeout_ms)?;
 
     let max_size = config.database.pool_max_size.max(2);
     let pool = crate::runtime_memory::sqlite_pool_builder(max_size)
@@ -124,18 +157,7 @@ pub(crate) fn init_audit_db(config: &AppConfig) -> anyhow::Result<DbPool> {
     }
     apply_private_sqlite_permissions(database_path)?;
 
-    let busy_ms = config.database.busy_timeout_ms;
-    let resource_profile = crate::runtime_memory::sqlite_resource_profile();
-    let manager = SqliteConnectionManager::file(&config.database.audit_sqlite_path).with_init(
-        move |conn: &mut Connection| {
-            conn.busy_timeout(Duration::from_millis(busy_ms))?;
-            conn.pragma_update(None, "journal_mode", "WAL")?;
-            conn.pragma_update(None, "synchronous", "NORMAL")?;
-            conn.pragma_update(None, "foreign_keys", "ON")?;
-            crate::runtime_memory::apply_sqlite_resource_profile(conn, resource_profile)?;
-            Ok(())
-        },
-    );
+    let manager = sqlite_file_manager(database_path, config.database.busy_timeout_ms)?;
 
     let max_size = config.database.audit_pool_max_size.max(2);
     let pool = crate::runtime_memory::sqlite_pool_builder(max_size)

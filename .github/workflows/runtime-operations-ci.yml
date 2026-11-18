@@ -2,7 +2,7 @@ name: Runtime operations protection verification
 
 "on":
   push:
-    branches: ["ci/runtime-operations-*"]
+    branches: ["ci/runtime-operations-*", "ci/memory-integration-*"]
   workflow_dispatch:
 
 permissions:
@@ -70,7 +70,13 @@ jobs:
           python3 scripts/check_no_runtime_hard_reply.py
           python3 scripts/check_historical_hardcoded_language.py --fail-on-runtime --fail-on-ui-visible
           python3 scripts/check_no_policy_boundary_hard_reply.py
+          python3 scripts/check_rag_contracts.py --self-test
+          python3 scripts/check_rag_contracts.py
+          python3 scripts/check_mcp_runtime_contracts.py --self-test
+          python3 scripts/check_mcp_runtime_contracts.py
           npm ci --ignore-scripts --prefix UI
+          npm run lint --prefix UI
+          npm test --prefix UI
           bash scripts/product_identity_tests.sh --with-ui
       - name: Test disk admission, memory failure recovery, background ownership and logs
         shell: bash
@@ -80,17 +86,19 @@ jobs:
           bash component_start/common_tests.sh
           cargo test --locked -p clawd --bin clawd -- --list > "$RUNNER_TEMP/reliability-tests.txt"
           result=0
-          for suite in runtime::storage_pressure::tests runtime::worker_health::tests worker::runtime_support::worker_supervision::tests worker::runtime_support::background_workers::tests memory::jobs::tests memory::jobs::sources::tests memory::job_failure::tests memory::embedding_jobs::tests memory::service::tests memory::wp0_baseline_tests; do
-            grep -F "${suite}::" "$RUNNER_TEMP/reliability-tests.txt"
+          for suite in runtime::storage_pressure::tests runtime::worker_health::tests worker::runtime_support:: memory:: http::memory db_pool:: db_init:: retention_policy::; do
+            grep -F "${suite}" "$RUNNER_TEMP/reliability-tests.txt"
             cargo test --locked -p clawd --bin clawd "$suite" -- --test-threads=3 || result=1
           done
+          cargo test --locked -p claw-core --lib || result=1
+          cargo test --locked -p webd memory_import_limits || result=1
           exit "$result"
       - name: Build verified local runtime without publishing any release
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
-          cargo build --locked --release -p clawd --bin clawd
+          cargo build --locked --release -p clawd --bin clawd -p webd --bin webd -p skill-runner --bin skill-runner -p agent-skill-sdk --bin skillctl
           npm run build --prefix UI
           artifact_root="$RUNNER_TEMP/runtime-operations-artifact"
           mkdir -p "$artifact_root/runtime"

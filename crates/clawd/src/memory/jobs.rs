@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use super::job_failure::{permanent, JobFailure};
 use anyhow::anyhow;
@@ -18,6 +18,16 @@ use super::eligibility::{
 
 const MIGRATION_ID: &str = "011_durable_memory_jobs_v1";
 const MIGRATION_SQL: &str = include_str!("../../../../migrations/011_durable_memory_jobs.sql");
+
+const GENERATION_CANDIDATE_SQL: &str = "WITH running AS MATERIALIZED (
+         SELECT principal_id, COUNT(*) AS active_count FROM memory_jobs
+         WHERE status = 'running' GROUP BY principal_id
+     )
+     SELECT j.job_id, j.principal_id, j.checkpoint_json FROM memory_jobs j
+     LEFT JOIN running ON running.principal_id = j.principal_id
+     WHERE j.status IN ('queued', 'retry_wait')
+       AND j.cancel_requested = 0 AND j.not_before_ts <= ?1
+     ORDER BY COALESCE(running.active_count, 0), j.not_before_ts, j.created_at_ts, j.job_id";
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct MemoryJobSnapshot {
@@ -60,6 +70,12 @@ pub(crate) fn ensure_memory_job_schema(db: &Connection) -> anyhow::Result<()> {
         apply_migration(db)?;
     }
     Ok(())
+}
+
+pub(crate) fn require_memory_job_schema(db: &Connection) -> anyhow::Result<()> {
+    super::scope::require_memory_scope_schema(db)?;
+    super::scope::require_applied_migration(db, MIGRATION_ID, &migration_manifest_digest())?;
+    super::job_completion::require_schema(db)
 }
 
 fn apply_migration(db: &Connection) -> anyhow::Result<()> {
@@ -130,6 +146,7 @@ fn apply_migration(db: &Connection) -> anyhow::Result<()> {
          VALUES (?1, ?2, ?3) ON CONFLICT(migration_id) DO NOTHING",
         params![MIGRATION_ID, migration_manifest_digest(), crate::now_ts()],
     )?;
+    super::job_completion::ensure_schema(db)?;
     Ok(())
 }
 
@@ -145,15 +162,14 @@ pub(crate) fn enqueue_turn_memory_jobs(
         .db
         .get()
         .map_err(|error| anyhow!("memory_job_db_pool:{error}"))?;
-    ensure_memory_job_schema(&db)?;
+    require_memory_job_schema(&db)?;
     let settings = super::settings::resolve_task_memory_settings(state, task)?
         .ok_or_else(|| permanent("memory_job_settings_unavailable"))?;
     if !settings.generate_memory {
         return Ok(Vec::new());
     }
-    super::retention::ensure_principal_quota(
+    super::retention::refresh_existing_principal_usage(
         &db,
-        &state.policy.memory,
         &settings.target_principal_id,
         crate::now_ts_u64() as i64,
     )?;
@@ -203,7 +219,7 @@ pub(crate) fn persist_turn_and_enqueue(
         .db
         .get()
         .map_err(|error| anyhow!("memory_job_db_pool:{error}"))?;
-    ensure_memory_job_schema(&db)?;
+    require_memory_job_schema(&db)?;
     let settings = super::settings::resolve_task_memory_settings(state, task)?;
     let tx = db.unchecked_transaction()?;
     let user_source_memory_id = super::insert_memory_with_id_in_connection(
@@ -237,9 +253,8 @@ pub(crate) fn persist_turn_and_enqueue(
         tx.commit()?;
         return Ok(Vec::new());
     };
-    super::retention::ensure_principal_quota(
+    super::retention::refresh_existing_principal_usage(
         &tx,
-        &state.policy.memory,
         &settings.target_principal_id,
         crate::now_ts_u64() as i64,
     )?;
@@ -488,6 +503,17 @@ fn provider_snapshot_for_job(
     settings: &super::settings::MemoryEffectiveSettings,
     job_kind: &str,
 ) -> anyhow::Result<(String, String, String, String)> {
+    Ok(provider_snapshot(provider_for_job(
+        state, task, settings, job_kind,
+    )?))
+}
+
+fn provider_for_job(
+    state: &crate::AppState,
+    task: &crate::ClaimedTask,
+    settings: &super::settings::MemoryEffectiveSettings,
+    job_kind: &str,
+) -> anyhow::Result<Option<std::sync::Arc<crate::LlmProviderRuntime>>> {
     let (configured_provider, configured_model) = match job_kind {
         "extract" => (
             state.policy.memory.extract_provider.trim(),
@@ -505,7 +531,7 @@ fn provider_snapshot_for_job(
             .into_iter()
             .next()
             .ok_or_else(|| permanent("memory_job_provider_unavailable"))?;
-        return Ok(provider_snapshot(Some(provider)));
+        return Ok(Some(provider));
     }
     anyhow::ensure!(
         !configured_provider.is_empty() && !configured_model.is_empty(),
@@ -526,7 +552,7 @@ fn provider_snapshot_for_job(
         })
         .cloned()
         .ok_or_else(|| permanent("memory_job_configured_provider_unavailable"))?;
-    Ok(provider_snapshot(Some(provider)))
+    Ok(Some(provider))
 }
 
 pub(crate) fn spawn_memory_job_workers(state: crate::AppState, concurrency: usize) {
@@ -555,10 +581,12 @@ pub(crate) async fn run_one_memory_job(
     state: &crate::AppState,
     worker_id: &str,
 ) -> anyhow::Result<bool> {
+    let settled = super::job_completion::settle_due(state)?;
     let Some(job) = claim_next_job(state, worker_id)? else {
-        return Ok(false);
+        return Ok(settled);
     };
-    let execution = crate::runtime::provider_diagnostics::capture(execute_claimed_job(state, &job));
+    let execution =
+        crate::runtime::provider_diagnostics::capture(execute_claimed_job(state, &job, worker_id));
     tokio::pin!(execution);
     let heartbeat_seconds = (state.policy.memory.background_lease_seconds.max(15) / 3).clamp(5, 30);
     let result = loop {
@@ -633,29 +661,10 @@ fn claim_next_job(
            AND lease_expires_at_ts <= ?1 AND cancel_requested = 0",
         [now],
     )?;
-    tx.execute(
-        "UPDATE memory_jobs
-         SET status = 'cancelled', lease_owner = NULL, lease_expires_at_ts = NULL,
-             error_code = 'cancel_requested', retryable = 0,
-             updated_at_ts = ?1, finished_at_ts = ?1
-         WHERE cancel_requested = 1 AND status IN ('queued', 'retry_wait')",
-        [now],
-    )?;
-    let job_id: Option<String> = tx
-        .query_row(
-            "SELECT j.job_id
-             FROM memory_jobs j
-             WHERE j.status IN ('queued', 'retry_wait')
-               AND j.cancel_requested = 0 AND j.not_before_ts <= ?1
-             ORDER BY (
-                SELECT COUNT(*) FROM memory_jobs active
-                WHERE active.principal_id = j.principal_id AND active.status = 'running'
-             ) ASC, j.not_before_ts ASC, j.created_at_ts ASC
-             LIMIT 1",
-            [now],
-            |row| row.get(0),
-        )
-        .optional()?;
+    super::job_completion::finalize_cancelled(&tx, now)?;
+    // Preflight is only an optimization. Recheck after acquiring the writer
+    // transaction so a policy update committed during the wait takes effect.
+    let job_id = next_admitted_job(&tx, now)?;
     let Some(job_id) = job_id else {
         tx.commit()?;
         return Ok(None);
@@ -684,18 +693,54 @@ fn claim_next_job(
 }
 
 fn memory_job_claim_needs_write(db: &Connection, now: i64) -> anyhow::Result<bool> {
-    Ok(db.query_row(
+    let maintenance: bool = db.query_row(
         "SELECT EXISTS(
             SELECT 1 FROM memory_jobs
             WHERE (status = 'running' AND lease_expires_at_ts IS NOT NULL
-                   AND lease_expires_at_ts <= ?1 AND cancel_requested = 0)
+                   AND lease_expires_at_ts <= ?1)
                OR (cancel_requested = 1 AND status IN ('queued', 'retry_wait'))
-               OR (status IN ('queued', 'retry_wait') AND cancel_requested = 0
-                   AND not_before_ts <= ?1)
          )",
         [now],
         |row| row.get(0),
-    )?)
+    )?;
+    Ok(maintenance || next_admitted_job(db, now)?.is_some())
+}
+
+fn next_admitted_job(db: &Connection, now: i64) -> anyhow::Result<Option<String>> {
+    use super::capacity::{
+        principal_generation_availability, GenerationAvailability, StoragePressure,
+    };
+    let storage_available =
+        StoragePressure::load(db)?.generation_availability() == GenerationAvailability::Available;
+    let mut statement = db.prepare(GENERATION_CANDIDATE_SQL)?;
+    let candidates = statement.query_map([now], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    // This cache belongs only to this read/transaction, never to another poll.
+    // Older blocked jobs must not hide another principal's eligible work.
+    let mut blocked = HashSet::new();
+    for candidate in candidates {
+        let (job_id, principal_id, checkpoint) = candidate?;
+        // Finalizing an already committed result is maintenance, not a new
+        // generation request. Capacity cannot force it to replay the provider.
+        if super::job_completion::phase(&checkpoint) == super::job_completion::JobPhase::Committed {
+            return Ok(Some(job_id));
+        }
+        if !storage_available || blocked.contains(&principal_id) {
+            continue;
+        }
+        if principal_generation_availability(db, &principal_id)?
+            == GenerationAvailability::Available
+        {
+            return Ok(Some(job_id));
+        }
+        blocked.insert(principal_id);
+    }
+    Ok(None)
 }
 
 fn validate_pinned_model(
@@ -703,10 +748,9 @@ fn validate_pinned_model(
     task: &crate::ClaimedTask,
     job: &MemoryJobSnapshot,
 ) -> anyhow::Result<()> {
-    let selected_provider = state
-        .task_llm_providers(task)
-        .into_iter()
-        .next()
+    let settings = super::settings::resolve_task_memory_settings(state, task)?
+        .ok_or_else(|| permanent("memory_job_settings_unavailable"))?;
+    let selected_provider = provider_for_job(state, task, &settings, &job.job_kind)?
         .ok_or_else(|| permanent("memory_job_provider_unavailable"))?;
     let (_, _, selected_model, selected_capability_digest) =
         provider_snapshot(Some(selected_provider.clone()));
@@ -723,12 +767,25 @@ fn validate_pinned_model(
 async fn execute_claimed_job(
     state: &crate::AppState,
     job: &MemoryJobSnapshot,
+    worker_id: &str,
 ) -> anyhow::Result<()> {
+    use super::job_completion::{GenerationLease, JobPhase};
+    let phase = super::job_completion::phase(&job.checkpoint_json);
+    match phase {
+        JobPhase::Committed => return Ok(()),
+        JobPhase::ProviderStarted => anyhow::bail!("memory_job_provider_result_unknown"),
+        JobPhase::Invalid => anyhow::bail!("memory_job_checkpoint_invalid"),
+        _ => {}
+    }
+    let lease = GenerationLease {
+        job_id: &job.job_id,
+        worker_id,
+        principal_id: &job.principal_id,
+    };
     if job.cancel_requested {
         return Err(permanent("memory_job_cancelled"));
     }
     let task = load_source_task(state, job)?;
-    validate_pinned_model(state, &task, job)?;
     let current = super::settings::resolve_task_memory_settings(state, &task)?
         .ok_or_else(|| permanent("memory_job_settings_unavailable"))?;
     anyhow::ensure!(
@@ -739,6 +796,22 @@ async fn execute_claimed_job(
         current.revision == job.settings_revision && current.policy_digest == job.policy_digest,
         permanent("memory_job_settings_snapshot_changed")
     );
+    validate_pinned_model(state, &task, job)?;
+    let selected_provider = provider_for_job(state, &task, &current, &job.job_kind)?
+        .ok_or_else(|| permanent("memory_job_provider_unavailable"))?;
+    let (selected_name, selected_protocol, selected_model, selected_capability_digest) =
+        provider_snapshot(Some(selected_provider.clone()));
+    anyhow::ensure!(
+        selected_name == job.provider_name
+            && selected_protocol == job.provider_type
+            && selected_model == job.model_name
+            && selected_capability_digest == job.model_capability_digest,
+        permanent("memory_job_model_snapshot_mismatch")
+    );
+    let generation = super::generation_response::GenerationCall {
+        lease,
+        provider: selected_provider,
+    };
     let db = state
         .core
         .db
@@ -756,30 +829,40 @@ async fn execute_claimed_job(
     let source_end = job
         .source_event_end
         .ok_or_else(|| permanent("memory_job_source_range_missing"))?;
-    db.execute(
-        "UPDATE memory_jobs
+    if matches!(
+        phase,
+        JobPhase::Unstarted | JobPhase::SourceVerified | JobPhase::ResourceWait
+    ) {
+        let changed = db.execute(
+            "UPDATE memory_jobs
          SET checkpoint_json = json_patch(checkpoint_json, ?2), progress_current = 1, progress_total = 2,
              updated_at_ts = ?3
-         WHERE job_id = ?1 AND status = 'running'",
-        params![
-            job.job_id,
-            json!({
-                "schema_version": 1,
-                "phase": "source_range_verified",
-                "source_event_start": source_start,
-                "source_event_end": source_end,
-                "source_digest": job.source_digest,
-            })
-            .to_string(),
-            crate::now_ts_u64() as i64,
-        ],
-    )?;
+         WHERE job_id = ?1 AND status = 'running' AND lease_owner = ?4
+           AND principal_id = ?5 AND cancel_requested = 0",
+            params![
+                job.job_id,
+                json!({
+                    "schema_version": 1,
+                    "phase": "source_range_verified",
+                    "source_event_start": source_start,
+                    "source_event_end": source_end,
+                    "source_digest": job.source_digest,
+                })
+                .to_string(),
+                crate::now_ts_u64() as i64,
+                worker_id,
+                job.principal_id,
+            ],
+        )?;
+        anyhow::ensure!(changed == 1, "memory_job_source_checkpoint_lease_lost");
+    }
     drop(db);
     match job.job_kind.as_str() {
         "extract" => {
             let content = load_user_source_bundle(state, job)?;
             if !content.trim().is_empty() {
-                super::maybe_extract_memory_intent_with_llm(state, &task, &content).await?;
+                super::intent_generation::extract_for_job(state, &task, &content, &generation)
+                    .await?;
             }
         }
         "consolidate" => {
@@ -788,7 +871,7 @@ async fn execute_claimed_job(
                 &task,
                 true,
                 Some((source_start, source_end)),
-                Some(&job.job_id),
+                Some(&generation),
             )
             .await?;
         }
@@ -799,17 +882,9 @@ async fn execute_claimed_job(
         .db
         .get()
         .map_err(|error| anyhow!("memory_job_db_pool:{error}"))?;
-    db.execute(
-        "UPDATE memory_jobs
-         SET checkpoint_json = json_patch(checkpoint_json, ?2), progress_current = 2, progress_total = 2,
-             updated_at_ts = ?3
-         WHERE job_id = ?1 AND status = 'running'",
-        params![
-            job.job_id,
-            json!({"schema_version": 1, "phase": "commit_verified"}).to_string(),
-            crate::now_ts_u64() as i64,
-        ],
-    )?;
+    let tx = db.unchecked_transaction()?;
+    super::job_completion::mark_committed(&tx, lease)?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -868,7 +943,7 @@ fn load_source_task(
         [source_task_id],
         |row| {
             let principal_id = row.get::<_, Option<String>>(9)?;
-            let mut task = crate::ClaimedTask {
+            let task = crate::ClaimedTask {
                 claim_attempt: 0,
                 task_id: row.get(0)?,
                 user_id: row.get(1)?,
@@ -913,26 +988,7 @@ fn load_source_task(
 }
 
 fn complete_job(state: &crate::AppState, job_id: &str, worker_id: &str) -> anyhow::Result<()> {
-    let db = state.core.db.get().map_err(|error| anyhow!(error))?;
-    let now = crate::now_ts_u64() as i64;
-    let changed = db.execute(
-        "UPDATE memory_jobs
-         SET status = CASE WHEN cancel_requested = 1 THEN 'cancelled' ELSE 'completed' END,
-             lease_owner = NULL, lease_expires_at_ts = NULL, retryable = 0,
-             updated_at_ts = ?1, finished_at_ts = ?1
-         WHERE job_id = ?2 AND status = 'running' AND lease_owner = ?3",
-        params![now, job_id, worker_id],
-    )?;
-    anyhow::ensure!(changed == 1, "memory_job_completion_lease_lost");
-    db.execute(
-        "UPDATE memory_principal_quotas
-         SET used_background_cost_microunits = used_background_cost_microunits + 1000,
-             updated_at_ts = ?2
-         WHERE principal_id = (SELECT principal_id FROM memory_jobs WHERE job_id = ?1)",
-        params![job_id, now],
-    )?;
-    info!(job_id, "memory_job_completed");
-    Ok(())
+    super::job_completion::complete(state, job_id, worker_id)
 }
 
 fn fail_or_retry_job(
@@ -944,8 +1000,39 @@ fn fail_or_retry_job(
 ) -> anyhow::Result<()> {
     let db = state.core.db.get().map_err(|error| anyhow!(error))?;
     let now = crate::now_ts_u64() as i64;
-    let retryable =
-        failure.retryable && attempt < state.policy.memory.background_max_attempts.max(1) as i64;
+    let checkpoint: String = db.query_row(
+        "SELECT checkpoint_json FROM memory_jobs
+        WHERE job_id = ?1 AND status = 'running' AND lease_owner = ?2",
+        params![job_id, worker_id],
+        |row| row.get(0),
+    )?;
+    let phase = super::job_completion::phase(&checkpoint);
+    if phase == super::job_completion::JobPhase::Committed {
+        drop(db);
+        return complete_job(state, job_id, worker_id);
+    }
+    let phase_failure = match phase {
+        super::job_completion::JobPhase::ProviderStarted => Some(JobFailure::new(
+            "memory_job_provider_result_unknown",
+            false,
+            "provider_result",
+        )),
+        super::job_completion::JobPhase::Invalid => Some(JobFailure::new(
+            "memory_job_checkpoint_invalid",
+            false,
+            "checkpoint",
+        )),
+        super::job_completion::JobPhase::ResourceWait => Some(JobFailure::new(
+            "memory_job_resource_wait",
+            true,
+            "resource_admission",
+        )),
+        _ => None,
+    };
+    let failure = phase_failure.as_ref().unwrap_or(failure);
+    let retryable = failure.retryable
+        && (phase == super::job_completion::JobPhase::ResourceWait
+            || attempt < state.policy.memory.background_max_attempts.max(1) as i64);
     let backoff = 2_i64.saturating_pow(attempt.clamp(1, 8) as u32).min(300);
     let changed = db.execute(
         "UPDATE memory_jobs
@@ -955,6 +1042,7 @@ fn fail_or_retry_job(
              not_before_ts = ?2, error_code = ?3, retryable = ?1,
              checkpoint_json = json_set(checkpoint_json, '$.failure', json(?7)),
              updated_at_ts = ?4,
+             attempt = CASE WHEN ?8 THEN MAX(attempt - 1, 0) ELSE attempt END,
              finished_at_ts = CASE WHEN cancel_requested = 1 OR ?1 = 0 THEN ?4 ELSE NULL END
          WHERE job_id = ?5 AND status = 'running' AND lease_owner = ?6",
         params![
@@ -965,6 +1053,7 @@ fn fail_or_retry_job(
             job_id,
             worker_id,
             serde_json::to_string(failure)?,
+            phase == super::job_completion::JobPhase::ResourceWait,
         ],
     )?;
     anyhow::ensure!(changed == 1, "memory_job_failure_lease_lost");
@@ -991,12 +1080,18 @@ pub(crate) fn request_cancel_for_scope(
             params![principal_id, now],
         )?
     };
+    db.execute(
+        "DELETE FROM memory_generation_outputs WHERE principal_id = ?1
+        AND job_id IN (SELECT job_id FROM memory_jobs
+            WHERE principal_id = ?1 AND (?2 IS NULL OR scope_ref = ?2))",
+        params![principal_id, scope_ref],
+    )?;
     Ok(changed)
 }
 
 pub(crate) fn reconcile_missing_turn_jobs(state: &crate::AppState) -> anyhow::Result<usize> {
     let db = state.core.db.get().map_err(|error| anyhow!(error))?;
-    ensure_memory_job_schema(&db)?;
+    require_memory_job_schema(&db)?;
     let task_ids = missing_turn_task_ids(&db)?;
     drop(db);
     let mut repaired = 0usize;
@@ -1162,3 +1257,27 @@ fn sha256_bytes(value: &[u8]) -> String {
 #[cfg(test)]
 #[path = "jobs_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "jobs_capacity_tests.rs"]
+mod capacity_tests;
+
+#[cfg(test)]
+#[path = "jobs_completion_tests.rs"]
+mod completion_tests;
+
+#[cfg(test)]
+#[path = "jobs_capacity_race_tests.rs"]
+mod capacity_race_tests;
+
+#[cfg(test)]
+#[path = "completion_execution_tests.rs"]
+mod completion_execution_tests;
+
+#[cfg(test)]
+#[path = "completion_provider_selection_tests.rs"]
+mod provider_selection_tests;
+
+#[cfg(test)]
+#[path = "jobs_claim_work_tests.rs"]
+mod claim_work_tests;

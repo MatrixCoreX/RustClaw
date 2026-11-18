@@ -10,6 +10,9 @@ fn setup_db() -> Connection {
     crate::db_init::ensure_channel_schema(&db).expect("channel schema");
     crate::repo::auth::ensure_key_auth_schema(&db).expect("auth schema");
     crate::memory::indexing::ensure_retrieval_schema(&db).expect("retrieval schema");
+    crate::memory::jobs::ensure_memory_job_schema(&db).expect("jobs startup");
+    initialize_storage_pressure(&db, &MemoryConfig::default(), 100)
+        .expect("explicit configured storage startup");
     db
 }
 
@@ -71,3 +74,6 @@ fn pressure_state_machine_is_monotonic_by_threshold() {
 
 #[path = "retention_accounting_tests.rs"]
 mod accounting;
+
+#[path = "retention_duration_tests.rs"]
+mod duration_bounds;

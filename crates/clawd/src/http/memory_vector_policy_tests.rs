@@ -85,7 +85,8 @@ async fn index_policy_snapshot_keeps_stale_rejection_for_every_action() {
         Some("memory_settings_revision_conflict")
     );
     for action in ["paused", "active", "cancelled"] {
-        let (code, Json(reply)) = vector_control(state.clone(), headers.clone(), request(), action);
+        let (code, Json(reply)) =
+            vector_control(state.clone(), headers.clone(), request(), action).await;
         assert_eq!(code, StatusCode::CONFLICT);
         assert_eq!(
             reply.error.as_deref(),
@@ -100,7 +101,8 @@ async fn index_policy_snapshot_keeps_stale_rejection_for_every_action() {
                 expected_policy_digest: current.clone(),
             },
             action,
-        );
+        )
+        .await;
         assert_eq!(code, StatusCode::OK);
         assert!(reply.ok);
     }

@@ -258,6 +258,54 @@ pub(crate) fn expire_due_memory_facts(db: &Connection, now_ts: i64) -> anyhow::R
     Ok(ids.len())
 }
 
+/// Read eligibility for linked facts; unresolved index links remain the explicit
+/// consistency/retention owner's responsibility, not a reason for read repair.
+pub(crate) fn current_fact_projection_sql(db: &Connection) -> anyhow::Result<String> {
+    let (scoped, opaque_ids): (bool, bool) = db.query_row(
+        "SELECT
+           EXISTS(SELECT 1 FROM pragma_table_info('memory_facts') WHERE name='principal_id' COLLATE NOCASE)
+           AND EXISTS(SELECT 1 FROM pragma_table_info('memory_retrieval_index') WHERE name='principal_id' COLLATE NOCASE),
+           EXISTS(SELECT 1 FROM pragma_table_info('memory_facts') WHERE name='memory_id' COLLATE NOCASE)",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let identity_match = if scoped {
+        "(f.principal_id = i.principal_id
+          OR (f.principal_id IS NULL AND i.principal_id IS NULL AND f.user_key = i.user_key))"
+    } else {
+        "f.user_key = i.user_key"
+    };
+    let inactive_fact = format!(
+        "i.source_kind = '{fact_source}' AND {identity_match}
+              AND (f.status <> '{active}' OR
+                (f.expires_at_ts IS NOT NULL
+                 AND f.expires_at_ts <= CAST(strftime('%s', 'now') AS INTEGER)))",
+        fact_source = super::RETRIEVAL_SOURCE_MEMORY_FACT,
+        active = MEMORY_FACT_STATUS_ACTIVE,
+    );
+    let opaque_id_match = if opaque_ids {
+        format!(
+            "UNION ALL SELECT 1 FROM memory_facts f
+             WHERE f.memory_id = i.source_ref AND {inactive_fact}"
+        )
+    } else {
+        String::new()
+    };
+    // Narrow numeric candidates by primary key, then check exact reference spelling.
+    // Separate opaque lookup keeps ownership ORs from causing an owner-wide scan.
+    Ok(format!(
+        "NOT EXISTS (
+            SELECT 1 FROM memory_facts f
+            WHERE f.id = CAST(REPLACE(i.source_ref, '{reference_prefix}', '') AS INTEGER)
+              AND (i.source_ref = CAST(f.id AS TEXT)
+                OR i.source_ref = '{reference_prefix}' || CAST(f.id AS TEXT))
+              AND {inactive_fact}
+            {opaque_id_match}
+        )",
+        reference_prefix = super::MEMORY_FACT_SOURCE_REF_PREFIX,
+    ))
+}
+
 fn normalized_or_default<'a>(value: &'a str, default: &'a str) -> &'a str {
     let value = value.trim();
     if value.is_empty() {
@@ -370,3 +418,7 @@ fn mark_facts_status(
 #[cfg(test)]
 #[path = "facts_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "facts_recall_liveness_tests.rs"]
+mod recall_liveness_tests;

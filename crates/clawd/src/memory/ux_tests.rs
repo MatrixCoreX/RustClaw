@@ -19,6 +19,18 @@ fn setup_db() -> (Connection, String) {
     crate::repo::auth::ensure_principal_identity_schema(&db).expect("principal schema");
     crate::repo::ensure_principal_ownership_schema(&db).expect("ownership schema");
     ensure_memory_ux_schema(&db).expect("ux schema");
+    crate::memory::quota::initialize_startup_defaults(
+        &db,
+        &claw_core::config::MemoryConfig::default(),
+        100,
+    )
+    .expect("explicit source quota startup");
+    crate::memory::retention::initialize_storage_pressure(
+        &db,
+        &claw_core::config::MemoryConfig::default(),
+        100,
+    )
+    .expect("explicit configured storage startup");
     let principal_id = db
         .query_row(
             "SELECT principal_id FROM auth_keys WHERE user_key = 'ux-key'",

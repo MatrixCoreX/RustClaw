@@ -156,6 +156,10 @@ jobs:
         shell: bash
         run: |
           UI_BROWSER_ARTIFACTS="$RUNNER_TEMP/ui-reliability/status-contrast" node UI/test/status-contrast.browser.mjs
+      - name: Verify built memory disclosure and document language
+        shell: bash
+        run: |
+          UI_BROWSER_ARTIFACTS="$RUNNER_TEMP/ui-reliability/memory-display" node UI/test/memory-display-language.browser.mjs
       - name: Verify every isolated AiAPP browser fixture
         shell: bash
         run: |

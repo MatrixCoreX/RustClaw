@@ -145,9 +145,8 @@ async fn execute_action(
                 evidence_refs.sort();
                 evidence_refs.dedup();
             }
-            crate::memory::retention::ensure_principal_quota(
+            crate::memory::retention::refresh_existing_principal_usage(
                 &db,
-                &state.policy.memory,
                 &settings.target_principal_id,
                 crate::now_ts_u64() as i64,
             )
@@ -249,7 +248,7 @@ async fn execute_action(
 }
 
 fn ensure_schema(db: &Connection) -> anyhow::Result<()> {
-    crate::memory::ux::ensure_memory_ux_schema(db)?;
+    crate::memory::ux::require_memory_ux_schema(db)?;
     crate::memory::indexing::ensure_retrieval_schema(db)?;
     let applied: Option<String> = db
         .query_row(
