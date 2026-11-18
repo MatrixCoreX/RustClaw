@@ -436,14 +436,11 @@ fn durable_failure_records_classification_and_retries_only_transient_failures() 
 
 #[test]
 fn missing_provider_is_rejected_before_a_durable_job_is_created() {
-    let state = crate::AppState::test_default();
-    let error = provider_snapshot_for_job(
-        &state,
-        &fixture_task("unconfigured"),
-        &fixture_settings(),
-        "extract",
-    )
-    .unwrap_err();
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let mut task = fixture_task("unconfigured");
+    task.payload_json = json!({"_agent_model_selection": {"schema_version":1,"provider":"unavailable","model":"unavailable","authority":"server_validated_model_catalog"}}).to_string();
+    let error =
+        provider_snapshot_for_job(&state, &task, &fixture_settings(), "extract").unwrap_err();
     assert_eq!(
         JobFailure::from_error(&error).error_code,
         "memory_job_provider_unavailable"

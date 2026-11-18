@@ -8,16 +8,47 @@ pub(super) fn verified_ids(
     task: &crate::ClaimedTask,
     principal: &str,
 ) -> anyhow::Result<Option<(i64, i64)>> {
+    let result: Option<String> = db
+        .query_row(
+            "SELECT result_json FROM tasks WHERE task_id = ?1 AND principal_id = ?2",
+            params![task.task_id, principal],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+    let Some(result) = result.and_then(|raw| serde_json::from_str::<Value>(&raw).ok()) else {
+        return Ok(None);
+    };
+    let Some(text) = result.get("text").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    let messages = result
+        .get("messages")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let answer = crate::finalize::assistant_memory_source_text(text, &messages);
+    if answer.is_empty() {
+        return Ok(None);
+    }
+    let marked_answer = format!("{}{}", super::super::LLM_SHORT_TERM_MEMORY_PREFIX, answer);
     let mut stmt = db.prepare("SELECT m.id, m.role FROM tasks t JOIN memories m
         ON m.principal_id = t.principal_id AND m.chat_id = t.chat_id AND m.user_key IS t.user_key
         WHERE t.task_id = ?1 AND t.principal_id = ?2 AND t.status = 'succeeded'
           AND m.created_at_ts BETWEEN CAST(t.updated_at AS INTEGER) - 5 AND CAST(t.updated_at AS INTEGER) + 5
-          AND ((m.role = 'user' AND m.content = json_extract(t.payload_json, '$.text')) OR m.role = 'assistant')
+          AND ((m.role = 'user' AND m.content = json_extract(t.payload_json, '$.text')) OR (m.role = 'assistant' AND m.content IN (?3, ?4)))
         ORDER BY m.id LIMIT 4")?;
     let rows = stmt
-        .query_map(params![task.task_id, principal], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-        })?
+        .query_map(
+            params![task.task_id, principal, answer, marked_answer],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        )?
         .collect::<Result<Vec<_>, _>>()?;
     if rows.len() != 2 {
         return Ok(None);

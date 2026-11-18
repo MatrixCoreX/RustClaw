@@ -55,8 +55,7 @@ use task_delivery_guards::{
     journal_has_missing_file_search_evidence, should_use_missing_file_delivery_reply,
 };
 use task_failure_lifecycle::failed_task_lifecycle_payload;
-#[cfg(test)]
-use task_memory::assistant_memory_source_text;
+pub(crate) use task_memory::assistant_memory_source_text;
 use task_memory::{insert_ask_memory_pair, insert_unfinished_goal_memory};
 #[cfg(test)]
 use task_payload_helpers::answer_verifier_forces_task_failure;

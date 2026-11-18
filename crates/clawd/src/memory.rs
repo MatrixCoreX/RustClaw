@@ -570,21 +570,24 @@ pub(crate) async fn maybe_extract_memory_intent_with_llm(
     .await
     {
         Ok(raw) => raw,
-        Err(err) => {
+        Err(_) => {
+            let failure = job_failure::JobFailure::provider("extract_provider");
             warn!(
-                "memory intent llm extraction failed task_id={} err={}",
-                task.task_id, err
+                task_id = task.task_id,
+                error_code = failure.error_code,
+                "memory_intent_extract_failed"
             );
-            return Err(job_failure::JobFailure::provider("extract_provider").into());
+            return Err(failure.into());
         }
     };
 
     let intent = match intent::parse_memory_intent_schema(&raw) {
         Ok(intent) => intent,
-        Err(err) => {
+        Err(_) => {
             warn!(
-                "memory intent schema validation failed task_id={} err={}",
-                task.task_id, err
+                task_id = task.task_id,
+                error_code = "memory_job_extract_schema_invalid",
+                "memory_intent_schema_failed"
             );
             return Err(job_failure::JobFailure::new(
                 "memory_job_extract_schema_invalid",

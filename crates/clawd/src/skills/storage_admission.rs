@@ -1,11 +1,16 @@
 use super::*;
 
-pub(super) async fn admit(state: &AppState, skill_name: &str, args: &Value) -> anyhow::Result<()> {
+pub(super) async fn admit(state: &AppState, skill_name: &str, args: &Value) -> Result<(), String> {
     if action_scoped_planner_mapping(state, skill_name, args)
         .is_none_or(|mapping| mapping.filesystem_write != Some(false))
     {
-        let storage = crate::runtime::storage_pressure::admit_write(state).await?;
-        if !storage.write_admission {
+        let storage = crate::runtime::storage_pressure::admit_write(state)
+            .await
+            .ok();
+        if storage
+            .as_ref()
+            .is_none_or(|status| !status.write_admission)
+        {
             return Err(structured_skill_error_from_parts(
                 skill_name,
                 "resource_admission_unavailable",

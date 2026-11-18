@@ -4,7 +4,7 @@ use crate::AppState;
 
 use super::task_payload_helpers::should_skip_ask_memory_pair;
 
-pub(super) fn assistant_memory_source_text(
+pub(crate) fn assistant_memory_source_text(
     answer_text: &str,
     answer_messages: &[String],
 ) -> String {

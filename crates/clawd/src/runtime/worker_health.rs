@@ -115,12 +115,20 @@ impl WorkerSupervision {
     ) {
         let mut current = locked(&self.storage);
         if current.as_ref().map(|v| &v.state) != Some(&snapshot.state) {
-            tracing::warn!(
-                event = "storage_pressure_changed",
-                state = snapshot.state,
-                write_admission = snapshot.write_admission,
-                "storage_pressure_changed"
-            );
+            if snapshot.state == "normal" {
+                tracing::info!(
+                    event = "storage_pressure_changed",
+                    write_admission = true,
+                    "storage_pressure_normal"
+                );
+            } else {
+                tracing::warn!(
+                    event = "storage_pressure_changed",
+                    state = snapshot.state,
+                    write_admission = snapshot.write_admission,
+                    "storage_pressure_changed"
+                );
+            }
         }
         *current = Some(snapshot);
     }
