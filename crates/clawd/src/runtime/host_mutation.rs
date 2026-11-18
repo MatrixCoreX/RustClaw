@@ -64,7 +64,7 @@ impl HostFilesystemPolicy {
         path: &Path,
     ) -> io::Result<HostPathMetadata> {
         if root.is_some_and(|root| path == root) {
-            self.check_declared_path(path)?;
+            self.check_workspace_path(root, path)?;
             let directory = crate::secure_workspace_fs::open_workspace_directory_with_guard(
                 root.expect("workspace root checked"),
                 path,
@@ -168,7 +168,7 @@ impl HostFilesystemPolicy {
     }
 
     fn mutation_target(&self, root: Option<&Path>, path: &Path) -> io::Result<PathBuf> {
-        self.check_declared_path(path)?;
+        self.check_workspace_path(root, path)?;
         if root.is_some() {
             return Ok(path.to_path_buf());
         }

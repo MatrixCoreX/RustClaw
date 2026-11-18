@@ -69,6 +69,7 @@ impl HostFilesystemPolicy {
             )?;
             let descriptor = File::from(descriptor);
             let metadata = descriptor.metadata()?;
+            let identity = rustix::fs::fstat(&descriptor)?;
             let current = std::fs::symlink_metadata(path)?;
             if !metadata.is_dir()
                 || metadata.uid() != unsafe { libc::geteuid() }
@@ -82,7 +83,7 @@ impl HostFilesystemPolicy {
             directories.push(PrivateDirectory {
                 path: path.clone(),
                 descriptor,
-                identity: (metadata.dev(), metadata.ino()),
+                identity: (identity.st_dev as u64, identity.st_ino as u64),
             });
         }
         Ok(Self { directories })
@@ -179,9 +180,24 @@ impl HostFilesystemPolicy {
         Ok(())
     }
 
+    fn check_workspace_path(&self, root: Option<&Path>, path: &Path) -> io::Result<()> {
+        self.check_declared_path(path)?;
+        if let Some(root) = root {
+            let canonical_root = root.canonicalize()?;
+            let relative = path
+                .strip_prefix(&canonical_root)
+                .or_else(|_| path.strip_prefix(root))
+                .map_err(|_| denied("workspace_path_outside_root"))?;
+            // Apply the same lexical exclusion through a workspace alias,
+            // including a replacement inode at a declared private location.
+            self.check_declared_path(&canonical_root.join(relative))?;
+        }
+        Ok(())
+    }
+
     fn check_directory(&self, directory: &OwnedFd) -> io::Result<()> {
-        let metadata = File::from(directory.try_clone()?).metadata()?;
-        let identity = (metadata.dev(), metadata.ino());
+        let metadata = rustix::fs::fstat(directory)?;
+        let identity = (metadata.st_dev as u64, metadata.st_ino as u64);
         if self
             .directories
             .iter()

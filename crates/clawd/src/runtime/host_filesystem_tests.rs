@@ -172,8 +172,17 @@ fn directory_entries_and_metadata_stay_with_the_opened_directory_after_replaceme
     let private = fixture.directory("private");
     let public = fixture.directory("public");
     std::fs::write(public.join("original"), b"abc").unwrap();
-    let raw_name = std::ffi::OsString::from_vec(b"raw-\xff".to_vec());
-    std::fs::write(public.join(&raw_name), b"raw-name").unwrap();
+    let mut raw_name = std::ffi::OsString::from_vec(b"raw-\xff".to_vec());
+    match std::fs::write(public.join(&raw_name), b"raw-name") {
+        Ok(()) => (),
+        Err(error) if error.raw_os_error() == Some(libc::EILSEQ) => {
+            // APFS rejects invalid UTF-8 at creation; retain a non-ASCII name
+            // while exercising the same held-directory replacement contract.
+            raw_name = "raw-中".into();
+            std::fs::write(public.join(&raw_name), b"raw-name").unwrap();
+        }
+        Err(error) => panic!("create raw-name fixture: {error}"),
+    }
     symlink("does-not-exist", public.join("broken-link")).unwrap();
     let policy = HostFilesystemPolicy::pin_directories(&[private], &fixture.0).unwrap();
     let alias = fixture.0.join("public-alias");

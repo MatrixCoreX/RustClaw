@@ -3,8 +3,7 @@ use std::fs::File;
 use std::io::{self, Write};
 use std::io::{IoSlice, IoSliceMut};
 use std::mem::MaybeUninit;
-use std::os::fd::AsFd;
-use std::os::fd::OwnedFd;
+use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::net::UnixStream;
@@ -335,23 +334,13 @@ impl LaunchChannel {
         deadline: Instant,
     ) -> Result<usize, LaunchChannelFailure> {
         loop {
-            self.socket
-                .set_read_timeout(Some(remaining(deadline)?))
-                .map_err(|_error| {
-                    #[cfg(test)]
-                    diagnostics_tests::receive_error(
-                        "set_read_timeout",
-                        bytes.len(),
-                        _error.raw_os_error(),
-                    );
-                    LaunchChannelFailure::TransportUnavailable
-                })?;
+            self.wait_readable(deadline)?;
             let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(MAX_HANDLES))];
             let mut ancillary = RecvAncillaryBuffer::new(&mut space);
             #[cfg(target_os = "linux")]
-            let flags = RecvFlags::CMSG_CLOEXEC;
+            let flags = RecvFlags::CMSG_CLOEXEC | RecvFlags::DONTWAIT;
             #[cfg(not(target_os = "linux"))]
-            let flags = RecvFlags::empty();
+            let flags = RecvFlags::DONTWAIT;
             let message = match recvmsg(
                 &self.socket,
                 &mut [IoSliceMut::new(bytes)],
@@ -359,7 +348,7 @@ impl LaunchChannel {
                 flags,
             ) {
                 Ok(message) => message,
-                Err(rustix::io::Errno::INTR) => continue,
+                Err(rustix::io::Errno::INTR | rustix::io::Errno::AGAIN) => continue,
                 Err(error) => {
                     #[cfg(test)]
                     diagnostics_tests::receive_error(
@@ -408,6 +397,41 @@ impl LaunchChannel {
             } else {
                 Ok(message.bytes)
             };
+        }
+    }
+
+    fn wait_readable(&self, deadline: Instant) -> Result<(), LaunchChannelFailure> {
+        loop {
+            let duration = remaining(deadline)?;
+            let millis = duration
+                .as_millis()
+                .saturating_add(u128::from(duration.subsec_nanos() % 1_000_000 != 0));
+            let mut descriptor = libc::pollfd {
+                fd: self.socket.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            // Darwin may reject SO_RCVTIMEO after the peer closes even while
+            // buffered data/rights remain. Poll plus a nonblocking recv keeps
+            // the absolute deadline without changing shared descriptor flags.
+            // SAFETY: one initialized pollfd remains live for this bounded call.
+            let ready = unsafe {
+                libc::poll(
+                    &mut descriptor,
+                    1,
+                    i32::try_from(millis).unwrap_or(i32::MAX),
+                )
+            };
+            if ready > 0 {
+                return if descriptor.revents & libc::POLLNVAL != 0 {
+                    Err(LaunchChannelFailure::TransportUnavailable)
+                } else {
+                    Ok(())
+                };
+            }
+            if ready < 0 && io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+                return Err(LaunchChannelFailure::TransportUnavailable);
+            }
         }
     }
 

@@ -135,19 +135,32 @@ fn moved_private_inode_refuses_metadata_creation_removal_and_publication() {
     let moved = root.path().join("moved-private");
     fs::rename(&private, &moved).unwrap();
     fs::DirBuilder::new().mode(0o700).create(&private).unwrap();
-    for path in [&private, &moved] {
-        for outcome in [
-            policy.metadata(Some(root.path()), path).map(|_| ()),
-            policy.create_directory(Some(root.path()), &path.join("child"), true),
-            policy.remove_path(Some(root.path()), path, true),
+    let alias = root.path().join("workspace-alias");
+    symlink(root.path(), &alias).unwrap();
+    let alias_private = alias.join("private");
+    let alias_moved = alias.join("moved-private");
+    for path in [&private, &moved, &alias_private, &alias_moved] {
+        let workspace = if path.starts_with(&alias) {
+            alias.as_path()
+        } else {
+            root.path()
+        };
+        for (operation, outcome) in [
+            policy.metadata(Some(workspace), path).map(|_| ()),
+            policy.create_directory(Some(workspace), &path.join("child"), true),
+            policy.remove_path(Some(workspace), path, true),
             policy.atomic_write_file_with_options(
-                Some(root.path()),
+                Some(workspace),
                 &path.join("child/marker"),
                 b"no",
                 true,
             ),
-        ] {
-            let error = outcome.unwrap_err();
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let error =
+                outcome.expect_err(&format!("private path {path:?}, operation {operation}"));
             assert!(HostFilesystemPolicy::is_private_access_denied(&error));
         }
         assert!(!path.join("child").exists());
