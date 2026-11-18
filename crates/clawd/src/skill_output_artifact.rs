@@ -283,6 +283,10 @@ pub(crate) fn publish_task_text_artifact(
     artifact_metadata.insert("filename".to_string(), Value::String(filename.to_string()));
     let artifact_ref = json!({
         "id": artifact_id,
+        "artifact_ref": claw_core::task_delivery_artifacts::canonical_task_artifact_ref(task_id, &artifact_id),
+        "owner_task_id": task_id,
+        "filename": filename,
+        "size_bytes": bytes.len(),
         "path": relative_path,
         "media_type": "text/plain; charset=utf-8",
         "sha256": sha256,

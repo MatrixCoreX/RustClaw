@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "answer_verifier_runtime/compacted_machine_ref_gap.rs"]
 mod compacted_machine_ref_gap;
+#[path = "answer_verifier_runtime/delivery_manifest_gap.rs"]
+mod delivery_manifest_gap;
 #[path = "answer_verifier_runtime/operation_audit.rs"]
 mod operation_audit;
 #[path = "answer_verifier_runtime/prompt_evidence_blocks.rs"]
@@ -28,6 +30,15 @@ pub(crate) async fn verify_answer_observe_only(
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> AnswerVerificationOutcome {
+    if let Some(gap) = delivery_manifest_gap::missing_delivery_manifest_gap(
+        &state.skill_rt.workspace_root,
+        &task.task_id,
+        route_result,
+        journal,
+        candidate_answer,
+    ) {
+        return AnswerVerificationOutcome::from_verdict(gap);
+    }
     if let Some(local_gap) =
         local_compacted_machine_ref_answer_verifier_gap(journal, candidate_answer)
     {

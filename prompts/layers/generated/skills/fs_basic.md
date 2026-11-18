@@ -90,7 +90,9 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 | `grep_text` | `max_file_bytes` / `max_scan_bytes` | no | integer | bounded defaults | Per-file and aggregate content-read budgets. |
 | `find_images` | `root`, `exts`, `max_results`, `cursor`, `max_dirs` | no | bounded fields | workspace/defaults | Return paged image paths plus MIME, size, mtime, and dimensions where available. |
 | `compare_paths` | `left_path`, `right_path` | yes | string(path) | - | Two explicit paths to compare. |
-| `write_text` | `path`, `content` | yes | string(path), string | - | Replace/write text content. An explicit empty or whitespace-only content string is valid (`minLength=0`); missing/null content is invalid. Requires confirmation. |
+| `write_text` | `path`, `content` | yes | string(path), string | - | Replace/write exact UTF-8 content. Empty/whitespace content is valid; missing/null is invalid. Requires confirmation. |
+| `write_text` | `deliver_to_user` | no | boolean | false | Set true when a file attachment is requested; publishes a task-owned immutable snapshot. A path or FILE token alone does not publish. Complete overwrite only, not append. |
+| `write_text` | `replaces_artifact_refs` | no | string[] | [] | For a corrected deliverable, select the obsolete attachments' exact canonical refs from this same task. Requires deliver_to_user=true. Preserve unrelated successful files; never invent refs. |
 | `append_text` | `path`, `content` | yes | string(path), string | - | Append text content to an existing or new file. A content string containing only a newline is valid. Include the requested newline in `content` when the user asks for a line append. Requires confirmation. |
 | `make_dir` | `path` | yes | string(path) | - | Create directory. Requires confirmation. |
 | `make_dir` | `parents` / `recursive` | no | bool | `true` | Create missing parent directories for mkdir-p style operations. |
