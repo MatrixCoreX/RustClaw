@@ -510,6 +510,12 @@ fn verified_legacy_jobs_requeue_once_with_consent_and_an_audited_model_binding()
         db.execute("INSERT INTO memories(id,user_id,chat_id,user_key,principal_id,channel,role,content,created_at,created_at_ts)
             VALUES (?1,1,2,'fixture-key',?2,'ui',?3,?4,'100',100)", params![id,principal,role,content]).unwrap();
     }
+    // Production jobs pin the effective task/conversation view, not the settings editor view.
+    drop(db);
+    let settings = super::super::settings::resolve_task_memory_settings(&state, &task)
+        .unwrap()
+        .unwrap();
+    let db = state.core.db.get().unwrap();
     let payload = serde_json::from_str(&task.payload_json).unwrap();
     let eligibility = super::super::eligibility::build_turn_eligibility(&task, &payload, &settings);
     let tx = db.unchecked_transaction().unwrap();
@@ -532,7 +538,16 @@ fn verified_legacy_jobs_requeue_once_with_consent_and_an_audited_model_binding()
         model_name='unavailable',attempt=5,error_code='memory_job_execution_failed',retryable=0", []).unwrap();
     drop(db);
     let report = recovery::retry_unavailable(&state, &principal).unwrap();
-    assert_eq!(report["requeued_jobs"], ids.len());
+    assert_eq!(
+        report["requeued_jobs"],
+        ids.len(),
+        "repair report={report}; failures={:?}",
+        recovery::list(&state, &principal)
+            .unwrap()
+            .iter()
+            .map(|job| (&job.error_code, &job.checkpoint_json))
+            .collect::<Vec<_>>()
+    );
     assert_eq!(report["blocked_jobs"], 0);
     assert_eq!(
         recovery::retry_unavailable(&state, &principal).unwrap()["requeued_jobs"],
