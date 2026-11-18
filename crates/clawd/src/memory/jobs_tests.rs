@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use super::*;
 
-fn setup_db() -> Connection {
+pub(super) fn setup_db() -> Connection {
     let db = Connection::open_in_memory().expect("fixture db");
     db.execute_batch(crate::INIT_SQL).expect("base schema");
     crate::db_init::ensure_schedule_schema(&db).expect("schedule schema");
@@ -13,7 +13,7 @@ fn setup_db() -> Connection {
     db
 }
 
-fn fixture_task(task_id: &str) -> crate::ClaimedTask {
+pub(super) fn fixture_task(task_id: &str) -> crate::ClaimedTask {
     crate::ClaimedTask {
         claim_attempt: 1,
         task_id: task_id.to_string(),

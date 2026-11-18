@@ -9,6 +9,8 @@ use sha2::{Digest, Sha256};
 use tracing::{info, warn};
 #[path = "job_recovery.rs"]
 pub(crate) mod recovery;
+#[path = "job_sources.rs"]
+mod sources;
 
 use super::eligibility::{
     build_turn_eligibility, MemoryEligibilityDisposition, MemorySourceCategory,
@@ -1023,23 +1025,17 @@ pub(crate) fn reconcile_missing_turn_jobs(state: &crate::AppState) -> anyhow::Re
         drop(db);
         let task = load_source_task(state, &job)?;
         let db = state.core.db.get().map_err(|error| anyhow!(error))?;
-        let ids = {
-            let mut source_stmt = db.prepare(
-                "SELECT id FROM memories
-                 WHERE principal_id = ?1 AND chat_id = ?2
-                 ORDER BY id DESC LIMIT 2",
-            )?;
-            let rows = source_stmt
-                .query_map(params![job.principal_id, task.chat_id], |row| {
-                    row.get::<_, i64>(0)
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            rows
-        };
+        let ids = sources::verified_ids(&db, &task, &job.principal_id)?;
         drop(db);
-        let user = ids.last().copied();
-        let assistant = ids.first().copied();
-        if !enqueue_turn_memory_jobs(state, &task, user, assistant, false)?.is_empty() {
+        let Some((user, assistant)) = ids else {
+            warn!(
+                task_id = task.task_id,
+                error_code = "memory_job_source_binding_unverified",
+                "memory_job_reconciliation_deferred"
+            );
+            continue;
+        };
+        if !enqueue_turn_memory_jobs(state, &task, Some(user), Some(assistant), false)?.is_empty() {
             repaired += 1;
         }
     }

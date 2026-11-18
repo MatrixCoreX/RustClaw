@@ -64,6 +64,9 @@ pub(crate) fn retry_unavailable(
         job.model_name.clear();
         let repair = (|| -> anyhow::Result<_> {
             let task = load_source_task(state, &job)?;
+            let source_db = state.core.db.get()?;
+            sources::verify_legacy_job(&source_db, &task, &job)?;
+            drop(source_db);
             let settings = super::super::settings::resolve_task_memory_settings(state, &task)?
                 .ok_or_else(|| permanent("memory_job_settings_unavailable"))?;
             anyhow::ensure!(
