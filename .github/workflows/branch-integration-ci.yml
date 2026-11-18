@@ -109,11 +109,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo test --locked -p agent-skill-sdk
-          cargo test --locked -p skill-runner
-          cargo test --locked -p claw-core
+          cargo test --locked -p agent-skill-sdk -p skill-runner -p claw-core -p clawd --no-run
           cargo build --locked -p clawd --bins -p skill-runner --bin skill-runner -p agent-skill-sdk --bin skillctl
-          cargo test --locked -p clawd --bin clawd -- --test-threads=3
+          result=0
+          cargo test --locked -p agent-skill-sdk || result=1
+          cargo test --locked -p skill-runner || result=1
+          cargo test --locked -p claw-core || result=1
+          cargo test --locked -p clawd --bin clawd -- --test-threads=3 || result=1
+          exit "$result"
       - name: Verify real memory project startup and restart
         shell: bash
         run: |

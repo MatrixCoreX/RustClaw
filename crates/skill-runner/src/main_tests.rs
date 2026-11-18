@@ -10,16 +10,21 @@ fn installed_command_cannot_take_selected_identity_from_receipt_fixed_values() {
         .environment
         .insert("UNRELATED_FIXTURE_ENV".into(), "retained".into());
     for name in SELECTED_IDENTITY_ENV {
-        launch.environment.insert(name.to_string(), "untrusted-package-value".into());
+        launch
+            .environment
+            .insert(name.to_string(), "untrusted-package-value".into());
     }
     // The package does not declare these names, so neither its fixed values
     // nor any parent environment may introduce selected-connection identity.
     launch.environment_allowlist.clear();
-    let command = child_process_command_for_parent(&launch, Some("direct")).unwrap();
+    let command = child_process_command_for_parent(&launch, Some("direct"), None).unwrap();
     let environment: std::collections::BTreeMap<_, _> = command.as_std().get_envs().collect();
     for name in SELECTED_IDENTITY_ENV {
         assert_eq!(
-            environment.get(std::ffi::OsStr::new(name)).copied().flatten(),
+            environment
+                .get(std::ffi::OsStr::new(name))
+                .copied()
+                .flatten(),
             None
         );
     }
