@@ -12,6 +12,7 @@ import { createPortal } from "react-dom";
 import { AlertTriangle, Info, X } from "lucide-react";
 
 export interface UiConfirmOptions {
+  signal?: AbortSignal;
   title?: string;
   message: string;
   confirmLabel?: string;
@@ -57,6 +58,7 @@ export function UiDialogProvider({ children }: { children: ReactNode }) {
   const [promptValue, setPromptValue] = useState("");
   const activeRef = useRef<DialogRequest | null>(null);
   const queueRef = useRef<DialogRequest[]>([]);
+  const abortCleanupRef = useRef(new Map<DialogRequest, () => void>());
   const primaryButtonRef = useRef<HTMLButtonElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -67,6 +69,20 @@ export function UiDialogProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const enqueue = useCallback((request: DialogRequest) => {
+    const cancel = () => {
+      abortCleanupRef.current.get(request)?.();
+      abortCleanupRef.current.delete(request);
+      if (request.kind === "confirm") request.resolve(false);
+      else request.resolve(null);
+      if (activeRef.current === request) activate(queueRef.current.shift() ?? null);
+      else queueRef.current = queueRef.current.filter(value => value !== request);
+    };
+    if (request.signal?.aborted) { cancel(); return; }
+    if (request.signal) {
+      const signal = request.signal;
+      signal.addEventListener("abort", cancel, { once: true });
+      abortCleanupRef.current.set(request, () => signal.removeEventListener("abort", cancel));
+    }
     if (activeRef.current) {
       queueRef.current.push(request);
     } else {
@@ -77,6 +93,8 @@ export function UiDialogProvider({ children }: { children: ReactNode }) {
   const finish = useCallback((value: boolean | string | null) => {
     const request = activeRef.current;
     if (!request) return;
+    abortCleanupRef.current.get(request)?.();
+    abortCleanupRef.current.delete(request);
     if (request.kind === "confirm") {
       request.resolve(value === true);
     } else {
@@ -119,6 +137,8 @@ export function UiDialogProvider({ children }: { children: ReactNode }) {
     }
     queueRef.current = [];
     activeRef.current = null;
+    for (const cleanup of abortCleanupRef.current.values()) cleanup();
+    abortCleanupRef.current.clear();
   }, []);
 
   const submitDialog = (event: FormEvent) => {

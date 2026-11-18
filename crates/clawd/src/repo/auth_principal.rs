@@ -25,6 +25,17 @@ pub(crate) fn ensure_principal_identity_schema(db: &Connection) -> anyhow::Resul
     with_identity_transaction(db, ensure_identity_schema_in_transaction)
 }
 
+/// Check readiness without migrating or scanning other credentials.
+pub(crate) fn require_principal_identity_schema(db: &Connection) -> anyhow::Result<()> {
+    let applied = migration_digest(db, PRINCIPAL_MIGRATION_ID)?;
+    let expected = schema_digest();
+    anyhow::ensure!(
+        applied.as_deref() == Some(expected.as_str()),
+        "principal_identity_schema_unavailable"
+    );
+    Ok(())
+}
+
 // An existing transaction remains owned by its caller, which must propagate an
 // error and roll it back. Standalone calls commit only after the entire action.
 pub(crate) fn with_identity_transaction<T>(
@@ -356,6 +367,34 @@ pub(super) fn active_auth_key_identity(
     )
     .optional()
     .map_err(Into::into)
+}
+
+/// Validate this account through the same live key/binding/principal read used
+/// by authentication and return that validated key. This is not authorization
+/// to act for another account.
+pub(crate) fn require_active_principal_credential(
+    db: &Connection,
+    principal_id: &str,
+) -> anyhow::Result<String> {
+    active_principal_credential(db, principal_id)?
+        .ok_or_else(|| anyhow::anyhow!("credential_binding_missing"))
+}
+
+/// Live projection metadata is not authorization to act for another account.
+pub(crate) fn active_principal_credential(
+    db: &Connection,
+    principal_id: &str,
+) -> anyhow::Result<Option<String>> {
+    let mut statement =
+        db.prepare("SELECT user_key FROM auth_keys WHERE principal_id = ?1 AND enabled = 1")?;
+    let mut keys = statement.query([principal_id])?;
+    while let Some(row) = keys.next()? {
+        let key: String = row.get(0)?;
+        if active_auth_key_identity(db, &key)?.is_some_and(|(_, owner)| owner == principal_id) {
+            return Ok(Some(key));
+        }
+    }
+    Ok(None)
 }
 
 pub(crate) fn principal_id_for_user_key(

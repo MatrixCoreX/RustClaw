@@ -95,6 +95,7 @@ mod repair_boundary_inventory;
 mod repair_signal;
 mod repo;
 mod resource_scheduler;
+mod retention_policy;
 mod routing_context;
 mod runtime;
 mod runtime_memory;
@@ -794,7 +795,12 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         memory::scope::ensure_memory_scope_schema(&db)?;
         memory::jobs::ensure_memory_job_schema(&db)?;
         memory::ux::ensure_memory_ux_schema(&db)?;
+        if let Err(error) = memory::project_identity::resolve_project_identity(&db, &workspace_root)
+        {
+            warn!(%error, "memory_project_startup_initialization_unavailable");
+        }
         memory::embedding_jobs::initialize_embedding_runtime(&db, &memory_runtime)?;
+        memory::ensure_retirement_access_schema(&db)?;
         task_context_builder::context_compaction_lifecycle::ensure_context_compaction_lifecycle_schema(&db)?;
         if memory_runtime.hybrid_recall_enabled
             && (memory_runtime.reindex_on_startup
@@ -809,6 +815,8 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
             .map_err(|e| anyhow::anyhow!("get db conn: {e}"))?;
         let key = ensure_bootstrap_admin_key(&db)?;
         seed_channel_bindings(&db, &config)?;
+        memory::quota::initialize_startup_defaults(&db, &memory_runtime, now_ts_u64() as i64)?;
+        memory::retention::initialize_storage_pressure(&db, &memory_runtime, now_ts_u64() as i64)?;
         key
     };
     let skill_storage = Arc::new(skill_storage::SkillStorageRuntime::initialize(
@@ -1240,6 +1248,9 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         policy: crate::PolicyConfig {
             maintenance: config.maintenance.clone(),
             memory: memory_runtime,
+            memory_import_ingress: crate::memory::import_upload::IngressPolicy::from_config(
+                &config.webd,
+            ),
             routing,
             limits: config.limits.clone(),
             llm_cost_governance: config.llm.cost_governance.clone(),

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Database, Download, FileUp, Loader2, RefreshCw, Trash2, Undo2 } from "lucide-react";
+import { Database, Download, Loader2, RefreshCw, Trash2, Undo2 } from "lucide-react";
 
 import { formatUnixDateTime } from "../lib/date-format";
 import {
@@ -20,12 +20,17 @@ import type {
 import type { MemoryListFilters } from "../hooks/useMemoryRuntime";
 import type { KbIdentity } from "../lib/kb-maintenance";
 import { KbMaintenancePanel } from "./KbMaintenancePanel";
+import { MemoryCapacityPanel } from "./MemoryCapacityPanel";
+import { MemoryImportControls } from "./MemoryImportControls";
+import { ExpandableMemoryText } from "./ExpandableMemoryText";
+import type { MemoryImportProgress } from "../lib/memory-import-upload";
 
 type UiLanguage = "zh" | "en";
 type ClearScope = "recent" | "all";
 type Translate = (zh: string, en: string) => string;
 
 export interface MemoryPageProps {
+  requestScope: string;
   lang: UiLanguage;
   t: Translate;
   memoryLoading: boolean;
@@ -41,6 +46,7 @@ export interface MemoryPageProps {
   memoryFacts: MemoryFactItem[];
   memoryRecent: MemoryRecentItem[];
   memoryActionLoading: string | null;
+  memoryImportProgress: MemoryImportProgress | null;
   memorySettingsSaving: boolean;
   memoryClearScope: ClearScope;
   memoryPage: MemoryPageResult | null;
@@ -61,6 +67,8 @@ export interface MemoryPageProps {
   onUndoMemoryMutation: () => void | Promise<void>;
   onExportMemory: (format?: "json" | "markdown") => void | Promise<void>;
   onImportMemory: (file: File) => void | Promise<void>;
+  onResumeMemoryImport: () => void | Promise<void>;
+  onCancelMemoryImport: () => void | Promise<void>;
   onClearMemoryScope: () => void | Promise<void>;
   onUpdateMemorySetting: (kind: "use" | "generate", enabled: boolean) => void | Promise<void>;
   onUpdateMemoryExternalPolicy: (policy: "exclude" | "evidence_only" | "allow") => void | Promise<void>;
@@ -74,6 +82,7 @@ export interface MemoryPageProps {
 }
 
 export function MemoryPage({
+  requestScope,
   lang,
   t,
   memoryLoading,
@@ -89,6 +98,7 @@ export function MemoryPage({
   memoryFacts,
   memoryRecent,
   memoryActionLoading,
+  memoryImportProgress,
   memorySettingsSaving,
   memoryClearScope,
   memoryPage,
@@ -105,6 +115,8 @@ export function MemoryPage({
   onUndoMemoryMutation,
   onExportMemory,
   onImportMemory,
+  onResumeMemoryImport,
+  onCancelMemoryImport,
   onClearMemoryScope,
   onUpdateMemorySetting,
   onUpdateMemoryExternalPolicy,
@@ -184,6 +196,8 @@ export function MemoryPage({
         </div>
       </div>
 
+      <MemoryCapacityPanel t={t} lang={lang} requestScope={requestScope} settings={memorySettings}
+        scope={memorySettingScope} conversationId={activeConversationId} apiFetch={apiFetch} />
       <KbMaintenancePanel t={t} apiFetch={apiFetch} identity={kbIdentity} />
 
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
@@ -211,21 +225,8 @@ export function MemoryPage({
               <Download className="h-3.5 w-3.5" />
               {t("导出 Markdown", "Export Markdown")}
             </button>
-            <label className="theme-secondary-btn cursor-pointer px-3 py-2 text-xs">
-              <FileUp className="h-3.5 w-3.5" />
-              {t("导入预检", "Preview import")}
-              <input
-                type="file"
-                accept="application/json,.json"
-                className="sr-only"
-                disabled={memoryActionLoading === "import"}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void onImportMemory(file);
-                  event.currentTarget.value = "";
-                }}
-              />
-            </label>
+            <MemoryImportControls t={t} progress={memoryImportProgress} onImport={onImportMemory}
+              onResume={onResumeMemoryImport} onCancel={onCancelMemoryImport} />
           </div>
         </div>
         <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-7">
@@ -293,7 +294,7 @@ export function MemoryPage({
                   </div>
                 </div>
               ) : (
-                <p className="mt-3 break-words text-sm leading-6 text-white/80">{item.content}</p>
+                <ExpandableMemoryText text={item.content} t={t} className="mt-3 text-sm leading-6 text-white/80" />
               )}
               <p className="mt-3 text-[11px] leading-5 text-white/40">
                 {t("来源", "Source")}: {item.source || "--"} · {t("生成方式", "Origin")}: {item.origin || "--"}<br />
@@ -548,7 +549,7 @@ export function MemoryPage({
                       </span>
                       <span className="text-[10px] text-white/35">{Math.round(item.confidence * 100)}%</span>
                     </div>
-                    <p className="mt-2 break-words text-sm leading-6 text-white/80">{item.fact_text || item.fact_value}</p>
+                    <ExpandableMemoryText text={item.fact_text || item.fact_value} t={t} className="mt-2 text-sm leading-6 text-white/80" />
                     <p className="mt-2 text-[11px] text-white/40">
                       {item.fact_key} · {t("更新", "Updated")}: {timeLabel(item.updated_at_ts)}
                       {item.expires_at_ts ? ` · ${t("过期", "Expires")}: ${timeLabel(item.expires_at_ts)}` : ""}

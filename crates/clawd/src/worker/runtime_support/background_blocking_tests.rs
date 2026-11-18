@@ -11,10 +11,12 @@ async fn observe_database_wait(stage: &str) {
         .max_size(1)
         .build(r2d2_sqlite::SqliteConnectionManager::memory())
         .unwrap();
-    let state = state.with_seeded_db_schema();
+    let mut state = state.with_seeded_db_schema();
+    super::fixtures::isolate_workspace(&mut state);
     {
         let db = state.core.db.get().unwrap();
         crate::memory::indexing::ensure_retrieval_schema(&db).unwrap();
+        crate::memory::scope::ensure_memory_scope_schema(&db).unwrap();
         crate::repo::ensure_channel_delivery_outbox_schema(&db).unwrap();
         crate::repo::ensure_conversation_reply_item_schema(&db).unwrap();
     }

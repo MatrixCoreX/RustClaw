@@ -299,6 +299,7 @@ impl CoreServices {
 pub(crate) struct PolicyConfig {
     pub(crate) maintenance: MaintenanceConfig,
     pub(crate) memory: MemoryConfig,
+    pub(crate) memory_import_ingress: crate::memory::import_upload::IngressPolicy,
     pub(crate) routing: RoutingConfig,
     pub(crate) limits: claw_core::config::LimitsConfig,
     pub(crate) llm_cost_governance: claw_core::config::LlmCostGovernanceConfig,
@@ -334,6 +335,9 @@ impl PolicyConfig {
         Self {
             maintenance: MaintenanceConfig::default(),
             memory: MemoryConfig::default(),
+            memory_import_ingress: crate::memory::import_upload::IngressPolicy::from_config(
+                &claw_core::config::WebdConfig::default(),
+            ),
             routing: RoutingConfig::default(),
             limits: claw_core::config::LimitsConfig::default(),
             llm_cost_governance: claw_core::config::LlmCostGovernanceConfig::default(),
@@ -935,6 +939,9 @@ impl AppState {
         self.policy = PolicyConfig {
             maintenance: config.maintenance.clone(),
             memory: memory_runtime,
+            memory_import_ingress: crate::memory::import_upload::IngressPolicy::from_config(
+                &config.webd,
+            ),
             routing: config.routing.clone(),
             limits: config.limits.clone(),
             llm_cost_governance: config.llm.cost_governance.clone(),
@@ -995,6 +1002,22 @@ impl AppState {
         crate::repo::child_task_graph::ensure_child_task_graph_schema(&conn)
             .expect("child_task_graph_schema_test");
         crate::repo::task_plan::ensure_task_plan_schema(&conn).expect("task_plan_schema_test");
+        crate::memory::jobs::ensure_memory_job_schema(&conn)
+            .expect("memory startup schema for test runtime");
+        crate::memory::ux::ensure_memory_ux_schema(&conn)
+            .expect("memory UX startup schema for test runtime");
+        crate::memory::quota::initialize_startup_defaults(
+            &conn,
+            &self.policy.memory,
+            crate::now_ts_u64() as i64,
+        )
+        .expect("memory quota startup defaults for test runtime");
+        crate::memory::retention::initialize_storage_pressure(
+            &conn,
+            &self.policy.memory,
+            crate::now_ts_u64() as i64,
+        )
+        .expect("configured memory storage startup for test runtime");
         drop(conn);
         self
     }

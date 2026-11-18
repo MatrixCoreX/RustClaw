@@ -352,15 +352,768 @@ jobs:
           cargo test --locked -p clawd --bin clawd identity_lifecycle -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd repo::auth:: -- --test-threads=1 --nocapture --skip identity_lifecycle
           cargo test --locked -p clawd --bin clawd principal_ownership -- --test-threads=1 --nocapture
+      - name: Test feedback mutation atomicity without hiding failures
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::feedback_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::feedback_tests:: \
+            --require failures::incorrect_without_content_does_not_commit_feedback \
+            --require failures::blank_correction_does_not_commit_feedback \
+            --require failures::unsupported_correction_does_not_commit_feedback \
+            --require failures::replacement_insert_failure_rolls_back_feedback_and_supersession \
+            --require failures::revision_insert_failure_rolls_back_feedback_and_replacement \
+            --require failures::recall_disable_failure_rolls_back_feedback \
+            --require failures::feedback_insert_failure_cannot_publish_a_correction \
+            --require success::fact_correction_commits_feedback_replacement_and_reversible_revision_together \
+            --require success::preference_correction_preserves_feedback_and_existing_revision_contract \
+            --require success::irrelevant_feedback_records_each_event_without_mutating_content \
+            --require success::do_not_use_commits_feedback_and_existing_recall_disable_result \
+            --require success::stale_revision_is_rejected_without_feedback_or_mutation \
+            --require success::another_principals_memory_cannot_receive_feedback \
+            --require success::nonexistent_memory_cannot_receive_feedback \
+            --require success::read_only_connection_cannot_partially_record_feedback
+          cargo test --locked -p clawd --bin clawd memory::ux::feedback_tests:: -- --test-threads=1 --nocapture
+      - name: Test projection transactions without losing parent ownership
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::projection_transaction::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::projection_transaction::tests:: \
+            --require standalone_failure_rolls_back_and_releases_the_writer \
+            --require nested_failure_caught_by_parent_rolls_back_only_its_local_effects \
+            --require nested_success_does_not_commit_its_parent_transaction \
+            --require nested_panic_restores_local_state_without_ending_the_parent
+          cargo test --locked -p clawd --bin clawd memory::projection_transaction::tests:: -- --test-threads=1 --nocapture
+      - name: Test recall mutation indexes without hiding failures
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::recall_contract_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::recall_contract_tests:: \
+            --require corrections::fact_correction_replaces_index_and_fts_without_retaining_old_content \
+            --require corrections::preference_correction_replaces_index_and_fts_and_preserves_other_owners \
+            --require corrections::fact_correction_undo_restores_only_original_retrieval \
+            --require disabling::fact_do_not_use_removes_index_and_fts_and_survives_rebuild \
+            --require disabling::preference_do_not_use_survives_rebuild_and_preserves_other_owners \
+            --require disabling::recent_do_not_use_survives_rebuild_without_deleting_transcript \
+            --require corrections::failed_replacement_index_insert_rolls_back_canonical_revision_and_feedback \
+            --require corrections::stale_correction_preserves_all_owners_indexes_and_canonical_rows \
+            --require disabling::rebuilding_cannot_reenable_a_preference_disabled_by_explicit_feedback \
+            --require disabling::rebuilding_cannot_reenable_a_transcript_disabled_by_explicit_feedback \
+            --require incremental::incremental_preference_indexing_does_not_reenable_explicitly_disabled_content \
+            --require incremental::incremental_transcript_indexing_does_not_reenable_explicitly_disabled_content \
+            --require incremental::incremental_fact_indexing_does_not_reenable_explicitly_disabled_content \
+            --require boundaries::missing_feedback_ledger_rejects_index_refresh_without_effects_or_read_repair \
+            --require boundaries::failed_fts_insert_rolls_back_feedback_canonical_revision_and_projection \
+            --require boundaries::absent_optional_fts_does_not_block_correction_or_initialize_a_table \
+            --require boundaries::correcting_preference_preserves_another_scope_of_the_same_principal \
+            --require boundaries::rotating_admin_credential_does_not_make_owned_canonical_facts_uncorrectable \
+            --require boundaries::rebuild_after_credential_rotation_preserves_every_owned_canonical_kind \
+            --require incremental::stale_incremental_preference_payload_cannot_overwrite_a_confirmed_correction \
+            --require derived::disabled_fact_retires_queued_embeddings \
+            --require derived::disabled_preference_retires_queued_embeddings \
+            --require derived::disabled_transcript_retires_queued_embeddings \
+            --require derived::disabled_fact_deactivates_previously_completed_vectors \
+            --require derived::disabled_preference_deactivates_previously_completed_vectors \
+            --require derived::disabled_transcript_deactivates_previously_completed_vectors \
+            --require derived::corrected_fact_retires_its_old_completed_vectors \
+            --require derived::corrected_preference_retires_its_old_completed_vectors \
+            --require derived::suppression_keeps_another_owners_completed_vectors_and_pending_work \
+            --require derived::missing_index_source_cannot_produce_a_new_active_vector
+          cargo test --locked -p clawd --bin clawd memory::ux::recall_contract_tests:: -- --test-threads=1 --nocapture
+      - name: Test inflight embedding recall and lease fences
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::recall_races:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::capacity_http_tests::recall_races:: \
+            --require recall_suppression_after_request_cannot_reactivate_a_late_vector \
+            --require canonical_deletion_after_request_cannot_create_an_active_orphan_vector \
+            --require canonical_correction_after_request_cannot_commit_an_obsolete_vector \
+            --require remote_consent_revocation_after_request_cannot_commit_a_late_vector \
+            --require replacing_a_worker_lease_after_request_prevents_the_old_vector_commit \
+            --require projection_digest_change_after_request_prevents_a_stale_vector_commit \
+            --require unchanged_inflight_source_and_lease_still_commit_once \
+            --require another_owners_suppression_does_not_discard_the_current_response
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::recall_races:: -- --test-threads=1 --nocapture
+      - name: Test embedding response publication and recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::response_commit:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::capacity_http_tests::response_commit:: \
+            --require failed_ack_rolls_back_vector_and_recovers_response_without_another_provider_call \
+            --require received_response_is_discarded_if_consent_is_revoked_before_recovery \
+            --require a_live_replacement_lease_cannot_be_consumed_by_response_recovery \
+            --require an_unpersisted_provider_response_is_not_blindly_replayed_after_lease_expiry \
+            --require expired_inflight_lease_cannot_publish_a_vector_or_completion_receipt \
+            --require effective_consent_is_rechecked_without_relying_on_a_cancel_signal \
+            --require canonical_content_is_rechecked_even_if_its_index_row_did_not_change \
+            --require one_failed_publication_does_not_roll_back_valid_batch_peers
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::response_commit:: -- --test-threads=1 --nocapture
+      - name: Test terminal snapshot build maintenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::snapshot_maintenance:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::capacity_http_tests::snapshot_maintenance:: \
+            --require unknown_response_expiry_allows_explicit_rebuild_without_provider_replay \
+            --require revoked_queued_build_is_retired_by_paused_maintenance_without_outbound_work \
+            --require terminal_build_cleanup_preserves_active_and_other_owner_profile_generation_snapshots \
+            --require healthy_paused_build_poll_stays_read_only_under_an_independent_writer
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::snapshot_maintenance:: -- --test-threads=1 --nocapture
+      - name: Test original request memory mutation authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd http::memory_routes::actor_fence_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_routes::actor_fence_tests:: \
+            --require revoked_original_key_cannot_correct_through_another_live_account_key \
+            --require revoked_original_key_cannot_record_feedback_through_another_live_account_key \
+            --require revoked_original_key_cannot_delete_through_another_live_account_key \
+            --require revoked_original_key_cannot_undo_through_another_live_account_key \
+            --require revoked_original_key_cannot_persist_an_import_preview \
+            --require revoked_original_key_cannot_confirm_an_existing_import_preview \
+            --require revoked_original_key_cannot_clear_owned_memory \
+            --require revoked_original_binding_cannot_borrow_a_surviving_credential \
+            --require changed_original_role_is_rejected_at_the_actual_writer \
+            --require reassigned_original_credential_cannot_mutate_either_account \
+            --require unchanged_original_identity_still_commits_the_real_correction \
+            --require final_identity_loss_rolls_back_canonical_projection_audit_and_identity_changes \
+            --require nested_correction_failure_preserves_private_rows_and_the_callers_transaction \
+            --require nested_import_failure_preserves_preview_and_the_callers_transaction
+          cargo test --locked -p clawd --bin clawd http::memory_routes::actor_fence_tests:: -- --test-threads=1 --nocapture
+      - name: Test retained memory vector policy and read-only status fences
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd http::memory_routes::vector_policy_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_routes::vector_policy_tests:: \
+            --require index_status_returns_the_account_policy_not_a_conversation_policy \
+            --require index_policy_snapshot_keeps_stale_rejection_for_every_action \
+            --require index_policy_status_still_requires_authentication
+          cargo test --locked -p clawd --bin clawd http::memory_routes::vector_policy_tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd http::memory_routes::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_routes::tests:: \
+            --require vector_status_remains_read_only_while_another_connection_holds_the_writer_lock
+          cargo test --locked -p clawd --bin clawd http::memory_routes::tests:: -- --test-threads=1 --nocapture
+      - name: Test private maintenance fixtures and retained cleanup contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd worker::runtime_support::background_workers::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix worker::runtime_support::background_workers::tests:: \
+            --require terminal_delivery_retry_delay_is_bounded_and_increases \
+            --require cleanup_removes_cost_ledger_rows_after_task_retention_removes_owner \
+            --require cleanup_preserves_conversation_tasks_for_user_controlled_history \
+            --require cleanup_limits_each_expired_task_pass_to_a_fixed_batch \
+            --require cleanup_preserves_active_nonconversation_tasks_under_age_and_count_limits \
+            --require cleanup_preserves_cancellation_until_execution_settles \
+            --require cleanup_preserves_unfinished_terminal_delivery_under_both_policies \
+            --require cleanup_preserves_pending_conversation_replies_until_delivery_settles \
+            --require cleanup_preserves_scheduled_resume_anchors \
+            --require cleanup_preserves_child_graph_owners_and_results \
+            --require scheduled_wakeup_resumes_waiting_thread_without_enqueuing_duplicate_task \
+            --require scheduled_wakeup_enqueues_new_thread_after_previous_task_is_terminal \
+            --require legacy_scheduled_job_revalidates_admin_authority_on_each_wakeup \
+            --require blocking::cleanup_pool_wait_keeps_async_runtime_responsive \
+            --require blocking::schedule_pool_wait_keeps_async_runtime_responsive \
+            --require blocking::heartbeat_pool_wait_keeps_async_runtime_responsive \
+            --require blocking::blocking_ticks_preserve_results_errors_and_panics \
+            --require blocking::cancelled_waiter_does_not_replay_started_blocking_work \
+            --require blocking::delayed_heartbeat_cannot_renew_a_cancelled_or_reclaimed_task \
+            --require blocking::awaited_ticks_have_only_one_in_flight_operation_per_loop \
+            --require blocking::resume_lease::resume_lease_pool_wait_keeps_async_runtime_responsive \
+            --require blocking::resume_lease::running_execution_renews_its_complete_claim_chain_more_than_once \
+            --require blocking::resume_lease::cancellation_during_execution_loses_the_lease_without_returning_completion \
+            --require blocking::resume_lease::expired_claim_does_not_poll_the_execution_future \
+            --require duration_bounds::huge_task_and_audit_durations_do_not_delete_retained_rows \
+            --require duration_bounds::ordinary_and_zero_task_and_audit_durations_still_remove_expired_rows \
+            --require fixtures::cleanup_fixture_workspaces_are_private_and_distinct \
+            --require fixtures::cleanup_fixture_removes_only_its_own_orphan_artifacts
+          cargo test --locked -p clawd --bin clawd worker::runtime_support::background_workers::tests:: -- --test-threads=1 --nocapture
+      - name: Test retention duration overflow without arbitrary caps
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd retention_policy::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix retention_policy::tests:: \
+            --require ordinary_and_zero_days_preserve_exact_cutoffs \
+            --require all_u64_durations_match_wide_reference_without_future_cutoffs \
+            --require increasing_retention_never_moves_cutoff_forward \
+            --require duration_beyond_timestamp_range_saturates_to_oldest_timestamp
+          cargo test --locked -p clawd --bin clawd retention_policy::tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd memory::retention::tests::duration_bounds:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::retention::tests::duration_bounds:: \
+            --require all_memory_retention_kinds_preserve_fresh_rows_for_large_durations \
+            --require ordinary_and_zero_durations_keep_the_strict_cutoff_boundary
+          cargo test --locked -p clawd --bin clawd memory::retention::tests::duration_bounds:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd worker::runtime_support::background_workers::tests::duration_bounds:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix worker::runtime_support::background_workers::tests::duration_bounds:: \
+            --require huge_task_and_audit_durations_do_not_delete_retained_rows \
+            --require ordinary_and_zero_task_and_audit_durations_still_remove_expired_rows
+          cargo test --locked -p clawd --bin clawd worker::runtime_support::background_workers::tests::duration_bounds:: -- --test-threads=1 --nocapture
+      - name: Verify patched bundled SQLite and all direct consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked -p clawd -p clawcli -p rss-fetch-skill -p db-basic-skill -p kb-skill -p fs-search-skill -p crypto-skill
+          cargo test --locked -p clawd --bin clawd db_init::sqlite_security_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix db_init::sqlite_security_tests:: \
+            --require bundled_sqlite_includes_wal_reset_fix \
+            --require unsigned_sqlite_conversions_remain_checked
+          cargo test --locked -p clawd --bin clawd db_init::sqlite_security_tests:: -- --test-threads=1 --nocapture
+      - name: Test SQLite file bootstrap before parallel pool connections
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd db_init::pool_bootstrap_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix db_init::pool_bootstrap_tests:: \
+            --require fresh_file_is_wal_before_parallel_pool_connections \
+            --require rollback_database_is_upgraded_before_pool_connections_without_losing_rows \
+            --require pooled_connection_initialization_does_not_repeat_journal_assignment \
+            --require verified_wal_bootstrap_preserves_an_active_writer_and_rows \
+            --require pooled_settings_keep_timeout_foreign_keys_and_constrained_memory_policy \
+            --require corrupt_file_is_rejected_before_any_pooled_connection_without_rewriting_it \
+            --require parallel_connections_keep_wal_and_each_connections_local_settings
+          cargo test --locked -p clawd --bin clawd db_init::pool_bootstrap_tests:: -- --test-threads=1 --nocapture
+      - name: Test initialized embedding schema writer availability
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::schema_read_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::schema_read_tests:: \
+            --require initialized_vector_schema_does_not_acquire_writer \
+            --require initialized_embedding_controls_do_not_acquire_writer \
+            --require circuit_status_read_does_not_acquire_writer \
+            --require vector_migration_digest_mismatch_is_rejected_without_writing \
+            --require control_migration_digest_mismatch_is_rejected_without_writing \
+            --require missing_migration_still_requires_real_write_admission \
+            --require missing_migration_is_applied_after_writer_release
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::schema_read_tests:: -- --test-threads=1 --nocapture
+      - name: Test remaining memory write authority and policy fences
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd http::memory_routes::write_fence_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_routes::write_fence_tests:: \
+            --require revoked_key_cannot_commit_queued_settings \
+            --require unchanged_identity_can_commit_real_settings \
+            --require revoked_key_cannot_commit_queued_reindex \
+            --require unchanged_identity_can_commit_real_reindex \
+            --require revoked_key_cannot_commit_queued_pause \
+            --require unchanged_identity_can_commit_real_pause \
+            --require revoked_key_cannot_commit_queued_resume \
+            --require unchanged_identity_can_commit_real_resume \
+            --require revoked_key_cannot_commit_queued_cancel \
+            --require unchanged_identity_can_commit_real_cancel \
+            --require revoked_key_cannot_commit_queued_legacy_delete \
+            --require unchanged_identity_can_commit_real_legacy_delete \
+            --require revoked_key_cannot_commit_queued_legacy_expire \
+            --require unchanged_identity_can_commit_real_legacy_expire \
+            --require revoked_key_cannot_commit_queued_legacy_clear \
+            --require unchanged_identity_can_commit_real_legacy_clear \
+            --require revoked_key_cannot_commit_queued_project_link \
+            --require unchanged_identity_can_commit_real_project_link \
+            --require revoked_key_cannot_commit_queued_project_unlink \
+            --require unchanged_identity_can_commit_real_project_unlink \
+            --require changed_original_binding_cannot_commit_settings \
+            --require changed_original_role_cannot_commit_settings \
+            --require changed_original_principal_cannot_commit_settings \
+            --require stale_policy_at_writer_rejects_settings_without_partial_effects \
+            --require stale_policy_at_writer_rejects_reindex_without_partial_effects \
+            --require stale_policy_at_writer_rejects_pause_without_partial_effects \
+            --require stale_policy_at_writer_rejects_resume_without_partial_effects \
+            --require stale_policy_at_writer_rejects_cancel_without_partial_effects \
+            --require final_key_revocation_rolls_back_settings_and_avoids_false_audit \
+            --require late_sql_failure_rolls_back_reindex_effects \
+            --require late_sql_failure_rolls_back_cancel_effects \
+            --require late_sql_failure_rolls_back_project_link_effects \
+            --require empty_reindex_can_activate_inside_a_parent_transaction_without_committing_it
+          cargo test --locked -p clawd --bin clawd http::memory_routes::write_fence_tests:: -- --test-threads=1 --nocapture
+      - name: Test rejected reindex startup and no-side-effect contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::tests::remote_reindex_requires_explicit_consent_before_outbound_jobs_exist -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::tests:: \
+            --require remote_reindex_requires_explicit_consent_before_outbound_jobs_exist
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::tests::remote_reindex_requires_explicit_consent_before_outbound_jobs_exist -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::rejected_startup_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::rejected_startup_tests:: \
+            --require denied_reindex_does_not_install_schema_receipts_or_profile_state
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::rejected_startup_tests:: -- --test-threads=1 --nocapture
+      - name: Test lazy memory domain sampling and fresh observations
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::availability::sampling_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::availability::sampling_tests:: \
+            --require missing_state_ordinary_read_skips_domain_scan_without_repair \
+            --require unknown_state_ordinary_read_skips_domain_scan_without_normalizing \
+            --require missing_policy_ordinary_read_skips_domain_scan_without_inserting_defaults \
+            --require damaged_policy_ordinary_read_skips_domain_scan_without_rewriting_policy \
+            --require unbound_explicit_stop_ordinary_read_skips_domain_scan \
+            --require healthy_ordinary_read_samples_once_without_exposing_global_bytes_or_path \
+            --require healthy_admin_read_reuses_one_actual_sample_for_decision_and_diagnostics \
+            --require admin_missing_policy_still_samples_once_for_read_only_diagnostics \
+            --require a_later_observation_resamples_changed_storage_instead_of_reusing_old_bytes \
+            --require failed_actual_measurement_is_shared_once_and_a_later_read_can_recover
+          cargo test --locked -p clawd --bin clawd memory::availability::sampling_tests:: -- --test-threads=1 --nocapture
+      - name: Test manual memory growth availability and read-only HTTP projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::growth_availability_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::growth_availability_tests:: \
+            --require unrelated_main_growth_can_pause_background_without_blocking_manual_content \
+            --require source_quota_exhaustion_does_not_become_manual_domain_exhaustion \
+            --require missing_budget_is_read_only_unavailability_and_actual_growth_rejection \
+            --require damaged_budget_has_typed_projection_and_is_not_normalized \
+            --require actual_domain_limit_reports_blocked_without_disabling_recovery \
+            --require ordinary_projection_keeps_global_manual_limit_and_measurement_private \
+            --require invalid_state_or_policy_is_rejected_without_sampling_domains \
+            --require exact_allocation_limit_distinguishes_completion_from_new_growth
+          cargo test --locked -p clawd --bin clawd memory::ux::growth_availability_tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd http::memory_routes::capacity::growth_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_routes::capacity::growth_tests:: \
+            --require ordinary_http_response_has_manual_decision_without_global_limit_or_credentials \
+            --require absent_budget_remains_absent_after_authenticated_availability_read \
+            --require missing_source_quota_does_not_repair_policy_or_hide_manual_domain_state \
+            --require invalid_budget_is_visible_but_not_normalized_by_http_read
+          cargo test --locked -p clawd --bin clawd http::memory_routes::capacity::growth_tests:: -- --test-threads=1 --nocapture
+      - name: Test configured memory budget and source-only quota contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::budget_policy_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::budget_policy_tests:: \
+            --require explicit_configuration_roundtrips_u64_without_another_default \
+            --require missing_budget_row_rejects_growth_without_recreating_it \
+            --require invalid_budget_rejects_growth_without_normalizing_it \
+            --require missing_marker_cannot_adopt_an_owned_budget_on_restart \
+            --require restart_updates_only_configuration_projection_and_pressure \
+            --require crossing_actual_domain_budget_rolls_back_every_private_effect \
+            --require late_budget_corruption_rolls_back_only_nested_work \
+            --require missing_budget_allows_export_duplicate_preview_and_deletion \
+            --require source_quota_exhaustion_does_not_charge_canonical_facts \
+            --require source_undo_uses_utf8_bytes_and_keeps_receipt_until_room_exists \
+            --require source_undo_rechecks_actual_rows_not_stale_usage_counters \
+            --require failed_refresh_rolls_back_pressure_and_budget_together
+          cargo test --locked -p clawd --bin clawd memory::ux::budget_policy_tests:: -- --test-threads=1 --nocapture
+      - name: Test invalid capacity state admission and recovery controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::growth_state_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::growth_state_tests:: \
+            --require missing_state_preview_does_not_store_private_payload \
+            --require unknown_state_confirmation_retains_preview_for_explicit_retry \
+            --require incorrect_feedback_rolls_back_its_record_when_state_is_unknown \
+            --require unknown_state_deleted_content_restore_keeps_undo_receipt \
+            --require unknown_state_preference_undo_to_smaller_content_still_succeeds \
+            --require unknown_state_fact_undo_releases_replacement_without_losing_history \
+            --require suppression_feedback_still_works_with_unknown_capacity \
+            --require late_state_corruption_rolls_back_only_the_nested_correction
+          cargo test --locked -p clawd --bin clawd memory::ux::growth_state_tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd memory::ux::admission_contract_tests::missing_pressure_correction_fails_closed_without_repairing_the_observation -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::admission_contract_tests:: \
+            --require missing_pressure_correction_fails_closed_without_repairing_the_observation
+          cargo test --locked -p clawd --bin clawd memory::ux::admission_contract_tests::missing_pressure_correction_fails_closed_without_repairing_the_observation -- --test-threads=1 --nocapture
+      - name: Test actual memory domain budget and effect contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::budget_contract_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::budget_contract_tests:: \
+            --require growth::actual_domain_budget_rejects_private_correction_growth \
+            --require growth::actual_domain_budget_rejects_new_private_preview_growth \
+            --require growth::actual_domain_budget_rejects_confirmation_preserving_retryable_preview \
+            --require growth::preference_undo_to_larger_original_is_growth_without_receipt_loss \
+            --require growth::unknown_storage_state_rejects_private_growth_without_read_repair \
+            --require controls::unrelated_main_database_growth_does_not_reject_memory_growth_below_domain_budget \
+            --require controls::duplicate_only_and_empty_previews_are_metadata_not_private_payload_growth \
+            --require controls::existing_preview_reuse_under_pressure_does_not_write_or_consume_receipt \
+            --require controls::confirmation_after_competing_import_only_updates_metadata \
+            --require controls::fact_correction_undo_releases_replacement_and_preserves_original_history \
+            --require controls::preference_undo_to_smaller_original_is_releasing \
+            --require controls::unknown_state_still_allows_export_and_user_requested_content_deletion \
+            --require controls::host_available_observation_is_independent_of_main_pages_and_domain_budget
+          cargo test --locked -p clawd --bin clawd memory::ux::budget_contract_tests:: -- --test-threads=1 --nocapture
+      - name: Test recall projection liveness and cross-principal read effects
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::vector_store::recall_liveness_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::vector_store::recall_liveness_tests:: \
+            --require nearest_excludes_missing_projection_before_top_k_without_cleanup \
+            --require nearest_excludes_mismatched_owner_and_scope_before_top_k \
+            --require nearest_filters_orphans_while_an_independent_wal_writer_is_held \
+            --require ordinary_recall_does_not_mutate_another_principals_orphan_vectors \
+            --require warmed_ordinary_recall_does_not_attempt_an_independent_wal_writer \
+            --require background_maintenance_preserves_canonical_fact_and_retires_only_orphans \
+            --require background_maintenance_retires_fact_projection_owned_by_the_wrong_principal \
+            --require failed_orphan_maintenance_rolls_back_other_retention_deletions \
+            --require orphan_maintenance_does_not_install_an_uninitialized_optional_pipeline
+          cargo test --locked -p clawd --bin clawd memory::vector_store::recall_liveness_tests:: -- --test-threads=1 --nocapture
+      - name: Test embedding claims across busy and unserved owners
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::claim_fairness_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::claim_fairness_tests:: \
+            --require queued_unserved_owner_is_not_hidden_by_a_busy_older_owner \
+            --require paused_unserved_owner_is_not_claimed_for_fairness \
+            --require circuit_blocked_unserved_owner_is_not_claimed_for_fairness \
+            --require fairness_order_does_not_rescan_running_population_per_queued_job
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::claim_fairness_tests:: -- --test-threads=1 --nocapture
+      - name: Test read-only recall with due canonical facts
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::facts::recall_liveness_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::facts::recall_liveness_tests:: \
+            --require ordinary_scoped_recall_does_not_expire_another_principals_fact \
+            --require warmed_scoped_recall_with_foreign_expiry_does_not_attempt_a_wal_writer \
+            --require own_expired_fact_is_hidden_without_read_time_canonical_mutation \
+            --require background_maintenance_expires_due_fact_and_retires_its_vector \
+            --require failed_expiry_maintenance_rolls_back_fact_projection_and_source_deletions \
+            --require nearest_excludes_expired_canonical_fact_before_top_k_without_read_repair \
+            --require legacy_fact_expiry_filter_preserves_the_unscoped_schema_without_read_repair \
+            --require canonical_fact_expiry_filter_avoids_owner_population_cross_product \
+            --require indexed_fact_filter_preserves_exact_reference_owner_and_expiry_semantics
+          cargo test --locked -p clawd --bin clawd memory::facts::recall_liveness_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         run: |
           set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::availability:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd http::memory_routes::capacity:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd memory::quota:: -- --test-threads=1 --nocapture
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd skills::builtin::builtin_memory_store:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix skills::builtin::builtin_memory_store::tests:: \
+            --require save_is_effectively_once_and_search_returns_only_opaque_identity \
+            --require conversation_scope_isolated_and_child_mutation_is_denied \
+            --require pagination_scope_revision_forget_and_disabled_generation_are_enforced \
+            --require builtin_saved_fact_can_be_deleted_with_its_revision_and_index \
+            --require consistency::healthy_fact_is_not_reported_or_deleted_as_orphan \
+            --require consistency::repair_removes_only_the_actual_orphan_and_preserves_other_owners
+          cargo test --locked -p clawd --bin clawd skills::builtin::builtin_memory_store:: -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd memory::retention -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd memory:: -- --test-threads=1 --nocapture
       - name: Test memory vector status policy and scoped controls
         run: |
           set -euo pipefail
           cargo test --locked -p clawd --bin clawd http::memory_routes:: -- --test-threads=1 --nocapture
+      - name: Test capacity read authentication snapshot contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd http::memory_capacity_read_race_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_capacity_read_race_tests:: \
+            --require credential_revoked_after_authentication_does_not_return_later_private_state \
+            --require binding_revoked_after_authentication_does_not_return_later_private_state \
+            --require role_downgraded_after_authentication_does_not_return_later_admin_metrics \
+            --require principal_reassigned_after_authentication_does_not_return_previous_owner_state \
+            --require unchanged_user_still_reads_own_state_after_another_credential_changes \
+            --require unchanged_admin_still_reads_current_global_diagnostics_without_mutating_storage
+          cargo test --locked -p clawd --bin clawd http::memory_capacity_read_race_tests:: -- --test-threads=1 --nocapture
+      - name: Test memory read boundary authentication contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd http::memory_read_boundary_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_read_boundary_tests:: \
+            --require overview::credential_revoked \
+            --require overview::binding_revoked \
+            --require overview::role_downgraded \
+            --require overview::principal_reassigned \
+            --require overview::unchanged_user_other_key_changed \
+            --require overview::unchanged_admin \
+            --require settings::credential_revoked \
+            --require settings::binding_revoked \
+            --require settings::role_downgraded \
+            --require settings::principal_reassigned \
+            --require settings::unchanged_user_other_key_changed \
+            --require settings::unchanged_admin \
+            --require preferences::credential_revoked \
+            --require preferences::binding_revoked \
+            --require preferences::role_downgraded \
+            --require preferences::principal_reassigned \
+            --require preferences::unchanged_user_other_key_changed \
+            --require preferences::unchanged_admin \
+            --require facts::credential_revoked \
+            --require facts::binding_revoked \
+            --require facts::role_downgraded \
+            --require facts::principal_reassigned \
+            --require facts::unchanged_user_other_key_changed \
+            --require facts::unchanged_admin \
+            --require recent::credential_revoked \
+            --require recent::binding_revoked \
+            --require recent::role_downgraded \
+            --require recent::principal_reassigned \
+            --require recent::unchanged_user_other_key_changed \
+            --require recent::unchanged_admin \
+            --require items::credential_revoked \
+            --require items::binding_revoked \
+            --require items::role_downgraded \
+            --require items::principal_reassigned \
+            --require items::unchanged_user_other_key_changed \
+            --require items::unchanged_admin \
+            --require export::credential_revoked \
+            --require export::binding_revoked \
+            --require export::role_downgraded \
+            --require export::principal_reassigned \
+            --require export::unchanged_user_other_key_changed \
+            --require export::unchanged_admin \
+            --require markdown::credential_revoked \
+            --require markdown::binding_revoked \
+            --require markdown::role_downgraded \
+            --require markdown::principal_reassigned \
+            --require markdown::unchanged_user_other_key_changed \
+            --require markdown::unchanged_admin \
+            --require clear_preview::credential_revoked \
+            --require clear_preview::binding_revoked \
+            --require clear_preview::role_downgraded \
+            --require clear_preview::principal_reassigned \
+            --require clear_preview::unchanged_user_other_key_changed \
+            --require clear_preview::unchanged_admin \
+            --require vector_status::credential_revoked \
+            --require vector_status::binding_revoked \
+            --require vector_status::role_downgraded \
+            --require vector_status::principal_reassigned \
+            --require vector_status::unchanged_user_other_key_changed \
+            --require vector_status::unchanged_admin \
+            --require remote_disclosure::credential_revoked \
+            --require remote_disclosure::binding_revoked \
+            --require remote_disclosure::role_downgraded \
+            --require remote_disclosure::principal_reassigned \
+            --require remote_disclosure::unchanged_user_other_key_changed \
+            --require remote_disclosure::unchanged_admin
+          cargo test --locked -p clawd --bin clawd http::memory_read_boundary_tests:: -- --test-threads=1 --nocapture
+      - name: Test project lookup isolation and read-only identity contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd http::memory_project_read_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_project_read_tests:: \
+            --require credential_revoked_before_project_read \
+            --require binding_revoked_before_project_read \
+            --require role_downgraded_before_project_read \
+            --require principal_reassigned_before_project_read \
+            --require unchanged_user_reads_late_alias_after_another_key_changes \
+            --require unchanged_admin_reads_late_alias_without_repair \
+            --require lookup::cold_writable_get_does_not_create_project_identity \
+            --require lookup::cold_readonly_get_reports_uninitialized_without_attempting_creation \
+            --require lookup::known_project_does_not_backfill_an_unrelated_missing_binding \
+            --require lookup::missing_identity_migration_is_not_repaired_by_writable_get \
+            --require lookup::corrupt_identity_migration_is_unavailable_without_read_repair \
+            --require lookup::explicit_initialization_survives_repeated_readonly_queries
+          cargo test --locked -p clawd --bin clawd http::memory_project_read_tests:: -- --test-threads=1 --nocapture
+      - name: Test durable memory import upload foundations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s scripts/tests -p 'test_memory_import_upload_schema.py'
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::import_upload::storage_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::import_upload::storage_tests:: \
+            --require accounting::raw_staging_is_measured_as_domain_growth_not_relabelled_as_source_quota \
+            --require identity::original_revoked_key_cannot_renew_or_open_a_parser_with_a_surviving_sibling \
+            --require schema::explicit_startup_is_idempotent_and_status_is_query_only \
+            --require schema::missing_marker_is_not_repaired_or_adopted_by_read_or_startup \
+            --require schema::corrupt_marker_fails_closed_without_overwriting_receipt \
+            --require schema::missing_schema_read_never_creates_tables \
+            --require schema::invalid_metadata_and_oversized_file_leave_no_staging \
+            --require chunks::create_resumes_same_file_only_within_the_same_owner \
+            --require chunks::duplicate_chunk_does_not_write_or_need_growth_admission \
+            --require chunks::bad_digest_order_overlap_and_size_never_advance_the_cursor \
+            --require chunks::failed_pointer_write_rolls_back_the_inserted_chunk \
+            --require chunks::storage_policy_change_inside_chunk_write_rolls_back_all_effects \
+            --require chunks::nested_chunk_write_cannot_commit_its_callers_transaction \
+            --require chunks::read_status_does_not_contend_with_an_independent_sqlite_writer \
+            --require identity::other_owner_cannot_read_append_cancel_or_claim_an_upload \
+            --require identity::original_key_binding_role_and_principal_are_rechecked_with_a_surviving_sibling \
+            --require leases::incomplete_upload_is_not_claimed_or_modified_by_the_parser \
+            --require leases::parser_expiry_fences_old_workers_without_losing_raw_chunks \
+            --require leases::an_unstolen_parser_renews_after_expiry_instead_of_wall_clock_killing_work \
+            --require leases::cancellation_releases_only_owned_staging_even_when_capacity_is_missing \
+            --require leases::last_chunk_retry_remains_idempotent_after_parser_claim \
+            --require reader::streaming_reader_preserves_split_unicode_and_validates_full_file_digest \
+            --require reader::complete_bytes_are_not_verified_until_the_reader_checks_eof \
+            --require reader::intact_chunks_with_a_wrong_declared_file_digest_cannot_pass_eof \
+            --require reader::changed_chunk_body_is_rejected_even_when_its_size_is_unchanged \
+            --require reader::reopened_database_can_resume_upload_and_steal_only_an_expired_parse
+          cargo test --locked -p clawd --bin clawd memory::import_upload::storage_tests:: -- --test-threads=1 --nocapture
+      - name: Test bounded streaming memory export decoding
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::import_upload::parser::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::import_upload::parser::tests:: \
+            --require empty_export_retains_schema1_vec_checksum \
+            --require one_byte_reads_preserve_unicode_escapes_and_canonical_item_order \
+            --require top_level_field_order_and_unknown_fields_match_legacy_typed_hash \
+            --require decoder_does_not_impose_the_legacy_ten_thousand_item_ceiling \
+            --require decoder_does_not_confuse_legacy_character_filter_with_a_parser_limit \
+            --require oversized_single_item_is_rejected_before_consumer_allocation \
+            --require oversized_metadata_and_unknown_field_keys_are_bounded_too \
+            --require wrong_export_checksum_never_returns_a_publishable_summary \
+            --require duplicate_missing_malformed_and_trailing_documents_fail_structurally \
+            --require unsupported_schema_is_a_typed_error_not_parsed_prose \
+            --require consumer_failure_keeps_its_original_machine_error \
+            --require underlying_io_failure_keeps_its_actual_error_kind \
+            --require actual_two_point_six_megabyte_unicode_export_streams_from_durable_chunks
+          cargo test --locked -p clawd --bin clawd memory::import_upload::parser::tests:: -- --test-threads=1 --nocapture
+      - name: Test shared memory import filtering and canonical insertion
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::import_items::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::import_items::tests:: \
+            --require legacy_character_filter_is_explicit_and_not_a_new_streaming_ceiling \
+            --require unsupported_kinds_and_empty_content_are_skipped_for_both_ingress_paths \
+            --require read_only_filter_preserves_provenance_without_granting_source_trust \
+            --require duplicate_filter_is_cross_kind_but_principal_private \
+            --require all_supported_kinds_use_the_same_principal_scoped_low_trust_writer \
+            --require canonical_writer_keeps_existing_fact_and_preference_idempotency \
+            --require canonical_writer_cannot_commit_an_item_outside_the_whole_import_transaction \
+            --require malformed_digest_kind_or_content_is_rejected_without_panicking_or_writing \
+            --require caller_failure_rolls_back_all_shared_item_writes
+          cargo test --locked -p clawd --bin clawd memory::ux::import_items::tests:: -- --test-threads=1 --nocapture
+      - name: Test staged memory whole preview confirmation and privacy lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::import_upload::flow_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::import_upload::flow_tests:: \
+            --require roundtrip::one_whole_preview_and_confirmation_publish_no_early_canonical_rows \
+            --require roundtrip::staged_preview_matches_legacy_logical_digest_and_reuses_its_receipt \
+            --require roundtrip::legacy_preview_reuses_a_staged_receipt_and_the_same_atomic_operation \
+            --require roundtrip::finalize_and_last_chunk_retries_do_not_duplicate_a_whole_preview \
+            --require roundtrip::original_large_unicode_shape_roundtrips_core_without_claiming_http_repair \
+            --require roundtrip::larger_unicode_record_remains_exact_within_the_advertised_resource_budget \
+            --require failure::wrong_export_checksum_releases_provisional_items_but_keeps_resumable_raw_bytes \
+            --require failure::stale_expected_preview_digest_cannot_publish_any_canonical_item \
+            --require failure::failing_second_canonical_insert_rolls_back_the_entire_confirmation \
+            --require failure::revoked_original_binding_cannot_confirm_through_a_surviving_sibling \
+            --require failure::damaged_staged_content_never_matches_the_original_logical_preview_digest \
+            --require lifecycle::cancelling_a_preview_removes_only_its_owned_plaintext_and_releases_its_file_identity \
+            --require lifecycle::full_clear_purges_owned_pending_raw_and_preview_staging_without_touching_another_owner \
+            --require lifecycle::recent_clear_withdraws_recent_preview_but_keeps_a_fact_only_preview \
+            --require lifecycle::a_failed_staging_purge_rolls_back_session_tombstones_and_the_whole_clear \
+            --require lifecycle::confirmed_receipts_keep_audit_metadata_without_retaining_the_imported_plaintext \
+            --require lifecycle::reopened_database_reuses_one_complete_preview_without_reparsing_raw_bytes \
+            --require batching::more_than_ten_thousand_records_share_one_preview_and_one_confirmation \
+            --require batching::later_batch_failure_discards_provisional_rows_but_keeps_the_whole_raw_upload \
+            --require batching::damaged_raw_blob_larger_than_its_pinned_chunk_budget_is_rejected_before_delivery
+          cargo test --locked -p clawd --bin clawd memory::import_upload::flow_tests:: -- --test-threads=1 --nocapture
+      - name: Test bounded staged import HTTP and ingress policies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::import_upload::ingress::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::import_upload::ingress::tests:: \
+            --require ingress_projects_existing_webd_values_without_second_defaults \
+            --require invalid_ingress_or_lease_configuration_fails_without_silent_clamping \
+            --require policy_read_reports_the_real_persisted_budget_without_initializing_missing_state \
+            --require revoked_original_identity_cannot_read_policy_through_a_surviving_key \
+            --require growth_failures_keep_typed_machine_codes_and_not_provider_prose \
+            --require parser_rejects_an_outer_transaction_before_claim_or_staging
+          cargo test --locked -p clawd --bin clawd memory::import_upload::ingress::tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd http::memory_import_http_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_import_http_tests:: \
+            --require ingress::policy_projects_config_and_requires_authentication \
+            --require ingress::create_rejects_payload_supplied_ownership_and_does_not_write_a_session \
+            --require ingress::identical_chunk_retry_is_idempotent_and_out_of_order_bytes_do_not_advance \
+            --require ingress::declared_and_streamed_oversize_chunks_return_json_413_without_partial_append \
+            --require ingress::another_owner_is_rejected_before_any_chunk_body_is_consumed \
+            --require ingress::original_key_revocation_during_body_receipt_rejects_persistence \
+            --require ingress::malformed_metadata_query_and_digest_have_structured_errors \
+            --require roundtrip::large_unicode_export_uses_one_real_http_preview_and_one_confirmation \
+            --require roundtrip::legacy_single_request_limit_is_not_disabled_for_unrelated_routes \
+            --require boundary::status_and_policy_reads_do_not_need_the_sqlite_writer_lock \
+            --require boundary::missing_migration_returns_json_unavailable_without_read_repair \
+            --require boundary::preview_cancellation_requires_its_owner_and_removes_pending_plaintext \
+            --require boundary::invalid_ingress_configuration_does_not_block_status_or_cancellation_recovery \
+            --require boundary::body_receipt_deadline_is_structured_and_does_not_append_partial_bytes \
+            --require boundary::pressure_rejection_exposes_its_typed_reason_and_keeps_recovery_available
+          cargo test --locked -p clawd --bin clawd http::memory_import_http_tests:: -- --test-threads=1 --nocapture
+      - name: Test native webd staged import transport limits
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p webd --bin webd request_limits::memory_import_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix request_limits::memory_import_tests:: \
+            --require only_the_exact_chunk_path_gets_the_existing_upload_policy \
+            --require similarly_named_nested_or_encoded_paths_do_not_expand_the_upload_exception \
+            --require chunk_class_uses_configured_upload_bytes_not_a_second_body_limit \
+            --require parser_and_upload_use_the_existing_separate_resource_permits
+          cargo test --locked -p webd --bin webd request_limits::memory_import_tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p webd --bin webd -- --test-threads=1 --nocapture
+      - name: Test effective flat and wrapped memory configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd bootstrap::config_loaders:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix bootstrap::config_loaders:: \
+            --require tests::memory_runtime_file_controls_startup_reindex_and_background_concurrency \
+            --require memory_runtime_config_tests::flat_explicit_false_and_nondefault_values_are_preserved \
+            --require memory_runtime_config_tests::wrapped_explicit_false_and_nondefault_values_are_not_replaced_by_defaults \
+            --require memory_runtime_config_tests::flat_and_wrapped_forms_agree_and_keep_the_selected_absolute_path \
+            --require memory_runtime_config_tests::explicit_memory_namespace_is_not_shadowed_by_flat_fields \
+            --require memory_runtime_config_tests::malformed_wrapper_uses_explicit_main_values_not_flat_defaults \
+            --require memory_runtime_config_tests::missing_or_malformed_file_keeps_main_configuration \
+            --require memory_runtime_config_tests::empty_path_keeps_main_configuration_without_reading_a_file
+          cargo test --locked -p clawd --bin clawd bootstrap::config_loaders:: -- --test-threads=1 --nocapture
+      - name: Test owned memory retirement access paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::retirement_access:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::retirement_access:: \
+            --require migration_tests::upgrade_preserves_duplicates_data_and_prior_receipts \
+            --require migration_tests::repeated_initialization_is_read_only_and_query_only_safe \
+            --require migration_tests::digest_mismatch_precedes_any_schema_write \
+            --require migration_tests::unreceipted_wrong_projection_index_shapes_reject_atomically \
+            --require migration_tests::wrong_job_index_rolls_back_projection_index_and_receipt \
+            --require migration_tests::missing_applied_index_is_not_repaired \
+            --require migration_tests::outer_transaction_can_roll_back_successful_migration \
+            --require migration_tests::failed_nested_migration_preserves_caller_work \
+            --require migration_tests::missing_jobs_schema_is_not_initialized_by_index_migration \
+            --require migration_tests::readonly_first_initialization_has_no_partial_adoption \
+            --require migration_tests::concurrent_initializers_publish_one_valid_receipt \
+            --require migration_tests::validation_and_receipts_are_bound_to_main_not_temp_shadows \
+            --require tests::exact_identity_retirement_preserves_foreign_derived_rows_and_fts \
+            --require tests::all_scopes_and_principals_retire_only_their_selected_identity \
+            --require tests::eligibility_and_rotated_profile_generations_preserve_terminal_work \
+            --require tests::legacy_and_parameterless_selectors_preserve_duplicate_target_semantics \
+            --require tests::missing_targets_and_replays_have_no_unrelated_side_effects \
+            --require tests::absent_optional_tables_are_not_created_by_text_only_retirement \
+            --require tests::autocommit_retirement_is_rejected_without_changes \
+            --require tests::successful_nested_retirement_remains_owned_by_caller_transaction \
+            --require failure_tests::failures_at_every_retirement_stage_restore_all_rows_and_caller_can_commit \
+            --require failure_tests::malformed_present_tables_fail_even_for_empty_targets_without_repair \
+            --require failure_tests::readonly_failure_does_not_cancel_or_tombstone_work \
+            --require work_tests::populated_job_retirement_is_target_bounded_and_matches_legacy_effects \
+            --require work_tests::populated_vector_retirement_is_target_bounded_and_matches_legacy_effects \
+            --require work_tests::populated_upgrade_reports_storage_and_writer_hold_without_rewriting_rows
+          cargo test --locked -p clawd --bin clawd memory::retirement_access:: -- --test-threads=1 --nocapture
       - name: Verify both product identities with the shared UI
         run: |
           npm ci --ignore-scripts --prefix UI
@@ -368,14 +1121,17 @@ jobs:
       - name: Build the exact verified Linux core without publishing a release
         run: |
           set -euo pipefail
-          cargo build --locked --release -p clawd --bin clawd -p clawcli --bin clawcli
+          cargo build --locked --release -p clawd --bin clawd -p clawcli --bin clawcli -p webd --bin webd
           artifact_root="$RUNNER_TEMP/runtime-read-artifact"
           mkdir -p "$artifact_root/runtime-read"
           install -m 755 target/release/clawd "$artifact_root/runtime-read/clawd"
           install -m 755 target/release/clawcli "$artifact_root/runtime-read/clawcli"
+          install -m 755 target/release/webd "$artifact_root/runtime-read/webd"
           printf '%s\n' "$GITHUB_SHA" > "$artifact_root/runtime-read/source-commit"
           printf '%s\n' 'task_event_transport_and_archive ui_auth_error_contract model_catalog_fixture_isolation model_catalog_read model_settings_integrity secure_workspace_metadata configuration_reads skill_state_mutations skill_switch_updates skill_reload_publication configuration_publication provider_credentials aipp aipp_read_surfaces aipp_generation run_skill product_identity storage_ownership aipp_decoupling cross_platform task_lifecycle model_catalog_truthfulness task_model_selection cli_model_readiness provider_descriptors receipt_publication_metadata receipt_regular_file_reads artifact_regular_file_reads principal_identity_lifecycle memory_quota_accounting memory_vector_policy' > "$artifact_root/runtime-read/verified-gates"
+          printf '%s\n' 'memory_staged_import_http_native webd_import_transport_native' >> "$artifact_root/runtime-read/verified-gates"
           (cd "$artifact_root/runtime-read" && sha256sum clawd clawcli source-commit verified-gates > SHA256SUMS)
+          (cd "$artifact_root/runtime-read" && sha256sum webd >> SHA256SUMS)
           tar -czf "$artifact_root/runtime-read-${GITHUB_SHA}.tar.gz" -C "$artifact_root" runtime-read
           (cd "$artifact_root" && sha256sum "runtime-read-${GITHUB_SHA}.tar.gz" > "runtime-read-${GITHUB_SHA}.tar.gz.sha256")
       - name: Attest the exact Linux core provenance
@@ -607,17 +1363,772 @@ jobs:
           cargo test --locked -p clawd --bin clawd repo::auth:: -- --test-threads=1 --nocapture --skip identity_lifecycle
           cargo test --locked -p clawd --bin clawd principal_ownership -- --test-threads=1 --nocapture
 
+      - name: Test feedback mutation atomicity without hiding failures
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::feedback_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::feedback_tests:: \
+            --require failures::incorrect_without_content_does_not_commit_feedback \
+            --require failures::blank_correction_does_not_commit_feedback \
+            --require failures::unsupported_correction_does_not_commit_feedback \
+            --require failures::replacement_insert_failure_rolls_back_feedback_and_supersession \
+            --require failures::revision_insert_failure_rolls_back_feedback_and_replacement \
+            --require failures::recall_disable_failure_rolls_back_feedback \
+            --require failures::feedback_insert_failure_cannot_publish_a_correction \
+            --require success::fact_correction_commits_feedback_replacement_and_reversible_revision_together \
+            --require success::preference_correction_preserves_feedback_and_existing_revision_contract \
+            --require success::irrelevant_feedback_records_each_event_without_mutating_content \
+            --require success::do_not_use_commits_feedback_and_existing_recall_disable_result \
+            --require success::stale_revision_is_rejected_without_feedback_or_mutation \
+            --require success::another_principals_memory_cannot_receive_feedback \
+            --require success::nonexistent_memory_cannot_receive_feedback \
+            --require success::read_only_connection_cannot_partially_record_feedback
+          cargo test --locked -p clawd --bin clawd memory::ux::feedback_tests:: -- --test-threads=1 --nocapture
+
+      - name: Test projection transactions without losing parent ownership
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::projection_transaction::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::projection_transaction::tests:: \
+            --require standalone_failure_rolls_back_and_releases_the_writer \
+            --require nested_failure_caught_by_parent_rolls_back_only_its_local_effects \
+            --require nested_success_does_not_commit_its_parent_transaction \
+            --require nested_panic_restores_local_state_without_ending_the_parent
+          cargo test --locked -p clawd --bin clawd memory::projection_transaction::tests:: -- --test-threads=1 --nocapture
+      - name: Test recall mutation indexes without hiding failures
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::recall_contract_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::recall_contract_tests:: \
+            --require corrections::fact_correction_replaces_index_and_fts_without_retaining_old_content \
+            --require corrections::preference_correction_replaces_index_and_fts_and_preserves_other_owners \
+            --require corrections::fact_correction_undo_restores_only_original_retrieval \
+            --require disabling::fact_do_not_use_removes_index_and_fts_and_survives_rebuild \
+            --require disabling::preference_do_not_use_survives_rebuild_and_preserves_other_owners \
+            --require disabling::recent_do_not_use_survives_rebuild_without_deleting_transcript \
+            --require corrections::failed_replacement_index_insert_rolls_back_canonical_revision_and_feedback \
+            --require corrections::stale_correction_preserves_all_owners_indexes_and_canonical_rows \
+            --require disabling::rebuilding_cannot_reenable_a_preference_disabled_by_explicit_feedback \
+            --require disabling::rebuilding_cannot_reenable_a_transcript_disabled_by_explicit_feedback \
+            --require incremental::incremental_preference_indexing_does_not_reenable_explicitly_disabled_content \
+            --require incremental::incremental_transcript_indexing_does_not_reenable_explicitly_disabled_content \
+            --require incremental::incremental_fact_indexing_does_not_reenable_explicitly_disabled_content \
+            --require boundaries::missing_feedback_ledger_rejects_index_refresh_without_effects_or_read_repair \
+            --require boundaries::failed_fts_insert_rolls_back_feedback_canonical_revision_and_projection \
+            --require boundaries::absent_optional_fts_does_not_block_correction_or_initialize_a_table \
+            --require boundaries::correcting_preference_preserves_another_scope_of_the_same_principal \
+            --require boundaries::rotating_admin_credential_does_not_make_owned_canonical_facts_uncorrectable \
+            --require boundaries::rebuild_after_credential_rotation_preserves_every_owned_canonical_kind \
+            --require incremental::stale_incremental_preference_payload_cannot_overwrite_a_confirmed_correction \
+            --require derived::disabled_fact_retires_queued_embeddings \
+            --require derived::disabled_preference_retires_queued_embeddings \
+            --require derived::disabled_transcript_retires_queued_embeddings \
+            --require derived::disabled_fact_deactivates_previously_completed_vectors \
+            --require derived::disabled_preference_deactivates_previously_completed_vectors \
+            --require derived::disabled_transcript_deactivates_previously_completed_vectors \
+            --require derived::corrected_fact_retires_its_old_completed_vectors \
+            --require derived::corrected_preference_retires_its_old_completed_vectors \
+            --require derived::suppression_keeps_another_owners_completed_vectors_and_pending_work \
+            --require derived::missing_index_source_cannot_produce_a_new_active_vector
+          cargo test --locked -p clawd --bin clawd memory::ux::recall_contract_tests:: -- --test-threads=1 --nocapture
+      - name: Test inflight embedding recall and lease fences
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::recall_races:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::capacity_http_tests::recall_races:: \
+            --require recall_suppression_after_request_cannot_reactivate_a_late_vector \
+            --require canonical_deletion_after_request_cannot_create_an_active_orphan_vector \
+            --require canonical_correction_after_request_cannot_commit_an_obsolete_vector \
+            --require remote_consent_revocation_after_request_cannot_commit_a_late_vector \
+            --require replacing_a_worker_lease_after_request_prevents_the_old_vector_commit \
+            --require projection_digest_change_after_request_prevents_a_stale_vector_commit \
+            --require unchanged_inflight_source_and_lease_still_commit_once \
+            --require another_owners_suppression_does_not_discard_the_current_response
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::recall_races:: -- --test-threads=1 --nocapture
+      - name: Test embedding response publication and recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::response_commit:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::capacity_http_tests::response_commit:: \
+            --require failed_ack_rolls_back_vector_and_recovers_response_without_another_provider_call \
+            --require received_response_is_discarded_if_consent_is_revoked_before_recovery \
+            --require a_live_replacement_lease_cannot_be_consumed_by_response_recovery \
+            --require an_unpersisted_provider_response_is_not_blindly_replayed_after_lease_expiry \
+            --require expired_inflight_lease_cannot_publish_a_vector_or_completion_receipt \
+            --require effective_consent_is_rechecked_without_relying_on_a_cancel_signal \
+            --require canonical_content_is_rechecked_even_if_its_index_row_did_not_change \
+            --require one_failed_publication_does_not_roll_back_valid_batch_peers
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::response_commit:: -- --test-threads=1 --nocapture
+      - name: Test terminal snapshot build maintenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::snapshot_maintenance:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::capacity_http_tests::snapshot_maintenance:: \
+            --require unknown_response_expiry_allows_explicit_rebuild_without_provider_replay \
+            --require revoked_queued_build_is_retired_by_paused_maintenance_without_outbound_work \
+            --require terminal_build_cleanup_preserves_active_and_other_owner_profile_generation_snapshots \
+            --require healthy_paused_build_poll_stays_read_only_under_an_independent_writer
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::capacity_http_tests::snapshot_maintenance:: -- --test-threads=1 --nocapture
+      - name: Test original request memory mutation authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd http::memory_routes::actor_fence_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_routes::actor_fence_tests:: \
+            --require revoked_original_key_cannot_correct_through_another_live_account_key \
+            --require revoked_original_key_cannot_record_feedback_through_another_live_account_key \
+            --require revoked_original_key_cannot_delete_through_another_live_account_key \
+            --require revoked_original_key_cannot_undo_through_another_live_account_key \
+            --require revoked_original_key_cannot_persist_an_import_preview \
+            --require revoked_original_key_cannot_confirm_an_existing_import_preview \
+            --require revoked_original_key_cannot_clear_owned_memory \
+            --require revoked_original_binding_cannot_borrow_a_surviving_credential \
+            --require changed_original_role_is_rejected_at_the_actual_writer \
+            --require reassigned_original_credential_cannot_mutate_either_account \
+            --require unchanged_original_identity_still_commits_the_real_correction \
+            --require final_identity_loss_rolls_back_canonical_projection_audit_and_identity_changes \
+            --require nested_correction_failure_preserves_private_rows_and_the_callers_transaction \
+            --require nested_import_failure_preserves_preview_and_the_callers_transaction
+          cargo test --locked -p clawd --bin clawd http::memory_routes::actor_fence_tests:: -- --test-threads=1 --nocapture
+      - name: Test retained memory vector policy and read-only status fences
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd http::memory_routes::vector_policy_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_routes::vector_policy_tests:: \
+            --require index_status_returns_the_account_policy_not_a_conversation_policy \
+            --require index_policy_snapshot_keeps_stale_rejection_for_every_action \
+            --require index_policy_status_still_requires_authentication
+          cargo test --locked -p clawd --bin clawd http::memory_routes::vector_policy_tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd http::memory_routes::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_routes::tests:: \
+            --require vector_status_remains_read_only_while_another_connection_holds_the_writer_lock
+          cargo test --locked -p clawd --bin clawd http::memory_routes::tests:: -- --test-threads=1 --nocapture
+      - name: Test private maintenance fixtures and retained cleanup contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd worker::runtime_support::background_workers::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix worker::runtime_support::background_workers::tests:: \
+            --require terminal_delivery_retry_delay_is_bounded_and_increases \
+            --require cleanup_removes_cost_ledger_rows_after_task_retention_removes_owner \
+            --require cleanup_preserves_conversation_tasks_for_user_controlled_history \
+            --require cleanup_limits_each_expired_task_pass_to_a_fixed_batch \
+            --require cleanup_preserves_active_nonconversation_tasks_under_age_and_count_limits \
+            --require cleanup_preserves_cancellation_until_execution_settles \
+            --require cleanup_preserves_unfinished_terminal_delivery_under_both_policies \
+            --require cleanup_preserves_pending_conversation_replies_until_delivery_settles \
+            --require cleanup_preserves_scheduled_resume_anchors \
+            --require cleanup_preserves_child_graph_owners_and_results \
+            --require scheduled_wakeup_resumes_waiting_thread_without_enqueuing_duplicate_task \
+            --require scheduled_wakeup_enqueues_new_thread_after_previous_task_is_terminal \
+            --require legacy_scheduled_job_revalidates_admin_authority_on_each_wakeup \
+            --require blocking::cleanup_pool_wait_keeps_async_runtime_responsive \
+            --require blocking::schedule_pool_wait_keeps_async_runtime_responsive \
+            --require blocking::heartbeat_pool_wait_keeps_async_runtime_responsive \
+            --require blocking::blocking_ticks_preserve_results_errors_and_panics \
+            --require blocking::cancelled_waiter_does_not_replay_started_blocking_work \
+            --require blocking::delayed_heartbeat_cannot_renew_a_cancelled_or_reclaimed_task \
+            --require blocking::awaited_ticks_have_only_one_in_flight_operation_per_loop \
+            --require blocking::resume_lease::resume_lease_pool_wait_keeps_async_runtime_responsive \
+            --require blocking::resume_lease::running_execution_renews_its_complete_claim_chain_more_than_once \
+            --require blocking::resume_lease::cancellation_during_execution_loses_the_lease_without_returning_completion \
+            --require blocking::resume_lease::expired_claim_does_not_poll_the_execution_future \
+            --require duration_bounds::huge_task_and_audit_durations_do_not_delete_retained_rows \
+            --require duration_bounds::ordinary_and_zero_task_and_audit_durations_still_remove_expired_rows \
+            --require fixtures::cleanup_fixture_workspaces_are_private_and_distinct \
+            --require fixtures::cleanup_fixture_removes_only_its_own_orphan_artifacts
+          cargo test --locked -p clawd --bin clawd worker::runtime_support::background_workers::tests:: -- --test-threads=1 --nocapture
+      - name: Test retention duration overflow without arbitrary caps
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd retention_policy::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix retention_policy::tests:: \
+            --require ordinary_and_zero_days_preserve_exact_cutoffs \
+            --require all_u64_durations_match_wide_reference_without_future_cutoffs \
+            --require increasing_retention_never_moves_cutoff_forward \
+            --require duration_beyond_timestamp_range_saturates_to_oldest_timestamp
+          cargo test --locked -p clawd --bin clawd retention_policy::tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd memory::retention::tests::duration_bounds:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::retention::tests::duration_bounds:: \
+            --require all_memory_retention_kinds_preserve_fresh_rows_for_large_durations \
+            --require ordinary_and_zero_durations_keep_the_strict_cutoff_boundary
+          cargo test --locked -p clawd --bin clawd memory::retention::tests::duration_bounds:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd worker::runtime_support::background_workers::tests::duration_bounds:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix worker::runtime_support::background_workers::tests::duration_bounds:: \
+            --require huge_task_and_audit_durations_do_not_delete_retained_rows \
+            --require ordinary_and_zero_task_and_audit_durations_still_remove_expired_rows
+          cargo test --locked -p clawd --bin clawd worker::runtime_support::background_workers::tests::duration_bounds:: -- --test-threads=1 --nocapture
+      - name: Verify patched bundled SQLite and all direct consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked -p clawd -p clawcli -p rss-fetch-skill -p db-basic-skill -p kb-skill -p fs-search-skill -p crypto-skill
+          cargo test --locked -p clawd --bin clawd db_init::sqlite_security_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix db_init::sqlite_security_tests:: \
+            --require bundled_sqlite_includes_wal_reset_fix \
+            --require unsigned_sqlite_conversions_remain_checked
+          cargo test --locked -p clawd --bin clawd db_init::sqlite_security_tests:: -- --test-threads=1 --nocapture
+      - name: Test SQLite file bootstrap before parallel pool connections
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd db_init::pool_bootstrap_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix db_init::pool_bootstrap_tests:: \
+            --require fresh_file_is_wal_before_parallel_pool_connections \
+            --require rollback_database_is_upgraded_before_pool_connections_without_losing_rows \
+            --require pooled_connection_initialization_does_not_repeat_journal_assignment \
+            --require verified_wal_bootstrap_preserves_an_active_writer_and_rows \
+            --require pooled_settings_keep_timeout_foreign_keys_and_constrained_memory_policy \
+            --require corrupt_file_is_rejected_before_any_pooled_connection_without_rewriting_it \
+            --require parallel_connections_keep_wal_and_each_connections_local_settings
+          cargo test --locked -p clawd --bin clawd db_init::pool_bootstrap_tests:: -- --test-threads=1 --nocapture
+      - name: Test initialized embedding schema writer availability
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::schema_read_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::schema_read_tests:: \
+            --require initialized_vector_schema_does_not_acquire_writer \
+            --require initialized_embedding_controls_do_not_acquire_writer \
+            --require circuit_status_read_does_not_acquire_writer \
+            --require vector_migration_digest_mismatch_is_rejected_without_writing \
+            --require control_migration_digest_mismatch_is_rejected_without_writing \
+            --require missing_migration_still_requires_real_write_admission \
+            --require missing_migration_is_applied_after_writer_release
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::schema_read_tests:: -- --test-threads=1 --nocapture
+      - name: Test remaining memory write authority and policy fences
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd http::memory_routes::write_fence_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_routes::write_fence_tests:: \
+            --require revoked_key_cannot_commit_queued_settings \
+            --require unchanged_identity_can_commit_real_settings \
+            --require revoked_key_cannot_commit_queued_reindex \
+            --require unchanged_identity_can_commit_real_reindex \
+            --require revoked_key_cannot_commit_queued_pause \
+            --require unchanged_identity_can_commit_real_pause \
+            --require revoked_key_cannot_commit_queued_resume \
+            --require unchanged_identity_can_commit_real_resume \
+            --require revoked_key_cannot_commit_queued_cancel \
+            --require unchanged_identity_can_commit_real_cancel \
+            --require revoked_key_cannot_commit_queued_legacy_delete \
+            --require unchanged_identity_can_commit_real_legacy_delete \
+            --require revoked_key_cannot_commit_queued_legacy_expire \
+            --require unchanged_identity_can_commit_real_legacy_expire \
+            --require revoked_key_cannot_commit_queued_legacy_clear \
+            --require unchanged_identity_can_commit_real_legacy_clear \
+            --require revoked_key_cannot_commit_queued_project_link \
+            --require unchanged_identity_can_commit_real_project_link \
+            --require revoked_key_cannot_commit_queued_project_unlink \
+            --require unchanged_identity_can_commit_real_project_unlink \
+            --require changed_original_binding_cannot_commit_settings \
+            --require changed_original_role_cannot_commit_settings \
+            --require changed_original_principal_cannot_commit_settings \
+            --require stale_policy_at_writer_rejects_settings_without_partial_effects \
+            --require stale_policy_at_writer_rejects_reindex_without_partial_effects \
+            --require stale_policy_at_writer_rejects_pause_without_partial_effects \
+            --require stale_policy_at_writer_rejects_resume_without_partial_effects \
+            --require stale_policy_at_writer_rejects_cancel_without_partial_effects \
+            --require final_key_revocation_rolls_back_settings_and_avoids_false_audit \
+            --require late_sql_failure_rolls_back_reindex_effects \
+            --require late_sql_failure_rolls_back_cancel_effects \
+            --require late_sql_failure_rolls_back_project_link_effects \
+            --require empty_reindex_can_activate_inside_a_parent_transaction_without_committing_it
+          cargo test --locked -p clawd --bin clawd http::memory_routes::write_fence_tests:: -- --test-threads=1 --nocapture
+      - name: Test rejected reindex startup and no-side-effect contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::tests::remote_reindex_requires_explicit_consent_before_outbound_jobs_exist -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::tests:: \
+            --require remote_reindex_requires_explicit_consent_before_outbound_jobs_exist
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::tests::remote_reindex_requires_explicit_consent_before_outbound_jobs_exist -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::rejected_startup_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::rejected_startup_tests:: \
+            --require denied_reindex_does_not_install_schema_receipts_or_profile_state
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::rejected_startup_tests:: -- --test-threads=1 --nocapture
+      - name: Test lazy memory domain sampling and fresh observations
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::availability::sampling_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::availability::sampling_tests:: \
+            --require missing_state_ordinary_read_skips_domain_scan_without_repair \
+            --require unknown_state_ordinary_read_skips_domain_scan_without_normalizing \
+            --require missing_policy_ordinary_read_skips_domain_scan_without_inserting_defaults \
+            --require damaged_policy_ordinary_read_skips_domain_scan_without_rewriting_policy \
+            --require unbound_explicit_stop_ordinary_read_skips_domain_scan \
+            --require healthy_ordinary_read_samples_once_without_exposing_global_bytes_or_path \
+            --require healthy_admin_read_reuses_one_actual_sample_for_decision_and_diagnostics \
+            --require admin_missing_policy_still_samples_once_for_read_only_diagnostics \
+            --require a_later_observation_resamples_changed_storage_instead_of_reusing_old_bytes \
+            --require failed_actual_measurement_is_shared_once_and_a_later_read_can_recover
+          cargo test --locked -p clawd --bin clawd memory::availability::sampling_tests:: -- --test-threads=1 --nocapture
+      - name: Test manual memory growth availability and read-only HTTP projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::growth_availability_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::growth_availability_tests:: \
+            --require unrelated_main_growth_can_pause_background_without_blocking_manual_content \
+            --require source_quota_exhaustion_does_not_become_manual_domain_exhaustion \
+            --require missing_budget_is_read_only_unavailability_and_actual_growth_rejection \
+            --require damaged_budget_has_typed_projection_and_is_not_normalized \
+            --require actual_domain_limit_reports_blocked_without_disabling_recovery \
+            --require ordinary_projection_keeps_global_manual_limit_and_measurement_private \
+            --require invalid_state_or_policy_is_rejected_without_sampling_domains \
+            --require exact_allocation_limit_distinguishes_completion_from_new_growth
+          cargo test --locked -p clawd --bin clawd memory::ux::growth_availability_tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd http::memory_routes::capacity::growth_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_routes::capacity::growth_tests:: \
+            --require ordinary_http_response_has_manual_decision_without_global_limit_or_credentials \
+            --require absent_budget_remains_absent_after_authenticated_availability_read \
+            --require missing_source_quota_does_not_repair_policy_or_hide_manual_domain_state \
+            --require invalid_budget_is_visible_but_not_normalized_by_http_read
+          cargo test --locked -p clawd --bin clawd http::memory_routes::capacity::growth_tests:: -- --test-threads=1 --nocapture
+      - name: Test configured memory budget and source-only quota contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::budget_policy_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::budget_policy_tests:: \
+            --require explicit_configuration_roundtrips_u64_without_another_default \
+            --require missing_budget_row_rejects_growth_without_recreating_it \
+            --require invalid_budget_rejects_growth_without_normalizing_it \
+            --require missing_marker_cannot_adopt_an_owned_budget_on_restart \
+            --require restart_updates_only_configuration_projection_and_pressure \
+            --require crossing_actual_domain_budget_rolls_back_every_private_effect \
+            --require late_budget_corruption_rolls_back_only_nested_work \
+            --require missing_budget_allows_export_duplicate_preview_and_deletion \
+            --require source_quota_exhaustion_does_not_charge_canonical_facts \
+            --require source_undo_uses_utf8_bytes_and_keeps_receipt_until_room_exists \
+            --require source_undo_rechecks_actual_rows_not_stale_usage_counters \
+            --require failed_refresh_rolls_back_pressure_and_budget_together
+          cargo test --locked -p clawd --bin clawd memory::ux::budget_policy_tests:: -- --test-threads=1 --nocapture
+      - name: Test invalid capacity state admission and recovery controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::growth_state_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::growth_state_tests:: \
+            --require missing_state_preview_does_not_store_private_payload \
+            --require unknown_state_confirmation_retains_preview_for_explicit_retry \
+            --require incorrect_feedback_rolls_back_its_record_when_state_is_unknown \
+            --require unknown_state_deleted_content_restore_keeps_undo_receipt \
+            --require unknown_state_preference_undo_to_smaller_content_still_succeeds \
+            --require unknown_state_fact_undo_releases_replacement_without_losing_history \
+            --require suppression_feedback_still_works_with_unknown_capacity \
+            --require late_state_corruption_rolls_back_only_the_nested_correction
+          cargo test --locked -p clawd --bin clawd memory::ux::growth_state_tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd memory::ux::admission_contract_tests::missing_pressure_correction_fails_closed_without_repairing_the_observation -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::admission_contract_tests:: \
+            --require missing_pressure_correction_fails_closed_without_repairing_the_observation
+          cargo test --locked -p clawd --bin clawd memory::ux::admission_contract_tests::missing_pressure_correction_fails_closed_without_repairing_the_observation -- --test-threads=1 --nocapture
+      - name: Test actual memory domain budget and effect contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::budget_contract_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::budget_contract_tests:: \
+            --require growth::actual_domain_budget_rejects_private_correction_growth \
+            --require growth::actual_domain_budget_rejects_new_private_preview_growth \
+            --require growth::actual_domain_budget_rejects_confirmation_preserving_retryable_preview \
+            --require growth::preference_undo_to_larger_original_is_growth_without_receipt_loss \
+            --require growth::unknown_storage_state_rejects_private_growth_without_read_repair \
+            --require controls::unrelated_main_database_growth_does_not_reject_memory_growth_below_domain_budget \
+            --require controls::duplicate_only_and_empty_previews_are_metadata_not_private_payload_growth \
+            --require controls::existing_preview_reuse_under_pressure_does_not_write_or_consume_receipt \
+            --require controls::confirmation_after_competing_import_only_updates_metadata \
+            --require controls::fact_correction_undo_releases_replacement_and_preserves_original_history \
+            --require controls::preference_undo_to_smaller_original_is_releasing \
+            --require controls::unknown_state_still_allows_export_and_user_requested_content_deletion \
+            --require controls::host_available_observation_is_independent_of_main_pages_and_domain_budget
+          cargo test --locked -p clawd --bin clawd memory::ux::budget_contract_tests:: -- --test-threads=1 --nocapture
+      - name: Test recall projection liveness and cross-principal read effects
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::vector_store::recall_liveness_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::vector_store::recall_liveness_tests:: \
+            --require nearest_excludes_missing_projection_before_top_k_without_cleanup \
+            --require nearest_excludes_mismatched_owner_and_scope_before_top_k \
+            --require nearest_filters_orphans_while_an_independent_wal_writer_is_held \
+            --require ordinary_recall_does_not_mutate_another_principals_orphan_vectors \
+            --require warmed_ordinary_recall_does_not_attempt_an_independent_wal_writer \
+            --require background_maintenance_preserves_canonical_fact_and_retires_only_orphans \
+            --require background_maintenance_retires_fact_projection_owned_by_the_wrong_principal \
+            --require failed_orphan_maintenance_rolls_back_other_retention_deletions \
+            --require orphan_maintenance_does_not_install_an_uninitialized_optional_pipeline
+          cargo test --locked -p clawd --bin clawd memory::vector_store::recall_liveness_tests:: -- --test-threads=1 --nocapture
+      - name: Test embedding claims across busy and unserved owners
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::claim_fairness_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::embedding_jobs::claim_fairness_tests:: \
+            --require queued_unserved_owner_is_not_hidden_by_a_busy_older_owner \
+            --require paused_unserved_owner_is_not_claimed_for_fairness \
+            --require circuit_blocked_unserved_owner_is_not_claimed_for_fairness \
+            --require fairness_order_does_not_rescan_running_population_per_queued_job
+          cargo test --locked -p clawd --bin clawd memory::embedding_jobs::claim_fairness_tests:: -- --test-threads=1 --nocapture
+      - name: Test read-only recall with due canonical facts
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::facts::recall_liveness_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::facts::recall_liveness_tests:: \
+            --require ordinary_scoped_recall_does_not_expire_another_principals_fact \
+            --require warmed_scoped_recall_with_foreign_expiry_does_not_attempt_a_wal_writer \
+            --require own_expired_fact_is_hidden_without_read_time_canonical_mutation \
+            --require background_maintenance_expires_due_fact_and_retires_its_vector \
+            --require failed_expiry_maintenance_rolls_back_fact_projection_and_source_deletions \
+            --require nearest_excludes_expired_canonical_fact_before_top_k_without_read_repair \
+            --require legacy_fact_expiry_filter_preserves_the_unscoped_schema_without_read_repair \
+            --require canonical_fact_expiry_filter_avoids_owner_population_cross_product \
+            --require indexed_fact_filter_preserves_exact_reference_owner_and_expiry_semantics
+          cargo test --locked -p clawd --bin clawd memory::facts::recall_liveness_tests:: -- --test-threads=1 --nocapture
       - name: Test memory quota byte accounting and empty-principal refresh
         shell: bash
         run: |
           set -euo pipefail
+          cargo test --locked -p clawd --bin clawd memory::availability:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd http::memory_routes::capacity:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd memory::quota:: -- --test-threads=1 --nocapture
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd skills::builtin::builtin_memory_store:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix skills::builtin::builtin_memory_store::tests:: \
+            --require save_is_effectively_once_and_search_returns_only_opaque_identity \
+            --require conversation_scope_isolated_and_child_mutation_is_denied \
+            --require pagination_scope_revision_forget_and_disabled_generation_are_enforced \
+            --require builtin_saved_fact_can_be_deleted_with_its_revision_and_index \
+            --require consistency::healthy_fact_is_not_reported_or_deleted_as_orphan \
+            --require consistency::repair_removes_only_the_actual_orphan_and_preserves_other_owners
+          cargo test --locked -p clawd --bin clawd skills::builtin::builtin_memory_store:: -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd memory::retention -- --test-threads=1 --nocapture
           cargo test --locked -p clawd --bin clawd memory:: -- --test-threads=1 --nocapture
       - name: Test memory vector status policy and scoped controls
         run: |
           set -euo pipefail
           cargo test --locked -p clawd --bin clawd http::memory_routes:: -- --test-threads=1 --nocapture
+      - name: Test capacity read authentication snapshot contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd http::memory_capacity_read_race_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_capacity_read_race_tests:: \
+            --require credential_revoked_after_authentication_does_not_return_later_private_state \
+            --require binding_revoked_after_authentication_does_not_return_later_private_state \
+            --require role_downgraded_after_authentication_does_not_return_later_admin_metrics \
+            --require principal_reassigned_after_authentication_does_not_return_previous_owner_state \
+            --require unchanged_user_still_reads_own_state_after_another_credential_changes \
+            --require unchanged_admin_still_reads_current_global_diagnostics_without_mutating_storage
+          cargo test --locked -p clawd --bin clawd http::memory_capacity_read_race_tests:: -- --test-threads=1 --nocapture
+      - name: Test memory read boundary authentication contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd http::memory_read_boundary_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_read_boundary_tests:: \
+            --require overview::credential_revoked \
+            --require overview::binding_revoked \
+            --require overview::role_downgraded \
+            --require overview::principal_reassigned \
+            --require overview::unchanged_user_other_key_changed \
+            --require overview::unchanged_admin \
+            --require settings::credential_revoked \
+            --require settings::binding_revoked \
+            --require settings::role_downgraded \
+            --require settings::principal_reassigned \
+            --require settings::unchanged_user_other_key_changed \
+            --require settings::unchanged_admin \
+            --require preferences::credential_revoked \
+            --require preferences::binding_revoked \
+            --require preferences::role_downgraded \
+            --require preferences::principal_reassigned \
+            --require preferences::unchanged_user_other_key_changed \
+            --require preferences::unchanged_admin \
+            --require facts::credential_revoked \
+            --require facts::binding_revoked \
+            --require facts::role_downgraded \
+            --require facts::principal_reassigned \
+            --require facts::unchanged_user_other_key_changed \
+            --require facts::unchanged_admin \
+            --require recent::credential_revoked \
+            --require recent::binding_revoked \
+            --require recent::role_downgraded \
+            --require recent::principal_reassigned \
+            --require recent::unchanged_user_other_key_changed \
+            --require recent::unchanged_admin \
+            --require items::credential_revoked \
+            --require items::binding_revoked \
+            --require items::role_downgraded \
+            --require items::principal_reassigned \
+            --require items::unchanged_user_other_key_changed \
+            --require items::unchanged_admin \
+            --require export::credential_revoked \
+            --require export::binding_revoked \
+            --require export::role_downgraded \
+            --require export::principal_reassigned \
+            --require export::unchanged_user_other_key_changed \
+            --require export::unchanged_admin \
+            --require markdown::credential_revoked \
+            --require markdown::binding_revoked \
+            --require markdown::role_downgraded \
+            --require markdown::principal_reassigned \
+            --require markdown::unchanged_user_other_key_changed \
+            --require markdown::unchanged_admin \
+            --require clear_preview::credential_revoked \
+            --require clear_preview::binding_revoked \
+            --require clear_preview::role_downgraded \
+            --require clear_preview::principal_reassigned \
+            --require clear_preview::unchanged_user_other_key_changed \
+            --require clear_preview::unchanged_admin \
+            --require vector_status::credential_revoked \
+            --require vector_status::binding_revoked \
+            --require vector_status::role_downgraded \
+            --require vector_status::principal_reassigned \
+            --require vector_status::unchanged_user_other_key_changed \
+            --require vector_status::unchanged_admin \
+            --require remote_disclosure::credential_revoked \
+            --require remote_disclosure::binding_revoked \
+            --require remote_disclosure::role_downgraded \
+            --require remote_disclosure::principal_reassigned \
+            --require remote_disclosure::unchanged_user_other_key_changed \
+            --require remote_disclosure::unchanged_admin
+          cargo test --locked -p clawd --bin clawd http::memory_read_boundary_tests:: -- --test-threads=1 --nocapture
+      - name: Test project lookup isolation and read-only identity contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin clawd http::memory_project_read_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_project_read_tests:: \
+            --require credential_revoked_before_project_read \
+            --require binding_revoked_before_project_read \
+            --require role_downgraded_before_project_read \
+            --require principal_reassigned_before_project_read \
+            --require unchanged_user_reads_late_alias_after_another_key_changes \
+            --require unchanged_admin_reads_late_alias_without_repair \
+            --require lookup::cold_writable_get_does_not_create_project_identity \
+            --require lookup::cold_readonly_get_reports_uninitialized_without_attempting_creation \
+            --require lookup::known_project_does_not_backfill_an_unrelated_missing_binding \
+            --require lookup::missing_identity_migration_is_not_repaired_by_writable_get \
+            --require lookup::corrupt_identity_migration_is_unavailable_without_read_repair \
+            --require lookup::explicit_initialization_survives_repeated_readonly_queries
+          cargo test --locked -p clawd --bin clawd http::memory_project_read_tests:: -- --test-threads=1 --nocapture
 
+      - name: Test durable memory import upload foundations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s scripts/tests -p 'test_memory_import_upload_schema.py'
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::import_upload::storage_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::import_upload::storage_tests:: \
+            --require accounting::raw_staging_is_measured_as_domain_growth_not_relabelled_as_source_quota \
+            --require identity::original_revoked_key_cannot_renew_or_open_a_parser_with_a_surviving_sibling \
+            --require schema::explicit_startup_is_idempotent_and_status_is_query_only \
+            --require schema::missing_marker_is_not_repaired_or_adopted_by_read_or_startup \
+            --require schema::corrupt_marker_fails_closed_without_overwriting_receipt \
+            --require schema::missing_schema_read_never_creates_tables \
+            --require schema::invalid_metadata_and_oversized_file_leave_no_staging \
+            --require chunks::create_resumes_same_file_only_within_the_same_owner \
+            --require chunks::duplicate_chunk_does_not_write_or_need_growth_admission \
+            --require chunks::bad_digest_order_overlap_and_size_never_advance_the_cursor \
+            --require chunks::failed_pointer_write_rolls_back_the_inserted_chunk \
+            --require chunks::storage_policy_change_inside_chunk_write_rolls_back_all_effects \
+            --require chunks::nested_chunk_write_cannot_commit_its_callers_transaction \
+            --require chunks::read_status_does_not_contend_with_an_independent_sqlite_writer \
+            --require identity::other_owner_cannot_read_append_cancel_or_claim_an_upload \
+            --require identity::original_key_binding_role_and_principal_are_rechecked_with_a_surviving_sibling \
+            --require leases::incomplete_upload_is_not_claimed_or_modified_by_the_parser \
+            --require leases::parser_expiry_fences_old_workers_without_losing_raw_chunks \
+            --require leases::an_unstolen_parser_renews_after_expiry_instead_of_wall_clock_killing_work \
+            --require leases::cancellation_releases_only_owned_staging_even_when_capacity_is_missing \
+            --require leases::last_chunk_retry_remains_idempotent_after_parser_claim \
+            --require reader::streaming_reader_preserves_split_unicode_and_validates_full_file_digest \
+            --require reader::complete_bytes_are_not_verified_until_the_reader_checks_eof \
+            --require reader::intact_chunks_with_a_wrong_declared_file_digest_cannot_pass_eof \
+            --require reader::changed_chunk_body_is_rejected_even_when_its_size_is_unchanged \
+            --require reader::reopened_database_can_resume_upload_and_steal_only_an_expired_parse
+          cargo test --locked -p clawd --bin clawd memory::import_upload::storage_tests:: -- --test-threads=1 --nocapture
+      - name: Test bounded streaming memory export decoding
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::import_upload::parser::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::import_upload::parser::tests:: \
+            --require empty_export_retains_schema1_vec_checksum \
+            --require one_byte_reads_preserve_unicode_escapes_and_canonical_item_order \
+            --require top_level_field_order_and_unknown_fields_match_legacy_typed_hash \
+            --require decoder_does_not_impose_the_legacy_ten_thousand_item_ceiling \
+            --require decoder_does_not_confuse_legacy_character_filter_with_a_parser_limit \
+            --require oversized_single_item_is_rejected_before_consumer_allocation \
+            --require oversized_metadata_and_unknown_field_keys_are_bounded_too \
+            --require wrong_export_checksum_never_returns_a_publishable_summary \
+            --require duplicate_missing_malformed_and_trailing_documents_fail_structurally \
+            --require unsupported_schema_is_a_typed_error_not_parsed_prose \
+            --require consumer_failure_keeps_its_original_machine_error \
+            --require underlying_io_failure_keeps_its_actual_error_kind \
+            --require actual_two_point_six_megabyte_unicode_export_streams_from_durable_chunks
+          cargo test --locked -p clawd --bin clawd memory::import_upload::parser::tests:: -- --test-threads=1 --nocapture
+      - name: Test shared memory import filtering and canonical insertion
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::ux::import_items::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::ux::import_items::tests:: \
+            --require legacy_character_filter_is_explicit_and_not_a_new_streaming_ceiling \
+            --require unsupported_kinds_and_empty_content_are_skipped_for_both_ingress_paths \
+            --require read_only_filter_preserves_provenance_without_granting_source_trust \
+            --require duplicate_filter_is_cross_kind_but_principal_private \
+            --require all_supported_kinds_use_the_same_principal_scoped_low_trust_writer \
+            --require canonical_writer_keeps_existing_fact_and_preference_idempotency \
+            --require canonical_writer_cannot_commit_an_item_outside_the_whole_import_transaction \
+            --require malformed_digest_kind_or_content_is_rejected_without_panicking_or_writing \
+            --require caller_failure_rolls_back_all_shared_item_writes
+          cargo test --locked -p clawd --bin clawd memory::ux::import_items::tests:: -- --test-threads=1 --nocapture
+      - name: Test staged memory whole preview confirmation and privacy lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::import_upload::flow_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::import_upload::flow_tests:: \
+            --require roundtrip::one_whole_preview_and_confirmation_publish_no_early_canonical_rows \
+            --require roundtrip::staged_preview_matches_legacy_logical_digest_and_reuses_its_receipt \
+            --require roundtrip::legacy_preview_reuses_a_staged_receipt_and_the_same_atomic_operation \
+            --require roundtrip::finalize_and_last_chunk_retries_do_not_duplicate_a_whole_preview \
+            --require roundtrip::original_large_unicode_shape_roundtrips_core_without_claiming_http_repair \
+            --require roundtrip::larger_unicode_record_remains_exact_within_the_advertised_resource_budget \
+            --require failure::wrong_export_checksum_releases_provisional_items_but_keeps_resumable_raw_bytes \
+            --require failure::stale_expected_preview_digest_cannot_publish_any_canonical_item \
+            --require failure::failing_second_canonical_insert_rolls_back_the_entire_confirmation \
+            --require failure::revoked_original_binding_cannot_confirm_through_a_surviving_sibling \
+            --require failure::damaged_staged_content_never_matches_the_original_logical_preview_digest \
+            --require lifecycle::cancelling_a_preview_removes_only_its_owned_plaintext_and_releases_its_file_identity \
+            --require lifecycle::full_clear_purges_owned_pending_raw_and_preview_staging_without_touching_another_owner \
+            --require lifecycle::recent_clear_withdraws_recent_preview_but_keeps_a_fact_only_preview \
+            --require lifecycle::a_failed_staging_purge_rolls_back_session_tombstones_and_the_whole_clear \
+            --require lifecycle::confirmed_receipts_keep_audit_metadata_without_retaining_the_imported_plaintext \
+            --require lifecycle::reopened_database_reuses_one_complete_preview_without_reparsing_raw_bytes \
+            --require batching::more_than_ten_thousand_records_share_one_preview_and_one_confirmation \
+            --require batching::later_batch_failure_discards_provisional_rows_but_keeps_the_whole_raw_upload \
+            --require batching::damaged_raw_blob_larger_than_its_pinned_chunk_budget_is_rejected_before_delivery
+          cargo test --locked -p clawd --bin clawd memory::import_upload::flow_tests:: -- --test-threads=1 --nocapture
+      - name: Test bounded staged import HTTP and ingress policies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::import_upload::ingress::tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::import_upload::ingress::tests:: \
+            --require ingress_projects_existing_webd_values_without_second_defaults \
+            --require invalid_ingress_or_lease_configuration_fails_without_silent_clamping \
+            --require policy_read_reports_the_real_persisted_budget_without_initializing_missing_state \
+            --require revoked_original_identity_cannot_read_policy_through_a_surviving_key \
+            --require growth_failures_keep_typed_machine_codes_and_not_provider_prose \
+            --require parser_rejects_an_outer_transaction_before_claim_or_staging
+          cargo test --locked -p clawd --bin clawd memory::import_upload::ingress::tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p clawd --bin clawd http::memory_import_http_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix http::memory_import_http_tests:: \
+            --require ingress::policy_projects_config_and_requires_authentication \
+            --require ingress::create_rejects_payload_supplied_ownership_and_does_not_write_a_session \
+            --require ingress::identical_chunk_retry_is_idempotent_and_out_of_order_bytes_do_not_advance \
+            --require ingress::declared_and_streamed_oversize_chunks_return_json_413_without_partial_append \
+            --require ingress::another_owner_is_rejected_before_any_chunk_body_is_consumed \
+            --require ingress::original_key_revocation_during_body_receipt_rejects_persistence \
+            --require ingress::malformed_metadata_query_and_digest_have_structured_errors \
+            --require roundtrip::large_unicode_export_uses_one_real_http_preview_and_one_confirmation \
+            --require roundtrip::legacy_single_request_limit_is_not_disabled_for_unrelated_routes \
+            --require boundary::status_and_policy_reads_do_not_need_the_sqlite_writer_lock \
+            --require boundary::missing_migration_returns_json_unavailable_without_read_repair \
+            --require boundary::preview_cancellation_requires_its_owner_and_removes_pending_plaintext \
+            --require boundary::invalid_ingress_configuration_does_not_block_status_or_cancellation_recovery \
+            --require boundary::body_receipt_deadline_is_structured_and_does_not_append_partial_bytes \
+            --require boundary::pressure_rejection_exposes_its_typed_reason_and_keeps_recovery_available
+          cargo test --locked -p clawd --bin clawd http::memory_import_http_tests:: -- --test-threads=1 --nocapture
+      - name: Test native webd staged import transport limits
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p webd --bin webd request_limits::memory_import_tests:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix request_limits::memory_import_tests:: \
+            --require only_the_exact_chunk_path_gets_the_existing_upload_policy \
+            --require similarly_named_nested_or_encoded_paths_do_not_expand_the_upload_exception \
+            --require chunk_class_uses_configured_upload_bytes_not_a_second_body_limit \
+            --require parser_and_upload_use_the_existing_separate_resource_permits
+          cargo test --locked -p webd --bin webd request_limits::memory_import_tests:: -- --test-threads=1 --nocapture
+          cargo test --locked -p webd --bin webd -- --test-threads=1 --nocapture
+      - name: Test effective flat and wrapped memory configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd bootstrap::config_loaders:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix bootstrap::config_loaders:: \
+            --require tests::memory_runtime_file_controls_startup_reindex_and_background_concurrency \
+            --require memory_runtime_config_tests::flat_explicit_false_and_nondefault_values_are_preserved \
+            --require memory_runtime_config_tests::wrapped_explicit_false_and_nondefault_values_are_not_replaced_by_defaults \
+            --require memory_runtime_config_tests::flat_and_wrapped_forms_agree_and_keep_the_selected_absolute_path \
+            --require memory_runtime_config_tests::explicit_memory_namespace_is_not_shadowed_by_flat_fields \
+            --require memory_runtime_config_tests::malformed_wrapper_uses_explicit_main_values_not_flat_defaults \
+            --require memory_runtime_config_tests::missing_or_malformed_file_keeps_main_configuration \
+            --require memory_runtime_config_tests::empty_path_keeps_main_configuration_without_reading_a_file
+          cargo test --locked -p clawd --bin clawd bootstrap::config_loaders:: -- --test-threads=1 --nocapture
+      - name: Test owned memory retirement access paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/assert_rust_test_selection.py --self-test
+          cargo test --locked -p clawd --bin clawd memory::retirement_access:: -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py \
+            --prefix memory::retirement_access:: \
+            --require migration_tests::upgrade_preserves_duplicates_data_and_prior_receipts \
+            --require migration_tests::repeated_initialization_is_read_only_and_query_only_safe \
+            --require migration_tests::digest_mismatch_precedes_any_schema_write \
+            --require migration_tests::unreceipted_wrong_projection_index_shapes_reject_atomically \
+            --require migration_tests::wrong_job_index_rolls_back_projection_index_and_receipt \
+            --require migration_tests::missing_applied_index_is_not_repaired \
+            --require migration_tests::outer_transaction_can_roll_back_successful_migration \
+            --require migration_tests::failed_nested_migration_preserves_caller_work \
+            --require migration_tests::missing_jobs_schema_is_not_initialized_by_index_migration \
+            --require migration_tests::readonly_first_initialization_has_no_partial_adoption \
+            --require migration_tests::concurrent_initializers_publish_one_valid_receipt \
+            --require migration_tests::validation_and_receipts_are_bound_to_main_not_temp_shadows \
+            --require tests::exact_identity_retirement_preserves_foreign_derived_rows_and_fts \
+            --require tests::all_scopes_and_principals_retire_only_their_selected_identity \
+            --require tests::eligibility_and_rotated_profile_generations_preserve_terminal_work \
+            --require tests::legacy_and_parameterless_selectors_preserve_duplicate_target_semantics \
+            --require tests::missing_targets_and_replays_have_no_unrelated_side_effects \
+            --require tests::absent_optional_tables_are_not_created_by_text_only_retirement \
+            --require tests::autocommit_retirement_is_rejected_without_changes \
+            --require tests::successful_nested_retirement_remains_owned_by_caller_transaction \
+            --require failure_tests::failures_at_every_retirement_stage_restore_all_rows_and_caller_can_commit \
+            --require failure_tests::malformed_present_tables_fail_even_for_empty_targets_without_repair \
+            --require failure_tests::readonly_failure_does_not_cancel_or_tombstone_work \
+            --require work_tests::populated_job_retirement_is_target_bounded_and_matches_legacy_effects \
+            --require work_tests::populated_vector_retirement_is_target_bounded_and_matches_legacy_effects \
+            --require work_tests::populated_upgrade_reports_storage_and_writer_hold_without_rewriting_rows
+          cargo test --locked -p clawd --bin clawd memory::retirement_access:: -- --test-threads=1 --nocapture
       - name: Test browser API authentication boundaries
         shell: bash
         env:

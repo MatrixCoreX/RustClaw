@@ -12,6 +12,8 @@ pub(crate) const LOCAL_PROFILE_ID: &str = "memory_embedding:local_default";
 pub(crate) const PROJECTION_VERSION: &str = "memory_searchable_projection_v2";
 const VECTOR_FORMAT: &str = "f32le_v1";
 const VECTOR_MAGIC: &[u8; 5] = b"MVEC\x01";
+const PROJECTION_IDENTITY_MATCH: &str = "i.id = v.retrieval_id AND i.principal_id = v.principal_id
+    AND i.scope_kind = v.scope_kind AND i.scope_ref = v.scope_ref";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct MemoryEmbeddingProfile {
@@ -134,15 +136,17 @@ impl MemoryVectorIndex for ExactSqliteVectorIndex {
             &profile.profile_id,
             profile.generation,
         )?;
-        let mut stmt = db.prepare(
-            "SELECT retrieval_id, vector_blob, vector_checksum
-             FROM memory_vector_rows
-             WHERE principal_id = ?1 AND profile_id = ?2 AND generation = ?3
-               AND status = 'active'
-               AND ((scope_kind = 'principal' AND scope_ref = ?4)
-                 OR (scope_kind = 'conversation' AND ?5 IS NOT NULL AND scope_ref = ?5)
-                 OR (scope_kind = 'project' AND ?6 IS NOT NULL AND scope_ref = ?6))",
-        )?;
+        let fact_is_current = super::facts::current_fact_projection_sql(db)?;
+        let mut stmt = db.prepare(&format!(
+            "SELECT v.retrieval_id, v.vector_blob, v.vector_checksum
+             FROM memory_vector_rows v
+             JOIN memory_retrieval_index i ON {PROJECTION_IDENTITY_MATCH}
+             WHERE v.principal_id = ?1 AND v.profile_id = ?2 AND v.generation = ?3
+               AND v.status = 'active' AND {fact_is_current}
+               AND ((v.scope_kind = 'principal' AND v.scope_ref = ?4)
+                 OR (v.scope_kind = 'conversation' AND ?5 IS NOT NULL AND v.scope_ref = ?5)
+                 OR (v.scope_kind = 'project' AND ?6 IS NOT NULL AND v.scope_ref = ?6))"
+        ))?;
         let rows = stmt.query_map(
             params![
                 access.principal_id,
@@ -190,15 +194,25 @@ impl MemoryVectorIndex for ExactSqliteVectorIndex {
 
     fn tombstone_orphans(&self, db: &Connection) -> anyhow::Result<usize> {
         let changed = db.execute(
-            "UPDATE memory_vector_rows SET status = 'tombstone', updated_at_ts = ?1
-             WHERE status = 'active' AND NOT EXISTS (
-                SELECT 1 FROM memory_retrieval_index i
-                WHERE i.id = memory_vector_rows.retrieval_id
-             )",
+            &format!(
+                "UPDATE memory_vector_rows AS v SET status = 'tombstone', updated_at_ts = ?1
+                 WHERE v.status = 'active' AND NOT EXISTS (
+                   SELECT 1 FROM memory_retrieval_index i WHERE {PROJECTION_IDENTITY_MATCH}
+                 )"
+            ),
             [crate::now_ts_u64() as i64],
         )?;
         Ok(changed)
     }
+}
+
+/// Explicit maintenance only; an absent optional pipeline is not permission to install it.
+pub(crate) fn maintain_orphaned_vectors(db: &Connection) -> anyhow::Result<usize> {
+    if migration_digest(db)?.is_none() {
+        return Ok(0);
+    }
+    ensure_vector_pipeline_schema(db)?;
+    ExactSqliteVectorIndex.tombstone_orphans(db)
 }
 
 pub(crate) fn ensure_vector_pipeline_schema(db: &Connection) -> anyhow::Result<()> {
@@ -207,6 +221,8 @@ pub(crate) fn ensure_vector_pipeline_schema(db: &Connection) -> anyhow::Result<(
             applied == migration_manifest_digest(),
             "runtime_schema_migration_digest_mismatch:{MIGRATION_ID}"
         );
+        // A verified migration is a read path, not another schema write.
+        return Ok(());
     }
     if db.is_autocommit() {
         let tx = db.unchecked_transaction()?;
@@ -619,3 +635,7 @@ fn short_digest(value: &[u8]) -> String {
 #[cfg(test)]
 #[path = "vector_store_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "vector_recall_liveness_tests.rs"]
+mod recall_liveness_tests;

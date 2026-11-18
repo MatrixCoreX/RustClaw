@@ -1,5 +1,5 @@
 use claw_core::types::AuthIdentity;
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -279,39 +279,39 @@ pub(crate) fn update_memory_settings(
         &target_principal_id,
         conversation_id.as_deref(),
     );
-    let tx = db.unchecked_transaction()?;
-    ensure_target_principal(&tx, request.scope, &target_principal_id)?;
-    let existing = load_settings_row(&tx, &setting_key)?;
-    let current_revision = existing.as_ref().map_or(0, |row| row.revision);
-    anyhow::ensure!(
-        current_revision == expected_revision,
-        "memory_settings_revision_conflict"
-    );
-    let legacy_mode = request.long_term_enabled.map(|enabled| {
-        if enabled {
-            MemorySettingMode::Enabled
-        } else {
-            MemorySettingMode::Disabled
-        }
-    });
-    let use_mode = request
-        .use_mode
-        .or(legacy_mode)
-        .or_else(|| existing.as_ref().map(|row| row.use_mode))
-        .unwrap_or(MemorySettingMode::Inherit);
-    let generate_mode = request
-        .generate_mode
-        .or(legacy_mode)
-        .or_else(|| existing.as_ref().map(|row| row.generate_mode))
-        .unwrap_or(MemorySettingMode::Inherit);
-    let external_context_policy = request
-        .external_context_policy
-        .or_else(|| existing.as_ref().map(|row| row.external_context_policy))
-        .unwrap_or(ExternalContextPolicy::Inherit);
-    let next_revision = current_revision + 1;
-    let now = crate::now_ts();
-    tx.execute(
-        "INSERT INTO memory_runtime_settings (
+    super::projection_transaction::atomic(db, |tx| {
+        ensure_target_principal(tx, request.scope, &target_principal_id)?;
+        let existing = load_settings_row(tx, &setting_key)?;
+        let current_revision = existing.as_ref().map_or(0, |row| row.revision);
+        anyhow::ensure!(
+            current_revision == expected_revision,
+            "memory_settings_revision_conflict"
+        );
+        let legacy_mode = request.long_term_enabled.map(|enabled| {
+            if enabled {
+                MemorySettingMode::Enabled
+            } else {
+                MemorySettingMode::Disabled
+            }
+        });
+        let use_mode = request
+            .use_mode
+            .or(legacy_mode)
+            .or_else(|| existing.as_ref().map(|row| row.use_mode))
+            .unwrap_or(MemorySettingMode::Inherit);
+        let generate_mode = request
+            .generate_mode
+            .or(legacy_mode)
+            .or_else(|| existing.as_ref().map(|row| row.generate_mode))
+            .unwrap_or(MemorySettingMode::Inherit);
+        let external_context_policy = request
+            .external_context_policy
+            .or_else(|| existing.as_ref().map(|row| row.external_context_policy))
+            .unwrap_or(ExternalContextPolicy::Inherit);
+        let next_revision = current_revision + 1;
+        let now = crate::now_ts();
+        tx.execute(
+            "INSERT INTO memory_runtime_settings (
             setting_key, setting_scope, principal_id, conversation_id,
             use_mode, generate_mode, external_context_policy,
             managed_deny_use, managed_deny_generate, revision, policy_digest,
@@ -324,44 +324,44 @@ pub(crate) fn update_memory_settings(
             revision = excluded.revision,
             updated_at = excluded.updated_at,
             updated_by_principal_id = excluded.updated_by_principal_id",
-        params![
-            setting_key,
-            request.scope.as_str(),
-            if matches!(request.scope, MemorySettingScope::Admin) {
-                None::<&str>
-            } else {
-                Some(target_principal_id.as_str())
-            },
-            conversation_id,
-            use_mode.as_str(),
-            generate_mode.as_str(),
-            external_context_policy.as_str(),
-            next_revision,
-            now,
-            actor.principal_id,
-        ],
-    )?;
-    let effective = resolve_for_scope(
-        &tx,
-        request.scope,
-        &target_principal_id,
-        conversation_id.as_deref(),
-        release_default,
-    )?;
-    tx.execute(
-        "UPDATE memory_runtime_settings SET policy_digest = ?2 WHERE setting_key = ?1",
-        params![setting_key, effective.policy_digest],
-    )?;
-    if !matches!(request.scope, MemorySettingScope::Admin) {
+            params![
+                setting_key,
+                request.scope.as_str(),
+                if matches!(request.scope, MemorySettingScope::Admin) {
+                    None::<&str>
+                } else {
+                    Some(target_principal_id.as_str())
+                },
+                conversation_id,
+                use_mode.as_str(),
+                generate_mode.as_str(),
+                external_context_policy.as_str(),
+                next_revision,
+                now,
+                actor.principal_id,
+            ],
+        )?;
+        let effective = resolve_for_scope(
+            tx,
+            request.scope,
+            &target_principal_id,
+            conversation_id.as_deref(),
+            release_default,
+        )?;
         tx.execute(
-            "UPDATE memory_onboarding_state
+            "UPDATE memory_runtime_settings SET policy_digest = ?2 WHERE setting_key = ?1",
+            params![setting_key, effective.policy_digest],
+        )?;
+        if !matches!(request.scope, MemorySettingScope::Admin) {
+            tx.execute(
+                "UPDATE memory_onboarding_state
              SET status = 'completed', updated_at = ?1
              WHERE singleton_id = 1 AND status = 'pending_choice'",
-            [crate::now_ts()],
-        )?;
-    }
-    tx.commit()?;
-    Ok(effective)
+                [crate::now_ts()],
+            )?;
+        }
+        Ok(effective)
+    })
 }
 
 fn resolve_for_scope(
@@ -616,7 +616,7 @@ fn setting_key(
 }
 
 fn ensure_target_principal(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     scope: MemorySettingScope,
     principal_id: &str,
 ) -> anyhow::Result<()> {

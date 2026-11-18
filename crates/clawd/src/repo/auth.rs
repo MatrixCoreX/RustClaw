@@ -7,14 +7,22 @@ use crate::{mask_secret, normalize_external_id_opt, now_ts, AppState};
 
 #[path = "auth_principal.rs"]
 mod auth_principal;
+#[path = "auth_request.rs"]
+mod auth_request;
 #[path = "auth_seed.rs"]
 mod auth_seed;
 #[path = "auth_webd.rs"]
 mod auth_webd;
 mod schema;
 
+#[cfg(test)]
+pub(crate) use auth_principal::credential_digest;
 pub(super) use auth_principal::with_identity_transaction;
-pub(crate) use auth_principal::{ensure_principal_identity_schema, principal_id_for_user_key};
+pub(crate) use auth_principal::{
+    active_principal_credential, ensure_principal_identity_schema, principal_id_for_user_key,
+    require_active_principal_credential, require_principal_identity_schema,
+};
+pub(crate) use auth_request::{require_request_identity, RequestIdentityError};
 pub(crate) use auth_seed::seed_channel_bindings;
 pub(crate) use auth_webd::{upsert_webd_login_account, verify_webd_password_login};
 pub(crate) use schema::ensure_key_auth_schema;
@@ -321,6 +329,7 @@ pub(crate) fn factory_reset_auth_state(state: &AppState) -> anyhow::Result<Facto
     let memory_facts_deleted = delete_all_rows_if_exists(&tx, "memory_facts")?;
     let memory_retrieval_rows_deleted = delete_all_rows_if_exists(&tx, "memory_retrieval_index")?;
     let _ = delete_all_rows_if_exists(&tx, "memory_retrieval_index_fts")?;
+    let _ = delete_all_rows_if_exists(&tx, "memory_generation_outputs")?;
 
     let followup_frames_deleted = delete_all_rows_if_exists(&tx, "followup_frames")?;
     let clarify_states_deleted = delete_all_rows_if_exists(&tx, "clarify_states")?;
@@ -579,7 +588,13 @@ pub(crate) fn create_auth_key(state: &AppState, role: &str) -> anyhow::Result<St
              VALUES (?1, ?2, 1, ?3, NULL)",
             params![user_key, role, now_ts()],
         )?;
-        auth_principal::create_principal_for_auth_key(db, &user_key, &role)?;
+        let principal = auth_principal::create_principal_for_auth_key(db, &user_key, &role)?;
+        crate::memory::quota::initialize_new_identity(
+            db,
+            &state.policy.memory,
+            &principal,
+            crate::now_ts_u64() as i64,
+        )?;
         Ok(())
     })?;
     Ok(user_key)

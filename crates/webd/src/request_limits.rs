@@ -416,11 +416,23 @@ fn is_upload_path(path: &str) -> bool {
     matches!(
         path,
         "/v1/skills/import/upload" | "/v1/memory/import/preview"
-    )
+    ) || is_memory_import_action(path, "/chunks")
+}
+
+fn is_memory_import_action(path: &str, action: &str) -> bool {
+    path.strip_prefix("/v1/memory/import/uploads/")
+        .and_then(|rest| rest.strip_suffix(action))
+        .is_some_and(|id| {
+            !id.is_empty()
+                && id
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        })
 }
 
 fn is_high_cost_path(path: &str) -> bool {
     path == "/v1/llm/test"
+        || is_memory_import_action(path, "/preview")
         || path == "/v1/memory/vector/reindex"
         || path == "/v1/nni/bancor/trade"
         || path == "/v1/nni/assets/transfer"
@@ -437,3 +449,7 @@ fn is_high_cost_path(path: &str) -> bool {
 #[cfg(test)]
 #[path = "request_limits_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "memory_import_limits_tests.rs"]
+mod memory_import_tests;

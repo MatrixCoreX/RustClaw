@@ -21,6 +21,7 @@ fn setup_db() -> Connection {
     crate::repo::auth::ensure_principal_identity_schema(&db).expect("principal schema");
     crate::repo::ensure_principal_ownership_schema(&db).expect("ownership schema");
     crate::memory::scope::ensure_memory_scope_schema(&db).expect("scope schema");
+    crate::memory::ux::ensure_memory_ux_schema(&db).expect("explicit fixture UX startup");
     db
 }
 
@@ -36,6 +37,19 @@ fn principal_id(db: &Connection) -> String {
 #[test]
 fn memory_api_lists_preferences_and_facts() {
     let db = setup_db();
+    crate::memory::capacity_test_fixtures::persist_preference_sources(
+        &db,
+        7,
+        11,
+        "user:test",
+        &[(
+            "response_language".into(),
+            "zh-CN".into(),
+            0.96,
+            "memory_extract".into(),
+        )],
+        1000,
+    );
     crate::memory::indexing::index_preference_entries(
         &db,
         7,
@@ -50,23 +64,6 @@ fn memory_api_lists_preferences_and_facts() {
         1000,
     )
     .expect("index preference");
-    db.execute(
-        "INSERT INTO user_preferences
-         (user_id, chat_id, user_key, pref_key, pref_value, confidence, source, updated_at, updated_at_ts)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![
-            7,
-            11,
-            "user:test",
-            "response_language",
-            "zh-CN",
-            0.96_f32,
-            "memory_extract",
-            "1000",
-            1000_i64,
-        ],
-    )
-    .expect("insert preference");
     let source_ids = [42_i64];
     let fact = MemoryFactUpsert::from_long_term_summary(
         "user_profile",
@@ -206,8 +203,11 @@ fn memory_api_clear_all_removes_scoped_records_and_indexes() {
     let db = setup_db();
     db.execute(
         "INSERT INTO memories
-         (user_id, chat_id, user_key, channel, role, content, created_at, created_at_ts, memory_type, salience, is_instructional, safety_flag)
-         VALUES (?1, ?2, ?3, 'ui', 'user', '记住我的测试上下文', '1000', ?4, 'generic', 0.8, 0, 'normal')",
+         (memory_id,principal_id,scope_kind,scope_ref,user_id, chat_id, user_key, channel, role, content, created_at, created_at_ts, memory_type, salience, is_instructional, safety_flag)
+         VALUES ('memory_api_fixture',
+                 (SELECT principal_id FROM auth_keys WHERE user_key=?3),'principal',
+                 (SELECT principal_id FROM auth_keys WHERE user_key=?3),
+                 ?1, ?2, ?3, 'ui', 'user', '记住我的测试上下文', '1000', ?4, 'generic', 0.8, 0, 'normal')",
         params![7, 11, "user:test", 1000_i64],
     )
     .expect("insert memory");
@@ -228,8 +228,11 @@ fn memory_api_clear_all_removes_scoped_records_and_indexes() {
     .expect("index memory");
     db.execute(
         "INSERT INTO user_preferences
-         (user_id, chat_id, user_key, pref_key, pref_value, confidence, source, updated_at, updated_at_ts)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+         (memory_id,principal_id,scope_kind,scope_ref,user_id, chat_id, user_key, pref_key, pref_value, confidence, source, updated_at, updated_at_ts)
+         VALUES ('memory_api_preference',
+                 (SELECT principal_id FROM auth_keys WHERE user_key=?3),'principal',
+                 (SELECT principal_id FROM auth_keys WHERE user_key=?3),
+                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             7,
             11,

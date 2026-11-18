@@ -116,6 +116,48 @@ pub(crate) fn resolve_project_scope(
     })
 }
 
+pub(crate) fn lookup_project_scope(
+    db: &Connection,
+    identity: &AuthIdentity,
+    workspace: &Path,
+) -> anyhow::Result<Option<ResolvedMemoryScope>> {
+    Ok(
+        super::project_identity::lookup_project_identity(db, workspace)?.map(|project| {
+            ResolvedMemoryScope {
+                kind: MemoryScopeKind::Project,
+                scope_ref: project.project_ref,
+                principal_id: identity.principal_id.clone(),
+            }
+        }),
+    )
+}
+
+pub(super) fn require_applied_migration(
+    db: &Connection,
+    migration_id: &str,
+    expected_digest: &str,
+) -> anyhow::Result<()> {
+    let applied: Option<String> = db
+        .query_row(
+            "SELECT schema_digest FROM runtime_schema_migrations WHERE migration_id = ?1",
+            [migration_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|_| anyhow::anyhow!("memory_schema_unavailable"))?;
+    let applied = applied
+        .ok_or_else(|| anyhow::anyhow!("memory_schema_migration_required:{migration_id}"))?;
+    anyhow::ensure!(
+        applied == expected_digest,
+        "runtime_schema_migration_digest_mismatch:{migration_id}"
+    );
+    Ok(())
+}
+
+pub(super) fn require_memory_scope_schema(db: &Connection) -> anyhow::Result<()> {
+    require_applied_migration(db, MIGRATION_ID, &manifest_digest())
+}
+
 pub(crate) fn ensure_memory_scope_schema(db: &Connection) -> anyhow::Result<()> {
     crate::repo::ensure_principal_ownership_schema(db)?;
     if let Some(applied_digest) = migration_digest(db)? {

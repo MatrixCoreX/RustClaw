@@ -91,6 +91,10 @@ jobs:
           python3 scripts/check_no_policy_boundary_hard_reply.py
           python3 scripts/check_skill_hotplug_coupling_inventory.py --self-test
           python3 scripts/check_skill_hotplug_coupling_inventory.py
+          python3 scripts/check_rag_contracts.py --self-test
+          python3 scripts/check_rag_contracts.py
+          python3 scripts/check_mcp_runtime_contracts.py --self-test
+          python3 scripts/check_mcp_runtime_contracts.py
           python3 scripts/check_on_demand_skill_builds.py
           python3 scripts/check_answer_verifier_boundary.py
           python3 scripts/check_deterministic_decision_inventory.py
@@ -108,8 +112,20 @@ jobs:
           cargo test --locked -p agent-skill-sdk
           cargo test --locked -p skill-runner
           cargo test --locked -p claw-core
-          cargo build --locked -p clawd --bins
+          cargo build --locked -p clawd --bins -p skill-runner --bin skill-runner -p agent-skill-sdk --bin skillctl
           cargo test --locked -p clawd --bin clawd -- --test-threads=3
+      - name: Verify real memory project startup and restart
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/project-process-evidence"
+          python3 -B scripts/tests/memory_project_process_probe.py --repository "$GITHUB_WORKSPACE" --source "$GITHUB_SHA" --clawd "$GITHUB_WORKSPACE/target/debug/clawd" --skill-runner "$GITHUB_WORKSPACE/target/debug/skill-runner" --skillctl "$GITHUB_WORKSPACE/target/debug/skillctl" --output "$RUNNER_TEMP/project-process-evidence"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: combined-project-process-${{ runner.os }}-${{ github.sha }}
+          path: ${{ runner.temp }}/project-process-evidence/
+          if-no-files-found: warn
       - name: Verify the actual process owner and package custody
         shell: bash
         run: |

@@ -455,7 +455,12 @@ def check_runtime_rebuild_safety(root: Path, findings: list[str]) -> None:
     commit_at = rebuild.rfind("tx.commit()?")
     if not (0 <= transaction_at < delete_at < commit_at):
         findings.append("memory_retrieval_rebuild_not_atomic")
-    if "memory_retrieval_unowned_source_skipped" not in source:
+    writer = read_text(root, Path("crates/clawd/src/memory/indexing_insert.rs"), findings)
+    if (
+        "memory_retrieval_unowned_source_skipped" not in writer
+        or '#[path = "indexing_insert.rs"]' not in source
+        or "pub(super) use writer::insert_index_row;" not in source
+    ):
         findings.append("memory_retrieval_unowned_legacy_boundary_missing")
 
 
@@ -574,6 +579,10 @@ fn clear_inline_vector_payloads() {
             "    tx.execute(\"DELETE FROM memory_retrieval_index\", [])?;\n"
             "    tx.commit()?;\n"
             "}\n"
+            '#[path = "indexing_insert.rs"]\nmod writer;\n'
+            "pub(super) use writer::insert_index_row;\n"
+        ),
+        "crates/clawd/src/memory/indexing_insert.rs": (
             "// memory_retrieval_unowned_source_skipped\n"
         ),
         "crates/clawd/src/memory/retrieval.rs": (
@@ -732,6 +741,26 @@ def self_test() -> int:
         findings = evaluate(root)
         if "memory_retrieval_rebuild_not_atomic" not in findings:
             print(f"RAG_CONTRACT_SELF_TEST rebuild_negative_failed={findings}")
+            return 1
+        write_fixture(root)
+        writer = root / "crates/clawd/src/memory/indexing_insert.rs"
+        writer.write_text("// missing ownership refusal\n", encoding="utf-8")
+        findings = evaluate(root)
+        if "memory_retrieval_unowned_legacy_boundary_missing" not in findings:
+            print(f"RAG_CONTRACT_SELF_TEST writer_ownership_negative_failed={findings}")
+            return 1
+        write_fixture(root)
+        indexing = root / "crates/clawd/src/memory/indexing.rs"
+        indexing.write_text(
+            indexing.read_text(encoding="utf-8").replace(
+                "pub(super) use writer::insert_index_row;",
+                "// ownership writer is not connected",
+            ),
+            encoding="utf-8",
+        )
+        findings = evaluate(root)
+        if "memory_retrieval_unowned_legacy_boundary_missing" not in findings:
+            print(f"RAG_CONTRACT_SELF_TEST writer_binding_negative_failed={findings}")
             return 1
         write_fixture(root)
         installed = root / "data/skill-packages/kb/versions/stale"

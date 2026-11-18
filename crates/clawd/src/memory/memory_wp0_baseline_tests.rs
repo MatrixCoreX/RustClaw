@@ -141,6 +141,7 @@ fn setup_fixture(state: &AppState, fixture: &BaselineFixture) {
     crate::repo::auth::ensure_principal_identity_schema(&db).expect("principal schema");
     crate::repo::ensure_principal_ownership_schema(&db).expect("ownership schema");
     super::scope::ensure_memory_scope_schema(&db).expect("scope schema");
+    super::ux::ensure_memory_ux_schema(&db).expect("explicit fixture UX startup");
     let principal_ids = fixture
         .retrieval
         .items

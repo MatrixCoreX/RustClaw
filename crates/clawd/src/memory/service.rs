@@ -658,12 +658,12 @@ pub(crate) async fn maybe_refresh_long_term_summary(
         .map_err(|error| error.to_string())
 }
 
-pub(crate) async fn maybe_refresh_long_term_summary_for_range(
+pub(super) async fn maybe_refresh_long_term_summary_for_range(
     state: &AppState,
     task: &ClaimedTask,
     force_refresh: bool,
     source_range: Option<(i64, i64)>,
-    generation_job_id: Option<&str>,
+    generation: Option<&super::generation_response::GenerationCall<'_>>,
 ) -> anyhow::Result<()> {
     if !state.policy.memory.long_term_enabled {
         return Ok(());
@@ -811,14 +811,14 @@ pub(crate) async fn maybe_refresh_long_term_summary_for_range(
         None,
     );
 
-    let summary = crate::llm_gateway::run_with_fallback_with_prompt_source(
+    let summary = super::generation_response::run(
         state,
         task,
         &summary_prompt,
         &summary_prompt_source,
+        generation,
     )
-    .await
-    .map_err(|_| super::job_failure::JobFailure::provider("consolidate_provider"))?;
+    .await?;
     let parsed = match try_parse_long_term_refresh_llm_out_with_schema(&summary) {
         Ok(parsed) => parsed,
         Err(err) => {
@@ -837,8 +837,16 @@ pub(crate) async fn maybe_refresh_long_term_summary_for_range(
         )
         .into());
     }
-    crate::memory::upsert_long_term_summary(
-        state,
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|error| anyhow::anyhow!("memory_job_db_pool:{error}"))?;
+    let tx = db
+        .unchecked_transaction()
+        .map_err(|error| anyhow::anyhow!("memory_job_commit_begin:{error}"))?;
+    crate::memory::upsert_long_term_summary_in_connection(
+        &tx,
         task.user_id,
         task.chat_id,
         task.user_key.as_deref(),
@@ -847,14 +855,18 @@ pub(crate) async fn maybe_refresh_long_term_summary_for_range(
     )
     .map_err(|err| anyhow::anyhow!(err))?;
     persist_valid_knowledge_candidates(
-        state,
+        &tx,
         task,
         latest_id,
         &parsed.fact_candidates,
         &parsed.knowledge_candidates,
-        generation_job_id,
+        generation.map(|generation| generation.lease.job_id),
     )
     .map_err(|err| anyhow::anyhow!(err))?;
+    if let Some(generation) = generation {
+        super::job_completion::mark_committed(&tx, generation.lease)?;
+    }
+    tx.commit()?;
     Ok(())
 }
 
@@ -902,7 +914,7 @@ fn parse_long_term_refresh_llm_out(raw: &str) -> LongTermRefreshLlmOut {
 }
 
 fn persist_valid_knowledge_candidates(
-    state: &AppState,
+    db: &rusqlite::Connection,
     task: &ClaimedTask,
     latest_id: i64,
     fact_candidates: &[KnowledgeCandidateLlmOut],
@@ -920,11 +932,6 @@ fn persist_valid_knowledge_candidates(
     if fact_candidates.is_empty() && candidates.is_empty() {
         return Ok(());
     }
-    let db = state
-        .core
-        .db
-        .get()
-        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let effective_candidates = if fact_candidates.is_empty() {
         candidates
     } else {
