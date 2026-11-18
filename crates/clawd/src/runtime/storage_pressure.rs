@@ -94,6 +94,16 @@ pub(crate) async fn admit_write(state: &crate::AppState) -> anyhow::Result<Stora
     Ok(tokio::task::spawn_blocking(move || refresh(&state)).await?)
 }
 
+pub(crate) async fn background_write_admitted(state: &crate::AppState) -> bool {
+    let snapshot = match state.worker.supervision.storage_snapshot() {
+        Some(snapshot) if crate::now_ts_u64().saturating_sub(snapshot.sampled_at_ts) <= 30 => {
+            Some(snapshot)
+        }
+        _ => admit_write(state).await.ok(),
+    };
+    snapshot.is_some_and(|snapshot| snapshot.write_admission)
+}
+
 #[cfg(test)]
 #[path = "storage_pressure_tests.rs"]
 mod tests;
