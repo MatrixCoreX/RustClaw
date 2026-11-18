@@ -399,35 +399,57 @@ async fn configuration_write_legacy_blank_key_does_not_erase_existing_credential
         "custom",
     )
     .unwrap();
-    assert!(
-        literal == SECRET
-            || environment
-                .as_ref()
-                .is_some_and(|secret| secret.expose() == SECRET),
-        "a blank credential update must preserve the previous effective secret"
-    );
+    assert_eq!(literal, "", "migrate legacy credentials out of TOML");
+    assert_eq!(environment.unwrap().expose(), SECRET);
+    assert!(!serde_json::to_string(&body).unwrap().contains(SECRET));
 }
 
 #[test]
 fn configuration_write_failed_legacy_publication_does_not_rotate_the_secret() {
+    for key in [None, Some(REPLACEMENT)] {
+        let fixture = custom_fixture();
+        let original = fixture.files();
+        let path = claw_core::secrets::model_environment::path(&fixture.root);
+        let before = fs::read(&path).ok();
+        let (status, Json(body)) = update_llm_config_with_writer(
+            fixture.state.clone(),
+            headers(),
+            legacy_request(key),
+            |_, _| Err(std::io::Error::other("owned TOML publication failure")),
+        );
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(!body.ok);
+        assert_eq!(fixture.files(), original);
+        assert_eq!(
+            fs::read(path).ok(),
+            before,
+            "failed configuration publication must not rotate or migrate credentials"
+        );
+    }
+}
+
+#[tokio::test]
+async fn configuration_write_blank_key_keeps_broker_credential_over_legacy_literal() {
     let fixture = custom_fixture();
-    let original = fixture.files();
-    let path = claw_core::secrets::model_environment::path(&fixture.root);
-    let before = fs::read(&path).ok();
-    let (status, Json(body)) = update_llm_config_with_writer(
-        fixture.state.clone(),
-        headers(),
-        legacy_request(Some(REPLACEMENT)),
-        |_, _| Err(std::io::Error::other("owned TOML publication failure")),
-    );
-    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
-    assert!(!body.ok);
-    assert_eq!(fixture.files(), original);
-    assert_eq!(
-        fs::read(path).ok(),
-        before,
-        "failed configuration publication must not rotate the saved credential"
-    );
+    claw_core::secrets::model_environment::save(&fixture.root, "custom", REPLACEMENT).unwrap();
+    for key in [None, Some("  ")] {
+        let (status, Json(body)) = update_llm_config(
+            State(fixture.state.clone()),
+            headers(),
+            Json(legacy_request(key)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.ok);
+        let parsed: toml::Value =
+            toml::from_str(&fs::read_to_string(fixture.root.join("configs/config.toml")).unwrap())
+                .unwrap();
+        assert_eq!(parsed["llm"]["custom"]["api_key"].as_str(), Some(""));
+        assert_eq!(
+            effective_model_provider_key(&fixture.state, "custom").unwrap(),
+            REPLACEMENT
+        );
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]

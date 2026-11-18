@@ -133,6 +133,34 @@ fn update_llm_config_locked(
         );
     }
 
+    let broker_managed =
+        !claw_core::config::llm_vendor_api_key_env_names(&selected_vendor).is_empty();
+    let mut saved_api_key = inline_api_key;
+    if inline_api_key.is_empty() && !device_key_enrollment && broker_managed {
+        let legacy_key = parsed
+            .get("llm")
+            .and_then(|llm| llm.get(&selected_vendor))
+            .and_then(|vendor| vendor.get("api_key"))
+            .and_then(toml::Value::as_str)
+            .map(str::trim)
+            .unwrap_or("");
+        if !model_provider_display_mask(legacy_key)
+            && claw_core::secrets::model_environment::validate_update(&selected_vendor, legacy_key)
+                .is_ok()
+        {
+            match effective_model_provider_key(state, &selected_vendor) {
+                Ok(key) if key.is_empty() => saved_api_key = legacy_key,
+                Ok(_) => (),
+                Err(_) => {
+                    return crate::api_err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "provider_keys_read_failed",
+                    );
+                }
+            }
+        }
+    }
+
     let updated_vendor = upsert_string_key_in_section(
         &raw,
         "llm",
@@ -164,10 +192,7 @@ fn update_llm_config_locked(
         &allowed_models,
         &selected_model,
     );
-    let updated_api_key = if !inline_api_key.is_empty()
-        || device_key_enrollment
-        || !claw_core::config::llm_vendor_api_key_env_names(&selected_vendor).is_empty()
-    {
+    let updated_api_key = if !saved_api_key.is_empty() || device_key_enrollment || broker_managed {
         // Broker-owned text credentials must not remain in legacy TOML after
         // saving model settings, including an empty/reuse credential request.
         upsert_string_key_in_section(
@@ -210,12 +235,14 @@ fn update_llm_config_locked(
         Ok(parsed) => parsed,
         Err(_) => return crate::api_err(StatusCode::BAD_REQUEST, "llm_config_invalid"),
     };
-    let publication = if !inline_api_key.is_empty() {
+    let publication = if !saved_api_key.is_empty() {
         use claw_core::secrets::model_environment::{with_saved, PublicationError};
         with_saved(
             &state.skill_rt.workspace_root,
             &selected_vendor,
-            inline_api_key,
+            // Migrate a legacy literal only when the broker has no credential.
+            // Clearing TOML and publishing the secret share failure recovery.
+            saved_api_key,
             || publish(state, &final_updated),
         )
         .map_err(|error| match error {
