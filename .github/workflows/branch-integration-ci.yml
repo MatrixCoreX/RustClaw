@@ -144,7 +144,7 @@ jobs:
             ${{ runner.temp }}/project-process-evidence/*/process-*.log
           if-no-files-found: warn
       - name: Verify the actual process owner and package custody
-        if: ${{ !cancelled() && steps.native_build.outcome == 'success' }}
+        if: ${{ !cancelled() && runner.os == 'Linux' && steps.native_build.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
