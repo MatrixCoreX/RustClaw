@@ -1,3 +1,5 @@
+#[path = "skills/storage_admission.rs"]
+mod storage_admission;
 use claw_core::skill_registry::{
     CapabilityIsolationProfile, PlannerCapabilityEffect, SkillDispatchQueueScope, SkillKind,
     SkillRiskLevel,
@@ -1576,6 +1578,7 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
         SkillKind::Runner => "runner",
         SkillKind::External => "external",
     };
+    storage_admission::admit(state, &skill_name, &args).await?;
     audit_high_risk_skill_start(state, task, &skill_name, &args);
     let execution_isolation = prepare_skill_execution_isolation(state, task, &skill_name, &args)?;
     let (execution_state, isolation_artifact_refs) =

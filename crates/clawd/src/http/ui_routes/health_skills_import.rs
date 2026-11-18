@@ -400,6 +400,7 @@ async fn health(
         ),
     );
     let data = HealthResponse {
+        storage_pressure: state.worker.supervision.storage_snapshot(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         queue_length,
         worker_state: worker_supervision.state.clone(),

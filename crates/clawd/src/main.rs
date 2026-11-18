@@ -1441,6 +1441,7 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         )
         .route("/classifiers/direct", post(classify_direct))
         .merge(http::memory_routes::router())
+        .merge(http::memory_job_routes::router())
         .route(
             "/channel/preferences",
             get(communication_preferences::get_handler)

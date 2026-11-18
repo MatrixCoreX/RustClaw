@@ -1,11 +1,14 @@
 use std::time::Duration;
 
+use super::job_failure::{permanent, JobFailure};
 use anyhow::anyhow;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
+#[path = "job_recovery.rs"]
+pub(crate) mod recovery;
 
 use super::eligibility::{
     build_turn_eligibility, MemoryEligibilityDisposition, MemorySourceCategory,
@@ -35,6 +38,8 @@ pub(crate) struct MemoryJobSnapshot {
     pub(crate) attempt: i64,
     pub(crate) checkpoint_json: String,
     pub(crate) cancel_requested: bool,
+    pub(crate) error_code: Option<String>,
+    pub(crate) retryable: bool,
 }
 
 pub(crate) fn ensure_memory_job_schema(db: &Connection) -> anyhow::Result<()> {
@@ -140,7 +145,7 @@ pub(crate) fn enqueue_turn_memory_jobs(
         .map_err(|error| anyhow!("memory_job_db_pool:{error}"))?;
     ensure_memory_job_schema(&db)?;
     let settings = super::settings::resolve_task_memory_settings(state, task)?
-        .ok_or_else(|| anyhow!("memory_job_settings_unavailable"))?;
+        .ok_or_else(|| permanent("memory_job_settings_unavailable"))?;
     if !settings.generate_memory {
         return Ok(Vec::new());
     }
@@ -422,7 +427,19 @@ fn enqueue_prepared_turn_jobs(
     }
     for kind in kinds {
         let (provider_name, provider_type, model_name, capability_digest) =
-            provider_snapshot_for_job(state, task, settings, kind)?;
+            match provider_snapshot_for_job(state, task, settings, kind) {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    let failure = JobFailure::from_error(&error);
+                    warn!(
+                        task_id = task.task_id,
+                        job_kind = kind,
+                        error_code = failure.error_code,
+                        "memory_job_enqueue_deferred"
+                    );
+                    continue;
+                }
+            };
         let job_id = format!("memory_job_{}", uuid::Uuid::new_v4().simple());
         tx.execute(
             "INSERT INTO memory_jobs(
@@ -481,17 +498,20 @@ fn provider_snapshot_for_job(
         _ => ("", ""),
     };
     if configured_provider.is_empty() && configured_model.is_empty() {
-        return Ok(provider_snapshot(
-            state.task_llm_providers(task).into_iter().next(),
-        ));
+        let provider = state
+            .task_llm_providers(task)
+            .into_iter()
+            .next()
+            .ok_or_else(|| permanent("memory_job_provider_unavailable"))?;
+        return Ok(provider_snapshot(Some(provider)));
     }
     anyhow::ensure!(
         !configured_provider.is_empty() && !configured_model.is_empty(),
-        "memory_job_model_config_incomplete"
+        permanent("memory_job_model_config_incomplete")
     );
     anyhow::ensure!(
         settings.external_context_policy == super::settings::ExternalContextPolicy::Allow,
-        "memory_job_independent_provider_consent_required"
+        permanent("memory_job_independent_provider_consent_required")
     );
     let provider = state
         .core
@@ -502,26 +522,34 @@ fn provider_snapshot_for_job(
                 && runtime.config.model == configured_model
         })
         .cloned()
-        .ok_or_else(|| anyhow!("memory_job_configured_provider_unavailable"))?;
+        .ok_or_else(|| permanent("memory_job_configured_provider_unavailable"))?;
     Ok(provider_snapshot(Some(provider)))
 }
 
 pub(crate) fn spawn_memory_job_workers(state: crate::AppState, concurrency: usize) {
     for worker_index in 0..concurrency.max(1) {
-        let state = state.clone();
-        tokio::spawn(async move {
-            let worker_id = format!("{}:memory:{worker_index}", state.worker.worker_id);
-            loop {
-                match run_one_memory_job(&state, &worker_id).await {
-                    Ok(true) => {}
-                    Ok(false) => tokio::time::sleep(Duration::from_millis(750)).await,
-                    Err(error) => {
-                        error!(worker_id, error = %error, "memory_job_worker_tick_failed");
-                        tokio::time::sleep(Duration::from_secs(2)).await;
+        let worker_id = format!("{}:memory:{worker_index}", state.worker.worker_id);
+        let worker_state = state.clone();
+        crate::worker::runtime_support::spawn_background_loop(
+            &state,
+            worker_id.clone(),
+            Duration::from_millis(750),
+            move || {
+                let state = worker_state.clone();
+                let worker_id = worker_id.clone();
+                async move {
+                    if state
+                        .worker
+                        .supervision
+                        .storage_snapshot()
+                        .is_some_and(|v| !v.write_admission)
+                    {
+                        return Ok(false);
                     }
+                    run_one_memory_job(&state, &worker_id).await
                 }
-            }
-        });
+            },
+        );
     }
 }
 
@@ -532,30 +560,32 @@ pub(crate) async fn run_one_memory_job(
     let Some(job) = claim_next_job(state, worker_id)? else {
         return Ok(false);
     };
-    let execution = execute_claimed_job(state, &job);
+    let execution = crate::runtime::provider_diagnostics::capture(execute_claimed_job(state, &job));
     tokio::pin!(execution);
     let heartbeat_seconds = (state.policy.memory.background_lease_seconds.max(15) / 3).clamp(5, 30);
     let result = loop {
         tokio::select! {
-            result = &mut execution => break result,
+            result = &mut execution => break result.0,
             _ = tokio::time::sleep(Duration::from_secs(heartbeat_seconds)) => {
                 if let Err(error) = renew_job_lease(state, &job.job_id, worker_id) {
                     break Err(error);
                 }
+                crate::worker::runtime_support::background_execution_heartbeat();
             }
         }
     };
     match result {
         Ok(()) => complete_job(state, &job.job_id, worker_id)?,
         Err(error) => {
-            warn!(job_id = job.job_id, error = %error, "memory_job_execution_failed");
-            fail_or_retry_job(
-                state,
-                &job.job_id,
-                worker_id,
-                job.attempt,
-                "memory_job_execution_failed",
-            )?;
+            let failure = JobFailure::from_error(&error);
+            warn!(
+                job_id = job.job_id,
+                error_code = failure.error_code,
+                phase = failure.phase,
+                retryable = failure.retryable,
+                "memory_job_execution_failed"
+            );
+            fail_or_retry_job(state, &job.job_id, worker_id, job.attempt, &failure)?;
         }
     }
     Ok(true)
@@ -675,28 +705,31 @@ async fn execute_claimed_job(
     job: &MemoryJobSnapshot,
 ) -> anyhow::Result<()> {
     if job.cancel_requested {
-        anyhow::bail!("memory_job_cancelled");
+        return Err(permanent("memory_job_cancelled"));
     }
     let task = load_source_task(state, job)?;
     let selected_provider = state
         .task_llm_providers(&task)
         .into_iter()
         .next()
-        .ok_or_else(|| anyhow!("memory_job_provider_unavailable"))?;
+        .ok_or_else(|| permanent("memory_job_provider_unavailable"))?;
     let (_, _, selected_model, selected_capability_digest) =
         provider_snapshot(Some(selected_provider.clone()));
     anyhow::ensure!(
         selected_provider.config.name == job.provider_name
             && selected_model == job.model_name
             && selected_capability_digest == job.model_capability_digest,
-        "memory_job_model_snapshot_mismatch"
+        permanent("memory_job_model_snapshot_mismatch")
     );
     let current = super::settings::resolve_task_memory_settings(state, &task)?
-        .ok_or_else(|| anyhow!("memory_job_settings_unavailable"))?;
-    anyhow::ensure!(current.generate_memory, "memory_job_generation_revoked");
+        .ok_or_else(|| permanent("memory_job_settings_unavailable"))?;
+    anyhow::ensure!(
+        current.generate_memory,
+        permanent("memory_job_generation_revoked")
+    );
     anyhow::ensure!(
         current.revision == job.settings_revision && current.policy_digest == job.policy_digest,
-        "memory_job_settings_snapshot_changed"
+        permanent("memory_job_settings_snapshot_changed")
     );
     let db = state
         .core
@@ -708,16 +741,16 @@ async fn execute_claimed_job(
         [&job.job_id],
         |row| row.get(0),
     )?;
-    anyhow::ensure!(!cancelled, "memory_job_cancelled");
+    anyhow::ensure!(!cancelled, permanent("memory_job_cancelled"));
     let source_start = job
         .source_event_start
-        .ok_or_else(|| anyhow!("memory_job_source_range_missing"))?;
+        .ok_or_else(|| permanent("memory_job_source_range_missing"))?;
     let source_end = job
         .source_event_end
-        .ok_or_else(|| anyhow!("memory_job_source_range_missing"))?;
+        .ok_or_else(|| permanent("memory_job_source_range_missing"))?;
     db.execute(
         "UPDATE memory_jobs
-         SET checkpoint_json = ?2, progress_current = 1, progress_total = 2,
+         SET checkpoint_json = json_patch(checkpoint_json, ?2), progress_current = 1, progress_total = 2,
              updated_at_ts = ?3
          WHERE job_id = ?1 AND status = 'running'",
         params![
@@ -749,10 +782,9 @@ async fn execute_claimed_job(
                 Some((source_start, source_end)),
                 Some(&job.job_id),
             )
-            .await
-            .map_err(anyhow::Error::msg)?;
+            .await?;
         }
-        _ => anyhow::bail!("memory_job_kind_not_implemented"),
+        _ => return Err(permanent("memory_job_kind_not_implemented")),
     }
     let db = state
         .core
@@ -761,7 +793,7 @@ async fn execute_claimed_job(
         .map_err(|error| anyhow!("memory_job_db_pool:{error}"))?;
     db.execute(
         "UPDATE memory_jobs
-         SET checkpoint_json = ?2, progress_current = 2, progress_total = 2,
+         SET checkpoint_json = json_patch(checkpoint_json, ?2), progress_current = 2, progress_total = 2,
              updated_at_ts = ?3
          WHERE job_id = ?1 AND status = 'running'",
         params![
@@ -815,7 +847,7 @@ fn load_source_task(
     let source_task_id = job
         .source_task_id
         .as_deref()
-        .ok_or_else(|| anyhow!("memory_job_source_task_missing"))?;
+        .ok_or_else(|| permanent("memory_job_source_task_missing"))?;
     let db = state
         .core
         .db
@@ -842,7 +874,10 @@ fn load_source_task(
             };
             let mut payload =
                 serde_json::from_str::<Value>(&task.payload_json).unwrap_or_else(|_| json!({}));
-            if let Some(object) = payload.as_object_mut() {
+            if let Some(object) = payload
+                .as_object_mut()
+                .filter(|_| !job.provider_type.is_empty() && !job.model_name.is_empty())
+            {
                 object.insert(
                     "_agent_model_selection".to_string(),
                     json!({
@@ -858,11 +893,11 @@ fn load_source_task(
         },
     )
     .optional()?
-    .ok_or_else(|| anyhow!("memory_job_source_task_unavailable"))
+    .ok_or_else(|| permanent("memory_job_source_task_unavailable"))
     .and_then(|(task, principal_id)| {
         anyhow::ensure!(
             principal_id.as_deref() == Some(job.principal_id.as_str()),
-            "memory_job_source_principal_mismatch"
+            permanent("memory_job_source_principal_mismatch")
         );
         Ok(task)
     })
@@ -896,11 +931,12 @@ fn fail_or_retry_job(
     job_id: &str,
     worker_id: &str,
     attempt: i64,
-    error_code: &str,
+    failure: &JobFailure,
 ) -> anyhow::Result<()> {
     let db = state.core.db.get().map_err(|error| anyhow!(error))?;
     let now = crate::now_ts_u64() as i64;
-    let retryable = attempt < state.policy.memory.background_max_attempts.max(1) as i64;
+    let retryable =
+        failure.retryable && attempt < state.policy.memory.background_max_attempts.max(1) as i64;
     let backoff = 2_i64.saturating_pow(attempt.clamp(1, 8) as u32).min(300);
     let changed = db.execute(
         "UPDATE memory_jobs
@@ -908,16 +944,18 @@ fn fail_or_retry_job(
                            WHEN ?1 != 0 THEN 'retry_wait' ELSE 'failed' END,
              lease_owner = NULL, lease_expires_at_ts = NULL,
              not_before_ts = ?2, error_code = ?3, retryable = ?1,
+             checkpoint_json = json_set(checkpoint_json, '$.failure', json(?7)),
              updated_at_ts = ?4,
              finished_at_ts = CASE WHEN cancel_requested = 1 OR ?1 = 0 THEN ?4 ELSE NULL END
          WHERE job_id = ?5 AND status = 'running' AND lease_owner = ?6",
         params![
             if retryable { 1 } else { 0 },
             now + backoff,
-            error_code,
+            failure.error_code,
             now,
             job_id,
             worker_id,
+            serde_json::to_string(failure)?,
         ],
     )?;
     anyhow::ensure!(changed == 1, "memory_job_failure_lease_lost");
@@ -979,6 +1017,8 @@ pub(crate) fn reconcile_missing_turn_jobs(state: &crate::AppState) -> anyhow::Re
             attempt: 0,
             checkpoint_json: String::new(),
             cancel_requested: false,
+            error_code: None,
+            retryable: false,
         };
         drop(db);
         let task = load_source_task(state, &job)?;
@@ -1030,7 +1070,7 @@ fn load_job(db: &Connection, job_id: &str) -> anyhow::Result<Option<MemoryJobSna
         "SELECT job_id, job_kind, principal_id, scope_kind, scope_ref, source_task_id,
                 source_event_start, source_event_end, source_digest, settings_revision,
                 policy_digest, provider_name, provider_type, model_name,
-                model_capability_digest, status, attempt, checkpoint_json, cancel_requested
+                model_capability_digest, status, attempt, checkpoint_json, cancel_requested, error_code, retryable
          FROM memory_jobs WHERE job_id = ?1",
         [job_id],
         |row| {
@@ -1054,6 +1094,8 @@ fn load_job(db: &Connection, job_id: &str) -> anyhow::Result<Option<MemoryJobSna
                 attempt: row.get(16)?,
                 checkpoint_json: row.get(17)?,
                 cancel_requested: row.get::<_, i64>(18)? != 0,
+                error_code: row.get(19)?,
+                retryable: row.get(20)?,
             })
         },
     )

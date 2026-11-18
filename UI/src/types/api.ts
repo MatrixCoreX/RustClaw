@@ -67,6 +67,12 @@ export interface NniAssetTransferHistoryResponse {
 }
 
 export interface HealthResponse {
+  storage_pressure?: {
+    state: "normal" | "warning" | "critical" | "unavailable";
+    write_admission: boolean;
+    sampled_at_ts: number;
+    volumes: Array<{ role: string; state: string; available_bytes: number | null }>;
+  } | null;
   version: string;
   queue_length: number;
   worker_state: string;

@@ -8,6 +8,7 @@ pub(crate) mod embedding_jobs;
 pub(crate) mod facts;
 pub(crate) mod indexing;
 pub(crate) mod intent;
+pub(crate) mod job_failure;
 pub(crate) mod jobs;
 #[path = "memory_recent.rs"]
 mod memory_recent;
@@ -574,7 +575,7 @@ pub(crate) async fn maybe_extract_memory_intent_with_llm(
                 "memory intent llm extraction failed task_id={} err={}",
                 task.task_id, err
             );
-            return Ok(());
+            return Err(job_failure::JobFailure::provider("extract_provider").into());
         }
     };
 
@@ -585,7 +586,12 @@ pub(crate) async fn maybe_extract_memory_intent_with_llm(
                 "memory intent schema validation failed task_id={} err={}",
                 task.task_id, err
             );
-            return Ok(());
+            return Err(job_failure::JobFailure::new(
+                "memory_job_extract_schema_invalid",
+                false,
+                "extract_parse",
+            )
+            .into());
         }
     };
     let validation =

@@ -20,7 +20,7 @@ pub(crate) mod run_capability;
 mod run_skill_finalize;
 mod run_skill_mutation;
 mod run_skill_permission;
-mod runtime_support;
+pub(crate) mod runtime_support;
 mod workspace_instructions;
 
 // Phase 3.3 Stage 2.2：ask_finalize.rs 已物理搬移到 `crate::finalize::task`，

@@ -15,6 +15,8 @@ pub(crate) struct WorkerMonitor {
     pub(crate) alive: AtomicBool,
     pub(crate) stalled: AtomicBool,
     pub(crate) restarts: AtomicU64,
+    pub(crate) blocking_operations: AtomicUsize,
+    pub(crate) last_error_code: Mutex<Option<String>>,
     last_pulse: Mutex<Instant>,
     tick_started: Mutex<Instant>,
     task: Mutex<Option<(String, Instant)>>,
@@ -26,6 +28,8 @@ impl WorkerMonitor {
             alive: AtomicBool::new(false),
             stalled: AtomicBool::new(false),
             restarts: AtomicU64::new(0),
+            blocking_operations: AtomicUsize::new(0),
+            last_error_code: Mutex::new(None),
             last_pulse: Mutex::new(Instant::now()),
             tick_started: Mutex::new(Instant::now()),
             task: Mutex::new(None),
@@ -85,12 +89,42 @@ pub(crate) struct WorkerSupervision {
     configured: AtomicUsize,
     workers: Mutex<Vec<Arc<WorkerMonitor>>>,
     recovery: Mutex<Option<Arc<WorkerMonitor>>>,
+    background: Mutex<std::collections::BTreeMap<String, Arc<WorkerMonitor>>>,
+    storage: Mutex<Option<claw_core::operations_health::StoragePressureHealth>>,
     pub(crate) recovery_in_flight: AtomicBool,
     last_recovery_success: Mutex<Option<Instant>>,
     recovery_last_error: Mutex<Option<String>>,
 }
 
 impl WorkerSupervision {
+    pub(crate) fn register_background(&self, name: String) -> Arc<WorkerMonitor> {
+        let monitor = WorkerMonitor::new();
+        locked(&self.background).insert(name, monitor.clone());
+        monitor
+    }
+
+    pub(crate) fn storage_snapshot(
+        &self,
+    ) -> Option<claw_core::operations_health::StoragePressureHealth> {
+        locked(&self.storage).clone()
+    }
+
+    pub(crate) fn observe_storage(
+        &self,
+        snapshot: claw_core::operations_health::StoragePressureHealth,
+    ) {
+        let mut current = locked(&self.storage);
+        if current.as_ref().map(|v| &v.state) != Some(&snapshot.state) {
+            tracing::warn!(
+                event = "storage_pressure_changed",
+                state = snapshot.state,
+                write_admission = snapshot.write_admission,
+                "storage_pressure_changed"
+            );
+        }
+        *current = Some(snapshot);
+    }
+
     pub(crate) fn configure(&self, workers: Vec<Arc<WorkerMonitor>>, recovery: Arc<WorkerMonitor>) {
         self.configured.store(workers.len(), Ordering::Release);
         *locked(&self.workers) = workers;
@@ -133,15 +167,35 @@ impl WorkerSupervision {
             .as_ref()
             .map(Instant::elapsed);
         let last_error = locked(&self.recovery_last_error).clone();
+        let background_workers = locked(&self.background)
+            .iter()
+            .map(
+                |(name, monitor)| claw_core::operations_health::BackgroundWorkerHealth {
+                    name: name.clone(),
+                    alive: live(monitor),
+                    stalled: monitor.stalled.load(Ordering::Acquire),
+                    restart_count: monitor.restarts.load(Ordering::Acquire),
+                    heartbeat_age_seconds: monitor.heartbeat_age().as_secs(),
+                    in_flight_blocking_operations: monitor
+                        .blocking_operations
+                        .load(Ordering::Acquire),
+                    last_error_code: locked(&monitor.last_error_code).clone(),
+                },
+            )
+            .collect::<Vec<_>>();
         let state = if configured == 0 {
             "starting"
-        } else if stalled_workers > 0
+        } else if background_workers.iter().any(|worker| worker.stalled)
+            || stalled_workers > 0
             || recovery
                 .as_ref()
                 .is_some_and(|worker| worker.stalled.load(Ordering::Acquire))
         {
             "stalled"
-        } else if live_workers < configured
+        } else if background_workers
+            .iter()
+            .any(|worker| !worker.alive || worker.last_error_code.is_some())
+            || live_workers < configured
             || !recovery_alive
             || last_error.is_some()
             || success_age.is_none_or(|age| age > recovery_grace)
@@ -151,6 +205,7 @@ impl WorkerSupervision {
             "running"
         };
         WorkerSupervisionHealth {
+            background_workers,
             state: state.into(),
             configured_workers: configured,
             live_workers,

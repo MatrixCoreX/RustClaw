@@ -708,6 +708,7 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                     &provider_name,
                     provider.breaker.snapshot(),
                 );
+                crate::runtime::provider_diagnostics::clear();
                 state.clear_task_provider_blocker(&task.task_id);
                 stop_llm_task_lease_heartbeat(&mut heartbeat_stop);
                 touch_llm_task_lease(
@@ -720,6 +721,7 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                 return Ok(cleaned_text);
             }
             Err(err) => {
+                crate::runtime::provider_diagnostics::record(err.kind, err.retryable);
                 if err.kind == ProviderErrorKind::QuotaExhausted {
                     quota_error_count = quota_error_count.saturating_add(1);
                     quota_provider = Some(provider.config.name.clone());

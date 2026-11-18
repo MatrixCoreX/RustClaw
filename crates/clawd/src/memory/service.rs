@@ -653,7 +653,9 @@ pub(crate) async fn maybe_refresh_long_term_summary(
     task: &ClaimedTask,
     force_refresh: bool,
 ) -> Result<(), String> {
-    maybe_refresh_long_term_summary_for_range(state, task, force_refresh, None, None).await
+    maybe_refresh_long_term_summary_for_range(state, task, force_refresh, None, None)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) async fn maybe_refresh_long_term_summary_for_range(
@@ -662,7 +664,7 @@ pub(crate) async fn maybe_refresh_long_term_summary_for_range(
     force_refresh: bool,
     source_range: Option<(i64, i64)>,
     generation_job_id: Option<&str>,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     if !state.policy.memory.long_term_enabled {
         return Ok(());
     }
@@ -684,7 +686,7 @@ pub(crate) async fn maybe_refresh_long_term_summary_for_range(
         task.user_id,
         task.chat_id,
     )
-    .map_err(|err| format!("count memory rounds failed: {err}"))?;
+    .map_err(|err| anyhow::anyhow!(err))?;
     if rounds == 0 {
         return Ok(());
     }
@@ -694,7 +696,9 @@ pub(crate) async fn maybe_refresh_long_term_summary_for_range(
     let source_id = match source_range {
         Some((start, end)) => {
             if start <= 0 || end < start {
-                return Err("memory_job_source_range_invalid".to_string());
+                return Err(super::job_failure::permanent(
+                    "memory_job_source_range_invalid",
+                ));
             }
             start.saturating_sub(1)
         }
@@ -704,7 +708,7 @@ pub(crate) async fn maybe_refresh_long_term_summary_for_range(
             task.user_id,
             task.chat_id,
         )
-        .map_err(|err| format!("read long-term source id failed: {err}"))?,
+        .map_err(|err| anyhow::anyhow!(err))?,
     };
     let fetch_limit = state.policy.memory.long_term_source_rounds.max(1) * 2;
     let mut entries = crate::memory::recall_memories_since_id(
@@ -715,7 +719,7 @@ pub(crate) async fn maybe_refresh_long_term_summary_for_range(
         source_id,
         fetch_limit,
     )
-    .map_err(|err| format!("read memories for summary failed: {err}"))?;
+    .map_err(|err| anyhow::anyhow!(err))?;
     if let Some((start, end)) = source_range {
         entries.retain(|(id, _, _, _)| *id >= start && *id <= end);
     }
@@ -756,7 +760,7 @@ pub(crate) async fn maybe_refresh_long_term_summary_for_range(
         task.user_id,
         task.chat_id,
     )
-    .map_err(|err| format!("read previous long-term summary failed: {err}"))?
+    .map_err(|err| anyhow::anyhow!(err))?
     .unwrap_or_default();
 
     let mut convo_lines = Vec::new();
@@ -784,7 +788,12 @@ pub(crate) async fn maybe_refresh_long_term_summary_for_range(
                     task.task_id,
                     err
                 );
-                return Ok(());
+                return Err(super::job_failure::JobFailure::new(
+                    "memory_job_summary_prompt_unavailable",
+                    false,
+                    "consolidate_prompt",
+                )
+                .into());
             }
         };
     let summary_prompt = crate::render_prompt_template(
@@ -808,7 +817,8 @@ pub(crate) async fn maybe_refresh_long_term_summary_for_range(
         &summary_prompt,
         &summary_prompt_source,
     )
-    .await?;
+    .await
+    .map_err(|_| super::job_failure::JobFailure::provider("consolidate_provider"))?;
     let parsed = match try_parse_long_term_refresh_llm_out_with_schema(&summary) {
         Ok(parsed) => parsed,
         Err(err) => {
@@ -820,7 +830,12 @@ pub(crate) async fn maybe_refresh_long_term_summary_for_range(
         }
     };
     if parsed.summary.chars().count() > state.policy.memory.long_term_summary_max_chars.max(512) {
-        return Err("long_term_summary_schema_limit_exceeded".to_string());
+        return Err(super::job_failure::JobFailure::new(
+            "memory_job_summary_schema_limit",
+            false,
+            "consolidate_parse",
+        )
+        .into());
     }
     crate::memory::upsert_long_term_summary(
         state,
@@ -830,7 +845,7 @@ pub(crate) async fn maybe_refresh_long_term_summary_for_range(
         &parsed.summary,
         latest_id,
     )
-    .map_err(|err| format!("write long-term summary failed: {err}"))?;
+    .map_err(|err| anyhow::anyhow!(err))?;
     persist_valid_knowledge_candidates(
         state,
         task,
@@ -839,7 +854,7 @@ pub(crate) async fn maybe_refresh_long_term_summary_for_range(
         &parsed.knowledge_candidates,
         generation_job_id,
     )
-    .map_err(|err| format!("write knowledge candidates failed: {err}"))?;
+    .map_err(|err| anyhow::anyhow!(err))?;
     Ok(())
 }
 

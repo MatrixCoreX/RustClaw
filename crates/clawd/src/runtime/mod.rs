@@ -3,10 +3,12 @@ mod config_path;
 mod llm_cost;
 mod llm_cost_ledger;
 pub(crate) mod policy;
+pub(crate) mod provider_diagnostics;
 mod provider_outcome;
 pub(crate) mod provider_runtime;
 mod skill_views;
 pub(crate) mod state;
+pub(crate) mod storage_pressure;
 pub(crate) mod types;
 pub(crate) mod worker_health;
 

@@ -30,6 +30,7 @@ pub mod llm_connection_environment;
 pub mod llm_provider_descriptors;
 pub mod model_catalog;
 pub mod model_turn;
+pub mod operations_health;
 pub mod owner_gateway_context;
 pub mod product_identity;
 pub mod prompt_layers;

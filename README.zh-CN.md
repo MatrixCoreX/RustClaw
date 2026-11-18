@@ -5,6 +5,8 @@
 Agent Runtime 是一个用 Rust 编写、以 `clawd` 守护进程为核心的本地部署 Agent 平台。它把多通道聊天接入、任务执行、工具与技能路由、记忆、调度、浏览器 UI，以及基于 `user_key` 的身份体系整合到一套可部署系统里。
 
 <!-- ai-learning-stage: foundations -->
+- 磁盘空间写入保护、后台任务监督、记忆错误分类与重启日志留存：[运行保护说明](docs/runtime_operations_protection.md)。
+
 ## 项目概览
 
 Agent Runtime 面向在消息应用或浏览器中完成日常使用和管理的场景，而不是命令行优先的工作流。

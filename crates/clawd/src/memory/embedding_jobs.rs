@@ -34,23 +34,31 @@ struct EmbeddingJob {
 
 pub(crate) fn spawn_embedding_workers(state: crate::AppState, concurrency: usize) {
     for worker_index in 0..concurrency.max(1) {
-        let state = state.clone();
-        tokio::spawn(async move {
-            let worker_id = format!(
-                "memory_embedding_worker:{worker_index}:{}",
-                state.worker.worker_id
-            );
-            loop {
-                match run_one_embedding_batch(&state, &worker_id).await {
-                    Ok(true) => {}
-                    Ok(false) => tokio::time::sleep(Duration::from_millis(500)).await,
-                    Err(error) => {
-                        tracing::warn!(worker_id, error = %error, "memory_embedding_worker_tick_failed");
-                        tokio::time::sleep(Duration::from_secs(2)).await;
+        let worker_id = format!(
+            "memory_embedding_worker:{worker_index}:{}",
+            state.worker.worker_id
+        );
+        let worker_state = state.clone();
+        crate::worker::runtime_support::spawn_background_loop(
+            &state,
+            worker_id.clone(),
+            Duration::from_millis(500),
+            move || {
+                let state = worker_state.clone();
+                let worker_id = worker_id.clone();
+                async move {
+                    if state
+                        .worker
+                        .supervision
+                        .storage_snapshot()
+                        .is_some_and(|v| !v.write_admission)
+                    {
+                        return Ok(false);
                     }
+                    run_one_embedding_batch(&state, &worker_id).await
                 }
-            }
-        });
+            },
+        );
     }
 }
 
@@ -86,6 +94,7 @@ pub(crate) async fn run_one_embedding_batch(
                         None,
                     ));
                 }
+                crate::worker::runtime_support::background_execution_heartbeat();
             }
         }
     };

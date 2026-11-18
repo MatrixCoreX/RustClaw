@@ -131,13 +131,11 @@ pub(crate) fn spawn_worker(state: AppState, poll_interval_ms: u64, concurrency: 
 }
 
 pub(crate) fn spawn_cleanup_worker(state: AppState) {
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(
-                state.policy.maintenance.cleanup_interval_seconds.max(30),
-            ))
-            .await;
-
+    let idle = Duration::from_secs(state.policy.maintenance.cleanup_interval_seconds.max(30));
+    let worker_state = state.clone();
+    super::worker_supervision::spawn_background_loop(&state, "cleanup".into(), idle, move || {
+        let state = worker_state.clone();
+        async move {
             if state
                 .skill_rt
                 .skill_concurrency_gates
@@ -145,46 +143,42 @@ pub(crate) fn spawn_cleanup_worker(state: AppState) {
                 .pressure_state()
                 == claw_core::host_resources::ResourcePressureState::Critical
             {
-                let removed = state.clear_prompt_template_cache();
-                if removed > 0 {
-                    tracing::info!(
-                        removed,
-                        "resource pressure critical: released reconstructable prompt cache"
-                    );
-                }
-                continue;
+                state.clear_prompt_template_cache();
+            } else {
+                cleanup_tick(state).await?;
             }
-            if let Err(err) = cleanup_tick(state.clone()).await {
-                error!("Cleanup task failed: {}", err);
-            }
+            Ok(false)
         }
     });
 }
 
 pub(crate) fn spawn_schedule_worker(state: AppState) {
-    tokio::spawn(async move {
-        loop {
-            if let Err(err) = schedule_tick(state.clone()).await {
-                error!("Schedule worker tick failed: {}", err);
+    let worker_state = state.clone();
+    super::worker_supervision::spawn_background_loop(
+        &state,
+        "scheduler".into(),
+        Duration::from_secs(1),
+        move || {
+            let state = worker_state.clone();
+            async move {
+                schedule_tick(state).await?;
+                Ok(false)
             }
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
-    });
+        },
+    );
 }
 
 pub(crate) fn spawn_channel_terminal_delivery_worker(state: AppState) {
-    tokio::spawn(async move {
-        loop {
-            match channel_terminal_delivery_once(&state).await {
-                Ok(true) => {}
-                Ok(false) => tokio::time::sleep(Duration::from_millis(500)).await,
-                Err(error) => {
-                    error!(error = %error, "channel terminal delivery worker tick failed");
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                }
-            }
-        }
-    });
+    let worker_state = state.clone();
+    super::worker_supervision::spawn_background_loop(
+        &state,
+        "terminal_delivery".into(),
+        Duration::from_millis(500),
+        move || {
+            let state = worker_state.clone();
+            async move { channel_terminal_delivery_once(&state).await }
+        },
+    );
 }
 
 async fn cleanup_tick(state: AppState) -> anyhow::Result<()> {
@@ -213,7 +207,9 @@ pub(super) async fn run_blocking_tick<T: Send + 'static>(
     // Each caller awaits completion before scheduling its next tick. Dropping the
     // waiter cannot undo a started DB operation; repository claim/CAS fencing stays authoritative.
     let queued_at = std::time::Instant::now();
+    let blocking_operation = super::worker_supervision::BlockingOperation::start();
     let (result, queue_ms, execution_ms) = tokio::task::spawn_blocking(move || {
+        let _blocking_operation = blocking_operation;
         let started_at = std::time::Instant::now();
         let queue_ms = queued_at.elapsed().as_millis();
         let result = work();
@@ -232,18 +228,16 @@ pub(super) async fn run_blocking_tick<T: Send + 'static>(
 }
 
 pub(crate) fn spawn_conversation_reply_delivery_worker(state: AppState) {
-    tokio::spawn(async move {
-        loop {
-            match conversation_reply_delivery_once(&state).await {
-                Ok(true) => {}
-                Ok(false) => tokio::time::sleep(Duration::from_millis(500)).await,
-                Err(error) => {
-                    error!(error = %error, "conversation reply delivery worker tick failed");
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                }
-            }
-        }
-    });
+    let worker_state = state.clone();
+    super::worker_supervision::spawn_background_loop(
+        &state,
+        "conversation_delivery".into(),
+        Duration::from_millis(500),
+        move || {
+            let state = worker_state.clone();
+            async move { conversation_reply_delivery_once(&state).await }
+        },
+    );
 }
 
 async fn conversation_reply_delivery_once(state: &AppState) -> anyhow::Result<bool> {

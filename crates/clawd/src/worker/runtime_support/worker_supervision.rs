@@ -73,16 +73,44 @@ where
                     }
                 }
             };
+            // An aborted waiter cannot cancel an already-started blocking DB tick.
+            // Keep the old lease alive until its operation exits; never overlap a replacement.
+            while monitor.blocking_operations.load(Ordering::Acquire) > 0 {
+                monitor.pulse();
+                tokio::time::sleep(pulse_interval).await;
+            }
             match result {
-                Ok(Ok(())) => failures = 0,
+                Ok(Ok(())) => {
+                    failures = 0;
+                    *monitor
+                        .last_error_code
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+                }
                 Ok(Err(error)) => {
                     failures = failures.saturating_add(1);
+                    *monitor
+                        .last_error_code
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                        Some("background_tick_failed".into());
                     monitor.alive.store(false, Ordering::Release);
                     tracing::error!(event = "worker_tick_failed", %error, "supervised worker tick failed");
                 }
                 Err(error) => {
                     failures = failures.saturating_add(1);
                     monitor.restarts.fetch_add(1, Ordering::AcqRel);
+                    *monitor
+                        .last_error_code
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(
+                        if error.is_panic() {
+                            "background_tick_panicked"
+                        } else {
+                            "background_tick_cancelled"
+                        }
+                        .into(),
+                    );
                     monitor.alive.store(false, Ordering::Release);
                     tracing::warn!(
                         event = "worker_tick_restarting",
@@ -110,6 +138,59 @@ where
             }
         }
     })
+}
+
+pub(crate) fn background_execution_heartbeat() {
+    if let Some(monitor) = current_monitor() {
+        monitor.execution_heartbeat();
+    }
+}
+
+pub(super) struct BlockingOperation(Option<Arc<WorkerMonitor>>);
+impl BlockingOperation {
+    pub(super) fn start() -> Self {
+        let monitor = current_monitor();
+        if let Some(monitor) = &monitor {
+            monitor.blocking_operations.fetch_add(1, Ordering::AcqRel);
+        }
+        Self(monitor)
+    }
+}
+impl Drop for BlockingOperation {
+    fn drop(&mut self) {
+        if let Some(monitor) = &self.0 {
+            monitor.blocking_operations.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+}
+
+pub(crate) fn spawn_background_loop<F, Fut>(
+    state: &AppState,
+    name: String,
+    idle: Duration,
+    work: F,
+) -> JoinHandle<()>
+where
+    F: Fn() -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = anyhow::Result<bool>> + Send + 'static,
+{
+    let monitor = state.worker.supervision.register_background(name);
+    spawn_managed_loop(
+        monitor,
+        Duration::from_secs(5),
+        Duration::from_secs(300),
+        Duration::from_secs(600),
+        Duration::from_millis(5),
+        move || {
+            let future = work();
+            async move {
+                if !future.await? {
+                    tokio::time::sleep(idle).await;
+                }
+                Ok(())
+            }
+        },
+    )
 }
 
 pub(crate) struct ActiveTaskGuard {

@@ -276,3 +276,36 @@ async fn cancelled_recovery_waiter_keeps_the_started_sweep_exclusive() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn detached_blocking_tick_finishes_before_any_replacement() {
+    let monitor = WorkerMonitor::new();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let active = Arc::new(AtomicUsize::new(0));
+    let maximum = Arc::new(AtomicUsize::new(0));
+    let (count, current, max) = (calls.clone(), active.clone(), maximum.clone());
+    let handle = start(monitor.clone(), move || {
+        let (count, current, max) = (count.clone(), current.clone(), max.clone());
+        async move {
+            let first = count.fetch_add(1, Ordering::SeqCst) == 0;
+            super::super::background_workers::run_blocking_tick("injected_slow_db", move || {
+                max.fetch_max(current.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
+                let _active = ActiveFuture(current);
+                if first {
+                    std::thread::sleep(Duration::from_millis(350));
+                }
+                Ok(())
+            })
+            .await
+        }
+    });
+    wait_for(|| calls.load(Ordering::SeqCst) >= 2).await;
+    assert_eq!(
+        maximum.load(Ordering::SeqCst),
+        1,
+        "aborting an async waiter must not overlap its DB operation"
+    );
+    assert!(monitor.restarts.load(Ordering::Acquire) >= 1);
+    handle.abort();
+    let _ = handle.await;
+}

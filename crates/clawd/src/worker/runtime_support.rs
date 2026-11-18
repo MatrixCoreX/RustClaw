@@ -6,7 +6,9 @@ pub(crate) use background_workers::{
     spawn_channel_terminal_delivery_worker, spawn_cleanup_worker,
     spawn_conversation_reply_delivery_worker, spawn_schedule_worker, spawn_worker,
 };
-pub(crate) use worker_supervision::ActiveTaskGuard;
+pub(crate) use worker_supervision::{
+    background_execution_heartbeat, spawn_background_loop, ActiveTaskGuard,
+};
 
 #[path = "runtime_support/dispatch_result.rs"]
 mod dispatch_result;

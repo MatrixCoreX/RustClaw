@@ -333,13 +333,15 @@ component_launch_detached() {
     return 2
   fi
 
+  python3 "$COMPONENT_COMMON_DIR/../scripts/rotate_component_log.py" "$log_path" || return $?
+
   # A new session keeps deployed daemons alive when a non-interactive caller
   # exits or its process group is cleaned up. macOS does not ship `setsid`, so
   # keep the conventional nohup fallback there.
   if command -v setsid >/dev/null 2>&1; then
-    setsid "$@" >"$log_path" 2>&1 </dev/null &
+    setsid "$@" >>"$log_path" 2>&1 </dev/null &
   else
-    nohup "$@" >"$log_path" 2>&1 </dev/null &
+    nohup "$@" >>"$log_path" 2>&1 </dev/null &
   fi
   COMPONENT_LAUNCHED_PID=$!
   disown "$COMPONENT_LAUNCHED_PID" 2>/dev/null || true

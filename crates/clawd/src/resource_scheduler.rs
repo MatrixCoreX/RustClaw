@@ -1002,7 +1002,8 @@ fn read_durable_resource_lease_metadata(job_dir: &Path) -> Option<DurableResourc
 }
 
 fn spawn_durable_resource_lease_monitor(lease: ResourceLease, job_dir: PathBuf) {
-    let monitor = crate::task_result_retention::monitors::DurableJobMonitorGuard::register(&job_dir);
+    let monitor =
+        crate::task_result_retention::monitors::DurableJobMonitorGuard::register(&job_dir);
     tokio::spawn(async move {
         let _monitor = monitor;
         let pid = crate::local_process_job::read_pid(&job_dir);
@@ -1072,110 +1073,128 @@ fn durable_resource_monitor_interval() -> Duration {
 }
 
 pub(crate) fn spawn_resource_pressure_monitor(state: crate::AppState) {
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        let mut previous = None;
-        let mut previous_process_warning = None;
-        loop {
-            interval.tick().await;
-            let mut status = state
-                .skill_rt
-                .skill_concurrency_gates
-                .resource_broker()
-                .observe_host();
-            let workspace_root = state.skill_rt.workspace_root.clone();
-            let process_sample = tokio::task::spawn_blocking(move || {
-                crate::runtime_process_memory::collect_runtime_process_memory(&workspace_root)
-            })
-            .await;
-            match process_sample {
-                Ok(Ok(sample)) => {
-                    let process_status = state
+    let worker_state = state.clone();
+    crate::worker::runtime_support::spawn_background_loop(
+        &state,
+        "resource_pressure".into(),
+        Duration::from_secs(15),
+        move || {
+            let state = worker_state.clone();
+            async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                let mut previous = None;
+                let mut previous_process_warning = None;
+                loop {
+                    interval.tick().await;
+                    crate::worker::runtime_support::background_execution_heartbeat();
+                    let mut status = state
                         .skill_rt
                         .skill_concurrency_gates
                         .resource_broker()
-                        .record_runtime_process_memory(
-                            sample,
-                            status.snapshot.effective_memory_limit_bytes,
+                        .observe_host();
+                    let workspace_root = state.skill_rt.workspace_root.clone();
+                    let storage_state = state.clone();
+                    let process_sample = tokio::task::spawn_blocking(move || {
+                        crate::runtime::storage_pressure::refresh(&storage_state);
+                        crate::runtime_process_memory::collect_runtime_process_memory(
+                            &workspace_root,
+                        )
+                    })
+                    .await;
+                    match process_sample {
+                        Ok(Ok(sample)) => {
+                            let process_status = state
+                                .skill_rt
+                                .skill_concurrency_gates
+                                .resource_broker()
+                                .record_runtime_process_memory(
+                                    sample,
+                                    status.snapshot.effective_memory_limit_bytes,
+                                );
+                            status.runtime_process_memory = Some(process_status);
+                        }
+                        Ok(Err(error_code)) => {
+                            tracing::debug!(
+                                error_code,
+                                "runtime_process_memory_sample_unavailable"
+                            );
+                        }
+                        Err(error) => {
+                            tracing::warn!(error = %error, "runtime_process_memory_sample_join_failed");
+                        }
+                    }
+                    if matches!(
+                        status.pressure_state,
+                        ResourcePressureState::Constrained | ResourcePressureState::Critical
+                    ) {
+                        state.skill_rt.runner_pool.invalidate_all();
+                    }
+                    let reclaimed_browsers =
+                        if status.pressure_state == ResourcePressureState::Critical {
+                            state
+                                .core
+                                .browser_sessions
+                                .reclaim_idle(std::time::Duration::from_secs(30))
+                                .await
+                        } else {
+                            0
+                        };
+                    let process_warning = status
+                        .runtime_process_memory
+                        .as_ref()
+                        .map(|sample| sample.warning);
+                    let process_warning_changed = process_warning != previous_process_warning;
+                    if previous != Some(status.pressure_state) || process_warning_changed {
+                        tracing::info!(
+                            pressure_state = ?status.pressure_state,
+                            effective_memory_limit_bytes = status.snapshot.effective_memory_limit_bytes,
+                            memory_available_bytes = status.snapshot.memory_available_bytes,
+                            reserved_memory_mib = status.reserved_memory_mib,
+                            active_leases = status.active_leases,
+                            reclaimed_browsers,
+                            runtime_process_memory_bytes = status
+                                .runtime_process_memory
+                                .as_ref()
+                                .map(|sample| sample.current_bytes),
+                            runtime_process_memory_peak_bytes = status
+                                .runtime_process_memory
+                                .as_ref()
+                                .map(|sample| sample.peak_bytes),
+                            runtime_process_memory_warning = process_warning,
+                            "host_resource_pressure_changed"
                         );
-                    status.runtime_process_memory = Some(process_status);
-                }
-                Ok(Err(error_code)) => {
-                    tracing::debug!(error_code, "runtime_process_memory_sample_unavailable");
-                }
-                Err(error) => {
-                    tracing::warn!(error = %error, "runtime_process_memory_sample_join_failed");
+                        if process_warning == Some(true) && previous_process_warning != Some(true) {
+                            tracing::warn!(
+                                current_bytes = status
+                                    .runtime_process_memory
+                                    .as_ref()
+                                    .map(|sample| sample.current_bytes),
+                                peak_bytes = status
+                                    .runtime_process_memory
+                                    .as_ref()
+                                    .map(|sample| sample.peak_bytes),
+                                process_count = status
+                                    .runtime_process_memory
+                                    .as_ref()
+                                    .map(|sample| sample.process_count),
+                                "runtime_process_memory_high"
+                            );
+                        }
+                        if let Err(error) = append_resource_pressure_event(
+                            &state.skill_rt.workspace_root,
+                            &status,
+                            reclaimed_browsers,
+                        ) {
+                            tracing::warn!(error = %error, "resource_pressure_log_write_failed");
+                        }
+                        previous = Some(status.pressure_state);
+                        previous_process_warning = process_warning;
+                    }
                 }
             }
-            if matches!(
-                status.pressure_state,
-                ResourcePressureState::Constrained | ResourcePressureState::Critical
-            ) {
-                state.skill_rt.runner_pool.invalidate_all();
-            }
-            let reclaimed_browsers = if status.pressure_state == ResourcePressureState::Critical {
-                state
-                    .core
-                    .browser_sessions
-                    .reclaim_idle(std::time::Duration::from_secs(30))
-                    .await
-            } else {
-                0
-            };
-            let process_warning = status
-                .runtime_process_memory
-                .as_ref()
-                .map(|sample| sample.warning);
-            let process_warning_changed = process_warning != previous_process_warning;
-            if previous != Some(status.pressure_state) || process_warning_changed {
-                tracing::info!(
-                    pressure_state = ?status.pressure_state,
-                    effective_memory_limit_bytes = status.snapshot.effective_memory_limit_bytes,
-                    memory_available_bytes = status.snapshot.memory_available_bytes,
-                    reserved_memory_mib = status.reserved_memory_mib,
-                    active_leases = status.active_leases,
-                    reclaimed_browsers,
-                    runtime_process_memory_bytes = status
-                        .runtime_process_memory
-                        .as_ref()
-                        .map(|sample| sample.current_bytes),
-                    runtime_process_memory_peak_bytes = status
-                        .runtime_process_memory
-                        .as_ref()
-                        .map(|sample| sample.peak_bytes),
-                    runtime_process_memory_warning = process_warning,
-                    "host_resource_pressure_changed"
-                );
-                if process_warning == Some(true) && previous_process_warning != Some(true) {
-                    tracing::warn!(
-                        current_bytes = status
-                            .runtime_process_memory
-                            .as_ref()
-                            .map(|sample| sample.current_bytes),
-                        peak_bytes = status
-                            .runtime_process_memory
-                            .as_ref()
-                            .map(|sample| sample.peak_bytes),
-                        process_count = status
-                            .runtime_process_memory
-                            .as_ref()
-                            .map(|sample| sample.process_count),
-                        "runtime_process_memory_high"
-                    );
-                }
-                if let Err(error) = append_resource_pressure_event(
-                    &state.skill_rt.workspace_root,
-                    &status,
-                    reclaimed_browsers,
-                ) {
-                    tracing::warn!(error = %error, "resource_pressure_log_write_failed");
-                }
-                previous = Some(status.pressure_state);
-                previous_process_warning = process_warning;
-            }
-        }
-    });
+        },
+    );
 }
 
 fn append_resource_pressure_event(

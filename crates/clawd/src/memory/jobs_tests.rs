@@ -364,3 +364,114 @@ fn active_worker_heartbeat_renews_lease_and_respects_cancellation_fence() {
     drop(db);
     assert!(renew_job_lease(&state, "heartbeat-job", "worker-a").is_err());
 }
+
+fn operations_state() -> crate::AppState {
+    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let db = state.core.db.get().unwrap();
+    ensure_memory_job_schema(&db).unwrap();
+    drop(db);
+    state
+}
+
+fn insert_operations_job(state: &crate::AppState, status: &str) {
+    let db = state.core.db.get().unwrap();
+    db.execute("INSERT INTO tasks(task_id,user_id,chat_id,user_key,principal_id,channel,kind,payload_json,status,created_at,updated_at)
+        VALUES ('operations-source',1,2,'fixture-key','principal-fixture','ui','ask','{}','succeeded','1','1')", []).unwrap();
+    db.execute("INSERT INTO memory_jobs(job_id,job_kind,principal_id,scope_kind,scope_ref,source_task_id,source_digest,
+        eligibility_json,settings_revision,policy_digest,provider_name,provider_type,model_name,model_capability_digest,
+        status,lease_owner,not_before_ts,created_at_ts,updated_at_ts)
+        VALUES ('operations-job','extract','principal-fixture','principal','principal-fixture','operations-source','digest',
+        '{}',1,'policy','unavailable','unavailable','unavailable','digest',?1,'worker-a',0,0,0)", [status]).unwrap();
+}
+
+#[test]
+fn reconciliation_preserves_source_selection_instead_of_stamping_empty_binding() {
+    let state = operations_state();
+    insert_operations_job(&state, "failed");
+    let db = state.core.db.get().unwrap();
+    let mut job = load_job(&db, "operations-job").unwrap().unwrap();
+    drop(db);
+    job.provider_type.clear();
+    job.model_name.clear();
+    let task = load_source_task(&state, &job).unwrap();
+    assert!(serde_json::from_str::<Value>(&task.payload_json)
+        .unwrap()
+        .get("_agent_model_selection")
+        .is_none());
+    assert!(!state.task_llm_providers(&task).is_empty());
+    job.provider_type = "unavailable".into();
+    job.model_name = "unavailable".into();
+    let pinned = load_source_task(&state, &job).unwrap();
+    assert!(
+        state.task_llm_providers(&pinned).is_empty(),
+        "an execution binding may never silently switch models"
+    );
+}
+
+#[test]
+fn durable_failure_records_classification_and_retries_only_transient_failures() {
+    let state = operations_state();
+    insert_operations_job(&state, "running");
+    let failure = JobFailure::new("memory_job_provider_unavailable", false, "preflight");
+    fail_or_retry_job(&state, "operations-job", "worker-a", 1, &failure).unwrap();
+    let db = state.core.db.get().unwrap();
+    let job = load_job(&db, "operations-job").unwrap().unwrap();
+    assert_eq!(job.status, "failed");
+    assert!(!job.retryable);
+    let checkpoint: Value = serde_json::from_str(&job.checkpoint_json).unwrap();
+    assert_eq!(checkpoint["failure"]["phase"], "preflight");
+    db.execute("UPDATE memory_jobs SET status='running',lease_owner='worker-b' WHERE job_id='operations-job'", []).unwrap();
+    drop(db);
+    assert!(
+        fail_or_retry_job(&state, "operations-job", "worker-a", 1, &failure).is_err(),
+        "stale worker cannot finish another lease"
+    );
+    let transient = JobFailure::new("memory_job_provider_timeout", true, "extract_provider");
+    fail_or_retry_job(&state, "operations-job", "worker-b", 1, &transient).unwrap();
+    let db = state.core.db.get().unwrap();
+    let job = load_job(&db, "operations-job").unwrap().unwrap();
+    assert_eq!(job.status, "retry_wait");
+    assert!(job.retryable);
+}
+
+#[test]
+fn missing_provider_is_rejected_before_a_durable_job_is_created() {
+    let state = crate::AppState::test_default();
+    let error = provider_snapshot_for_job(
+        &state,
+        &fixture_task("unconfigured"),
+        &fixture_settings(),
+        "extract",
+    )
+    .unwrap_err();
+    assert_eq!(
+        JobFailure::from_error(&error).error_code,
+        "memory_job_provider_unavailable"
+    );
+}
+
+#[test]
+fn legacy_retry_cannot_touch_another_principal_or_a_progressed_job() {
+    let state = operations_state();
+    insert_operations_job(&state, "failed");
+    let db = state.core.db.get().unwrap();
+    db.execute(
+        "UPDATE memory_jobs SET progress_current=1 WHERE job_id='operations-job'",
+        [],
+    )
+    .unwrap();
+    drop(db);
+    assert_eq!(
+        recovery::retry_unavailable(&state, "principal-fixture").unwrap()["requeued_jobs"],
+        0
+    );
+    assert_eq!(
+        recovery::retry_unavailable(&state, "another-principal").unwrap()["requeued_jobs"],
+        0
+    );
+    let jobs = recovery::list(&state, "principal-fixture").unwrap();
+    assert_eq!(jobs[0].status, "failed");
+    assert!(recovery::list(&state, "another-principal")
+        .unwrap()
+        .is_empty());
+}
