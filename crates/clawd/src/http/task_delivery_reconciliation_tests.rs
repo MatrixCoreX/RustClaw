@@ -12,8 +12,10 @@ async fn only_current_channel_owner_can_request_reconciliation() {
     let payload = json!({"channel_ingress":{"schema_version":1,"channel":"telegram","adapter":"telegram_bot","account_id":"bot-main","external_user_id":"1","external_chat_id":"2","reply_target":{"kind":"chat","external_id":"2"}}});
     let db = state.core.db.get().unwrap();
     db.execute("INSERT INTO tasks(task_id,user_id,chat_id,user_key,principal_id,channel,external_user_id,external_chat_id,kind,payload_json,status,created_at,updated_at) VALUES (?1,1,2,'owner',?2,'telegram','1','2','ask',?3,'succeeded','1','1')",rusqlite::params![id.to_string(),owner.principal_id,payload.to_string()]).unwrap();
-    db.execute("INSERT INTO channel_bindings(channel,external_user_id,external_chat_id,user_key,bound_at,updated_at) VALUES ('telegram','1','2','owner','1','1')",[]).unwrap();
     drop(db);
+    crate::repo::bind_channel_identity(&state, "telegram", Some("1"), Some("2"), "owner")
+        .unwrap()
+        .expect("owned channel binding");
     for key in [None, Some("other"), Some("owner")] {
         let mut headers = HeaderMap::new();
         if let Some(key) = key {

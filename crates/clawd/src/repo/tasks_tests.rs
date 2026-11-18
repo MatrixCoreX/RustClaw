@@ -170,35 +170,9 @@ fn stored_status(state: &crate::AppState, task_id: &str) -> String {
 
 #[test]
 fn admin_can_view_tasks_from_the_global_admin_lists() {
-    let state = state_with_tasks_table();
-    {
-        let db = state.core.db.get().expect("get db");
-        db.execute_batch(
-            "CREATE TABLE auth_keys (
-                user_key TEXT PRIMARY KEY,
-                principal_id TEXT,
-                role TEXT NOT NULL,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL,
-                last_used_at TEXT
-            );",
-        )
-        .expect("create auth table");
-        db.execute(
-            "INSERT INTO auth_keys (
-                user_key, principal_id, role, enabled, created_at, last_used_at
-             ) VALUES (?1, ?2, 'admin', 1, '1', NULL)",
-            rusqlite::params!["rk-report-admin", "principal-report-admin"],
-        )
-        .expect("insert admin key");
-        db.execute(
-            "INSERT INTO auth_keys (
-                user_key, principal_id, role, enabled, created_at, last_used_at
-             ) VALUES (?1, ?2, 'user', 1, '1', NULL)",
-            rusqlite::params!["rk-report-user", "principal-report-user"],
-        )
-        .expect("insert user key");
-    }
+    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    state.seed_test_auth_identity("rk-report-admin", "admin");
+    state.seed_test_auth_identity("rk-report-user", "user");
 
     assert!(
         check_task_view_access(&state, Some("rk-task-owner"), "ui", Some("rk-report-admin"),)

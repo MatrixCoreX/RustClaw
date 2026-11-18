@@ -377,53 +377,20 @@ fn restart_recovery_escalates_a_nested_sandbox_process_group() {
 
 #[cfg(unix)]
 #[test]
-fn wrapper_exit_keeps_its_live_process_group_supervisable() {
-    use std::os::unix::process::CommandExt;
-    use std::process::Command;
-
-    let root = TempDirGuard::new("wrapper_exit_group");
-    let run_script = root.path().join("run.sh");
-    let child_pid_path = root.path().join("child_pid");
-    std::fs::write(
-        &run_script,
-        format!(
-            "#!/usr/bin/env bash\nsleep 30 >/dev/null 2>&1 &\nprintf '%s' \"$!\" > '{}'\n",
-            child_pid_path.display()
-        ),
-    )
-    .expect("write wrapper script");
-    let mut command = Command::new("bash");
-    command.arg(&run_script).process_group(0);
-    let mut wrapper = command.spawn().expect("spawn wrapper group");
-    let process_group_id = wrapper.id();
-    wrapper.wait().expect("wrapper exits");
-    let child_pid: u32 = std::fs::read_to_string(&child_pid_path)
-        .expect("child pid")
-        .parse()
-        .expect("numeric child pid");
-
-    assert_eq!(
-        process_identity_state(root.path(), process_group_id),
-        ProcessIdentityState::AliveVerified
-    );
-    assert!(terminate_verified_process_group(
-        root.path(),
-        process_group_id,
-        "KILL"
-    ));
-    for _ in 0..50 {
-        let child_alive = Command::new("kill")
-            .args(["-0", &child_pid.to_string()])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|status| status.success());
-        if !child_alive {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-    panic!("child process remained alive after process-group termination");
+fn wrapper_exit_retains_unknown_group_without_granting_signal_authority() {
+    identity_tests::with_live_orphan(|root, group| {
+        std::fs::write(root.join("pid"), group.to_string()).unwrap();
+        assert_eq!(
+            process_identity_state(root, group),
+            ProcessIdentityState::Unknown
+        );
+        assert!(!terminate_verified_process_group(root, group, "KILL"));
+        assert!(!process_loss_is_stable(
+            root,
+            ProcessIdentityState::Unknown,
+            100
+        ));
+    });
 }
 
 #[test]

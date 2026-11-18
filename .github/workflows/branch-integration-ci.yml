@@ -105,12 +105,21 @@ jobs:
           npm run lint --prefix UI
           npm test --prefix UI
           bash scripts/product_identity_tests.sh --with-ui
-      - name: Verify shared SDK consumers and native runtime
+      - name: Compile shared runtime test executables
         shell: bash
         run: |
           set -euo pipefail
           cargo test --locked -p agent-skill-sdk -p skill-runner -p claw-core -p clawd --no-run
+      - name: Build exact native host consumers
+        id: native_build
+        shell: bash
+        run: |
+          set -euo pipefail
           cargo build --locked -p clawd --bins -p skill-runner --bin skill-runner -p agent-skill-sdk --bin skillctl
+      - name: Verify shared SDK consumers and native runtime
+        shell: bash
+        run: |
+          set -euo pipefail
           result=0
           cargo test --locked -p agent-skill-sdk || result=1
           cargo test --locked -p skill-runner || result=1
@@ -118,6 +127,7 @@ jobs:
           cargo test --locked -p clawd --bin clawd -- --test-threads=3 || result=1
           exit "$result"
       - name: Verify real memory project startup and restart
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -130,14 +140,18 @@ jobs:
           path: ${{ runner.temp }}/project-process-evidence/
           if-no-files-found: warn
       - name: Verify the actual process owner and package custody
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
           export APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd"
+          cargo test --locked -p clawd --bin clawd -- --list --ignored > "$RUNNER_TEMP/owner-acceptance-tests.txt"
           for test in local_process_owner::entry::tests::entry_executable_protocol_acceptance local_process_owner::authority_entry::tests::entry_executable_authority_acceptance skills::runner::owner_custody_tests::entry_executable_sdk_custody_acceptance skills::runner::owner_pre_ready_tests::entry_executable_pre_ready_acceptance skills::runner::owner_preparation_tests::entry_executable_ready_abort_acceptance skills::runner::owner_submission_tests::entry_executable_async_submit_acceptance skills::runner::owner_recovery_tests::entry_executable_inventory_recovery_acceptance; do
+            grep -Fx "$test: test" "$RUNNER_TEMP/owner-acceptance-tests.txt"
             cargo test --locked -p clawd --bin clawd "$test" -- --exact --ignored --test-threads=1 --nocapture
           done
       - name: Check proactive SDK skill consumers from registry metadata
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -147,21 +161,26 @@ jobs:
           while IFS= read -r package; do
             cargo check --locked --all-targets -p "$package"
           done < "$RUNNER_TEMP/sdk-consumers.txt"
-      - name: Build verified local runtime without publishing any release
+      - name: Verify the memory gateway transport
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' }}
+        shell: bash
+        run: cargo test --locked -p webd
+      - name: Package exact native test components without publishing a release
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
-          cargo build --locked --release -p clawd --bin clawd -p skill-runner --bin skill-runner -p agent-skill-sdk --bin skillctl -p webd --bin webd
+          cargo build --locked -p webd --bin webd
           npm run build --prefix UI
           artifact_root="$RUNNER_TEMP/runtime-operations-artifact"
           mkdir -p "$artifact_root/runtime"
-          install -m 755 target/release/clawd "$artifact_root/runtime/clawd"
-          install -m 755 target/release/skill-runner target/release/skillctl target/release/webd "$artifact_root/runtime/"
+          install -m 755 target/debug/clawd "$artifact_root/runtime/clawd"
+          install -m 755 target/debug/skill-runner target/debug/skillctl target/debug/webd "$artifact_root/runtime/"
           mkdir -p "$artifact_root/runtime/UI"
           cp -R UI/dist "$artifact_root/runtime/UI/dist"
           printf '%s\n' "$GITHUB_SHA" > "$artifact_root/runtime/source-commit"
-          printf '%s\n' 'disk-reserve memory-model-binding typed-failure-recovery supervised-background blocking-no-overlap log-rotation product-identity-two-brand-ui' > "$artifact_root/runtime/verified-gates"
+          printf '%s\n' debug > "$artifact_root/runtime/build-profile"
+          printf '%s\n' 'file-delivery-revisions memory-model-binding memory-import durable-memory-response process-custody workspace-recovery disk-reserve supervised-background product-identity-two-brand-ui' > "$artifact_root/runtime/verified-gates"
           (cd "$artifact_root/runtime" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
           tar -czf "$artifact_root/runtime-${GITHUB_SHA}.tar.gz" -C "$artifact_root" runtime
           (cd "$artifact_root" && sha256sum "runtime-${GITHUB_SHA}.tar.gz" > "runtime-${GITHUB_SHA}.tar.gz.sha256")
@@ -173,7 +192,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: runner.os == 'Linux'
         with:
-          name: runtime-operations-runtime-${{ github.sha }}
+          name: branch-integration-test-runtime-${{ github.sha }}
           path: ${{ runner.temp }}/runtime-operations-artifact/*
           if-no-files-found: error
           retention-days: 14

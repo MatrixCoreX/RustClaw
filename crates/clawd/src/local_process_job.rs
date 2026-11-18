@@ -105,10 +105,11 @@ pub(crate) fn process_identity_state(job_dir: &Path, pid: u32) -> ProcessIdentit
         match alive {
             Ok(status) if status.success() => {}
             Ok(_) => {
-                return if process_group_exists(pid) == Some(true) {
-                    ProcessIdentityState::AliveVerified
-                } else {
-                    ProcessIdentityState::Missing
+                // A surviving group proves existence, never which job owns it.
+                // Only the owner protocol can bind a leaderless process group.
+                return match process_group_exists(pid) {
+                    Some(false) => ProcessIdentityState::Missing,
+                    Some(true) | None => ProcessIdentityState::Unknown,
                 };
             }
             Err(_) => return ProcessIdentityState::Unknown,
@@ -147,13 +148,16 @@ fn process_group_exists(process_group_id: u32) -> Option<bool> {
         if !valid_job_process_target(process_group_id) {
             return Some(false);
         }
-        Command::new("kill")
-            .args(["-0", "--", &format!("-{process_group_id}")])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .ok()
-            .map(|status| status.success())
+        // Signal zero only observes the validated group; it never sends a signal.
+        if unsafe { libc::kill(-(process_group_id as i32), 0) } == 0 {
+            Some(true)
+        } else {
+            match std::io::Error::last_os_error().raw_os_error() {
+                Some(libc::ESRCH) => Some(false),
+                Some(libc::EPERM) => Some(true),
+                _ => None,
+            }
+        }
     }
     #[cfg(not(unix))]
     {

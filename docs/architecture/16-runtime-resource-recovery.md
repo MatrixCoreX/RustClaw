@@ -586,3 +586,5 @@ policy or the previous validated values. If execution behavior regresses, roll b
 runtime package so the core, runner, registry contracts, and UI remain version-aligned. Do not work
 around pressure by disabling authorization, verifier checks, durable journals, or skill receipt
 validation.
+
+A legacy PID record whose leader has exited cannot establish ownership of a surviving process group. Such a group remains `unknown`: leases stay reserved and PID-based cancellation is refused. Bound owner-protocol custody is required before signalling leaderless work.

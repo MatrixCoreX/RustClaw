@@ -164,7 +164,12 @@ fn update_llm_config_locked(
         &allowed_models,
         &selected_model,
     );
-    let updated_api_key = if !inline_api_key.is_empty() || device_key_enrollment {
+    let updated_api_key = if !inline_api_key.is_empty()
+        || device_key_enrollment
+        || !claw_core::config::llm_vendor_api_key_env_names(&selected_vendor).is_empty()
+    {
+        // Broker-owned text credentials must not remain in legacy TOML after
+        // saving model settings, including an empty/reuse credential request.
         upsert_string_key_in_section(
             &updated_vendor_models,
             &format!("llm.{selected_vendor}"),

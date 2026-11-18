@@ -250,18 +250,9 @@ fn delivery_authorization_uses_the_current_bound_key_and_allows_key_rotation() {
     let identity = crate::resolve_auth_identity_by_key(&state, "key")
         .expect("identity lookup")
         .expect("identity");
-    state
-        .core
-        .db
-        .get()
-        .expect("db connection")
-        .execute(
-            "INSERT INTO channel_bindings(
-                channel, external_user_id, external_chat_id, user_key, bound_at, updated_at
-             ) VALUES ('telegram', '1', '2', 'key', '1', '1')",
-            [],
-        )
-        .expect("channel binding");
+    crate::repo::bind_channel_identity(&state, "telegram", Some("1"), Some("2"), "key")
+        .unwrap()
+        .expect("owned channel binding");
     let mut record = record("succeeded", Some(serde_json::json!({"text": "done"})));
     record.owner_principal_id = Some(identity.principal_id.clone());
     let payload: Value = serde_json::from_str(&record.task.payload_json).expect("payload");
@@ -290,6 +281,9 @@ fn delivery_authorization_uses_the_current_bound_key_and_allows_key_rotation() {
         [&identity.principal_id],
     )
     .expect("insert rotated key");
+    db.execute("INSERT INTO credential_bindings(binding_id,credential_digest,principal_id,status,created_at,revoked_at)
+        VALUES ('rotated-binding',?1,?2,'active','2',NULL)",
+        rusqlite::params![crate::repo::auth::credential_digest("rotated-key"), identity.principal_id]).unwrap();
     db.execute(
         "UPDATE channel_bindings SET user_key = 'rotated-key', updated_at = '2'
          WHERE channel = 'telegram' AND external_user_id = '1' AND external_chat_id = '2'",

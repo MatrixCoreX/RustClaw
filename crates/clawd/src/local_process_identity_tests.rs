@@ -3,10 +3,8 @@ use std::process::{Command, Stdio};
 
 use super::{process_identity_state, ProcessIdentityState, TempDirGuard};
 
-#[test]
-fn live_orphan_group_cannot_verify_an_unrelated_job() {
+pub(super) fn with_live_orphan(check: impl FnOnce(&std::path::Path, u32)) {
     let owner = TempDirGuard::new("orphan_group_owner");
-    let unrelated = TempDirGuard::new("orphan_group_unrelated");
     let script = owner.path().join("run.sh");
     let child_record = owner.path().join("child_pid");
     let child_ready = owner.path().join("child_ready");
@@ -51,8 +49,29 @@ fn live_orphan_group_cannot_verify_an_unrelated_job() {
     );
     assert_eq!(child.process_group, group_id);
 
-    std::fs::write(unrelated.path().join("pid"), group_id.to_string()).unwrap();
-    // Only observational '-0' probes, never destructive signals.
-    let observed = process_identity_state(unrelated.path(), group_id);
-    assert_ne!(observed, ProcessIdentityState::AliveVerified);
+    check(owner.path(), group_id);
+    drop(_owned_input);
+    for _ in 0..150 {
+        match crate::local_process_owner::instance::observe_process(child_pid) {
+            Err(crate::local_process_owner::instance::ProcessProbeFailure::Missing) => return,
+            Ok(snapshot)
+                if snapshot.state
+                    == crate::local_process_owner::instance::ProcessRunState::Zombie =>
+            {
+                return
+            }
+            _ => std::thread::sleep(std::time::Duration::from_millis(20)),
+        }
+    }
+    panic!("owned orphan fixture remained active after closing its input");
+}
+
+#[test]
+fn live_orphan_group_cannot_verify_an_unrelated_job() {
+    with_live_orphan(|_, group_id| {
+        let unrelated = TempDirGuard::new("orphan_group_unrelated");
+        std::fs::write(unrelated.path().join("pid"), group_id.to_string()).unwrap();
+        let observed = process_identity_state(unrelated.path(), group_id);
+        assert_ne!(observed, ProcessIdentityState::AliveVerified);
+    });
 }
