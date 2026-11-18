@@ -47,12 +47,7 @@ pub(crate) fn spawn_embedding_workers(state: crate::AppState, concurrency: usize
                 let state = worker_state.clone();
                 let worker_id = worker_id.clone();
                 async move {
-                    if state
-                        .worker
-                        .supervision
-                        .storage_snapshot()
-                        .is_some_and(|v| !v.write_admission)
-                    {
+                    if !crate::runtime::storage_pressure::background_write_admitted(&state).await {
                         return Ok(false);
                     }
                     run_one_embedding_batch(&state, &worker_id).await

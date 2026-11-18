@@ -540,12 +540,7 @@ pub(crate) fn spawn_memory_job_workers(state: crate::AppState, concurrency: usiz
                 let state = worker_state.clone();
                 let worker_id = worker_id.clone();
                 async move {
-                    if state
-                        .worker
-                        .supervision
-                        .storage_snapshot()
-                        .is_some_and(|v| !v.write_admission)
-                    {
+                    if !crate::runtime::storage_pressure::background_write_admitted(&state).await {
                         return Ok(false);
                     }
                     run_one_memory_job(&state, &worker_id).await
