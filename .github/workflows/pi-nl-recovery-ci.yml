@@ -86,7 +86,7 @@ jobs:
           python3 scripts/check_skill_registry_aliases.py
           python3 scripts/check_skill_prompts.py
           python3 scripts/check_deterministic_decision_inventory.py
-          python3 scripts/check_evidence_extractor_contracts.py
+          python3 scripts/check_evidence_extractor_contracts.py --self-test
           python3 scripts/check_startup_preflight_contract.py
           python3 -m unittest discover -s scripts/tests -p test_rotate_component_log.py
           bash component_start/common_tests.sh
