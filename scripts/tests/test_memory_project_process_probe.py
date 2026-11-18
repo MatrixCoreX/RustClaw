@@ -130,6 +130,18 @@ class ProcessProbeTests(unittest.TestCase):
                 self.assertFalse(required_job(broken))
 
 
+class CombinedEvidenceTests(unittest.TestCase):
+    def test_combined_probe_uploads_only_safe_results_and_process_logs(self):
+        workflow = yaml.safe_load((ROOT / ".github/workflows/branch-integration-ci.yml").read_text())
+        uploads = [step for step in workflow["jobs"]["native"]["steps"]
+                   if step.get("with", {}).get("name", "").startswith("combined-project-process-")]
+        self.assertEqual(len(uploads), 1)
+        self.assertEqual(set(uploads[0]["with"]["path"].splitlines()), {
+            "${{ runner.temp }}/project-process-evidence/result.json",
+            "${{ runner.temp }}/project-process-evidence/*/process-*.log",
+        })
+
+
 class ReadinessTests(unittest.TestCase):
     def test_ready_listener_requires_live_foreground_workers(self):
         for state in ["running", "degraded"]:

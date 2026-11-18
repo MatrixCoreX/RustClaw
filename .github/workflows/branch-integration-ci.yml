@@ -99,6 +99,7 @@ jobs:
           python3 scripts/check_answer_verifier_boundary.py
           python3 scripts/check_deterministic_decision_inventory.py
           python3 scripts/check_evidence_extractor_contracts.py --self-test
+          python3 -m unittest discover -s scripts/tests -p test_memory_project_process_probe.py
           python3 -m unittest discover -s scripts/tests -p test_clean_dev_artifacts.py
           python3 -m unittest discover -s scripts/tests -p test_check_staged_secrets.py
           npm ci --ignore-scripts --prefix UI
@@ -137,7 +138,9 @@ jobs:
         if: always()
         with:
           name: combined-project-process-${{ runner.os }}-${{ github.sha }}
-          path: ${{ runner.temp }}/project-process-evidence/
+          path: |
+            ${{ runner.temp }}/project-process-evidence/result.json
+            ${{ runner.temp }}/project-process-evidence/*/process-*.log
           if-no-files-found: warn
       - name: Verify the actual process owner and package custody
         if: ${{ !cancelled() && steps.native_build.outcome == 'success' }}
