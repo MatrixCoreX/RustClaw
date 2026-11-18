@@ -99,6 +99,7 @@ jobs:
           python3 scripts/check_answer_verifier_boundary.py
           python3 scripts/check_deterministic_decision_inventory.py
           python3 scripts/check_evidence_extractor_contracts.py --self-test
+          python3 scripts/nl_tests/macos_runner_workflow_tests.py
           python3 -m unittest discover -s scripts/tests -p test_memory_project_process_probe.py
           python3 -m unittest discover -s scripts/tests -p test_clean_dev_artifacts.py
           python3 -m unittest discover -s scripts/tests -p test_check_staged_secrets.py
