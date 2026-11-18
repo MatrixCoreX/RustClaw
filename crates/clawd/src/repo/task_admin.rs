@@ -819,8 +819,7 @@ fn cancel_adapter_has_settled(result: &Value) -> bool {
         .unwrap_or_default();
     match adapter.get("adapter_kind").and_then(Value::as_str) {
         Some("local_process_poll") => match status {
-            "already_terminal" => true,
-            "accepted" | "already_requested" => adapter
+            "already_terminal" | "accepted" | "already_requested" => adapter
                 .get("job_dir")
                 .and_then(Value::as_str)
                 .map(Path::new)
@@ -833,14 +832,10 @@ fn cancel_adapter_has_settled(result: &Value) -> bool {
 }
 
 fn local_process_cancel_has_settled(job_dir: &Path) -> bool {
-    if job_dir.join("exit_code").exists() {
-        return true;
-    }
     let Some(pid) = crate::local_process_job::read_pid(job_dir) else {
-        return true;
+        return false;
     };
-    crate::local_process_job::process_identity_state(job_dir, pid)
-        != crate::local_process_job::ProcessIdentityState::AliveVerified
+    crate::local_process_job::process_identity_state(job_dir, pid).alive() == Some(false)
 }
 
 fn cancellable_child_task_records(
@@ -1180,7 +1175,7 @@ fn cancel_local_process_job(cancel_ref: &str, now_ts: i64, terminate_grace_secon
             Some(job_dir),
         );
     }
-    if job_dir.join("exit_code").exists() {
+    if job_dir.join("exit_code").exists() && local_process_cancel_has_settled(job_dir) {
         return local_process_cancel_result(
             cancel_ref,
             now_ts,

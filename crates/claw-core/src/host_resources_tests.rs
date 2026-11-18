@@ -1,5 +1,111 @@
 use super::*;
 
+struct CgroupFixture(PathBuf);
+
+impl CgroupFixture {
+    fn new() -> Self {
+        let root = std::env::temp_dir().join(format!("host-cgroup-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        Self(root)
+    }
+
+    fn write(&self, name: &str, value: &str) {
+        fs::write(self.0.join(name), value).unwrap();
+    }
+}
+
+impl Drop for CgroupFixture {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn cgroup_directory_candidates_keep_membership_before_root_without_duplicates() {
+    let fixture = CgroupFixture::new();
+    assert_eq!(
+        cgroup_directories(&fixture.0, Path::new("/")),
+        vec![fixture.0.clone()]
+    );
+    for membership in ["/user.slice/agent.scope", "user.slice/agent.scope"] {
+        assert_eq!(
+            cgroup_directories(&fixture.0, Path::new(membership)),
+            vec![fixture.0.join("user.slice/agent.scope"), fixture.0.clone()]
+        );
+    }
+}
+
+#[test]
+fn cgroup_v2_directory_fixture_preserves_capacity_usage_events_and_pressure() {
+    let fixture = CgroupFixture::new();
+    fixture.write("memory.max", "536870912\n");
+    fixture.write("memory.current", "268435456\n");
+    fixture.write("memory.swap.max", "134217728\n");
+    fixture.write("memory.swap.current", "0\n");
+    fixture.write("memory.events", "high 2\noom 3\noom_kill 1\n");
+    fixture.write(
+        "memory.pressure",
+        "some avg10=1.25 avg60=2.50\nfull avg10=0.50 avg60=0.75\n",
+    );
+    let value = collect_cgroup_v2_dir(&fixture.0);
+    assert_eq!(value.version, Some(2));
+    assert_eq!(value.memory_limit_bytes, Some(536_870_912));
+    assert_eq!(value.memory_current_bytes, Some(268_435_456));
+    assert_eq!(value.swap_limit_bytes, Some(134_217_728));
+    assert_eq!(value.swap_used_bytes, Some(0));
+    assert_eq!(value.events.high, 2);
+    assert_eq!(value.events.oom, 3);
+    assert_eq!(value.events.oom_kill, 1);
+    let pressure = value.pressure.unwrap();
+    assert_eq!(pressure.some_avg10, Some(1.25));
+    assert_eq!(pressure.full_avg60, Some(0.75));
+
+    fixture.write("memory.max", "max\n");
+    fixture.write("memory.current", "invalid\n");
+    fixture.write("memory.swap.current", "-1\n");
+    let unavailable = collect_cgroup_v2_dir(&fixture.0);
+    assert_eq!(unavailable.memory_limit_bytes, None);
+    assert_eq!(unavailable.memory_current_bytes, None);
+    assert_eq!(unavailable.swap_used_bytes, None);
+}
+
+#[test]
+fn cgroup_v1_directory_fixture_subtracts_combined_swap_without_underflow() {
+    let fixture = CgroupFixture::new();
+    fixture.write("memory.limit_in_bytes", "536870912\n");
+    fixture.write("memory.usage_in_bytes", "268435456\n");
+    fixture.write("memory.memsw.limit_in_bytes", "805306368\n");
+    fixture.write("memory.memsw.usage_in_bytes", "335544320\n");
+    let value = collect_cgroup_v1_dir(&fixture.0);
+    assert_eq!(value.version, Some(1));
+    assert_eq!(value.memory_limit_bytes, Some(536_870_912));
+    assert_eq!(value.memory_current_bytes, Some(268_435_456));
+    assert_eq!(value.swap_limit_bytes, Some(268_435_456));
+    assert_eq!(value.swap_used_bytes, Some(67_108_864));
+    assert_eq!(value.events, CgroupMemoryEvents::default());
+    assert_eq!(value.pressure, None);
+    fixture.write("memory.memsw.limit_in_bytes", "1\n");
+    fixture.write("memory.memsw.usage_in_bytes", "1\n");
+    let saturated = collect_cgroup_v1_dir(&fixture.0);
+    assert_eq!(saturated.swap_limit_bytes, Some(0));
+    assert_eq!(saturated.swap_used_bytes, Some(0));
+}
+
+#[test]
+fn cgroup_directory_fixture_keeps_missing_capacity_unknown_in_both_versions() {
+    let fixture = CgroupFixture::new();
+    for value in [
+        collect_cgroup_v1_dir(&fixture.0),
+        collect_cgroup_v2_dir(&fixture.0),
+    ] {
+        assert_eq!(value.memory_limit_bytes, None);
+        assert_eq!(value.memory_current_bytes, None);
+        assert_eq!(value.swap_limit_bytes, None);
+        assert_eq!(value.swap_used_bytes, None);
+        assert_eq!(value.pressure, None);
+    }
+}
+
 fn snapshot(limit_mib: u64, available_mib: u64) -> HostResourceSnapshot {
     HostResourceSnapshot {
         schema_version: 1,

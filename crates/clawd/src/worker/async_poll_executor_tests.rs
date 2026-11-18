@@ -1,5 +1,9 @@
 use serde_json::json;
 
+#[cfg(unix)]
+#[path = "async_poll_cancellation_observation_tests.rs"]
+mod cancellation_observation;
+
 struct TempDirGuard {
     path: std::path::PathBuf,
 }
@@ -334,9 +338,10 @@ fn async_poll_large_output_keeps_exact_artifact_and_bounded_preview() {
 
 #[test]
 fn async_poll_local_process_cancel_marker_becomes_cancelled_result() {
-    let dir = TempDirGuard::new("async_poll_local_process_cancelled");
-    std::fs::write(dir.path.join("cancel_requested_at"), "1000\n").expect("write cancel marker");
-    std::fs::write(dir.path.join("exit_code"), "143\n").expect("write post-cancel exit");
+    let mut dir = crate::local_process_job::observation_test_support::LiveJobFixture::new();
+    dir.request_cancel();
+    dir.finish();
+    dir.write("exit_code", "143\n");
 
     let mut claimed = async_poll_claimed_dispatch(None);
     let job_id = "local_process:cancelled-job";
@@ -344,7 +349,7 @@ fn async_poll_local_process_cancel_marker_becomes_cancelled_result() {
     claimed.dispatch_payload["job_id"] = json!(job_id);
     if let Some(job) = claimed.task_checkpoint.pending_async_job.as_mut() {
         job.job_id = job_id.to_string();
-        job.cancel_ref = format!("local_process:{}", dir.path.display());
+        job.cancel_ref = format!("local_process:{}", dir.path().display());
     }
 
     let payload = super::execute_async_poll_dispatch_result(&claimed, 1_000, 30)
@@ -520,11 +525,13 @@ fn async_poll_missing_pid_metadata_is_a_stable_machine_failure() {
         let payload = super::execute_async_poll_dispatch_result(&claimed, 1_011, 30)
             .expect("invalid pid is a stable metadata failure");
         assert_eq!(
-            payload["executor_result_status"],
-            "async_poll_failed",
+            payload["executor_result_status"], "async_poll_failed",
             "pid={raw}",
         );
-        assert_eq!(payload["error_code"], "local_process_pid_missing", "pid={raw}");
+        assert_eq!(
+            payload["error_code"], "local_process_pid_missing",
+            "pid={raw}"
+        );
         assert_eq!(
             payload["failure_result_json"]["pid"],
             serde_json::Value::Null,

@@ -133,28 +133,43 @@ pub(super) fn apply_selected_connection_environment(
     command: &mut tokio::process::Command,
     connection: Option<&crate::llm_gateway::SelectedLlmConnection>,
 ) {
+    project_selected_connection_environment(connection, |name, value| match value {
+        Some(value) => {
+            command.env(name, value);
+        }
+        None => {
+            command.env_remove(name);
+        }
+    });
+}
+
+pub(super) fn project_selected_connection_environment(
+    connection: Option<&crate::llm_gateway::SelectedLlmConnection>,
+    mut set: impl FnMut(&str, Option<&str>),
+) {
     use claw_core::llm_connection_environment::{
         SELECTED_IDENTITY_ENV, SELECTED_PROTOCOL_ENV, SELECTED_RELAY_ENV, SELECTED_VENDOR_ENV,
     };
-    // Neither a parent deployment environment nor a receipt allowlist owns
-    // the identity of this task's selected connection.
     for name in SELECTED_IDENTITY_ENV {
-        command.env_remove(name);
+        set(name, None);
     }
     if let Some(connection) = connection {
-        command
-            .env("OPENAI_BASE_URL", &connection.base_url)
-            .env("OPENAI_MODEL", &connection.model)
-            .env(SELECTED_VENDOR_ENV, &connection.vendor)
-            .env(SELECTED_PROTOCOL_ENV, &connection.provider_type)
-            .env(
+        for (name, value) in [
+            ("OPENAI_BASE_URL", connection.base_url.as_str()),
+            ("OPENAI_MODEL", connection.model.as_str()),
+            (SELECTED_VENDOR_ENV, connection.vendor.as_str()),
+            (SELECTED_PROTOCOL_ENV, connection.provider_type.as_str()),
+            (
                 SELECTED_RELAY_ENV,
                 if connection.hosted_relay {
                     "true"
                 } else {
                     "false"
                 },
-            );
+            ),
+        ] {
+            set(name, Some(value));
+        }
     }
 }
 
@@ -209,7 +224,7 @@ pub(super) fn inherited_sandbox_backend(backend: &'static str) -> Option<&'stati
 }
 
 pub(super) fn apply_parent_execution_backend(
-    command: &mut tokio::process::Command,
+    command: &mut super::launch_spec::RunnerLaunch,
     backend: Option<&'static str>,
 ) {
     // Neither the parent environment nor a package allowlist owns this grant.

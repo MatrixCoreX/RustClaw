@@ -1,18 +1,18 @@
 use std::ffi::OsStr;
 
-use crate::process_sandbox::{self, PreparedProcessCommand, ProcessSandboxRequest};
+use crate::process_sandbox::{self, PreparedSandboxInvocation, ProcessSandboxRequest};
 
-pub(super) fn prepare_runner_command(
+pub(super) fn prepare_runner_invocation(
     program: impl AsRef<OsStr>,
     request: ProcessSandboxRequest<'_>,
     durable: bool,
     host_process: bool,
-) -> Result<PreparedProcessCommand, &'static str> {
+) -> Result<PreparedSandboxInvocation, &'static str> {
     match (durable, host_process) {
-        (true, true) => process_sandbox::prepare_durable_host_process_command(program, request),
-        (true, false) => process_sandbox::prepare_durable_process_command(program, request),
-        (false, true) => process_sandbox::prepare_host_process_command(program, request),
-        (false, false) => process_sandbox::prepare_process_command(program, request),
+        (true, true) => process_sandbox::prepare_durable_host_process_invocation(program, request),
+        (true, false) => process_sandbox::prepare_durable_process_invocation(program, request),
+        (false, true) => process_sandbox::prepare_host_process_invocation(program, request),
+        (false, false) => process_sandbox::prepare_process_invocation(program, request),
     }
 }
 

@@ -64,7 +64,12 @@ fn unlimited_wechat_media_keep_file_validation_without_a_byte_ceiling() {
         wechat_file_max_bytes(),
     ] {
         assert_eq!(limit, None);
+        // Validate large lengths without creating a multi-GiB fixture that
+        // exceeds a test runner's per-file safety limit.
         for size in [127_140_539, 4 * 1024 * MIB] {
+            assert_eq!(preflight_regular_media_length(size, limit).unwrap(), size);
+        }
+        for size in [1, 127_140_539] {
             file.set_len(size).expect("sparse file length");
             assert_eq!(preflight_local_media_file(&path, limit).unwrap(), size);
             assert_eq!(
@@ -109,6 +114,24 @@ fn unlimited_wechat_media_keep_file_validation_without_a_byte_ceiling() {
     }
     drop(file);
     std::fs::remove_dir_all(dir).expect("remove temporary test files");
+}
+
+#[test]
+fn regular_media_lengths_preserve_exact_limits_and_full_u64_range() {
+    for limit in [None, Some(0), Some(10), Some(u64::MAX)] {
+        let error = preflight_regular_media_length(0, limit).unwrap_err();
+        assert_eq!(error.failure, LocalMediaPreflightFailure::Empty);
+        assert_eq!(error.actual_bytes, Some(0));
+        assert_eq!(error.max_bytes, limit);
+    }
+    for size in [1, 4 * 1024 * MIB, u64::MAX] {
+        assert_eq!(preflight_regular_media_length(size, None), Ok(size));
+        assert_eq!(preflight_regular_media_length(size, Some(size)), Ok(size));
+        let error = preflight_regular_media_length(size, Some(size - 1)).unwrap_err();
+        assert_eq!(error.failure, LocalMediaPreflightFailure::TooLarge);
+        assert_eq!(error.actual_bytes, Some(size));
+        assert_eq!(error.max_bytes, Some(size - 1));
+    }
 }
 
 #[test]

@@ -12,13 +12,11 @@ pub(super) fn read_file_page(
     requested_path: &str,
     path: &Path,
     workspace_root: Option<&Path>,
+    host_filesystem: &crate::runtime::host_filesystem::HostFilesystemPolicy,
     start_byte: u64,
     requested_max_bytes: Option<usize>,
 ) -> io::Result<Value> {
-    let mut file = match workspace_root {
-        Some(root) => crate::secure_workspace_fs::open_workspace_file(root, path)?,
-        None => File::open(path)?,
-    };
+    let (mut file, canonical_path) = host_filesystem.open_file(workspace_root, path)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(io::Error::new(
@@ -54,7 +52,7 @@ pub(super) fn read_file_page(
             true,
         ),
     };
-    let canonical_path = path.canonicalize()?.display().to_string();
+    let canonical_path = canonical_path.display().to_string();
     let continuation = (!complete).then(|| {
         json!({
             "kind": "byte_range",

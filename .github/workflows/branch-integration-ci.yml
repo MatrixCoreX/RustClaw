@@ -1,0 +1,195 @@
+name: Completed branch integration verification
+
+"on":
+  push:
+    branches: ["ci/runtime-custody-integration-*", "ci/completed-branches-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            cache: linux-runtime-read
+          - os: macos-15
+            cache: macos-runtime-read
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      CARGO_BUILD_JOBS: "3"
+      CARGO_TERM_COLOR: always
+      APP_REQUIRE_REFERENCE_ADAPTERS: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: "1.23.x"
+      - name: Prepare native dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq pkg-config clang libclang-dev protobuf-compiler ripgrep bubblewrap
+          else
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install protobuf ripgrep
+          fi
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          key: ${{ matrix.cache }}
+          prefix-key: v1-rust-cargo-profiles
+          env-vars: "CARGO CC CFLAGS CXX CMAKE RUST MACOSX_DEPLOYMENT_TARGET SDKROOT"
+          cache-targets: "false"
+          cache-directories: |
+            target/debug
+            target/release
+          cache-bin: "false"
+          cache-on-failure: "false"
+      - name: Prepare native browser and protocol fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --only-binary=:all: -r scripts/nl_tests/requirements.txt
+          npm ci --ignore-scripts --prefix crates/skills/browser_web
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            node crates/skills/browser_web/node_modules/playwright/cli.js install --with-deps chromium
+          else
+            node crates/skills/browser_web/node_modules/playwright/cli.js install chromium
+          fi
+      - name: Check runtime contracts and product independence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/check_long_files.py
+          python3 scripts/check_cross_platform_contracts.py
+          python3 scripts/check_startup_preflight_contract.py
+          for checker in product_identity_coupling skill_storage_ownership task_event_archive_contracts task_event_context_team_contracts; do
+            python3 "scripts/check_${checker}.py" --self-test
+            python3 "scripts/check_${checker}.py"
+          done
+          python3 scripts/check_task_lifecycle_contracts.py
+          python3 scripts/check_no_runtime_hard_reply.py
+          python3 scripts/check_historical_hardcoded_language.py --fail-on-runtime --fail-on-ui-visible
+          python3 scripts/check_no_policy_boundary_hard_reply.py
+          python3 scripts/check_skill_hotplug_coupling_inventory.py --self-test
+          python3 scripts/check_skill_hotplug_coupling_inventory.py
+          python3 scripts/check_on_demand_skill_builds.py
+          python3 scripts/check_answer_verifier_boundary.py
+          python3 scripts/check_deterministic_decision_inventory.py
+          python3 scripts/check_evidence_extractor_contracts.py --self-test
+          python3 -m unittest discover -s scripts/tests -p test_clean_dev_artifacts.py
+          python3 -m unittest discover -s scripts/tests -p test_check_staged_secrets.py
+          npm ci --ignore-scripts --prefix UI
+          npm run lint --prefix UI
+          npm test --prefix UI
+          bash scripts/product_identity_tests.sh --with-ui
+      - name: Verify shared SDK consumers and native runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p agent-skill-sdk
+          cargo test --locked -p skill-runner
+          cargo test --locked -p claw-core
+          cargo build --locked -p clawd --bins
+          cargo test --locked -p clawd --bin clawd -- --test-threads=3
+      - name: Verify the actual process owner and package custody
+        shell: bash
+        run: |
+          set -euo pipefail
+          export APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd"
+          for test in local_process_owner::entry::tests::entry_executable_protocol_acceptance local_process_owner::authority_entry::tests::entry_executable_authority_acceptance skills::runner::owner_custody_tests::entry_executable_sdk_custody_acceptance skills::runner::owner_pre_ready_tests::entry_executable_pre_ready_acceptance skills::runner::owner_preparation_tests::entry_executable_ready_abort_acceptance skills::runner::owner_submission_tests::entry_executable_async_submit_acceptance skills::runner::owner_recovery_tests::entry_executable_inventory_recovery_acceptance; do
+            cargo test --locked -p clawd --bin clawd "$test" -- --exact --ignored --test-threads=1 --nocapture
+          done
+      - name: Check proactive SDK skill consumers from registry metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo metadata --no-deps --locked --format-version 1 > "$RUNNER_TEMP/workspace-packages.json"
+          python3 scripts/skill_store_packages.py --scope proactive --format packages --target host > "$RUNNER_TEMP/proactive-packages.txt"
+          python3 -c 'import json,os,pathlib; t=pathlib.Path(os.environ["RUNNER_TEMP"]); allowed=set((t/"proactive-packages.txt").read_text().split()); packages=json.loads((t/"workspace-packages.json").read_text())["packages"]; names=sorted(p["name"] for p in packages if p["name"] in allowed and any(d["name"]=="agent-skill-sdk" for d in p["dependencies"])); (t/"sdk-consumers.txt").write_text("\n".join(names)+"\n"); assert names'
+          while IFS= read -r package; do
+            cargo check --locked --all-targets -p "$package"
+          done < "$RUNNER_TEMP/sdk-consumers.txt"
+      - name: Build verified local runtime without publishing any release
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --release -p clawd --bin clawd -p skill-runner --bin skill-runner -p agent-skill-sdk --bin skillctl -p webd --bin webd
+          npm run build --prefix UI
+          artifact_root="$RUNNER_TEMP/runtime-operations-artifact"
+          mkdir -p "$artifact_root/runtime"
+          install -m 755 target/release/clawd "$artifact_root/runtime/clawd"
+          install -m 755 target/release/skill-runner target/release/skillctl target/release/webd "$artifact_root/runtime/"
+          mkdir -p "$artifact_root/runtime/UI"
+          cp -R UI/dist "$artifact_root/runtime/UI/dist"
+          printf '%s\n' "$GITHUB_SHA" > "$artifact_root/runtime/source-commit"
+          printf '%s\n' 'disk-reserve memory-model-binding typed-failure-recovery supervised-background blocking-no-overlap log-rotation product-identity-two-brand-ui' > "$artifact_root/runtime/verified-gates"
+          (cd "$artifact_root/runtime" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          tar -czf "$artifact_root/runtime-${GITHUB_SHA}.tar.gz" -C "$artifact_root" runtime
+          (cd "$artifact_root" && sha256sum "runtime-${GITHUB_SHA}.tar.gz" > "runtime-${GITHUB_SHA}.tar.gz.sha256")
+      - name: Attest exact tested Linux runtime
+        if: runner.os == 'Linux'
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-path: ${{ runner.temp }}/runtime-operations-artifact/runtime-${{ github.sha }}.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: runner.os == 'Linux'
+        with:
+          name: runtime-operations-runtime-${{ github.sha }}
+          path: ${{ runner.temp }}/runtime-operations-artifact/*
+          if-no-files-found: error
+          retention-days: 14
+
+  pi-component:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      CARGO_BUILD_JOBS: "3"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - name: Prepare cross tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config make perl clang libclang-dev protobuf-compiler
+          rustup target add aarch64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          key: release-aarch64-unknown-linux-gnu
+          prefix-key: v1-rust-cargo-profiles
+          cache-targets: "false"
+          cache-directories: |
+            target/debug
+            target/release
+            target/aarch64-unknown-linux-gnu/debug
+            target/aarch64-unknown-linux-gnu/release
+          cache-bin: "false"
+          cache-on-failure: "false"
+      - name: Compile Pi backend for the same candidate
+        run: |
+          INSTALL_DEPS=0 bash scripts/archive/cross-build/cross-build-pi.sh --target pi64 --package clawd --no-ui --skip-deps -- --locked
+          python3 scripts/verify_release_binary.py target/aarch64-unknown-linux-gnu/release/clawd aarch64-unknown-linux-gnu

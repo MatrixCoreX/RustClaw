@@ -8,8 +8,29 @@ use super::{
     network_allowlist_spike, prepare_process_command, sandbox_backend_diagnostics,
     ProcessNetworkPolicy, ProcessSandboxRequest,
 };
-#[cfg(target_os = "linux")]
-use super::{prepare_durable_process_command, prepare_host_process_command};
+pub(super) fn prepare_host_process_command(
+    program: impl AsRef<std::ffi::OsStr>,
+    request: ProcessSandboxRequest<'_>,
+) -> Result<super::PreparedProcessCommand, &'static str> {
+    super::prepare_host_process_invocation(program, request)
+        .map(super::PreparedSandboxInvocation::into_process_command)
+}
+
+pub(super) fn prepare_durable_process_command(
+    program: impl AsRef<std::ffi::OsStr>,
+    request: ProcessSandboxRequest<'_>,
+) -> Result<super::PreparedProcessCommand, &'static str> {
+    super::prepare_durable_process_invocation(program, request)
+        .map(super::PreparedSandboxInvocation::into_process_command)
+}
+
+pub(super) fn prepare_durable_host_process_command(
+    program: impl AsRef<std::ffi::OsStr>,
+    request: ProcessSandboxRequest<'_>,
+) -> Result<super::PreparedProcessCommand, &'static str> {
+    super::prepare_durable_host_process_invocation(program, request)
+        .map(super::PreparedSandboxInvocation::into_process_command)
+}
 
 #[test]
 fn domain_allowlist_spike_is_validated_and_never_silently_inherits_network() {
@@ -68,10 +89,125 @@ impl Drop for TestDir {
     }
 }
 
+#[test]
+fn direct_recipe_materializes_without_changing_payload_or_process_defaults() {
+    use std::ffi::OsStr;
+
+    let root = TestDir::new("direct_recipe");
+    let request = ProcessSandboxRequest {
+        mode: ToolSandboxMode::DangerFull,
+        backend: ToolSandboxBackend::Auto,
+        workspace_root: root.path(),
+        execution_root: root.path(),
+        network: ProcessNetworkPolicy::Inherit,
+        additional_writable_paths: &[],
+        host_private_directories: &[],
+        browser_subprocess: false,
+    };
+    let mut recipe = super::prepare_invocation_for_lifetime(
+        "program with spaces",
+        request,
+        super::ProcessLifetime::DurableAsync,
+        super::ProcessNamespacePolicy::HostVisible,
+        &[],
+    )
+    .unwrap();
+    recipe.invocation.arg("").arg("$(literal)");
+    assert_eq!(recipe.backend, "direct");
+    let prepared = recipe.into_process_command();
+    let command = prepared.command.as_std();
+    assert_eq!(command.get_program(), OsStr::new("program with spaces"));
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        [OsStr::new(""), OsStr::new("$(literal)")]
+    );
+    assert!(command.get_current_dir().is_none());
+    assert_eq!(command.get_envs().count(), 0);
+    assert!(prepared.additional_writable_targets.is_empty());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn bubblewrap_recipe_keeps_lifetime_namespace_network_and_mount_arguments_exact() {
+    use std::ffi::OsString;
+
+    let root = TestDir::new("invocation_matrix");
+    let canonical = root.path().canonicalize().unwrap();
+    let backend = super::find_bubblewrap().expect("test requires existing sandbox backend");
+    for durable in [false, true] {
+        for host_visible in [false, true] {
+            for network_deny in [false, true] {
+                let request = ProcessSandboxRequest {
+                    mode: ToolSandboxMode::WorkspaceWrite,
+                    backend: ToolSandboxBackend::Bubblewrap,
+                    workspace_root: root.path(),
+                    execution_root: root.path(),
+                    network: if network_deny {
+                        ProcessNetworkPolicy::Deny
+                    } else {
+                        ProcessNetworkPolicy::Inherit
+                    },
+                    additional_writable_paths: &[],
+                    host_private_directories: &[],
+                    browser_subprocess: false,
+                };
+                let recipe = super::prepare_invocation_for_lifetime(
+                    "payload",
+                    request,
+                    if durable {
+                        super::ProcessLifetime::DurableAsync
+                    } else {
+                        super::ProcessLifetime::ParentBound
+                    },
+                    if host_visible {
+                        super::ProcessNamespacePolicy::HostVisible
+                    } else {
+                        super::ProcessNamespacePolicy::Isolated
+                    },
+                    &[],
+                )
+                .unwrap();
+                let (program, args) = recipe.invocation.into_parts();
+                let mut expected = Vec::<OsString>::new();
+                if !durable {
+                    expected.push("--die-with-parent".into());
+                }
+                expected.push("--new-session".into());
+                if !host_visible {
+                    expected.push("--unshare-pid".into());
+                }
+                expected.extend(
+                    ["--unshare-ipc", "--unshare-uts", "--ro-bind", "/", "/"].map(OsString::from),
+                );
+                expected.extend(["--dev", "/dev"].map(OsString::from));
+                if network_deny {
+                    expected.push("--unshare-net".into());
+                }
+                expected.extend(["--tmpfs", "/tmp", "--bind"].map(OsString::from));
+                expected.extend([
+                    canonical.as_os_str().to_owned(),
+                    canonical.as_os_str().to_owned(),
+                ]);
+                if !host_visible {
+                    expected.extend(["--proc", "/proc"].map(OsString::from));
+                }
+                expected.extend([
+                    "--chdir".into(),
+                    canonical.as_os_str().to_owned(),
+                    "--".into(),
+                    "payload".into(),
+                ]);
+                assert_eq!(program, backend);
+                assert_eq!(args, expected);
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn danger_full_uses_direct_backend() {
     let root = TestDir::new("danger_full");
-    let prepared = prepare_process_command(
+    let prepared = super::prepare_process_invocation(
         "bash",
         ProcessSandboxRequest {
             mode: ToolSandboxMode::DangerFull,
@@ -80,6 +216,7 @@ async fn danger_full_uses_direct_backend() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Inherit,
             additional_writable_paths: &[],
+            host_private_directories: &[],
             browser_subprocess: false,
         },
     )
@@ -121,6 +258,7 @@ fn remote_container_contract_is_explicit_and_fail_closed() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Deny,
             additional_writable_paths: &[],
+            host_private_directories: &[],
             browser_subprocess: false,
         },
     );
@@ -181,6 +319,7 @@ fn browser_subprocess_seatbelt_permissions_are_explicit_and_temp_scoped() {
                 execution_root: root.path(),
                 network: ProcessNetworkPolicy::Inherit,
                 additional_writable_paths: &[],
+                host_private_directories: &[],
                 browser_subprocess,
             },
         )
@@ -224,6 +363,7 @@ async fn browser_subprocess_can_terminate_its_direct_child() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Deny,
             additional_writable_paths: &[],
+            host_private_directories: &[],
             browser_subprocess: true,
         },
     )
@@ -259,6 +399,7 @@ fn durable_sandbox_omits_parent_death_while_foreground_keeps_it() {
         execution_root: root.path(),
         network: ProcessNetworkPolicy::Deny,
         additional_writable_paths: &[],
+        host_private_directories: &[],
         browser_subprocess: false,
     };
     let foreground = prepare_process_command("bash", request()).expect("foreground command");
@@ -301,6 +442,7 @@ fn host_process_sandbox_keeps_host_pid_view_and_other_boundaries() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Deny,
             additional_writable_paths: &[],
+            host_private_directories: &[],
             browser_subprocess: false,
         },
     )
@@ -337,6 +479,7 @@ fn host_process_sandbox_inherits_network_only_when_explicitly_requested() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Inherit,
             additional_writable_paths: &[],
+            host_private_directories: &[],
             browser_subprocess: false,
         },
     )
@@ -373,6 +516,7 @@ async fn read_only_backend_rejects_workspace_mutation() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Deny,
             additional_writable_paths: &[],
+            host_private_directories: &[],
             browser_subprocess: false,
         },
     )
@@ -407,6 +551,7 @@ async fn workspace_backend_writes_only_inside_bound_workspace() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Deny,
             additional_writable_paths: &[],
+            host_private_directories: &[],
             browser_subprocess: false,
         },
     )
@@ -445,6 +590,7 @@ async fn read_only_backend_can_execute_inside_system_temp_workspace() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Deny,
             additional_writable_paths: &[],
+            host_private_directories: &[],
             browser_subprocess: false,
         },
     )
@@ -478,6 +624,7 @@ async fn workspace_backend_can_write_inside_system_temp_workspace() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Deny,
             additional_writable_paths: &[],
+            host_private_directories: &[],
             browser_subprocess: false,
         },
     )
@@ -517,6 +664,7 @@ async fn read_only_backend_limits_writes_to_explicit_internal_path() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Deny,
             additional_writable_paths: &writable_paths,
+            host_private_directories: &[],
             browser_subprocess: false,
         },
     )
@@ -565,6 +713,7 @@ async fn explicit_writable_mount_preserves_system_resolver_configuration() {
             execution_root: root.path(),
             network: ProcessNetworkPolicy::Inherit,
             additional_writable_paths: &writable_paths,
+            host_private_directories: &[],
             browser_subprocess: false,
         },
     )

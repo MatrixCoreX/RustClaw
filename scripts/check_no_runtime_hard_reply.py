@@ -125,6 +125,12 @@ def looks_machine_literal(value: str) -> bool:
     value = value.strip()
     if not value:
         return True
+    # A closed Seatbelt path rule is executable policy, not reply prose.
+    if re.fullmatch(
+        r'\(deny file-(?:read|write)\* \(subpath "\{[A-Za-z_][A-Za-z0-9_]*\}"\)\)',
+        value,
+    ):
+        return True
     if value in {"true", "false", "null"}:
         return True
     if "{{" in value or "}}" in value or "://" in value:
@@ -195,6 +201,9 @@ def looks_sentence_like(value: str) -> bool:
 def is_machine_only_source_line(source_line: str) -> bool:
     stripped = source_line.strip()
     if stripped.startswith(("//", "/*", "*")):
+        return True
+    # A complete must_use attribute is a compiler diagnostic, not runtime text.
+    if re.fullmatch(r'#\[\s*must_use\s*=\s*"(?:\\.|[^"\\])*"\s*\]', stripped):
         return True
     if any(
         marker in stripped
@@ -367,6 +376,9 @@ def print_baseline_report(
 
 
 def run_self_test() -> int:
+    from no_runtime_hard_reply_source_tests import run_tests
+
+    run_tests()
     sample = """diff --git a/crates/clawd/src/finalize/task.rs b/crates/clawd/src/finalize/task.rs
 +++ b/crates/clawd/src/finalize/task.rs
 @@ -10,0 +11,3 @@

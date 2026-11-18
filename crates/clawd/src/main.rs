@@ -49,8 +49,8 @@ mod cors_tests;
 mod db_init;
 mod delivery_service;
 mod delivery_utils;
-mod evidence_policy;
 mod event_json_storage;
+mod evidence_policy;
 mod execution_adapters;
 mod execution_isolation;
 mod execution_recipe;
@@ -66,6 +66,7 @@ mod intent;
 mod language_policy;
 mod llm_gateway;
 mod local_process_job;
+mod local_process_owner;
 mod log_utils;
 mod long_task_progress;
 mod machine_selector;
@@ -81,6 +82,7 @@ mod package_commands;
 mod persona_style;
 mod pipeline_types;
 mod policy_decision;
+mod process_invocation;
 mod process_sandbox;
 mod prompt_budget;
 mod prompt_utils;
@@ -109,12 +111,12 @@ mod skill_storage;
 mod skills;
 mod sqlite_busy_retry;
 mod system_health;
-mod task_context_archive;
-mod task_context_privacy;
 mod task_admin_routes;
 mod task_artifacts;
 mod task_budget_contract;
+mod task_context_archive;
 mod task_context_builder;
+mod task_context_privacy;
 mod task_contract;
 mod task_event_archive;
 mod task_event_storage_maintenance;
@@ -184,12 +186,11 @@ use providers::{
     ChatRequestHints,
 };
 pub(crate) use repo::{
-    bind_channel_identity,
-    build_channel_ingress_snapshot, build_conversation_chat_id, build_submit_task_payload,
-    cancel_one_task_for_user_chat, cancel_task_by_id, cancel_tasks_for_user_chat,
-    check_submit_task_access, check_submit_task_limits, check_task_view_access, create_auth_key,
-    create_pending_channel_bind_session, delete_auth_key_by_id,
-    exchange_credential_status_for_user_key, factory_reset_auth_state,
+    bind_channel_identity, build_channel_ingress_snapshot, build_conversation_chat_id,
+    build_submit_task_payload, cancel_one_task_for_user_chat, cancel_task_by_id,
+    cancel_tasks_for_user_chat, check_submit_task_access, check_submit_task_limits,
+    check_task_view_access, create_auth_key, create_pending_channel_bind_session,
+    delete_auth_key_by_id, exchange_credential_status_for_user_key, factory_reset_auth_state,
     finalize_pending_channel_bind_session, find_task_by_idempotency_key,
     finish_pending_channel_resume, get_auth_key_value_by_id,
     get_pending_channel_bind_session_by_id, get_pending_channel_bind_session_by_token,
@@ -221,14 +222,15 @@ pub(crate) use runtime::{
     SkillViewsSnapshot, TaskCostBlocker, TaskMetricsRegistry, TaskProviderBlocker, ToolsPolicy,
     WhatsappDeliveryRoute, WorkerConfig,
 };
+use skill_sdk::package_custody;
+use skill_sdk::sandbox_private as private_filesystem_policy;
 pub(crate) use skills::canonical_skill_name;
 use skills::{run_skill_with_runner, run_skill_with_runner_outcome};
 pub(crate) use system_health::{
     active_running_task_count, active_running_task_count_for_user, channel_gateway_process_stats,
     current_rss_bytes, daemon_process_pids_by_name, feishud_process_stats, larkd_process_stats,
     oldest_running_task_age_seconds, oldest_running_task_age_seconds_for_user,
-    telegramd_process_stats, wa_webd_process_stats, wechatd_process_stats,
-    whatsappd_process_stats,
+    telegramd_process_stats, wa_webd_process_stats, wechatd_process_stats, whatsappd_process_stats,
 };
 use task_admin_routes::{
     cancel_one_task, cancel_task_by_id as cancel_task_by_id_handler, cancel_tasks,
@@ -598,6 +600,9 @@ fn tokio_worker_stack_bytes(raw: Option<&str>) -> usize {
 }
 
 fn main() -> anyhow::Result<()> {
+    if let Some(result) = local_process_owner::run_if_requested() {
+        return result.map_err(|failure| anyhow::anyhow!("{failure}"));
+    }
     // No threads have been created yet; glibc allocator settings are process-global.
     let allocator_tuning = unsafe { runtime_memory::configure_allocator_at_startup() };
     let worker_stack_bytes = tokio_worker_stack_bytes(
@@ -1164,6 +1169,9 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         default_locator_search_dir.display(),
     );
 
+    // No authority keys are loaded until complete managed-host admission.
+    let host_filesystem =
+        Arc::new(runtime::host_filesystem::HostFilesystemPolicy::without_private_authority());
     let mcp_runtime = Arc::new(crate::mcp_runtime::McpRuntime::new(config.mcp.clone()));
     mcp_runtime.start().await;
     mcp_runtime.spawn_health_monitor().await;
@@ -1189,7 +1197,8 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
             agents_by_id: Arc::new(RwLock::new(Arc::new(agents_by_id))),
             agent_runtime_leases: Arc::new(RwLock::new(agent_runtime_leases)),
             http_client: Client::new(),
-            registration_http_client: http::ui_routes::official_registration_http_client_builder().build()?,
+            registration_http_client: http::ui_routes::official_registration_http_client_builder()
+                .build()?,
             public_http_client: crate::public_http_client::build_public_http_client()?,
             skill_views_snapshot: Arc::new(RwLock::new(Arc::new(initial_skill_views))),
             active_provider_type,
@@ -1201,6 +1210,7 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
                 ),
         },
         skill_rt: crate::SkillRuntime {
+            host_filesystem,
             skill_timeout_seconds: config.skills.skill_timeout_seconds,
             skill_runner_path: effective_skill_runner_path,
             skill_global_max_concurrency: runtime_concurrency.skill_concurrency,
@@ -1336,26 +1346,7 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
     let restored_resource_leases = resource_scheduler::restore_durable_resource_leases(&state);
     info!(restored_resource_leases, "durable_resource_leases_restored");
     resource_scheduler::spawn_resource_pressure_monitor(state.clone());
-    // Recount only memory-owned payload, recovering obsolete whole-database pressure
-    // before reconciling or starting automatic memory jobs. This performs no retention.
-    match state
-        .core
-        .db
-        .get()
-        .map_err(anyhow::Error::from)
-        .and_then(|db| {
-            memory::retention::refresh_storage_pressure(
-                &db,
-                &state.policy.memory,
-                now_ts_u64() as i64,
-            )
-        }) {
-        Ok((observed_bytes, pressure_state)) => info!(
-            observed_bytes,
-            pressure_state, "memory_storage_pressure_recounted"
-        ),
-        Err(error) => warn!(%error, "memory_storage_pressure_recount_failed"),
-    }
+    runtime::storage_pressure::refresh_memory_pressure_before_workers(&state);
     spawn_worker(
         state.clone(),
         config.worker.poll_interval_ms,

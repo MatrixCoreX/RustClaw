@@ -133,6 +133,7 @@ pub(super) async fn execute_command_handler(
             execution_root: workspace_root,
             network: crate::process_sandbox::ProcessNetworkPolicy::Deny,
             additional_writable_paths: &[],
+            host_private_directories: &[],
             browser_subprocess: false,
         },
     );

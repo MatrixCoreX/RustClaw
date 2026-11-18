@@ -2,6 +2,15 @@ use super::*;
 use crate::task_result_retention::test_support::Fixture;
 use crate::task_result_retention::{files, storage};
 
+fn apply(
+    command: &mut tokio::process::Command,
+    plan: Option<&TaskTemporaryDirectory>,
+    sandbox_storage: Option<&Path>,
+) -> anyhow::Result<()> {
+    command.envs(environment(plan, sandbox_storage)?);
+    Ok(())
+}
+
 fn allowed() -> Vec<String> {
     TEMP_VARIABLES.into_iter().map(str::to_string).collect()
 }
@@ -59,6 +68,9 @@ fn ordinary_and_forged_payloads_keep_every_environment_entry_unchanged() {
         )
         .unwrap();
         assert!(plan.is_none());
+        assert!(environment(plan.as_ref(), Some(Path::new("../irrelevant")))
+            .unwrap()
+            .is_empty());
         let mut command = tokio::process::Command::new("unused");
         command
             .env("TMPDIR", "original value /tmp/with space")
@@ -107,8 +119,10 @@ fn owned_temporaries_use_linux_mapped_or_macos_canonical_storage_paths() {
             .env("TMPDIR", "global old tmp")
             .env("OTHER", "unchanged");
         apply(&mut command, Some(&plan), Some(&mapped)).unwrap();
+        let projected = environment(Some(&plan), Some(&mapped)).unwrap();
         let env = values(&command);
         for key in TEMP_VARIABLES {
+            assert_eq!(projected[key], mapped.join(TEMP_DIRECTORY).into_os_string());
             assert_eq!(
                 env[std::ffi::OsStr::new(key)],
                 Some(mapped.join(TEMP_DIRECTORY).into_os_string())
@@ -120,6 +134,7 @@ fn owned_temporaries_use_linux_mapped_or_macos_canonical_storage_paths() {
         );
     }
     assert!(plan.mapped_values(None).is_err());
+    assert!(environment(Some(&plan), None).is_err());
     assert!(plan.mapped_values(Some(Path::new("../tmp"))).is_err());
     assert!(plan.mapped_values(Some(Path::new("/run/../tmp"))).is_err());
 }

@@ -26,6 +26,9 @@ pub const INSTALL_RECEIPT_SCHEMA_VERSION: u32 = 2;
 pub const CURRENT_INSTALL_POINTER_SCHEMA_VERSION: u32 = 1;
 const BACKGROUND_VERSION_LEASE_SCHEMA_VERSION: u32 = 1;
 
+#[path = "receipt_package_custody.rs"]
+mod package_custody;
+
 fn digest_json(value: &impl Serialize) -> SkillSdkResult<String> {
     struct DigestWriter(Sha256);
     impl Write for DigestWriter {
@@ -338,7 +341,7 @@ pub struct InstallReceiptStore {
 
 #[derive(Debug)]
 pub struct SkillVersionLease {
-    file: File,
+    file: Option<File>,
     store: InstallReceiptStore,
     skill_name: String,
     install_dir: String,
@@ -348,11 +351,27 @@ impl SkillVersionLease {
     pub fn install_dir(&self) -> &str {
         &self.install_dir
     }
+
+    /// Retain a shared lease handle for an independent process owner. The
+    /// receiver must keep it private and never pass it to a skill payload.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub fn retain_process_handle(&self) -> std::io::Result<File> {
+        self.file
+            .as_ref()
+            .expect("skill_version_lease_handle_missing")
+            .try_clone()
+    }
 }
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+#[path = "receipt_process_lease_tests.rs"]
+mod process_lease_tests;
 
 impl Drop for SkillVersionLease {
     fn drop(&mut self) {
-        let _ = FileExt::unlock(&self.file);
+        // Explicit unlock also unlocks duplicates transferred to an owner.
+        // Close only this copy before GC; the last copy releases the lock.
+        drop(self.file.take());
         let skill_root = match self.store.skill_root(&self.skill_name) {
             Ok(root) => root,
             Err(_) => return,
@@ -555,7 +574,7 @@ impl InstallReceiptStore {
             ));
         }
         Ok(SkillVersionLease {
-            file,
+            file: Some(file),
             store: self.clone(),
             skill_name: skill_name.to_string(),
             install_dir,
@@ -821,6 +840,16 @@ impl InstallReceiptStore {
                     .open(&lease_path)?;
                 match FileExt::try_lock_exclusive(&lease) {
                     Ok(()) => {
+                        if self.version_has_active_owner_custody(
+                            skill_name,
+                            &install_dir,
+                            &lease,
+                        )? || self
+                            .version_has_active_background_lease(skill_name, &install_dir)?
+                        {
+                            retained = true;
+                            continue;
+                        }
                         fs::remove_dir_all(entry.path())?;
                         let _ = FileExt::unlock(&lease);
                         drop(lease);
@@ -833,7 +862,7 @@ impl InstallReceiptStore {
                 }
             }
         }
-        if retained {
+        if retained || self.has_remaining_owner_custody(skill_name)? {
             return Ok(false);
         }
         fs::remove_dir_all(skill_root)?;
@@ -870,6 +899,11 @@ impl InstallReceiptStore {
                 .open(&lease_path)?;
             match FileExt::try_lock_exclusive(&lease) {
                 Ok(()) => {
+                    if self.version_has_active_owner_custody(skill_name, &install_dir, &lease)?
+                        || self.version_has_active_background_lease(skill_name, &install_dir)?
+                    {
+                        continue;
+                    }
                     let version_root = versions_root.join(&install_dir);
                     if version_root.is_dir() {
                         fs::remove_dir_all(version_root)?;

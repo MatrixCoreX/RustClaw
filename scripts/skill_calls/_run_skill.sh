@@ -211,6 +211,7 @@ req="$(
       expected_overlay_generation_digest: null,
       expected_policy_digest: null,
       expected_admission_receipt_digest: null,
+      host_private_directories: [],
       args: $args,
       context: $context
     }'

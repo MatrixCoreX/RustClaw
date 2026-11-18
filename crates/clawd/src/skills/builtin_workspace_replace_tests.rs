@@ -1,4 +1,4 @@
-use super::execute_workspace_replace_for_root;
+use super::super::workspace_test_support::execute_workspace_replace_for_root;
 use serde_json::{json, Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -95,7 +95,7 @@ fn replace_is_atomic_checkpointed_and_rewindable() {
         "alpha\ndelta\ngamma\n"
     );
 
-    let rewind = super::super::builtin_workspace_patch::execute_workspace_patch_for_root(
+    let rewind = super::super::workspace_test_support::execute_workspace_patch_for_root(
         dir.path(),
         "task-replace",
         &args(json!({

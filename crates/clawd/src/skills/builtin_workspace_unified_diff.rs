@@ -1,5 +1,5 @@
+use crate::runtime::host_filesystem::HostFilesystemPolicy;
 use serde_json::{json, Value};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::{patch_io_error, read_optional_regular_file, validate_relative_patch_path};
@@ -31,6 +31,7 @@ struct PreparedFile {
 pub(super) fn inspect(
     root: &Path,
     patch: &str,
+    filesystem: &HostFilesystemPolicy,
 ) -> Result<(PureRustPatch, Vec<PureRustStat>), String> {
     let parsed = parse::parse_patch(patch)?;
     if parsed.files.len() > MAX_PATCH_FILES {
@@ -45,8 +46,8 @@ pub(super) fn inspect(
     let mut total_target_bytes = 0_u64;
     for file in parsed.files {
         let target = validate_relative_patch_path(root, &file.path)?;
-        let target_bytes = match fs::metadata(&target) {
-            Ok(metadata) => metadata.len(),
+        let target_bytes = match filesystem.metadata(Some(root), &target) {
+            Ok(metadata) => metadata.size_bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
             Err(error) => {
                 return Err(patch_io_error(
@@ -70,7 +71,7 @@ pub(super) fn inspect(
                 }),
             ));
         }
-        let before = read_optional_regular_file(root, &target)?;
+        let before = read_optional_regular_file(root, &target, filesystem)?;
         if file.old_missing && before.is_some() {
             return Err(context_error(&file.path, 0, "target_already_exists"));
         }
@@ -103,10 +104,14 @@ pub(super) fn inspect(
     Ok((PureRustPatch { files: prepared }, stats))
 }
 
-pub(super) fn apply(root: &Path, patch: &PureRustPatch) -> Result<(), String> {
+pub(super) fn apply(
+    root: &Path,
+    patch: &PureRustPatch,
+    filesystem: &HostFilesystemPolicy,
+) -> Result<(), String> {
     for file in &patch.files {
         validate_relative_patch_path(root, &file.path)?;
-        let current = read_optional_regular_file(root, &file.target)?;
+        let current = read_optional_regular_file(root, &file.target, filesystem)?;
         if current != file.before {
             return Err(context_error(&file.path, 0, "pre_apply_state_changed"));
         }
@@ -114,23 +119,17 @@ pub(super) fn apply(root: &Path, patch: &PureRustPatch) -> Result<(), String> {
     for file in &patch.files {
         match &file.after {
             Some(bytes) => {
-                if let Some(parent) = file.target.parent() {
-                    fs::create_dir_all(parent).map_err(|error| {
-                        patch_io_error(
-                            "patch_parent_create_failed",
-                            "workspace.patch.parent_create_failed",
-                            error,
-                        )
-                    })?;
-                }
-                crate::secure_workspace_fs::atomic_write_workspace_file(root, &file.target, bytes)
+                filesystem
+                    .atomic_write_file(root, &file.target, bytes)
                     .map_err(|error| {
                         patch_io_error("patch_apply_failed", "workspace.patch.apply_failed", error)
                     })?;
             }
-            None => crate::secure_workspace_fs::remove_workspace_file(root, &file.target).map_err(
-                |error| patch_io_error("patch_apply_failed", "workspace.patch.apply_failed", error),
-            )?,
+            None => filesystem
+                .remove_path(Some(root), &file.target, false)
+                .map_err(|error| {
+                    patch_io_error("patch_apply_failed", "workspace.patch.apply_failed", error)
+                })?,
         }
     }
     Ok(())

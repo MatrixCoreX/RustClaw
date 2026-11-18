@@ -9,7 +9,7 @@ use crate::repo::child_patch::{
 };
 use crate::{AppState, ClaimedTask};
 
-use super::builtin_workspace_patch::execute_workspace_patch_for_root;
+use super::builtin_workspace_patch::execute_workspace_patch;
 
 pub(super) fn execute_child_task_patch(
     state: &AppState,
@@ -178,8 +178,7 @@ fn apply_validated_patch(
             .cloned()
             .unwrap_or_else(|| json!({})),
     );
-    let output =
-        execute_workspace_patch_for_root(&state.skill_rt.workspace_root, &task.task_id, &args)?;
+    let output = execute_workspace_patch(state, Some(task), &args)?;
     serde_json::from_str(&output)
         .map_err(|_| child_patch_error("workspace_patch_result_invalid", Value::Null))
 }

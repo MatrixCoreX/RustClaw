@@ -351,6 +351,78 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
                     else: step["if"] = "${{ always() }}"
                     self.assertFalse(required_reload_gate(job))
 
+    def test_artifact_assertion_portability_is_tested_without_a_ui_build(self):
+        workflow = load("macos-polyglot-skill-ci.yml")
+        for event in ("push", "pull_request"):
+            self.assertTrue({"scripts/product_identity_tests.sh",
+                             "scripts/tests/test_product_identity_ui_artifacts.py"}
+                            .issubset(workflow["on"][event]["paths"]))
+        command = "python3 -m unittest discover -s scripts/tests -p test_product_identity_ui_artifacts.py -v"
+        runs = [step.get("run", "") for step in workflow["jobs"]["polyglot-skill-macos"]["steps"]]
+        self.assertEqual(sum(command in run for run in runs), 1)
+        self.assertLess(next(index for index, run in enumerate(runs) if command in run),
+                        next(index for index, run in enumerate(runs) if "npm ci --ignore-scripts --prefix UI" in run))
+
+    def test_two_brand_ui_identity_contract_is_built_after_dependency_installation(self):
+        steps = load("macos-polyglot-skill-ci.yml")["jobs"]["polyglot-skill-macos"]["steps"]
+        flattened = "\n".join(step.get("run", "") for step in steps)
+        for command in ("python3 scripts/check_product_identity_coupling.py --self-test",
+                        "python3 scripts/check_product_identity_coupling.py\n",
+                        "bash scripts/product_identity_tests.sh --with-ui"):
+            self.assertEqual(flattened.count(command), 1)
+            self.assertLess(flattened.index("npm ci --ignore-scripts --prefix UI"), flattened.index(command))
+
+    def test_native_browser_and_terminal_prerequisites_precede_actual_cases(self):
+        workflow = load("macos-polyglot-skill-ci.yml")
+        for event in ("push", "pull_request"):
+            self.assertIn("crates/skills/browser_web/**", workflow["on"][event]["paths"])
+        steps = workflow["jobs"]["polyglot-skill-macos"]["steps"]
+        flattened = "\n".join(step.get("run", "") for step in steps)
+        for prerequisite in (
+            "npm ci --ignore-scripts --prefix crates/skills/browser_web",
+            "node crates/skills/browser_web/node_modules/playwright/cli.js install chromium",
+            "cargo build --locked -p clawd --bin pty-session-runner",
+        ):
+            self.assertEqual(flattened.count(prerequisite), 1)
+            self.assertLess(flattened.index(prerequisite), flattened.index("browser_session_service::tests"))
+        for selection in ("browser_session_service::tests", "skills::builtin::builtin_pty_session::tests"):
+            command = f"cargo test -p clawd --bin clawd {selection} -- --test-threads=1 --nocapture"
+            self.assertEqual(flattened.count(command), 1)
+            self.assertLess(flattened.index(command), flattened.index("local_process_job::tests"))
+
+    def test_bounded_snapshot_enumeration_is_selected_before_the_owner_gate(self):
+        steps = load("macos-polyglot-skill-ci.yml")["jobs"]["polyglot-skill-macos"]["steps"]
+        gate = next(index for index, step in enumerate(steps) if "local_process_job::tests" in step.get("run", ""))
+        for selection in ("runtime::host_filesystem::directory::tests",
+                          "runtime::host_filesystem::access_mode::tests",
+                          "runtime::host_filesystem::restore::tests",
+                          "skills::builtin::builtin_workspace_mutation::enumeration_tests",
+                          "skills::builtin::builtin_list_dir::tests",
+                          "skills::builtin::builtin_workspace_mutation::restore_tests"):
+            command = f"cargo test -p clawd --bin clawd {selection}"
+            selected = [index for index, step in enumerate(steps) if command in step.get("run", "")]
+            self.assertEqual(len(selected), 1)
+            self.assertLess(selected[0], gate)
+
+    def test_staged_secret_guard_is_selected_on_native_macos(self):
+        workflow = load("macos-polyglot-skill-ci.yml")
+        for event in ("push", "pull_request"):
+            self.assertTrue({"scripts/check-secrets.sh", "scripts/check_staged_secrets.py",
+                             "scripts/tests/test_check_staged_secrets.py"}
+                            .issubset(workflow["on"][event]["paths"]))
+        command = "python3 -m unittest discover -s scripts/tests -p test_check_staged_secrets.py -v"
+        steps = workflow["jobs"]["polyglot-skill-macos"]["steps"]
+        self.assertEqual(sum(command in step.get("run", "") for step in steps), 1)
+
+    def test_cache_cleanup_regression_is_selected_on_native_macos(self):
+        workflow = load("macos-polyglot-skill-ci.yml")
+        for event in ("push", "pull_request"):
+            self.assertTrue({"scripts/clean_dev_artifacts.py", "scripts/tests/test_clean_dev_artifacts.py"}
+                            .issubset(workflow["on"][event]["paths"]))
+        command = "python3 -m unittest discover -s scripts/tests -p test_clean_dev_artifacts.py -v"
+        steps = workflow["jobs"]["polyglot-skill-macos"]["steps"]
+        self.assertEqual(sum(command in step.get("run", "") for step in steps), 1)
+
     def test_supported_runners_preserve_architecture_and_deployment_floor(self):
         for name, job_id, runner, target in EXPECTED:
             with self.subTest(workflow=name, job=job_id):
@@ -527,6 +599,54 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
             self.assertIn(f"node UI/test/authentication-{fixture}.browser.mjs", gate["run"])
         upload = next(step for step in steps if step.get("name") == "Upload the verified production web UI")
         self.assertLess(steps.index(gate), steps.index(upload))
+
+    def test_request_and_abort_admission_are_selected_before_known_process_authority_gate(self):
+        steps = load("macos-polyglot-skill-ci.yml")["jobs"]["polyglot-skill-macos"]["steps"]
+        command = "cargo test -p clawd --bin clawd skills::runner::startup:: -- --test-threads=1 --nocapture"
+        selected = [step["run"] for step in steps if command in step.get("run", "")]
+        self.assertEqual(len(selected), 1)
+        self.assertLess(selected[0].index(command), selected[0].index("local_process_job::tests"))
+
+    def test_owner_entry_uses_a_built_non_test_executable_and_explicit_fixture_selection(self):
+        steps = load("macos-polyglot-skill-ci.yml")["jobs"]["polyglot-skill-macos"]["steps"]
+        command = 'APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test -p clawd --bin clawd local_process_owner::entry::tests::entry_executable_protocol_acceptance -- --exact --ignored --test-threads=1 --nocapture'
+        selected = [step["run"] for step in steps if command in step.get("run", "")]
+        self.assertEqual(len(selected), 1)
+        self.assertLess(selected[0].index("cargo build -p clawd --bin clawd"), selected[0].index(command))
+        self.assertLess(selected[0].index(command), selected[0].index("local_process_job::tests"))
+
+    def test_typed_producer_and_raw_environment_are_selected_before_known_authority_gate(self):
+        steps = load("macos-polyglot-skill-ci.yml")["jobs"]["polyglot-skill-macos"]["steps"]
+        for selection in ["skills::builtin::builtin_run_cmd::launch_tests::",
+                          "skills::runner::launch_spec::",
+                          "skills::tests::env_isolation::", "process_launch::"]:
+            command = f"cargo test -p clawd --bin clawd {selection} -- --test-threads=1 --nocapture"
+            selected = [step["run"] for step in steps if command in step.get("run", "")]
+            self.assertEqual(len(selected), 1)
+            self.assertLess(selected[0].index(command), selected[0].index("local_process_job::tests"))
+
+    def test_sdk_and_runner_suites_precede_the_owner_authority_gate(self):
+        steps = load("macos-polyglot-skill-ci.yml")["jobs"]["polyglot-skill-macos"]["steps"]
+        runs = [step.get("run", "") for step in steps]
+        gate = next(index for index, run in enumerate(runs) if "local_process_job::tests" in run)
+        for command in ["cargo test -p agent-skill-sdk", "cargo test -p skill-runner"]:
+            selected = [index for index, run in enumerate(runs) if command in run]
+            self.assertEqual(len(selected), 1)
+            self.assertLess(selected[0], gate)
+
+    def test_cancellation_observation_precedes_the_known_identity_gate(self):
+        steps = load("macos-polyglot-skill-ci.yml")["jobs"]["polyglot-skill-macos"]["steps"]
+        command = "cargo test -p clawd --bin clawd cancellation_observation -- --test-threads=1 --nocapture"
+        selected = [step["run"] for step in steps if command in step.get("run", "")]
+        self.assertEqual(len(selected), 1)
+        self.assertLess(selected[0].index(command), selected[0].index("local_process_job::tests"))
+
+    def test_resource_observation_precedes_the_known_identity_gate(self):
+        steps = load("macos-polyglot-skill-ci.yml")["jobs"]["polyglot-skill-macos"]["steps"]
+        command = "cargo test -p clawd --bin clawd resource_observation -- --test-threads=1 --nocapture"
+        selected = [step["run"] for step in steps if command in step.get("run", "")]
+        self.assertEqual(len(selected), 1)
+        self.assertLess(selected[0].index(command), selected[0].index("local_process_job::tests"))
 
 
 if __name__ == "__main__":

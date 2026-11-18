@@ -237,9 +237,15 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         '"review_child_patch"',
         '"apply_child_patch"',
         '"reject_child_patch"',
-        "execute_workspace_patch_for_root",
+        "execute_workspace_patch(state, Some(task), &args)",
         "record_child_patch_disposition",
         "cleanup_child_worktree_artifacts",
+    ),
+    "crates/clawd/src/skills/builtin_workspace_patch.rs": (
+        "execute_workspace_patch_with_policy(",
+        "&state.skill_rt.host_filesystem",
+        "state.skill_rt.tools_policy.sandbox_backend",
+        "filesystem: &HostFilesystemPolicy",
     ),
     "crates/clawd/src/skills/builtin_child_task_patch_tests.rs": (
         "parent_reviews_then_applies_child_patch_with_checkpoint_and_cleanup",
@@ -440,6 +446,13 @@ def scan_texts(texts: dict[str, str | None]) -> list[str]:
             if token not in text:
                 findings.append(f"missing_token:{rel_path}:{token}")
 
+    child_patch = texts.get("crates/clawd/src/skills/builtin_child_task_patch.rs") or ""
+    if "execute_workspace_patch_for_root" in child_patch:
+        findings.append("child_patch_root_only_dispatch_forbidden")
+    patch_dispatch = texts.get("crates/clawd/src/skills/builtin_workspace_patch.rs") or ""
+    if "HostFilesystemPolicy::without_private_authority" in patch_dispatch:
+        findings.append("child_patch_empty_host_policy_forbidden")
+
     event_stream = texts.get("crates/clawd/src/task_journal_event_stream.rs") or ""
     required_event_types = (
         '"task_goal"',
@@ -553,6 +566,26 @@ def run_self_test() -> None:
     missing_tests["crates/clawd/src/task_journal_tests/event_stream_hooks.rs"] = '"task_goal"'
     findings = scan_texts(missing_tests)
     assert any("missing_rust_event_stream_test" in item for item in findings), findings
+
+    root_only_child = dict(good)
+    child_path = "crates/clawd/src/skills/builtin_child_task_patch.rs"
+    root_only_child[child_path] = str(root_only_child[child_path]).replace(
+        "execute_workspace_patch(state, Some(task), &args)",
+        "execute_workspace_patch_for_root(root, task_id, &args)",
+    )
+    findings = scan_texts(root_only_child)
+    assert "child_patch_root_only_dispatch_forbidden" in findings, findings
+    assert any("missing_token:" + child_path in item for item in findings), findings
+
+    empty_policy = dict(good)
+    patch_path = "crates/clawd/src/skills/builtin_workspace_patch.rs"
+    empty_policy[patch_path] = str(empty_policy[patch_path]).replace(
+        "&state.skill_rt.host_filesystem",
+        "&HostFilesystemPolicy::without_private_authority()",
+    )
+    findings = scan_texts(empty_policy)
+    assert "child_patch_empty_host_policy_forbidden" in findings, findings
+    assert any("missing_token:" + patch_path in item for item in findings), findings
 
     print("TASK_EVENT_CONTEXT_TEAM_CONTRACT_SELF_TEST ok")
 

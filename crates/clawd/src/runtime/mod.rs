@@ -1,5 +1,6 @@
 pub(crate) mod ask_state;
 mod config_path;
+pub(crate) mod host_filesystem;
 mod llm_cost;
 mod llm_cost_ledger;
 pub(crate) mod policy;

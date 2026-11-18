@@ -47,10 +47,10 @@ fn whitelist_keeps_only_listed_keys_and_drops_secrets_or_unknown() {
         ("AWS_ACCESS_KEY_ID", "AKIA..."),
     ];
     let kept = collect_whitelisted_env_pairs(source);
-    let kept_keys: Vec<&str> = kept.iter().map(|(k, _)| k.as_str()).collect();
+    let kept_keys: Vec<&str> = kept.iter().map(|(k, _)| k.to_str().unwrap()).collect();
     assert_eq!(kept_keys, vec!["HOME", "LANG", "PATH"]);
     for (key, _) in &kept {
-        assert!(SKILL_RUNNER_ENV_WHITELIST.contains(&key.as_str()));
+        assert!(SKILL_RUNNER_ENV_WHITELIST.contains(&key.to_str().unwrap()));
     }
 }
 
@@ -58,7 +58,7 @@ fn whitelist_keeps_only_listed_keys_and_drops_secrets_or_unknown() {
 fn whitelist_drops_empty_value_to_avoid_silent_propagation() {
     let source = vec![("PATH", "/usr/bin"), ("HOME", ""), ("LC_ALL", "C")];
     let kept = collect_whitelisted_env_pairs(source);
-    let kept_keys: Vec<&str> = kept.iter().map(|(k, _)| k.as_str()).collect();
+    let kept_keys: Vec<&str> = kept.iter().map(|(k, _)| k.to_str().unwrap()).collect();
     assert_eq!(kept_keys, vec!["LC_ALL", "PATH"]);
 }
 
@@ -67,6 +67,29 @@ fn whitelist_does_not_invent_keys_for_missing_source() {
     let source: Vec<(&str, &str)> = vec![("UNRELATED", "x")];
     let kept = collect_whitelisted_env_pairs(source);
     assert!(kept.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn whitelist_preserves_raw_values_and_deduplicates_without_expanding_allowed_keys() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let raw_home = OsString::from_vec(b"/tmp/home-\xff".to_vec());
+    let kept = collect_whitelisted_env_pairs([
+        (OsString::from("PATH"), OsString::from("/first")),
+        (
+            OsString::from_vec(b"PATH\xfe".to_vec()),
+            OsString::from("private"),
+        ),
+        (OsString::from("HOME"), raw_home.clone()),
+        (OsString::from("PATH"), OsString::from("/last")),
+        (OsString::from("HOME"), OsString::new()),
+    ]);
+    assert_eq!(
+        kept,
+        vec![("HOME".into(), raw_home), ("PATH".into(), "/last".into())]
+    );
 }
 
 #[test]
@@ -88,11 +111,11 @@ fn pinned_receipt_environment_passes_only_declared_non_sensitive_values() {
         vec![
             (
                 "WHISPER_BIN".to_string(),
-                "/opt/whisper/whisper-cli".to_string(),
+                std::ffi::OsString::from("/opt/whisper/whisper-cli"),
             ),
             (
                 "WHISPER_MODEL".to_string(),
-                "/opt/whisper/ggml-small.bin".to_string(),
+                std::ffi::OsString::from("/opt/whisper/ggml-small.bin"),
             ),
         ]
     );
@@ -147,4 +170,118 @@ async fn run_cmd_does_not_inherit_undeclared_parent_secret() {
         Some(value) => std::env::set_var("APP_TEST_PARENT_SECRET", value),
         None => std::env::remove_var("APP_TEST_PARENT_SECRET"),
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn strict_environment_accepts_non_utf8_parent_values_without_panicking() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "skills::tests::env_isolation::raw_parent_environment_child",
+            "--ignored",
+            "--test-threads=1",
+            "--nocapture",
+        ])
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", OsString::from_vec(b"/tmp/raw-home-\xff".to_vec()))
+        .env("LC_ALL", "")
+        .env("APP_TEST_PARENT_SECRET", "must-not-reach-child")
+        .env(OsString::from_vec(b"UNDECLARED_\xfe".to_vec()), "private")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "isolated environment fixture failed:\n{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report = raw_environment_completion(&output.stdout)
+        .expect("the exact isolated child must emit its completion report");
+    let source_entries = report["source_entries"].as_u64().unwrap();
+    assert!(source_entries >= 5);
+    assert_eq!(report["preserved"], serde_json::json!(["HOME", "PATH"]));
+    assert_eq!(report["stripped"], source_entries - 2);
+    assert_eq!(report["raw_home"], true);
+    assert_eq!(report["exact_child_environment"], true);
+    println!("STRICT_ENV_ACCEPTANCE {report}");
+}
+
+#[cfg(unix)]
+fn raw_environment_completion(stdout: &[u8]) -> Option<serde_json::Value> {
+    String::from_utf8_lossy(stdout)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|value| value["kind"] == "strict_env_complete")
+}
+
+#[cfg(unix)]
+#[test]
+fn raw_environment_zero_selection_cannot_be_a_completion_report() {
+    assert!(raw_environment_completion(b"running 0 tests\ntest result: ok. 0 passed\n").is_none());
+    assert!(raw_environment_completion(br#"{"kind":"other_report"}"#).is_none());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "isolated raw-environment subprocess, selected by its parent test"]
+async fn raw_parent_environment_child() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let mut command = tokio::process::Command::new("/usr/bin/env");
+    let source: Vec<_> = std::env::vars_os().collect();
+    assert!(source.len() >= 5, "all injected inputs must be present");
+    for pair in [
+        (OsString::from("LC_ALL"), OsString::new()),
+        (
+            OsString::from("APP_TEST_PARENT_SECRET"),
+            OsString::from("must-not-reach-child"),
+        ),
+        (
+            OsString::from_vec(b"UNDECLARED_\xfe".to_vec()),
+            OsString::from("private"),
+        ),
+    ] {
+        assert!(
+            source.contains(&pair),
+            "injected exclusion input is missing"
+        );
+    }
+    let report = super::super::apply_skill_runner_env_isolation(&mut command).unwrap();
+    assert_eq!(report.preserved, ["HOME", "PATH"]);
+    assert_eq!(report.stripped_count, source.len() - 2);
+    let declared = collect_declared_skill_env_pairs(
+        &["HOME".into(), "APP_TEST_PARENT_SECRET".into()],
+        source.clone(),
+    );
+    assert_eq!(declared.len(), 1);
+    assert_eq!(declared[0].0, "HOME");
+    assert_eq!(declared[0].1, std::env::var_os("HOME").unwrap());
+    command.env("LC_ALL", "");
+    let output = command.output().await.unwrap();
+    assert!(output.status.success());
+    let actual: std::collections::BTreeSet<_> = output
+        .stdout
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .collect();
+    let expected: std::collections::BTreeSet<&[u8]> = [
+        b"HOME=/tmp/raw-home-\xff".as_slice(),
+        b"PATH=/usr/bin:/bin".as_slice(),
+        b"LC_ALL=".as_slice(),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(actual, expected);
+    println!(
+        "\n{}",
+        serde_json::json!({"kind":"strict_env_complete", "source_entries":source.len(),
+            "preserved":report.preserved,"stripped":report.stripped_count,
+            "raw_home":true,"exact_child_environment":true})
+    );
 }

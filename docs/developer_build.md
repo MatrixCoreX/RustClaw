@@ -42,7 +42,51 @@ installing a prebuilt Release.
 跨平台脚本位于 `scripts/archive/cross-build/`，仅由维护者和发布 CI 显式调用。
 保留最近构建缓存，不要在每次构建后执行 `cargo clean`。
 
+## Explicit Cache Cleanup / 显式清理缓存
+
+Cache retention remains the normal workflow. Clear local compilation caches
+only when explicitly requested; deployment programs and installed skills are
+not cache targets. Preview the known Cargo compilation files before deleting:
+
+```bash
+python3 scripts/clean_dev_artifacts.py
+python3 scripts/clean_dev_artifacts.py --apply
+# Select a relocated Cargo target root explicitly; never follow a target symlink:
+python3 scripts/clean_dev_artifacts.py --target-dir /path/to/cargo-target
+```
+
+The root must have a valid `CACHEDIR.TAG`, and a profile must have an owned
+regular `.cargo-lock`. The cleaner refuses active builders/busy profiles and
+changed file identities. It only removes recognized compilation metadata,
+objects and incremental records; executables, shared libraries, unknown files,
+configuration, databases, logs, test evidence and symlinks are preserved.
+All selected roots are admitted before deletion begins. Linux and macOS use
+descriptor-relative, no-follow access; unsupported platforms fail explicitly.
+This is not a runtime-data retention or factory-reset command.
+
+默认保留缓存；只有明确要求清理时才使用 `--apply`。脚本先预览已识别的 Cargo 编译文件，
+不会清除运行程序、动态库、配置、数据库、日志、测试证据或未知文件。符号链接不会作为
+删除授权；迁移过的构建根目录需要显式指定。正在编译、锁被占用、文件身份变化或平台
+不支持时明确拒绝，不会退回删除运行数据的方式。这也不是恢复出厂设置功能。
+
 ## Publishing / 发布
+
+Before committing configuration, run `bash scripts/check-secrets.sh --staged`.
+The lightweight guard checks immutable Git-index blobs, not unstaged worktree
+contents. Diagnostics show only an escaped filename, line number and rule;
+matching values are never printed. Empty indexes do not fall back to scanning
+local configuration. Explicit file/directory arguments opt into a worktree
+configuration check. `--install` installs a pre-commit hook only if no hook
+already exists. Unreadable, oversized, non-UTF8 or non-regular configuration
+inputs fail explicitly. This heuristic guard is not a complete source secret
+scanner: publication still requires a redacted scan of the exact candidate
+sources, including non-configuration files.
+
+提交前可运行 `bash scripts/check-secrets.sh --staged`。轻量检查器读取暂存区固定对象，
+不读取尚未暂存的修改；输出只包含转义后的文件名、行号和规则，不打印密钥原文。
+空暂存区不会转而扫描本地配置。只有显式提供路径时才检查工作区文件；安装钩子不会
+覆盖已有钩子。不可读、超大、非 UTF-8 或非常规配置输入明确失败。此检查仅是配置
+启发式防护，发布前仍需对精确候选源码执行覆盖其他文件类型的脱敏密钥扫描。
 
 Release CI builds binaries and UI on dedicated runners, prepares locked browser
 runtime dependencies, checks contracts, precompiles platform-compatible Skill

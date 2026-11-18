@@ -41,13 +41,19 @@ PY
 assert_shell_identity "$PRIMARY_FIXTURE"
 assert_shell_identity "$ALTERNATE_FIXTURE"
 
-config_display_name() {
-  python3 - "$1" <<'PY'
+assert_ui_identity() {
+  python3 - "$1" "$2" <<'PY'
 import sys
 import tomllib
 from pathlib import Path
 
-print(tomllib.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["display_name"])
+expected = tomllib.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["display_name"].encode("utf-8")
+output = Path(sys.argv[2])
+if not expected or not any(
+    expected in path.read_bytes() for path in output.rglob("*")
+    if path.is_file() and not path.is_symlink()
+):
+    raise SystemExit("product_identity_ui_artifacts: configured identity missing")
 PY
 }
 
@@ -56,10 +62,10 @@ if [[ "${1:-}" == "--with-ui" ]]; then
     cd "$REPO_ROOT/UI"
     APP_PRODUCT_IDENTITY_CONFIG="$PRIMARY_FIXTURE" \
       npm run build -- --outDir "$FIXTURE_DIR/ui-first"
-    rg -F "$(config_display_name "$PRIMARY_FIXTURE")" "$FIXTURE_DIR/ui-first" >/dev/null
+    assert_ui_identity "$PRIMARY_FIXTURE" "$FIXTURE_DIR/ui-first"
     APP_PRODUCT_IDENTITY_CONFIG="$ALTERNATE_FIXTURE" \
       npm run build -- --outDir "$FIXTURE_DIR/ui-second"
-    rg -F "$(config_display_name "$ALTERNATE_FIXTURE")" "$FIXTURE_DIR/ui-second" >/dev/null
+    assert_ui_identity "$ALTERNATE_FIXTURE" "$FIXTURE_DIR/ui-second"
   )
 fi
 

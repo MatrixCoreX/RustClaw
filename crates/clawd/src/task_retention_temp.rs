@@ -140,15 +140,13 @@ impl TaskTemporaryDirectory {
     }
 }
 
-pub(crate) fn apply(
-    command: &mut tokio::process::Command,
+pub(crate) fn environment(
     plan: Option<&TaskTemporaryDirectory>,
     sandbox_storage: Option<&Path>,
-) -> anyhow::Result<()> {
-    if let Some(plan) = plan {
-        command.envs(plan.mapped_values(sandbox_storage)?);
-    }
-    Ok(())
+) -> anyhow::Result<BTreeMap<String, OsString>> {
+    plan.map(|plan| plan.mapped_values(sandbox_storage))
+        .transpose()
+        .map(Option::unwrap_or_default)
 }
 
 #[cfg(test)]

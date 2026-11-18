@@ -70,25 +70,27 @@ impl DurableRunnerJobPlan {
 
 struct DurableRunnerJobSetupGuard {
     job_dir: PathBuf,
-    preserve: bool,
+    retain_evidence: bool,
 }
 
 impl DurableRunnerJobSetupGuard {
     fn new(job_dir: &Path) -> Self {
         Self {
             job_dir: job_dir.to_path_buf(),
-            preserve: false,
+            retain_evidence: false,
         }
     }
 
-    fn preserve(&mut self) {
-        self.preserve = true;
+    // Call immediately before spawn, not after a lease/ACK. A dropped future
+    // cannot prove that a launch attempt had no effects or erase its evidence.
+    fn begin_launch_attempt(&mut self) {
+        self.retain_evidence = true;
     }
 }
 
 impl Drop for DurableRunnerJobSetupGuard {
     fn drop(&mut self) {
-        if !self.preserve {
+        if !self.retain_evidence {
             let _ = std::fs::remove_dir_all(&self.job_dir);
         }
     }
@@ -178,11 +180,14 @@ fn map_browser_authentication_to_sandbox(
     descriptor: &mut Option<crate::skill_storage::SkillStorageDescriptor>,
     sandbox_directory: Option<&std::path::Path>,
 ) -> Result<(), String> {
-    if let Some(authentication) = descriptor.as_mut()
-        .and_then(|descriptor| descriptor.browser_authentication.as_mut()) {
+    if let Some(authentication) = descriptor
+        .as_mut()
+        .and_then(|descriptor| descriptor.browser_authentication.as_mut())
+    {
         authentication.directory_path = sandbox_directory
             .ok_or_else(|| "browser authentication sandbox target unavailable".to_string())?
-            .display().to_string();
+            .display()
+            .to_string();
     }
     Ok(())
 }

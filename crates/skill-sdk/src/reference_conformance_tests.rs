@@ -9,7 +9,7 @@ use tempfile::tempdir;
 
 use crate::process::{run_command_controlled, ProcessOutput};
 use crate::{
-    prepare_sandboxed_command, validate_response_line, BuildAdapter, HostPlatform,
+    prepare_sandboxed_invocation, validate_response_line, BuildAdapter, HostPlatform,
     InstallReceiptStore, InstallRequest, ProtocolRequest, SandboxNetwork, SkillInstaller,
     SkillLaunchSpec, SkillRuntimeResolver,
 };
@@ -245,16 +245,18 @@ fn run_raw_action(
     output_root: &Path,
     timeout: Duration,
 ) -> Result<ProcessOutput, crate::SkillSdkError> {
-    let mut prepared = prepare_sandboxed_command(
+    let mut prepared = prepare_sandboxed_invocation(
         &launch.program,
         &launch.working_directory,
         &[output_root.to_path_buf()],
         SandboxNetwork::Deny,
+        &[],
     )?;
-    prepared.command.args(&launch.args);
-    prepared.command.env_clear();
-    prepared.command.env("PATH", "/usr/local/bin:/usr/bin:/bin");
-    prepared.command.envs(&launch.environment);
+    prepared.invocation.args(&launch.args);
+    let mut command = prepared.into_command();
+    command.env_clear();
+    command.env("PATH", "/usr/local/bin:/usr/bin:/bin");
+    command.envs(&launch.environment);
     let request = ProtocolRequest {
         request_id: "reference-request".to_string(),
         args,
@@ -265,13 +267,7 @@ fn run_raw_action(
     };
     let mut input = request.to_line()?.into_bytes();
     input.push(b'\n');
-    run_command_controlled(
-        &mut prepared.command,
-        Some(&input),
-        timeout,
-        "reference",
-        None,
-    )
+    run_command_controlled(&mut command, Some(&input), timeout, "reference", None)
 }
 
 fn prove_network_approval_gate(manifest_path: &Path, workspace: &Path, package_root: &Path) {

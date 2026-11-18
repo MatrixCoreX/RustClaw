@@ -33,7 +33,10 @@ pub(super) async fn execute_async_poll_dispatch_result_with_state(
     now_ts: i64,
     default_retry_after_seconds: i64,
 ) -> Option<Value> {
-    let _result_write_guard = crate::task_result_retention::write_gate::begin_writing(state, &claimed.task_id).await.ok()?;
+    let _result_write_guard =
+        crate::task_result_retention::write_gate::begin_writing(state, &claimed.task_id)
+            .await
+            .ok()?;
     if let Some(mut payload) =
         execute_async_poll_dispatch_result(claimed, now_ts, default_retry_after_seconds)
     {
@@ -273,7 +276,7 @@ fn local_process_async_poll_adapter_result(
         let pid = crate::local_process_job::read_pid(job_dir);
         let identity_state = pid
             .map(|pid| crate::local_process_job::process_identity_state(job_dir, pid))
-            .unwrap_or(crate::local_process_job::ProcessIdentityState::Missing);
+            .unwrap_or(crate::local_process_job::ProcessIdentityState::Unknown);
         let exit_code = std::fs::read_to_string(&exit_code_path)
             .ok()
             .and_then(|value| value.trim().parse::<i32>().ok());
@@ -287,22 +290,16 @@ fn local_process_async_poll_adapter_result(
             &job_dir.join("stderr_poll_cursor"),
             16 * 1024,
         );
-        return Some(json!({
-            "job_id": job_id,
-            "adapter_kind": "local_process_poll",
-            "status": "cancelled",
-            "poll_after_seconds": job.poll_after_seconds,
-            "expires_at": expires_at,
-            "message_key": "clawd.task.cancelled",
-            "cancellation_result_json": {
+        let mut observation = json!({
                 "schema_version": 1,
                 "source": "local_process_async_job",
                 "job_id": job_id,
                 "cancel_ref": job.cancel_ref,
-                "terminal_reason": "cancelled",
+                "cancellation_requested": true,
                 "pid": pid,
                 "exit_code": exit_code,
                 "process_identity_state": identity_state.as_token(),
+                "process_alive": identity_state.alive(),
                 "cancel_escalation": cancel_escalation,
                 "stdout": stdout.text,
                 "stdout_start_cursor": stdout.start_cursor,
@@ -312,7 +309,36 @@ fn local_process_async_poll_adapter_result(
                 "stderr_start_cursor": stderr.start_cursor,
                 "stderr_cursor": stderr.end_cursor,
                 "stderr_total_bytes": stderr.total_bytes,
-            }
+        });
+        // A request or an early output file cannot settle a live/unknown
+        // process. Authenticated whole-scope completion is a separate boundary.
+        if identity_state.alive() != Some(false) {
+            let retention_seconds = crate::local_process_job::read_retention_seconds(job_dir)
+                .unwrap_or_else(|| expires_at.saturating_sub(now_ts).max(1) as u64);
+            let retention_deadline_at =
+                now_ts.saturating_add(retention_seconds.min(i64::MAX as u64) as i64);
+            return Some(json!({
+                "job_id": job_id,
+                "adapter_kind": "local_process_poll",
+                "status": "running",
+                "poll_after_seconds": job.poll_after_seconds,
+                "expires_at": retention_deadline_at,
+                "retention_seconds": retention_seconds,
+                "retention_deadline_at": retention_deadline_at,
+                "message_key": job.message_key,
+                "retryable": true,
+                "process_observation": observation,
+            }));
+        }
+        observation["terminal_reason"] = json!("cancelled");
+        return Some(json!({
+            "job_id": job_id,
+            "adapter_kind": "local_process_poll",
+            "status": "cancelled",
+            "poll_after_seconds": job.poll_after_seconds,
+            "expires_at": expires_at,
+            "message_key": "clawd.task.cancelled",
+            "cancellation_result_json": observation,
         }));
     }
     if !exit_code_path.exists() {
@@ -948,10 +974,9 @@ fn async_poll_dispatch_result_payload_from_adapter_result(
             let retry_after_seconds =
                 poll_retry_after_seconds(claimed, adapter_result, default_retry_after_seconds);
             let supplied_expires_at = poll_expires_at(claimed, adapter_result).unwrap_or(0);
-            // A successful `running` observation proves that the adapter job is
-            // alive. A stale poll/retention window must be renewed, not rewritten
-            // as an underlying runtime failure. Only explicit adapter status
-            // `expired` is terminal.
+            // Non-terminal observations preserve the polling window, including
+            // cancellation awaiting process evidence. `running` is not proof
+            // of process ownership or scope completion.
             let minimum_retention_seconds = adapter_result
                 .get("retention_seconds")
                 .and_then(Value::as_i64)

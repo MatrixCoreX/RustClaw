@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(unix)]
+#[path = "resource_scheduler_observation_tests.rs"]
+mod observation_tests;
+
 fn resource_snapshot(total_mib: u64, available_mib: u64) -> HostResourceSnapshot {
     HostResourceSnapshot {
         schema_version: 1,
@@ -734,89 +738,63 @@ fn serial_swap_headroom_is_bounded_by_detected_free_swap() {
     assert_eq!(denied.projection["granted_swap_headroom_mb"], 128);
 }
 
+#[cfg(unix)]
 #[tokio::test]
-async fn durable_identity_handoff_accepts_an_already_terminal_job() {
-    let mut root = std::env::temp_dir();
-    root.push(format!(
-        "agent-runtime-terminal-lease-handoff-test-{}-{}",
-        std::process::id(),
-        crate::now_ts_u64()
-    ));
-    std::fs::create_dir_all(&root).expect("job directory");
-    std::fs::write(root.join("exit_code"), "0").expect("terminal marker");
+async fn durable_identity_handoff_accepts_a_reaped_terminal_job() {
+    let mut fixture = crate::local_process_job::observation_test_support::LiveJobFixture::new();
+    fixture.finish();
+    fixture.write("exit_code", "0");
 
     assert!(!await_durable_process_identity_or_terminal(
-        &root,
-        u32::MAX,
+        fixture.path(),
+        fixture.pid(),
         std::time::Duration::from_millis(25),
     )
     .await
     .expect("terminal jobs do not require a live process"));
-
-    std::fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[cfg(unix)]
 #[tokio::test]
 async fn durable_identity_handoff_waits_for_a_valid_process_marker() {
-    use std::process::Command;
-
-    let mut root = std::env::temp_dir();
-    root.push(format!(
-        "agent-runtime-delayed-lease-handoff-test-{}-{}",
-        std::process::id(),
-        crate::now_ts_u64()
-    ));
-    std::fs::create_dir_all(&root).expect("job directory");
-    let executable = std::path::Path::new("/bin/sleep");
-    let mut child = Command::new(executable)
-        .arg("30")
-        .spawn()
-        .expect("spawn process");
-    let marker_path = root.join("process_command_marker");
+    let mut fixture = crate::local_process_job::observation_test_support::LiveJobFixture::new();
+    let marker_path = fixture.path().join("process_command_marker");
+    let original_marker = std::fs::read(&marker_path).unwrap();
     std::fs::write(&marker_path, "marker-not-visible-yet").expect("initial marker");
     let delayed_marker_path = marker_path.clone();
     let marker_writer = std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(30));
-        std::fs::write(delayed_marker_path, executable.display().to_string())
-            .expect("valid marker");
+        std::fs::write(delayed_marker_path, original_marker).expect("valid marker");
     });
 
     let verified = await_durable_process_identity_or_terminal(
-        &root,
-        child.id(),
+        fixture.path(),
+        fixture.pid(),
         std::time::Duration::from_secs(1),
     )
     .await
     .expect("identity becomes valid within the handoff window");
     marker_writer.join().expect("marker writer");
-    let _ = child.kill();
-    let _ = child.wait();
+    fixture.finish();
 
     assert!(verified);
-    std::fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[cfg(unix)]
 #[tokio::test]
 async fn durable_resource_lease_is_rebuilt_and_released_from_machine_markers() {
-    let mut root = std::env::temp_dir();
-    root.push(format!(
-        "agent-runtime-resource-lease-test-{}-{}",
-        std::process::id(),
-        crate::now_ts_u64()
-    ));
+    let mut fixture = crate::local_process_job::observation_test_support::LiveJobFixture::new();
+    let root = fixture.path().to_owned();
     let job_dir = claw_core::workspace_state::workspace_state_root(&root)
         .join("async_jobs")
         .join("job-a");
     std::fs::create_dir_all(&job_dir).expect("job directory");
-    let executable = std::env::current_exe().expect("current executable");
-    let marker = executable
-        .file_name()
-        .expect("executable name")
-        .to_string_lossy();
-    std::fs::write(job_dir.join("pid"), std::process::id().to_string()).expect("pid");
-    std::fs::write(job_dir.join("process_command_marker"), marker.as_bytes()).expect("marker");
+    std::fs::write(job_dir.join("pid"), fixture.pid().to_string()).expect("pid");
+    std::fs::copy(
+        fixture.path().join("process_command_marker"),
+        job_dir.join("process_command_marker"),
+    )
+    .expect("marker");
     std::fs::write(job_dir.join("lease_ready"), "1").expect("lease ready");
     std::fs::write(job_dir.join("resource_lease_heartbeat_at"), "1")
         .expect("stale heartbeat fixture");
@@ -833,7 +811,7 @@ async fn durable_resource_lease_is_rebuilt_and_released_from_machine_markers() {
             heavy: true,
             background: true,
             estimate_key: None,
-            pid: std::process::id(),
+            pid: fixture.pid(),
             created_at_epoch: crate::now_ts_u64(),
         })
         .expect("lease metadata"),
@@ -873,8 +851,8 @@ async fn durable_resource_lease_is_rebuilt_and_released_from_machine_markers() {
     let broker = state.skill_rt.skill_concurrency_gates.resource_broker();
     assert!(broker.reserved_memory_mib() < 384);
 
+    fixture.finish();
     std::fs::write(job_dir.join("exit_code"), "0").expect("terminal marker");
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     assert_eq!(broker.reserved_memory_mib(), 0);
-    std::fs::remove_dir_all(root).expect("remove fixture");
 }

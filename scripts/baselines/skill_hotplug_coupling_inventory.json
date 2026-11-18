@@ -471,14 +471,14 @@
     "host_tool_dispatch|crates/clawd/src/skills/builtin.rs|browser_session": 1,
     "host_tool_dispatch|crates/clawd/src/skills/builtin.rs|code_index": 3,
     "host_tool_dispatch|crates/clawd/src/skills/builtin.rs|list_dir": 8,
-    "host_tool_dispatch|crates/clawd/src/skills/builtin.rs|make_dir": 4,
+    "host_tool_dispatch|crates/clawd/src/skills/builtin.rs|make_dir": 3,
     "host_tool_dispatch|crates/clawd/src/skills/builtin.rs|memory_store": 1,
     "host_tool_dispatch|crates/clawd/src/skills/builtin.rs|read_file": 3,
-    "host_tool_dispatch|crates/clawd/src/skills/builtin.rs|remove_file": 5,
+    "host_tool_dispatch|crates/clawd/src/skills/builtin.rs|remove_file": 2,
     "host_tool_dispatch|crates/clawd/src/skills/builtin.rs|run_cmd": 13,
     "host_tool_dispatch|crates/clawd/src/skills/builtin.rs|schedule": 1,
     "host_tool_dispatch|crates/clawd/src/skills/builtin.rs|workspace_patch": 1,
-    "host_tool_dispatch|crates/clawd/src/skills/builtin.rs|write_file": 8,
+    "host_tool_dispatch|crates/clawd/src/skills/builtin.rs|write_file": 7,
     "host_tool_dispatch|crates/clawd/src/skills/builtin_browser_session.rs|browser_session": 9,
     "host_tool_dispatch|crates/clawd/src/skills/builtin_child_task_patch.rs|workspace_patch": 4,
     "host_tool_dispatch|crates/clawd/src/skills/builtin_list_dir.rs|list_dir": 2,
@@ -487,7 +487,7 @@
     "host_tool_dispatch|crates/clawd/src/skills/builtin_run_cmd.rs|run_cmd": 2,
     "host_tool_dispatch|crates/clawd/src/skills/builtin_run_cmd_artifact.rs|run_cmd": 1,
     "host_tool_dispatch|crates/clawd/src/skills/builtin_schedule.rs|schedule": 5,
-    "host_tool_dispatch|crates/clawd/src/skills/builtin_workspace_patch.rs|workspace_patch": 6,
+    "host_tool_dispatch|crates/clawd/src/skills/builtin_workspace_patch.rs|workspace_patch": 1,
     "host_tool_dispatch|crates/clawd/src/skills/builtin_workspace_replace.rs|workspace_patch": 1
   }
 }

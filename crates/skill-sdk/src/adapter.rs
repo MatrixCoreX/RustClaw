@@ -14,7 +14,7 @@ use crate::manifest::{
 };
 use crate::process::{run_command, run_command_controlled, ProcessOutput};
 use crate::receipt::{digest_file, ArtifactReceipt, LaunchProgramScope, ReceiptLaunch};
-use crate::sandbox::{prepare_sandboxed_command, SandboxNetwork};
+use crate::sandbox::{prepare_sandboxed_invocation, SandboxNetwork};
 use crate::{HostPlatform, SkillSdkError, SkillSdkResult};
 
 #[derive(Debug, Clone)]
@@ -696,7 +696,18 @@ fn sandbox_command(
     } else {
         SandboxNetwork::Deny
     };
-    Ok(prepare_sandboxed_command(program, execution_root, writable, network)?.command)
+    let private_directories = context
+        .control
+        .map(InstallControl::host_private_directories)
+        .unwrap_or(&[]);
+    Ok(prepare_sandboxed_invocation(
+        program,
+        execution_root,
+        writable,
+        network,
+        private_directories,
+    )?
+    .into_command())
 }
 
 fn package_launch(
@@ -1635,3 +1646,7 @@ fn rewrite_python_console_scripts_for_relocation(_venv: &Path) -> SkillSdkResult
 #[cfg(test)]
 #[path = "adapter_tests.rs"]
 mod tests;
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+#[path = "adapter_private_tests.rs"]
+mod private_tests;
