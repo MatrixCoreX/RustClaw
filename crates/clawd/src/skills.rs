@@ -168,6 +168,7 @@ mod credential_fallback;
 mod dispatch_concurrency_tests;
 mod error_contract;
 mod execution_isolation;
+mod generated_file_delivery;
 mod memory_context;
 mod result_enrichment;
 mod runtime_environment;
@@ -1714,6 +1715,12 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
                 resource_lease.take(),
             )
             .await?;
+            generated_file_delivery::publish(
+                &state.skill_rt.workspace_root,
+                &task.task_id,
+                &args,
+                &mut extra,
+            )?;
             if skill_name == "workspace_patch" {
                 extra = append_extra_artifact_refs(
                     serde_json::from_str::<Value>(&text).ok(),
