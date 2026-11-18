@@ -9,7 +9,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 EXPECTED = (
-    ("macos-polyglot-skill-ci.yml", "polyglot-skill-macos", "macos-15", None),
+    ("macos-polyglot-skill-ci.yml", "polyglot-skill-macos", "macos-15-intel", None),
     ("macos-arm64-release-artifact.yml", "build-macos",
      "${{ inputs.architecture == 'x86_64' && 'macos-15-intel' || 'macos-15' }}", "13.0"),
     ("release-python-wheels.yml", "macos-wheels",
@@ -1759,7 +1759,8 @@ class MacosRunnerWorkflowTests(unittest.TestCase):
     def test_retired_runner_wrong_architecture_and_newer_floor_are_rejected(self):
         for name, job_id, runner, target in EXPECTED:
             job = load(name)["jobs"][job_id]
-            for changed_runner in [runner.replace("macos-15", "macos-14"), "macos-15-intel"]:
+            other_architecture = "macos-15" if runner == "macos-15-intel" else "macos-15-intel"
+            for changed_runner in [runner.replace("macos-15", "macos-14"), other_architecture]:
                 changed = deepcopy(job)
                 changed["runs-on"] = changed_runner
                 with self.subTest(workflow=name, runner=changed_runner):

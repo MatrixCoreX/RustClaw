@@ -20,7 +20,7 @@ jobs:
         include:
           - os: ubuntu-22.04
             cache: linux-runtime-read
-          - os: macos-15
+          - os: macos-15-intel
             cache: macos-runtime-read
     runs-on: ${{ matrix.os }}
     permissions:

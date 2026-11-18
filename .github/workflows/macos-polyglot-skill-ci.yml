@@ -1193,7 +1193,9 @@ jobs:
   polyglot-skill-macos:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.verification_scope != 'ui' }}
     name: Resolver, installer, and process supervision
-    runs-on: macos-15
+    # Keep architecture-independent runtime checks off the capacity-limited
+    # ARM pool; native ARM media and release validation remain separate gates.
+    runs-on: macos-15-intel
     env:
       CARGO_BUILD_JOBS: "2"
       CARGO_TERM_COLOR: always
