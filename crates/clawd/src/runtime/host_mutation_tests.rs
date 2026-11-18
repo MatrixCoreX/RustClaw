@@ -137,6 +137,13 @@ fn moved_private_inode_refuses_metadata_creation_removal_and_publication() {
     fs::DirBuilder::new().mode(0o700).create(&private).unwrap();
     let alias = root.path().join("workspace-alias");
     symlink(root.path(), &alias).unwrap();
+    fs::write(root.path().join("public-marker"), b"public").unwrap();
+    assert_eq!(
+        policy
+            .read_file(Some(&alias), &alias.join("public-marker"))
+            .unwrap(),
+        b"public"
+    );
     let alias_private = alias.join("private");
     let alias_moved = alias.join("moved-private");
     for path in [&private, &moved, &alias_private, &alias_moved] {
@@ -161,7 +168,10 @@ fn moved_private_inode_refuses_metadata_creation_removal_and_publication() {
         {
             let error =
                 outcome.expect_err(&format!("private path {path:?}, operation {operation}"));
-            assert!(HostFilesystemPolicy::is_private_access_denied(&error));
+            assert!(
+                HostFilesystemPolicy::is_private_access_denied(&error),
+                "private path {path:?}, operation {operation}: {error:?}"
+            );
         }
         assert!(!path.join("child").exists());
     }

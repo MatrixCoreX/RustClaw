@@ -185,8 +185,8 @@ impl HostFilesystemPolicy {
         if let Some(root) = root {
             let canonical_root = root.canonicalize()?;
             let relative = path
-                .strip_prefix(&canonical_root)
-                .or_else(|_| path.strip_prefix(root))
+                .strip_prefix(root)
+                .or_else(|_| path.strip_prefix(&canonical_root))
                 .map_err(|_| denied("workspace_path_outside_root"))?;
             // Apply the same lexical exclusion through a workspace alias,
             // including a replacement inode at a declared private location.

@@ -21,8 +21,8 @@ fn relative_components<'a>(
 ) -> io::Result<Vec<&'a std::ffi::OsStr>> {
     let root = workspace_root.canonicalize()?;
     let relative = target
-        .strip_prefix(&root)
-        .or_else(|_| target.strip_prefix(workspace_root))
+        .strip_prefix(workspace_root)
+        .or_else(|_| target.strip_prefix(&root))
         .map_err(|_| invalid_path("workspace_path_outside_root"))?;
     let mut components = Vec::new();
     for component in relative.components() {
