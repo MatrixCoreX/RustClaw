@@ -388,7 +388,8 @@ fn wrapper_exit_retains_unknown_group_without_granting_signal_authority() {
         assert!(!process_loss_is_stable(
             root,
             ProcessIdentityState::Unknown,
-            100
+            100,
+            1,
         ));
     });
 }
