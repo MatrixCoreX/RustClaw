@@ -93,6 +93,7 @@ pub(crate) fn retry_unavailable(
                 super::super::retention::automatic_generation_allowed(&db, principal)?,
                 permanent("memory_job_quota_blocked")
             );
+            drop(db);
             anyhow::ensure!(
                 !load_user_source_bundle(state, &job)?.trim().is_empty(),
                 permanent("memory_job_source_range_missing")

@@ -472,3 +472,77 @@ fn legacy_retry_cannot_touch_another_principal_or_a_progressed_job() {
         .unwrap()
         .is_empty());
 }
+
+#[test]
+fn verified_legacy_jobs_requeue_once_with_consent_and_an_audited_model_binding() {
+    use super::super::settings::{update_memory_settings, MemorySettingsUpdateRequest};
+    use claw_core::types::AuthIdentity;
+    let state = operations_state();
+    state.seed_test_auth_identity("fixture-key", "user");
+    let db = state.core.db.get().unwrap();
+    let principal = crate::repo::auth::principal_id_for_user_key(&db, "fixture-key")
+        .unwrap()
+        .unwrap();
+    let actor = AuthIdentity {
+        user_key: "fixture-key".into(),
+        principal_id: principal.clone(),
+        role: "user".into(),
+        user_id: 1,
+        chat_id: 2,
+    };
+    let request: MemorySettingsUpdateRequest = serde_json::from_value(json!({
+        "scope":"principal", "generate_mode":"enabled", "use_mode":"enabled", "expected_revision":0
+    }))
+    .unwrap();
+    let settings =
+        update_memory_settings(&db, &actor, &request, state.policy.memory.long_term_enabled)
+            .unwrap();
+    assert!(settings.generate_memory);
+    let mut task = fixture_task("verified-repair-source");
+    task.payload_json = json!({"text":"authentic user input for durable recovery"}).to_string();
+    db.execute("INSERT INTO tasks(task_id,user_id,chat_id,user_key,principal_id,channel,kind,payload_json,result_json,status,created_at,updated_at)
+        VALUES (?1,1,2,'fixture-key',?2,'ui','ask',?3,?4,'succeeded','100','100')",
+        params![task.task_id, principal, task.payload_json, json!({"text":"authentic answer"}).to_string()]).unwrap();
+    for (id, role, content) in [
+        (1, "user", "authentic user input for durable recovery"),
+        (2, "assistant", "authentic answer"),
+    ] {
+        db.execute("INSERT INTO memories(id,user_id,chat_id,user_key,principal_id,channel,role,content,created_at,created_at_ts)
+            VALUES (?1,1,2,'fixture-key',?2,'ui',?3,?4,'100',100)", params![id,principal,role,content]).unwrap();
+    }
+    let payload = serde_json::from_str(&task.payload_json).unwrap();
+    let eligibility = super::super::eligibility::build_turn_eligibility(&task, &payload, &settings);
+    let tx = db.unchecked_transaction().unwrap();
+    let ids = enqueue_prepared_turn_jobs(
+        &state,
+        &task,
+        &settings,
+        &eligibility,
+        "principal",
+        &principal,
+        Some(1),
+        Some(2),
+        true,
+        &tx,
+    )
+    .unwrap();
+    tx.commit().unwrap();
+    assert!(!ids.is_empty());
+    db.execute("UPDATE memory_jobs SET status='failed',provider_name='unavailable',provider_type='unavailable',
+        model_name='unavailable',attempt=5,error_code='memory_job_execution_failed',retryable=0", []).unwrap();
+    drop(db);
+    let report = recovery::retry_unavailable(&state, &principal).unwrap();
+    assert_eq!(report["requeued_jobs"], ids.len());
+    assert_eq!(report["blocked_jobs"], 0);
+    assert_eq!(
+        recovery::retry_unavailable(&state, &principal).unwrap()["requeued_jobs"],
+        0
+    );
+    for job in recovery::list(&state, &principal).unwrap() {
+        assert_eq!(job.status, "queued");
+        assert_eq!(job.attempt, 0);
+        assert_ne!(job.provider_type, "unavailable");
+        let checkpoint: Value = serde_json::from_str(&job.checkpoint_json).unwrap();
+        assert_eq!(checkpoint["legacy_repair"]["previous_attempts"], 5);
+    }
+}
