@@ -11,7 +11,7 @@
 - `extension_manager` is a guarded developer-facing skill for capability-gap assessment, bounded temporary fixes, and manifest-driven external skill lifecycle management.
 - Permanent packages stay unregistered while scaffolded and validated. Registration is allowed only after the selected adapter builds in private staging and the JSONL protocol smoke test produces a trusted install receipt.
 - External scaffolds may select Rust/Cargo, Python, Node, Go, or prebuilt explicitly. Source generation supports Cargo, Python, Node, and Go; prebuilt, generic-process, and HTTP packages require developer-supplied artifacts or configuration.
-- Registration writes `package_manifest` registry metadata and `skill_switches.<skill>=true` atomically. Only Cargo packages may require Cargo-workspace membership; non-Cargo packages do not edit the workspace.
+- Registration uses the host admission service and writes only the runtime overlay. Build/protocol success installs the package in `awaiting_policy_approval`; it never edits tracked registry/config/workspace files or grants runtime permissions. Treat server `admission_state` and `enabled` as authoritative. Separate administrator permission review is required before invocation.
 
 ## Config Entry Points (from interface)
 - Text generation normally uses the internal LLM gateway and the system `[llm].selected_vendor` / `selected_model`.
@@ -27,8 +27,8 @@
 - `scaffold_external_skill`: create `external_skills/<skill_name>` in an explicitly selected implementation language.
 - `implement_external_skill`: replace untouched scaffold docs and the manifest-selected source entrypoint with a first implementation.
 - `validate_external_skill`: synchronize docs, validate the manifest, install with its private adapter in staging, and run the protocol smoke test.
-- `register_external_skill`: validate and install the verified package, then atomically add registry/config metadata and enable it.
-- `enable_external_skill`: reinstall an already registered external package from its manifest and enable its config switch.
+- `register_external_skill`: validate and install through host admission; return installed/awaiting-policy state without granting or enabling execution.
+- `enable_external_skill`: resubmit an existing package through the same admission path. It may require renewed host permission review and does not bypass approval.
 
 ## Parameter Contract (from interface)
 | Action | Param | Required | Type | Default | Description |
@@ -54,9 +54,9 @@
 | `validate_external_skill` | `actions` | no | string or string[] | `["todo_action"]` | Smoke-test request actions. |
 | `register_external_skill` | `skill_name` | yes | snake_case string | - | Validated external package. |
 | `register_external_skill` | `confirm` | yes | bool | - | Must be `true` before installation and metadata writes. |
-| `register_external_skill` | `actions` | no | string or string[] | `["todo_action"]` | Validation smoke actions. |
+| `register_external_skill` | `actions` | no | string or string[] | `["todo_action"]` | Validation hint only; host admission uses the manifest smoke contract. |
 | `enable_external_skill` | `skill_name` | yes | snake_case string | - | Existing registered external package. |
-| `enable_external_skill` | `confirm` | yes | bool | - | Must be `true` before installation/config writes. |
+| `enable_external_skill` | `confirm` | yes | bool | - | Must be `true` before submission to host admission. |
 
 Every action also accepts `action`; it defaults to `assess_gap` only when omitted.
 
@@ -109,7 +109,7 @@ Request:
 Response:
 
 ```json
-{"request_id":"demo-3","status":"ok","text":"Registered external skill `text_probe`, installed its verified package, and enabled it in config. Reload skills or restart clawd before using it.","extra":{"action":"register_external_skill","skill_name":"text_probe","default_enabled":true,"install_ok":true,"adapter":"python","receipt_digest":"sha256:...","reload_required":true},"error_text":null}
+{"request_id":"demo-3","status":"ok","text":"{\"schema_version\":1,\"skill_name\":\"text_probe\",\"installed\":true,\"enabled\":false,\"admission_state\":\"awaiting_policy_approval\"}","extra":{"action":"register_external_skill","skill_name":"text_probe","default_enabled":false,"admission_state":"awaiting_policy_approval","permission_review_required":true,"install_ok":true,"adapter":"python","receipt_digest":"sha256:...","reload_required":false},"error_text":null}
 ```
 
 ## Output Contract

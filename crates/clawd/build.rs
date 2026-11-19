@@ -1,23 +1,25 @@
-use std::process::Command;
+use std::{path::Path, process::Command};
 fn git(args: &[&str]) -> Option<String> {
     let out = Command::new("git").args(args).output().ok()?;
     out.status
         .success()
         .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
+fn watch_git_path(name: &str) {
+    if let Some(path) =
+        git(&["rev-parse", "--git-path", name]).filter(|path| Path::new(path).is_file())
+    {
+        // Watching a missing packed-refs file makes Cargo rebuild on every invocation.
+        println!("cargo:rerun-if-changed={path}");
+    }
+}
 fn main() {
-    // Bind each cached binary to the actual checked-out revision; no environment override.
-    if let Some(path) = git(&["rev-parse", "--git-path", "HEAD"]) {
-        println!("cargo:rerun-if-changed={path}");
-    }
+    println!("cargo:rerun-if-changed=build.rs");
+    watch_git_path("HEAD");
     if let Some(reference) = git(&["symbolic-ref", "-q", "HEAD"]) {
-        if let Some(path) = git(&["rev-parse", "--git-path", &reference]) {
-            println!("cargo:rerun-if-changed={path}");
-        }
+        watch_git_path(&reference);
     }
-    if let Some(path) = git(&["rev-parse", "--git-path", "packed-refs"]) {
-        println!("cargo:rerun-if-changed={path}");
-    }
+    watch_git_path("packed-refs");
     let revision = git(&["rev-parse", "--verify", "HEAD"])
         .filter(|v| v.len() == 40 && v.bytes().all(|b| b.is_ascii_hexdigit()))
         .unwrap_or_default();

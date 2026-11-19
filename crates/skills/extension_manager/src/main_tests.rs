@@ -449,17 +449,28 @@ fn registration_uses_host_admission_api_without_mutating_tracked_config() {
     env::set_var("AGENT_INTERNAL_ADMISSION_URL", url);
     env::set_var("AGENT_INTERNAL_ADMISSION_TOKEN", "test-admission-token");
 
-    let report = run_async(register_external_skill(&root, "demo_skill"))
-        .expect("host admission should succeed");
-    assert_eq!(report.registry_generation, 42);
-    assert_eq!(report.build_adapter, "cargo");
-    assert_eq!(report.installed_version, "1.2.3");
-    assert_eq!(report.receipt_digest.len(), 64);
-    assert!(report.enabled);
+    let args = json!({"skill_name":"demo_skill","confirm":true});
+    let (text, extra) = run_async(register_external_skill_action(
+        root.clone(),
+        args.as_object().unwrap(),
+    ))
+    .expect("host admission should succeed without local revalidation or prompt synchronization");
+    let report = &extra["report"];
+    assert_eq!(report["registry_generation"], 42);
+    assert_eq!(report["build_adapter"], "cargo");
+    assert_eq!(report["installed_version"], "1.2.3");
+    assert_eq!(report["receipt_digest"].as_str().unwrap().len(), 64);
+    assert_eq!(report["enabled"], false);
+    assert_eq!(report["admission_state"], "awaiting_policy_approval");
+    assert_eq!(extra["default_enabled"], false);
+    assert_eq!(
+        serde_json::from_str::<Value>(&text).unwrap()["enabled"],
+        false
+    );
     let request = server.join().expect("mock admission server");
     assert!(request.contains("x-agent-internal-skill-token: test-admission-token"));
     assert!(request.contains("external_skills/demo_skill"));
-    assert!(request.contains("\"enabled\":true"));
+    assert!(request.contains("\"enabled\":false"));
     assert_eq!(fs::read(config_path).expect("config after"), config_before);
     assert_eq!(
         fs::read(registry_path).expect("registry after"),
@@ -515,7 +526,8 @@ fn mock_admission_server() -> (String, std::thread::JoinHandle<String>) {
                 "build_adapter": "cargo",
                 "package_version": "1.2.3",
                 "receipt_digest": "b".repeat(64),
-                "enabled": true
+                "enabled": false,
+                "admission_state": "awaiting_policy_approval"
             }
         })
         .to_string();
@@ -641,4 +653,21 @@ where
         .build()
         .expect("tokio runtime should build")
         .block_on(future)
+}
+
+#[test]
+fn admission_summary_reports_host_state_without_claiming_automatic_enablement() {
+    let report = ExternalSkillRegistrationReport {
+        registry_generation: 1,
+        registry_generation_digest: None,
+        build_adapter: "cargo".into(),
+        installed_version: "1.0.0".into(),
+        receipt_digest: "a".repeat(64),
+        enabled: false,
+        admission_state: skill_sdk::AdmissionState::AwaitingPolicyApproval,
+    };
+    let summary = external_admission_summary("review_probe", &report);
+    assert_eq!(summary["enabled"], false);
+    assert_eq!(summary["admission_state"], "awaiting_policy_approval");
+    assert_eq!(summary["installed"], true);
 }

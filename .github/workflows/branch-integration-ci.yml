@@ -119,11 +119,18 @@ jobs:
         run: |
           set -euo pipefail
           cargo build --locked -p clawd --bins -p skill-runner --bin skill-runner -p agent-skill-sdk --bin skillctl
+      - name: Verify unchanged runtime builds reuse their compiled artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked -p clawd --bins --message-format=json > "$RUNNER_TEMP/runtime-warm-build.jsonl"
+          python3 -c 'import json,sys; rows=[r for line in open(sys.argv[1]) if (r:=json.loads(line)).get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="clawd"]; assert rows and all(r.get("fresh") is True for r in rows), "runtime_warm_build_not_fresh"' "$RUNNER_TEMP/runtime-warm-build.jsonl"
       - name: Verify priority regression boundaries before the full suite
         shell: bash
         run: |
           set -euo pipefail
           test -x "$APP_PTY_SESSION_RUNNER"
+          cargo test --locked -p extension-manager-skill -- --test-threads=1 --nocapture
           for prefix in http::ui_routes::skill_store_tests:: http::ui_routes::storage_governance_tests:: task_result_objects::tests:: repo::tasks::tests::task_resume_execution_tests::terminal_result_projection::result_object_tests:: skills::builtin::builtin_pty_session::tests::; do
             cargo test --locked -p clawd --bin clawd "$prefix" -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py --prefix "$prefix"
             cargo test --locked -p clawd --bin clawd "$prefix" -- --test-threads=1 --nocapture

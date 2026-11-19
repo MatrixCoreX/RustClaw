@@ -227,7 +227,7 @@ async fn admit_external_skill(
         .header("x-agent-internal-skill-token", token)
         .json(&json!({
             "source": source.to_string_lossy(),
-            "enabled": true,
+            "enabled": false,
             "allow_network": false,
         }))
         .send()
@@ -251,6 +251,19 @@ async fn admit_external_skill(
         .get("data")
         .and_then(Value::as_object)
         .ok_or_else(|| "skill admission response is missing data".to_string())?;
+    let admission_state: skill_sdk::AdmissionState = serde_json::from_value(
+        data.get("admission_state")
+            .cloned()
+            .ok_or_else(|| "skill_admission_state_missing".to_string())?,
+    )
+    .map_err(|_| "skill_admission_state_invalid".to_string())?;
+    let enabled = data
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "skill_admission_enabled_missing".to_string())?;
+    if enabled != (admission_state == skill_sdk::AdmissionState::Enabled) {
+        return Err("skill_admission_state_mismatch".to_string());
+    }
     Ok(ExternalSkillRegistrationReport {
         registry_generation: data
             .get("registry_generation")
@@ -275,7 +288,8 @@ async fn admit_external_skill(
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string(),
-        enabled: data.get("enabled").and_then(Value::as_bool) == Some(true),
+        enabled,
+        admission_state,
     })
 }
 

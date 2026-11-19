@@ -153,6 +153,7 @@ struct ExternalSkillRegistrationReport {
     installed_version: String,
     receipt_digest: String,
     enabled: bool,
+    admission_state: skill_sdk::AdmissionState,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -273,7 +274,7 @@ fn assess_gap(obj: &Map<String, Value>) -> Result<(String, Value), String> {
             vec![
                 "Generate a dedicated skill scaffold under external_skills/.",
                 "Fill INTERFACE.md before registering the skill.",
-                "Run sync_skill_docs.py and compile/smoke-test before registration writes the enabled config switch.",
+                "Run sync_skill_docs.py and compile/smoke-test before host admission; runtime permissions require separate host review.",
             ],
         ),
         _ => (
@@ -428,6 +429,10 @@ fn validate_external_skill_action(obj: &Map<String, Value>) -> Result<(String, V
     ))
 }
 
+fn external_admission_summary(skill_name: &str, report: &ExternalSkillRegistrationReport) -> Value {
+    json!({"schema_version":1,"skill_name":skill_name,"installed":true,"enabled":report.enabled,"admission_state":report.admission_state})
+}
+
 async fn register_external_skill_action(
     repo_root: PathBuf,
     obj: &Map<String, Value>,
@@ -437,27 +442,26 @@ async fn register_external_skill_action(
     validate_identifier("skill_name", &skill_name)?;
     ensure_external_skill_scaffold_ready(&repo_root, &skill_name)?;
 
-    let actions = extract_actions(obj)?;
-    let _validation = validate_external_skill(&repo_root, &skill_name, &actions)?;
+    let _actions = extract_actions(obj)?;
+    // Host admission owns build/smoke and overlay publication; registration must
+    // not run the repository-only prompt synchronizer as an implicit side effect.
     let report = register_external_skill(&repo_root, &skill_name).await?;
     Ok((
-        format!(
-            "Registered and enabled external skill `{skill_name}` through the host admission service."
-        ),
+        external_admission_summary(&skill_name, &report).to_string(),
         json!({
             "action": "register_external_skill",
             "skill_name": skill_name,
             "report": &report,
-            "default_enabled": true,
+            "default_enabled": report.enabled,
+            "admission_state": report.admission_state,
+            "permission_review_required": report.admission_state == skill_sdk::AdmissionState::AwaitingPolicyApproval,
             "install_ok": true,
             "adapter": &report.build_adapter,
             "installed_version": &report.installed_version,
             "receipt_digest": &report.receipt_digest,
             "registry_generation": report.registry_generation,
             "reload_required": false,
-            "next_steps": [
-                "Run a run_skill happy path before normal runtime use."
-            ]
+            "next_steps": ["review_host_runtime_permissions"]
         }),
     ))
 }
@@ -471,15 +475,15 @@ async fn enable_external_skill_action(obj: &Map<String, Value>) -> Result<(Strin
 
     let report = enable_external_skill(&repo_root, &skill_name).await?;
     Ok((
-        format!("Enabled external skill `{skill_name}` through the host admission service."),
+        external_admission_summary(&skill_name, &report.admission).to_string(),
         json!({
             "action": "enable_external_skill",
             "skill_name": skill_name,
-            "report": report,
-            "default_enabled": true,
-            "next_steps": [
-                "Keep human review in the loop before normal runtime use."
-            ]
+            "report": &report,
+            "default_enabled": report.admission.enabled,
+            "admission_state": report.admission.admission_state,
+            "permission_review_required": report.admission.admission_state == skill_sdk::AdmissionState::AwaitingPolicyApproval,
+            "next_steps": ["review_host_runtime_permissions"]
         }),
     ))
 }
