@@ -12,20 +12,26 @@ Authenticated `GET /v1/memory/jobs` returns the caller's latest 100 job snapshot
 
 Detached launchers preserve the previous log before starting a daemon and then append to the new log. Each prior run is gzip-compressed, byte-verified and retained as `<component>.log.previous.<timestamp>.<pid>.log.gz`, with the newest 20 prior runs retained per component. Compression failure retains the uncompressed prior run and fails startup rather than truncating evidence. Never invoke the rotation helper against a live writer. Model I/O continues to use its existing daily rotation policy.
 
-Validation runs through the exact-SHA `runtime-operations-ci.yml` candidate workflow on Linux and macOS, plus ARM64 cross compilation. Tests cover typed permanent/transient errors, model reconstruction, stale lease fencing, principal boundaries, stalled blocking work, disk thresholds, restart recovery and lossless log rotation including disk-write failure.
+Validation runs through exact-SHA candidate workflows including `runtime-operations-ci.yml` on Linux and macOS, plus ARM64 cross compilation. Tests cover typed permanent/transient errors, model reconstruction, stale lease fencing, principal boundaries, stalled blocking work, disk thresholds, restart recovery and lossless log rotation including disk-write failure.
 
 ## Verified control-plane checkpoints
 
 `python3 scripts/runtime_checkpoint.py create --root ROOT --destination BACKUP_ROOT`
 creates an owner-private checkpoint on a different filesystem. It checks that foreground
-work is idle, stops the selected runtime service, checkpoints SQLite WAL files, holds
-writer fences, freezes a local snapshot and immediately resumes the runtime. Compression
-and database/control-file SHA-256 verification happen after service recovery, before atomic
-publication. SQLite quick checks also run on the frozen copy after service recovery. The runtime is
-restarted on both success and failure; the systemd timer has an `ExecStopPost` recovery
-command for an interrupted freeze, using a private marker written before stopping.
-The snapshot requires a
-temporary filesystem with enough space and, when using Linux tmpfs, explicit RAM headroom.
+and distributed work are idle and briefly stops the selected runtime service. After a
+successful truncating WAL checkpoint it establishes an actual SQLite read transaction at
+end-mark zero and requires the WAL to remain empty during pinning. This read fence prevents
+writes to the main database file while allowing later runtime commits to append to WAL.
+Non-WAL stores are compressed under their read fences before service recovery; WAL stores
+are validated and compressed after the runtime is back online. Main-file identity, size
+and timestamps are checked around compression; original SHA-256 and archive/member digests
+are verified before publication. Reader fences are released as soon as each database is
+packed. A source-space guard and bounded read-fence duration prevent unlimited WAL retention.
+
+Only control files need temporary copies, not the full database. Temporary space is
+actually reserved before stopping a service, catching per-user quotas that statvfs cannot
+see; tmpfs also requires RAM headroom. A private resume marker, SIGTERM cleanup and the
+systemd timer's ExecStopPost recovery restart the service after an interrupted freeze.
 An active task, unavailable service controller or insufficient destination space blocks the
 operation. Older checkpoints are retired only after a complete new checkpoint is verified.
 No build is performed. The default retention is one checkpoint; choose a larger value only
@@ -82,3 +88,32 @@ files with matching modes are hard-linked. Paths, database backups and evidence 
 Never edit those historical staging files in place after deduplication; replace a path when
 creating a different version. The command previews by default and refuses incomplete
 process-reference audits.
+
+The checkpoint followup CI can reuse a successful full native/Pi runtime ancestor only
+when a strict path allowlist proves every later change is limited to checkpoint Python,
+its tests/docs, this focused workflow and the checkpoint console card. It waits for that
+ancestor to succeed, verifies ancestry/diffs, then runs the final exact-SHA Python and UI
+checks on Linux/macOS. The signed deployment artifact is still built from the final SHA;
+any Rust, Cargo, registry, prompt or other runtime change requires full native/Pi validation.
+
+
+`runtime_checkpoint_remote.py --root ROOT --destination BACKUP_ROOT --host SSH_HOST
+--remote-directory PRIVATE_DIRECTORY` transfers the latest verified checkpoint through
+SSH with strict existing-host-key verification and batch authentication. It requires a
+private owner-only destination, verifies every compressed/raw digest on the receiver,
+pins the exact committed verification module by SHA-256 and records the matching tool
+source revision. Only index-tracked previous checkpoints are retired after the new copy
+and index are durable. It does not change the receiving host's application or services.
+
+Add `--restore-test` for an isolated database recovery exercise on the receiving host.
+It checks every restored database digest and SQLite quick-check result, preserves a
+2 GiB free-space floor before and during restoration, and always removes its newly
+created recovery directory. Existing output is refused and retained. Control-file archives
+are still fully verified; the exercise restores database files only to limit temporary
+disk use. Local/remote copies remain private compressed files at rest; SSH encrypts the
+transport. This feature does not claim separate encryption of storage at rest.
+
+The timer installer accepts `--remote-host SSH_HOST --remote-directory PRIVATE_DIRECTORY`.
+A failed remote copy retains the verified local checkpoint and the previous remote copy;
+the console distinguishes that state from a failed local checkpoint. An independent host
+protects against loss of the local disk; two local partitions alone do not.

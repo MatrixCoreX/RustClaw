@@ -13,7 +13,7 @@ def quoted(value):
     return '"'+str(value).replace('\\','\\\\').replace('"','\\"').replace('%','%%')+'"'
 
 
-def units(root,destination,user,python):
+def units(root,destination,user,python,remote_host=None,remote_directory=None):
     service='''[Unit]
 Description=Verified runtime control-plane checkpoint
 [Service]
@@ -26,6 +26,10 @@ TimeoutStartSec=45min
 ExecStart={python} {script} create --root {root} --destination {destination} --retain 1 --reserve-bytes 1610612736
 ExecStopPost={python} {script} resume --root {root}
 '''.format(user=user,python=quoted(python),script=quoted(root/'scripts/runtime_checkpoint.py'),root=quoted(root),destination=quoted(destination))
+    if remote_host:
+        from runtime_checkpoint_remote import validate_target
+        validate_target(remote_host,remote_directory)
+        service+='ExecStart='+quoted(python)+' '+quoted(root/'scripts/runtime_checkpoint_remote.py')+' --root '+quoted(root)+' --destination '+quoted(destination)+' --host '+quoted(remote_host)+' --remote-directory '+quoted(remote_directory)+'\n'
     timer='''[Unit]
 Description=Daily runtime control-plane checkpoint
 [Timer]
@@ -39,11 +43,11 @@ WantedBy=timers.target
 
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--root',required=True,type=Path);p.add_argument('--destination',required=True,type=Path);p.add_argument('--install',action='store_true');a=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--root',required=True,type=Path);p.add_argument('--destination',required=True,type=Path);p.add_argument('--install',action='store_true');p.add_argument('--remote-host');p.add_argument('--remote-directory');a=p.parse_args()
     if sys.platform!='linux' or not Path('/run/systemd/system').exists():
         print(json.dumps({'status':'unsupported','error_code':'checkpoint_timer_requires_systemd','alternative':'Use runtime_checkpoint.py from an operator-managed scheduler with a supported service controller.'}));return 1
     root=a.root.resolve();destination=a.destination.resolve();user=pwd.getpwuid(os.getuid()).pw_name
-    service,timer=units(root,destination,user,sys.executable)
+    service,timer=units(root,destination,user,sys.executable,a.remote_host,a.remote_directory)
     if a.install:
         for name,content in [('agent-runtime-checkpoint.service',service),('agent-runtime-checkpoint.timer',timer)]:
             subprocess.run(['sudo','-n','tee','/etc/systemd/system/'+name],input=content,text=True,stdout=subprocess.DEVNULL,check=True)

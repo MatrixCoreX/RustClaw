@@ -1,0 +1,79 @@
+name: Checkpoint and storage verification
+"on":
+  push:
+    branches: ["ci/runtime-checkpoint-*"]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  runtime-reference:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Require fully verified unchanged runtime ancestor
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECKPOINT_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json,os,subprocess,time
+          allowed={'.github/workflows/runtime-checkpoint-ci.yml','scripts/runtime_checkpoint.py','scripts/runtime_checkpoint_storage.py','scripts/runtime_checkpoint_snapshot.py','scripts/install_runtime_checkpoint_timer.py','scripts/tests/test_runtime_checkpoint.py','scripts/runtime_checkpoint_remote.py','scripts/tests/test_runtime_checkpoint_remote.py','docs/runtime_operations_protection.md','UI/src/components/RuntimeCheckpointPanel.tsx','UI/src/lib/checkpoint-status.test.tsx'}
+          runs=json.loads(subprocess.check_output(['gh','api','repos/'+os.environ['CHECKPOINT_REPOSITORY']+'/actions/workflows/branch-integration-ci.yml/runs?per_page=100'],text=True))['workflow_runs']
+          for run in runs:
+              source=run['head_sha']
+              if subprocess.run(['git','merge-base','--is-ancestor',source,'HEAD'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode:continue
+              changed=set(subprocess.check_output(['git','diff','--name-only',source,'HEAD'],text=True).splitlines())
+              if not changed.issubset(allowed):continue
+              for attempt in range(120):
+                  current=json.loads(subprocess.check_output(['gh','api','repos/'+os.environ['CHECKPOINT_REPOSITORY']+'/actions/runs/'+str(run['id'])],text=True))
+                  if current['status']=='completed':
+                      if current['conclusion']!='success':raise SystemExit('checkpoint_reference_runtime_failed')
+                      break
+                  print('Waiting for runtime reference '+str(run['id']),flush=True);time.sleep(15)
+              else:raise SystemExit('checkpoint_reference_runtime_timeout')
+              proof={'runtime_source':source,'full_native_pi_run':run['id'],'current_source':os.environ['GITHUB_SHA'],'changed_files':sorted(changed)}
+              open('verified-runtime-reference.json','w').write(json.dumps(proof,indent=2)+'\n');print(json.dumps(proof));break
+          else:raise SystemExit('checkpoint_scope_requires_successful_unchanged_runtime_ancestor')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: verified-runtime-reference-${{ github.sha }}
+          path: verified-runtime-reference.json
+          if-no-files-found: error
+  checkpoint:
+    needs: runtime-reference
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - name: Test snapshot isolation, quota failure, recovery and preserved paths
+        run: |
+          python3 -m unittest discover -s scripts/tests -p test_runtime_checkpoint.py -v
+          python3 -m unittest discover -s scripts/tests -p test_runtime_checkpoint_remote.py -v
+          python3 -m unittest discover -s scripts/tests -p test_deployment_staging_deduplication.py -v
+          python3 scripts/check_product_identity_coupling.py --self-test
+          python3 scripts/check_product_identity_coupling.py
+          python3 scripts/check_skill_storage_ownership.py --self-test
+          python3 scripts/check_skill_storage_ownership.py
+          python3 scripts/check_cross_platform_contracts.py
+          python3 scripts/check_long_files.py
+          python3 scripts/check_mcp_runtime_contracts.py --self-test
+          python3 scripts/check_mcp_runtime_contracts.py
+      - name: Verify console and both product identities
+        run: |
+          npm ci --ignore-scripts --prefix UI
+          npm run lint --prefix UI
+          npm test --prefix UI
+          bash scripts/product_identity_tests.sh --with-ui

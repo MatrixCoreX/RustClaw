@@ -26,10 +26,12 @@ def digest(path):
     with path.open('rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
 
 
-def compress_file(source, output):
+def compress_file(source, output, guard=None):
     raw=hashlib.sha256();size=0
     with source.open('rb') as stream, lzma.open(output,'xb',preset=3) as compressed:
-        while chunk:=stream.read(1024*1024):compressed.write(chunk);raw.update(chunk);size+=len(chunk)
+        while chunk:=stream.read(1024*1024):
+            if guard is not None:guard()
+            compressed.write(chunk);raw.update(chunk);size+=len(chunk)
     with output.open('rb') as stream:os.fsync(stream.fileno())
     return {'raw_bytes':size,'raw_sha256':raw.hexdigest(),'bytes':output.stat().st_size,'sha256':digest(output)}
 
@@ -110,28 +112,35 @@ def verify_checkpoint(checkpoint):
     return {'schema_version':1,'status':'verified','source_revision':value['source_revision'],'files':len(value['files'])}
 
 
-def restore_checkpoint(checkpoint, output):
+def restore_checkpoint(checkpoint, output, reserve_bytes=128*1024**2, databases_only=False):
+    if reserve_bytes<0:raise RuntimeError('checkpoint_invalid_limits')
     checkpoint=Path(checkpoint);output=Path(output).absolute();verify_checkpoint(checkpoint);value=manifest(checkpoint)
     if output.exists() or output.is_symlink():raise RuntimeError('checkpoint_output_exists')
-    required=sum(r['raw_bytes'] for r in value['files'])
+    required=sum(r['raw_bytes'] for r in value['files'] if not databases_only or r['kind']=='sqlite')
     parent=output.parent.resolve();parent.mkdir(parents=True,exist_ok=True)
-    if shutil.disk_usage(parent).free<required+128*1024**2:raise RuntimeError('checkpoint_restore_low_space')
+    if shutil.disk_usage(parent).free<required+reserve_bytes:raise RuntimeError('checkpoint_restore_low_space')
     output.mkdir(mode=0o700)
     try:
+        def copy(stream,destination):
+            while chunk:=stream.read(1024*1024):
+                if shutil.disk_usage(parent).free<reserve_bytes+len(chunk):raise RuntimeError('checkpoint_restore_storage_pressure')
+                destination.write(chunk)
         with tarfile.open(checkpoint/value['control_archive']['name'],'r:xz') as archive:
             for entry in archive:
+                if databases_only:continue
                 target=output/relative(entry.name);target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
-                with archive.extractfile(entry) as stream,target.open('xb') as dest:shutil.copyfileobj(stream,dest)
+                with archive.extractfile(entry) as stream,target.open('xb') as dest:copy(stream,dest)
                 target.chmod(entry.mode&0o700)
         for row in value['files']:
+            if databases_only and row['kind']!='sqlite':continue
             target=output/relative(row['path'])
             if row['kind']=='sqlite':
                 target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
-                with lzma.open(checkpoint/relative(row['archive']),'rb') as stream,target.open('xb') as dest:shutil.copyfileobj(stream,dest)
-                with contextlib.closing(sqlite3.connect(target.as_uri()+'?mode=ro',uri=True)) as db:
+                with lzma.open(checkpoint/relative(row['archive']),'rb') as stream,target.open('xb') as dest:copy(stream,dest)
+                with contextlib.closing(sqlite3.connect(target.as_uri()+'?mode=ro&immutable=1',uri=True)) as db:
                     if db.execute('PRAGMA quick_check').fetchone()[0]!='ok':raise RuntimeError('checkpoint_restored_database_invalid')
             if digest(target)!=row['raw_sha256']:raise RuntimeError('checkpoint_restore_digest_mismatch')
-        write_json(output/'checkpoint-restore.json',{'source_revision':value['source_revision'],'scope':value['scope'],'activated':False})
-        return {'schema_version':1,'status':'restored_verified','output':str(output),'files':len(value['files']),'activated':False}
+        write_json(output/'checkpoint-restore.json',{'source_revision':value['source_revision'],'scope':value['scope'],'activated':False,'databases_only':databases_only})
+        return {'schema_version':1,'status':'restored_verified','output':str(output),'files':sum(not databases_only or row['kind']=='sqlite' for row in value['files']),'activated':False,'databases_only':databases_only}
     except BaseException:
         shutil.rmtree(output);raise

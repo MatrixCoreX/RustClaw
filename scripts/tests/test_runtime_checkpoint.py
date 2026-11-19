@@ -92,4 +92,34 @@ class Checkpoints(unittest.TestCase):
         self.assertFalse(list(real.iterdir()))
 
 
+    def test_wal_writers_continue_but_restored_snapshot_excludes_later_commits(self):
+        import hashlib
+        with contextlib.closing(sqlite3.connect(self.root/'data/tasks.db')) as db:
+            db.execute('PRAGMA journal_mode=WAL')
+        original=checkpoint.compress_file
+        observed=[]
+        def concurrent(source,output,guard=None):
+            if source.name=='tasks.db':
+                before=hashlib.sha256(source.read_bytes()).hexdigest()
+                with contextlib.closing(sqlite3.connect(source,timeout=0)) as writer:
+                    writer.execute("INSERT INTO tasks VALUES('succeeded','committed during compression')");writer.commit()
+                    writer.execute('PRAGMA wal_checkpoint(PASSIVE)').fetchone()
+                    self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(),before)
+                    observed.append(True)
+                    return original(source,output,guard=guard)
+            return original(source,output,guard=guard)
+        with patch.object(checkpoint,'compress_file',concurrent):result=self.create()
+        self.assertEqual(observed,[True])
+        output=self.base/'concurrent-restore';restore_checkpoint(Path(result['checkpoint']),output)
+        with contextlib.closing(sqlite3.connect(output/'data/tasks.db')) as restored:
+            self.assertEqual(restored.execute('SELECT body FROM tasks').fetchall(),[('original evidence',)])
+        with contextlib.closing(sqlite3.connect(self.root/'data/tasks.db')) as live:
+            self.assertEqual(live.execute('SELECT count(*) FROM tasks').fetchone()[0],2)
+
+    def test_quota_probe_refuses_before_a_service_can_be_stopped(self):
+        from runtime_checkpoint_snapshot import snapshot_parent
+        with patch('runtime_checkpoint_snapshot.os.posix_fallocate',side_effect=OSError(122,'quota'),create=True):
+            with self.assertRaisesRegex(RuntimeError,'space_or_quota'):snapshot_parent(1000)
+
+
 if __name__=='__main__':unittest.main()

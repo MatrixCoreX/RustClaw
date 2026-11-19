@@ -19,7 +19,7 @@ import tomllib
 import urllib.request
 
 from runtime_checkpoint_storage import backup_files, compress_file, restore_checkpoint, verify_checkpoint, write_json, selected_files
-from runtime_checkpoint_snapshot import snapshot_parent, freeze, validate_frozen_databases
+from runtime_checkpoint_snapshot import snapshot_parent, freeze, pin_databases, validate_pin, signature
 
 
 def database_paths(root):
@@ -107,38 +107,52 @@ def create(root, destination, *, mode, unit, retain=1, reserve=2*1024**3, offlin
         frozen=None
         try:
             databases=database_paths(root);files=selected_files(root)
-            required=sum(p.stat().st_size for p in databases+files)
+            required=sum(p.stat().st_size for p in files)
             frozen=Path(tempfile.mkdtemp(prefix='runtime-checkpoint-',dir=snapshot_parent(required))).resolve()
             revision=running_revision(root) if not offline else subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip()
-            paused_at=time.monotonic()
-            try:
-                if not offline:
-                    if not controller(mode,unit,'is-active'):raise RuntimeError('checkpoint_service_not_running')
-                    write_json(root/'data/runtime-checkpoint-resume.json',{'schema_version':1,'service_mode':mode,'service_unit':unit})
-                    stopped=True
-                    controller(mode,unit,'stop')
-                    idle(root)
-                # The operator does not change source/configuration during this maintenance window.
-                database_relatives=freeze(root,frozen,databases,files)
-            finally:
-                if stopped:resume(root,mode,unit);stopped=False
-            pause_seconds=round(time.monotonic()-paused_at,3) if not offline else 0
-            if offline and revision!=subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip():
-                raise RuntimeError('checkpoint_source_changed')
             staging=Path(tempfile.mkdtemp(prefix='.pending-',dir=destination))
             manifest={'schema_version':1,'kind':'runtime_control_checkpoint','created_at_ts':int(time.time()),
-                'source_revision':revision,'runtime_pause_seconds':pause_seconds,
+                'source_revision':revision,
                 'scope':{'included':['runtime_databases','skill_databases','configuration','runtime_binaries','ui','admission','package_pointers'],
                     'excluded':['task_attachment_files','models','immutable_skill_package_payloads','external_connector_storage'],
                     'restore_requires_matching_installed_packages':True},'files':[]}
-            validate_frozen_databases(frozen,database_relatives)
-            for rel in database_relatives:
-                name='database-'+str(len(manifest['files']))+'.xz'
-                record=compress_file(frozen/rel,staging/name);record.update(path=rel,archive=name,kind='sqlite')
-                manifest['files'].append(record)
-            backup_files(frozen,staging,manifest)
-            write_json(staging/'manifest.json',manifest)
-            verify_checkpoint(staging)
+            paused_at=time.monotonic()
+            with contextlib.ExitStack() as database_lifetime:
+                try:
+                    if not offline:
+                        if not controller(mode,unit,'is-active'):raise RuntimeError('checkpoint_service_not_running')
+                        write_json(root/'data/runtime-checkpoint-resume.json',{'schema_version':1,'service_mode':mode,'service_unit':unit})
+                        stopped=True
+                        controller(mode,unit,'stop')
+                        idle(root)
+                    pins=pin_databases(databases,database_lifetime)
+                    freeze(root,frozen,files)
+                    fence_deadline=time.monotonic()+900
+                    def guard():
+                        if time.monotonic()>fence_deadline:raise RuntimeError('checkpoint_read_fence_timeout')
+                        if not offline and shutil.disk_usage(root).free<reserve:raise RuntimeError('checkpoint_source_storage_pressure')
+                    def pack(pin):
+                        validate_pin(pin)
+                        name='database-'+str(len(manifest['files']))+'.xz'
+                        record=compress_file(pin['path'],staging/name,guard=guard)
+                        if signature(pin['path'])!=pin['signature']:raise RuntimeError('checkpoint_database_file_changed')
+                        record.update(path=str(pin['path'].relative_to(root)),archive=name,kind='sqlite')
+                        manifest['files'].append(record)
+                        pin['db'].close()
+                    # Rollback-journal files need their read fences only during this small paused phase.
+                    for pin in pins:
+                        if pin['mode']!='wal':pack(pin);pin['db'].close()
+                finally:
+                    if stopped:resume(root,mode,unit);stopped=False
+                manifest['runtime_pause_seconds']=round(time.monotonic()-paused_at,3) if not offline else 0
+                if offline and revision!=subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip():
+                    raise RuntimeError('checkpoint_source_changed')
+                # At end-mark zero the reader prevents main-file checkpoint writes, not WAL commits.
+                for pin in pins:
+                    if pin['mode']=='wal':pack(pin)
+                backup_files(frozen,staging,manifest)
+                write_json(staging/'manifest.json',manifest)
+                verify_checkpoint(staging)
             stamp=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
             final=destination/('checkpoint-'+stamp+'-'+staging.name.removeprefix('.pending-'))
             os.rename(staging,final);staging=None
@@ -164,7 +178,7 @@ def main():
     make.add_argument('--retain',type=int,default=1);make.add_argument('--reserve-bytes',type=int,default=2*1024**3)
     make.add_argument('--offline',action='store_true',help='Operator guarantees all non-database state is offline; SQLite writers are still fenced.')
     check=sub.add_parser('verify');check.add_argument('--checkpoint',required=True,type=Path)
-    restore=sub.add_parser('restore');restore.add_argument('--checkpoint',required=True,type=Path);restore.add_argument('--output',required=True,type=Path)
+    restore=sub.add_parser('restore');restore.add_argument('--checkpoint',required=True,type=Path);restore.add_argument('--output',required=True,type=Path);restore.add_argument('--reserve-bytes',type=int,default=128*1024**2);restore.add_argument('--databases-only',action='store_true')
     recovery=sub.add_parser('resume');recovery.add_argument('--root',required=True,type=Path);recovery.add_argument('--service-mode',default='systemd-system');recovery.add_argument('--service-unit',default='agent-runtime.service')
     args=parser.parse_args()
     try:
@@ -174,7 +188,7 @@ def main():
             write_json(args.root/'data/runtime-checkpoint-status.json',result)
         elif args.action=='resume':result=resume(args.root,args.service_mode,args.service_unit)
         elif args.action=='verify':result=verify_checkpoint(args.checkpoint)
-        else:result=restore_checkpoint(args.checkpoint,args.output)
+        else:result=restore_checkpoint(args.checkpoint,args.output,reserve_bytes=args.reserve_bytes,databases_only=args.databases_only)
         print(json.dumps(result))
     except Exception as error:
         code=str(error) if isinstance(error,RuntimeError) and str(error).startswith('checkpoint_') else 'checkpoint_operation_failed'
