@@ -130,6 +130,9 @@ jobs:
         run: |
           set -euo pipefail
           test -x "$APP_PTY_SESSION_RUNNER"
+          fixture_root="$(mktemp -d "$RUNNER_TEMP/extension-scaffold-cache.XXXXXX")"
+          target/debug/skillctl init rust offline_scaffold_cache "$fixture_root/package"
+          cargo fetch --locked --manifest-path "$fixture_root/package/Cargo.toml"
           cargo test --locked -p extension-manager-skill -- --test-threads=1 --nocapture
           for prefix in http::ui_routes::skill_store_tests:: http::ui_routes::storage_governance_tests:: task_result_objects::tests:: repo::tasks::tests::task_resume_execution_tests::terminal_result_projection::result_object_tests:: skills::builtin::builtin_pty_session::tests::; do
             cargo test --locked -p clawd --bin clawd "$prefix" -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py --prefix "$prefix"

@@ -74,7 +74,6 @@ fn scaffolded_skill_is_validate_ready_for_single_action() {
     });
     scaffold_external_skill(root.clone(), args.as_object().unwrap()).expect("scaffold");
 
-    pin_fixture_dependencies(&root.join("external_skills/demo_skill"));
     let previous_offline = env::var("CARGO_NET_OFFLINE").ok();
     env::set_var("CARGO_NET_OFFLINE", "true");
     let result = validate_external_skill(&root, "demo_skill", &["ping".to_string()]);
@@ -580,13 +579,6 @@ fn write_repo_baseline(root: &Path, workspace_members: &[&str], with_sync_script
     }
 }
 
-fn pin_fixture_dependencies(skill_dir: &Path) {
-    // Exercise the default scaffold with the repository's already verified,
-    // cached dependency versions rather than resolving newer registry entries.
-    let lockfile = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../Cargo.lock");
-    fs::copy(lockfile, skill_dir.join("Cargo.lock")).expect("pin offline scaffold dependencies");
-}
-
 fn write_protocol_smoke_skill(root: &Path, skill_name: &str) {
     let destination = root.join("external_skills").join(skill_name);
     skill_sdk::scaffold_skill(&skill_sdk::ScaffoldRequest {
@@ -598,7 +590,6 @@ fn write_protocol_smoke_skill(root: &Path, skill_name: &str) {
         source_root: format!("external_skills/{skill_name}"),
     })
     .expect("write protocol smoke scaffold");
-    pin_fixture_dependencies(&destination);
     write_text(
         &destination.join("src/main.rs"),
         &protocol_smoke_main_rs("smoke ok"),
