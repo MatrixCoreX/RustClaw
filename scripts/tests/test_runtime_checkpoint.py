@@ -121,5 +121,48 @@ class Checkpoints(unittest.TestCase):
         with patch('runtime_checkpoint_snapshot.os.posix_fallocate',side_effect=OSError(122,'quota'),create=True):
             with self.assertRaisesRegex(RuntimeError,'space_or_quota'):snapshot_parent(1000)
 
+    def test_invalid_read_fence_budget_is_rejected_before_service_control(self):
+        with patch.object(checkpoint,'controller') as controller:
+            for limit in [0,-1,3601,float('inf')]:
+                with self.assertRaisesRegex(RuntimeError,'read_fence_budget_invalid'):
+                    checkpoint.create(self.root,self.destination,mode='offline',unit='',offline=True,reserve=0,read_fence_seconds=limit)
+            controller.assert_not_called()
+        self.assertFalse(list(self.destination.glob('checkpoint-*')))
+
+    def test_default_budget_allows_compression_beyond_fifteen_minutes(self):
+        original=checkpoint.compress_file
+        def delayed(source,output,guard=None):
+            with patch.object(checkpoint.time,'monotonic',return_value=2000):
+                return original(source,output,guard=guard)
+        with patch.object(checkpoint.time,'monotonic',return_value=1000),patch.object(checkpoint,'compress_file',delayed):
+            result=self.create()
+        self.assertEqual(verify_checkpoint(Path(result['checkpoint']))['status'],'verified')
+
+    def test_expired_fence_releases_writers_recovers_service_and_preserves_old_backup(self):
+        previous=Path(self.create()['checkpoint'])
+        with contextlib.closing(sqlite3.connect(self.root/'data/tasks.db')) as db:
+            db.execute('PRAGMA journal_mode=WAL')
+        calls=[];original_stat=Path.stat;original_compress=checkpoint.compress_file
+        def stat(path,*args,**kwargs):
+            value=original_stat(path,*args,**kwargs)
+            if path==self.destination:
+                values=list(value);values[2]+=1;return os.stat_result(values)
+            return value
+        def expired(source,output,guard=None):
+            self.assertEqual(calls,['is-active','stop','start'])
+            with patch.object(checkpoint.time,'monotonic',return_value=1002):
+                return original_compress(source,output,guard=guard)
+        with patch.object(Path,'stat',stat),patch.object(checkpoint,'running_revision',return_value='fixture-revision'),patch.object(checkpoint,'controller',side_effect=lambda mode,unit,action:(calls.append(action) or True)),patch.object(checkpoint.time,'monotonic',return_value=1000),patch.object(checkpoint,'compress_file',expired):
+            with self.assertRaisesRegex(RuntimeError,'read_fence_timeout'):
+                checkpoint.create(self.root,self.destination,mode='systemd-system',unit='fixture.service',reserve=0,read_fence_seconds=1)
+        self.assertEqual(calls,['is-active','stop','start'])
+        self.assertFalse((self.root/'data/runtime-checkpoint-resume.json').exists())
+        self.assertFalse(list(self.destination.glob('.pending-*')))
+        self.assertEqual(verify_checkpoint(previous)['status'],'verified')
+        with contextlib.closing(sqlite3.connect(self.root/'data/tasks.db',timeout=0)) as writer:
+            self.assertEqual(writer.execute('SELECT body FROM tasks').fetchall(),[('original evidence',)])
+            writer.execute("INSERT INTO tasks VALUES('succeeded','writer continues')");writer.commit()
+            self.assertEqual(writer.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()[0],0)
+
 
 if __name__=='__main__':unittest.main()

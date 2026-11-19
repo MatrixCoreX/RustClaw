@@ -23,3 +23,9 @@ test("quota failures explain the actual next step and cannot appear verified", a
   assert(text.includes("Temporary space or quota is insufficient"));
   assert(!text.includes("passed verification"));
 });
+test("compression timeout identifies the budget instead of claiming a storage failure", async () => {
+  const text = await show({ status: "failed", error_code: "checkpoint_read_fence_timeout" });
+  assert(text.includes("Compression exceeded the checkpoint time budget"));
+  assert(!text.includes("passed verification"));
+  assert(!text.includes("Check destination space"));
+});

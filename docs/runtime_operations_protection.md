@@ -27,6 +27,10 @@ are validated and compressed after the runtime is back online. Main-file identit
 and timestamps are checked around compression; original SHA-256 and archive/member digests
 are verified before publication. Reader fences are released as soon as each database is
 packed. A source-space guard and bounded read-fence duration prevent unlimited WAL retention.
+`--read-fence-seconds` sets a 1..3600 second limit, defaulting to 1800 seconds so multi-gigabyte
+databases have time to compress on slower machines. The disk-space guard still aborts immediately
+under pressure; an expired time budget closes readers, retains older checkpoints and recovers
+the service. This limit does not delay service recovery while compression continues online.
 
 Only control files need temporary copies, not the full database. Temporary space is
 actually reserved before stopping a service, catching per-user quotas that statvfs cannot

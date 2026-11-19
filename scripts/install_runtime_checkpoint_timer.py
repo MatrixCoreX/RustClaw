@@ -23,7 +23,7 @@ UMask=0077
 Nice=15
 IOSchedulingClass=idle
 TimeoutStartSec=45min
-ExecStart={python} {script} create --root {root} --destination {destination} --retain 1 --reserve-bytes 1610612736
+ExecStart={python} {script} create --root {root} --destination {destination} --retain 1 --reserve-bytes 1610612736 --read-fence-seconds 1800
 ExecStopPost={python} {script} resume --root {root}
 '''.format(user=user,python=quoted(python),script=quoted(root/'scripts/runtime_checkpoint.py'),root=quoted(root),destination=quoted(destination))
     if remote_host:

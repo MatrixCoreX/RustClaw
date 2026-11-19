@@ -28,6 +28,8 @@ export function RuntimeCheckpointPanel({ t, apiFetch, requestScope }: { t: (zh: 
   const ready = ["verified", "verified_remote", "verified_local_remote_failed"].includes(view.report?.status ?? "");
   const failure = ["checkpoint_foreground_not_idle", "checkpoint_distributed_work_active"].includes(view.report?.error_code ?? "")
     ? t("正在执行任务，本次备份已延后。原有备份会保留。", "Work is in progress; this checkpoint was deferred. The previous checkpoint is retained.")
+    : view.report?.error_code === "checkpoint_read_fence_timeout"
+      ? t("数据压缩超过备份时限，请联系管理员调整时间预算。原有备份会保留。", "Compression exceeded the checkpoint time budget. Ask an administrator to adjust it. The previous checkpoint is retained.")
     : view.report?.error_code === "checkpoint_snapshot_space_or_quota_unavailable"
       ? t("临时空间或配额不足，请联系管理员调整。原有备份会保留。", "Temporary space or quota is insufficient. Ask an administrator to adjust it. The previous checkpoint is retained.")
       : t("最近一次备份未完成，请检查目标磁盘空间和服务权限。原备份会保留。", "The latest checkpoint failed. Check destination space and service permissions. The previous checkpoint is retained.");

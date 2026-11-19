@@ -86,7 +86,9 @@ def idle(root):
         if active:raise RuntimeError('checkpoint_foreground_not_idle')
 
 
-def create(root, destination, *, mode, unit, retain=1, reserve=2*1024**3, offline=False):
+def create(root, destination, *, mode, unit, retain=1, reserve=2*1024**3, offline=False, read_fence_seconds=1800):
+    if type(read_fence_seconds) is not int or not 1<=read_fence_seconds<=3600:
+        raise RuntimeError('checkpoint_read_fence_budget_invalid')
     if sys.platform not in ('linux','darwin'):raise RuntimeError('checkpoint_platform_unsupported')
     root=root.resolve();destination=destination.resolve()
     if destination==root or root in destination.parents:raise RuntimeError('checkpoint_destination_inside_workspace')
@@ -127,7 +129,7 @@ def create(root, destination, *, mode, unit, retain=1, reserve=2*1024**3, offlin
                         idle(root)
                     pins=pin_databases(databases,database_lifetime)
                     freeze(root,frozen,files)
-                    fence_deadline=time.monotonic()+900
+                    fence_deadline=time.monotonic()+read_fence_seconds
                     def guard():
                         if time.monotonic()>fence_deadline:raise RuntimeError('checkpoint_read_fence_timeout')
                         if not offline and shutil.disk_usage(root).free<reserve:raise RuntimeError('checkpoint_source_storage_pressure')
@@ -176,6 +178,7 @@ def main():
     make=sub.add_parser('create');make.add_argument('--root',required=True,type=Path);make.add_argument('--destination',required=True,type=Path)
     make.add_argument('--service-mode',default='systemd-system');make.add_argument('--service-unit',default='agent-runtime.service')
     make.add_argument('--retain',type=int,default=1);make.add_argument('--reserve-bytes',type=int,default=2*1024**3)
+    make.add_argument('--read-fence-seconds',type=int,default=1800,help='Bound database read fences to 1..3600 seconds; storage pressure still aborts immediately.')
     make.add_argument('--offline',action='store_true',help='Operator guarantees all non-database state is offline; SQLite writers are still fenced.')
     check=sub.add_parser('verify');check.add_argument('--checkpoint',required=True,type=Path)
     restore=sub.add_parser('restore');restore.add_argument('--checkpoint',required=True,type=Path);restore.add_argument('--output',required=True,type=Path);restore.add_argument('--reserve-bytes',type=int,default=128*1024**2);restore.add_argument('--databases-only',action='store_true')
@@ -184,7 +187,7 @@ def main():
     try:
         if args.action=='create':
             if args.retain<1 or args.reserve_bytes<0:raise RuntimeError('checkpoint_invalid_limits')
-            result=create(args.root,args.destination,mode=args.service_mode,unit=args.service_unit,retain=args.retain,reserve=args.reserve_bytes,offline=args.offline)
+            result=create(args.root,args.destination,mode=args.service_mode,unit=args.service_unit,retain=args.retain,reserve=args.reserve_bytes,offline=args.offline,read_fence_seconds=args.read_fence_seconds)
             write_json(args.root/'data/runtime-checkpoint-status.json',result)
         elif args.action=='resume':result=resume(args.root,args.service_mode,args.service_unit)
         elif args.action=='verify':result=verify_checkpoint(args.checkpoint)
