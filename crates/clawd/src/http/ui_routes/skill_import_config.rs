@@ -90,7 +90,7 @@ struct ImportedSkillPlan {
     bundle_rel_dir: String,
     entry_file: String,
     source_url: String,
-    enabled: bool,
+
 }
 
 #[derive(Debug, Deserialize)]
