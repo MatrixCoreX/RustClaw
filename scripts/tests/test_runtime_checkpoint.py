@@ -16,7 +16,7 @@ from runtime_checkpoint_storage import restore_checkpoint,verify_checkpoint
 
 class Checkpoints(unittest.TestCase):
     def setUp(self):
-        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.base=Path(self.tmp.name)
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.base=Path(self.tmp.name).resolve()
         self.root=self.base/'root';self.root.mkdir();self.destination=self.base/'backups';self.destination.mkdir(mode=0o700)
         (self.root/'configs').mkdir();(self.root/'data').mkdir();(self.root/'configs/config.toml').write_text('[database]\nsqlite_path="data/tasks.db"\n')
         (self.root/'configs/private.toml').write_text('secret="fixture-only"\n')
@@ -71,6 +71,25 @@ class Checkpoints(unittest.TestCase):
         path.write_text(json.dumps(value))
         with self.assertRaisesRegex(RuntimeError,'path_invalid'):restore_checkpoint(backup,self.base/'unsafe-restore')
         self.assertFalse((self.base/'escaped').exists())
+
+
+    def test_crash_marker_restarts_only_the_service_stopped_by_checkpoint(self):
+        from runtime_checkpoint_storage import write_json
+        marker=self.root/'data/runtime-checkpoint-resume.json'
+        with patch.object(checkpoint,'controller') as controller:
+            checkpoint.resume(self.root,'systemd-system','fixture.service');controller.assert_not_called()
+            write_json(marker,{'schema_version':1,'service_mode':'systemd-system','service_unit':'fixture.service'})
+            checkpoint.resume(self.root,'systemd-system','fixture.service')
+            controller.assert_called_once_with('systemd-system','fixture.service','start')
+            self.assertFalse(marker.exists())
+
+
+    def test_snapshot_temporary_directory_alias_is_normalized(self):
+        real=self.base/'real-temp';real.mkdir();alias=self.base/'alias-temp';alias.symlink_to(real,target_is_directory=True)
+        with patch.object(checkpoint,'snapshot_parent',return_value=alias):
+            result=self.create()
+        self.assertEqual(verify_checkpoint(Path(result['checkpoint']))['status'],'verified')
+        self.assertFalse(list(real.iterdir()))
 
 
 if __name__=='__main__':unittest.main()

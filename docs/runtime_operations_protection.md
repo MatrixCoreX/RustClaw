@@ -21,7 +21,10 @@ creates an owner-private checkpoint on a different filesystem. It checks that fo
 work is idle, stops the selected runtime service, checkpoints SQLite WAL files, holds
 writer fences, freezes a local snapshot and immediately resumes the runtime. Compression
 and database/control-file SHA-256 verification happen after service recovery, before atomic
-publication. The runtime is restarted on both success and failure. The snapshot requires a
+publication. SQLite quick checks also run on the frozen copy after service recovery. The runtime is
+restarted on both success and failure; the systemd timer has an `ExecStopPost` recovery
+command for an interrupted freeze, using a private marker written before stopping.
+The snapshot requires a
 temporary filesystem with enough space and, when using Linux tmpfs, explicit RAM headroom.
 An active task, unavailable service controller or insufficient destination space blocks the
 operation. Older checkpoints are retired only after a complete new checkpoint is verified.

@@ -24,6 +24,7 @@ Nice=15
 IOSchedulingClass=idle
 TimeoutStartSec=45min
 ExecStart={python} {script} create --root {root} --destination {destination} --retain 1 --reserve-bytes 1610612736
+ExecStopPost={python} {script} resume --root {root}
 '''.format(user=user,python=quoted(python),script=quoted(root/'scripts/runtime_checkpoint.py'),root=quoted(root),destination=quoted(destination))
     timer='''[Unit]
 Description=Daily runtime control-plane checkpoint

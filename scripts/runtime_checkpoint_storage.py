@@ -53,6 +53,7 @@ def selected_files(root):
 
 
 def backup_files(root, staging, manifest):
+    root=root.resolve()
     output=staging/'control-files.tar.xz'
     with tarfile.open(output,'x:xz',preset=3,format=tarfile.PAX_FORMAT,dereference=True) as archive:
         for path in selected_files(root):

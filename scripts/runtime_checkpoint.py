@@ -9,6 +9,7 @@ import lzma
 import os
 from pathlib import Path
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -18,7 +19,7 @@ import tomllib
 import urllib.request
 
 from runtime_checkpoint_storage import backup_files, compress_file, restore_checkpoint, verify_checkpoint, write_json, selected_files
-from runtime_checkpoint_snapshot import snapshot_parent, freeze
+from runtime_checkpoint_snapshot import snapshot_parent, freeze, validate_frozen_databases
 
 
 def database_paths(root):
@@ -66,6 +67,16 @@ def controller(mode, unit, action):
     if result.returncode:raise RuntimeError('checkpoint_service_'+action+'_failed')
 
 
+def resume(root, mode, unit):
+    marker=root/'data/runtime-checkpoint-resume.json'
+    if marker.exists():
+        if marker.is_symlink():raise RuntimeError('checkpoint_resume_marker_invalid')
+        value=json.loads(marker.read_text())
+        if value!={'schema_version':1,'service_mode':mode,'service_unit':unit}:raise RuntimeError('checkpoint_resume_marker_invalid')
+        controller(mode,unit,'start');marker.unlink()
+    return {'status':'resumed_or_already_running'}
+
+
 def idle(root):
     if (root/'data/nni/work/current.json').exists():raise RuntimeError('checkpoint_distributed_work_active')
     config=tomllib.loads((root/'configs/config.toml').read_text())['database']
@@ -97,19 +108,20 @@ def create(root, destination, *, mode, unit, retain=1, reserve=2*1024**3, offlin
         try:
             databases=database_paths(root);files=selected_files(root)
             required=sum(p.stat().st_size for p in databases+files)
-            frozen=Path(tempfile.mkdtemp(prefix='runtime-checkpoint-',dir=snapshot_parent(required)))
+            frozen=Path(tempfile.mkdtemp(prefix='runtime-checkpoint-',dir=snapshot_parent(required))).resolve()
             revision=running_revision(root) if not offline else subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip()
             paused_at=time.monotonic()
             try:
                 if not offline:
                     if not controller(mode,unit,'is-active'):raise RuntimeError('checkpoint_service_not_running')
+                    write_json(root/'data/runtime-checkpoint-resume.json',{'schema_version':1,'service_mode':mode,'service_unit':unit})
                     stopped=True
                     controller(mode,unit,'stop')
                     idle(root)
                 # The operator does not change source/configuration during this maintenance window.
                 database_relatives=freeze(root,frozen,databases,files)
             finally:
-                if stopped:controller(mode,unit,'start');stopped=False
+                if stopped:resume(root,mode,unit);stopped=False
             pause_seconds=round(time.monotonic()-paused_at,3) if not offline else 0
             if offline and revision!=subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip():
                 raise RuntimeError('checkpoint_source_changed')
@@ -119,6 +131,7 @@ def create(root, destination, *, mode, unit, retain=1, reserve=2*1024**3, offlin
                 'scope':{'included':['runtime_databases','skill_databases','configuration','runtime_binaries','ui','admission','package_pointers'],
                     'excluded':['task_attachment_files','models','immutable_skill_package_payloads','external_connector_storage'],
                     'restore_requires_matching_installed_packages':True},'files':[]}
+            validate_frozen_databases(frozen,database_relatives)
             for rel in database_relatives:
                 name='database-'+str(len(manifest['files']))+'.xz'
                 record=compress_file(frozen/rel,staging/name);record.update(path=rel,archive=name,kind='sqlite')
@@ -133,7 +146,7 @@ def create(root, destination, *, mode, unit, retain=1, reserve=2*1024**3, offlin
         finally:
             if staging is not None:shutil.rmtree(staging)
             if frozen is not None:shutil.rmtree(frozen)
-            if stopped:controller(mode,unit,'start')
+            if stopped:resume(root,mode,unit)
         # Never retire an older checkpoint until a complete, verified new one exists.
         for old in sorted(recent,reverse=True)[max(0,retain-1):]:
             verify_checkpoint(old);shutil.rmtree(old)
@@ -144,6 +157,7 @@ def create(root, destination, *, mode, unit, retain=1, reserve=2*1024**3, offlin
 
 def main():
     os.umask(0o077)
+    signal.signal(signal.SIGTERM,lambda *_:sys.exit(143))
     parser=argparse.ArgumentParser(description=__doc__);sub=parser.add_subparsers(dest='action',required=True)
     make=sub.add_parser('create');make.add_argument('--root',required=True,type=Path);make.add_argument('--destination',required=True,type=Path)
     make.add_argument('--service-mode',default='systemd-system');make.add_argument('--service-unit',default='agent-runtime.service')
@@ -151,12 +165,14 @@ def main():
     make.add_argument('--offline',action='store_true',help='Operator guarantees all non-database state is offline; SQLite writers are still fenced.')
     check=sub.add_parser('verify');check.add_argument('--checkpoint',required=True,type=Path)
     restore=sub.add_parser('restore');restore.add_argument('--checkpoint',required=True,type=Path);restore.add_argument('--output',required=True,type=Path)
+    recovery=sub.add_parser('resume');recovery.add_argument('--root',required=True,type=Path);recovery.add_argument('--service-mode',default='systemd-system');recovery.add_argument('--service-unit',default='agent-runtime.service')
     args=parser.parse_args()
     try:
         if args.action=='create':
             if args.retain<1 or args.reserve_bytes<0:raise RuntimeError('checkpoint_invalid_limits')
             result=create(args.root,args.destination,mode=args.service_mode,unit=args.service_unit,retain=args.retain,reserve=args.reserve_bytes,offline=args.offline)
             write_json(args.root/'data/runtime-checkpoint-status.json',result)
+        elif args.action=='resume':result=resume(args.root,args.service_mode,args.service_unit)
         elif args.action=='verify':result=verify_checkpoint(args.checkpoint)
         else:result=restore_checkpoint(args.checkpoint,args.output)
         print(json.dumps(result))

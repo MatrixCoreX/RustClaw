@@ -38,10 +38,16 @@ def freeze(root, output, databases, files):
             result=db.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()
             if result and result[0]!=0:raise RuntimeError('checkpoint_database_busy')
             db.execute('BEGIN IMMEDIATE')
-            if db.execute('PRAGMA quick_check').fetchone()[0]!='ok':raise RuntimeError('checkpoint_database_invalid')
         for source in databases+files:
             relative=source.relative_to(root)
             if not source.resolve().is_relative_to(root) or source.is_symlink():raise RuntimeError('checkpoint_source_escaped')
             target=output/relative;target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
             shutil.copyfile(source,target);target.chmod(source.stat().st_mode&0o700)
     return [str(p.relative_to(root)) for p in databases]
+
+
+def validate_frozen_databases(root, relatives):
+    for relative in relatives:
+        path=(root/relative).resolve()
+        with contextlib.closing(sqlite3.connect(path.as_uri()+'?mode=ro&immutable=1',uri=True,timeout=10)) as db:
+            if db.execute('PRAGMA quick_check').fetchone()[0]!='ok':raise RuntimeError('checkpoint_database_invalid')
