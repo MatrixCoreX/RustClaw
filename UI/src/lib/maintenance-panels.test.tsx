@@ -28,7 +28,8 @@ test("unmount invalidates captured memory refresh callbacks", async () => {
   let view!: ReactTestRenderer;
   await act(async () => { view = create(panel("A", apiFetch)); });
   const refresh = view.root.findAllByType("button")[0].props.onClick;
-  await act(async () => { view.unmount(); await refresh(); });
+  await act(async () => { view.unmount(); });
+  await act(async () => { await refresh(); });
   assert.equal(calls, 1);
 });
 
