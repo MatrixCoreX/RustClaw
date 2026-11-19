@@ -67,6 +67,7 @@ def controller(mode, unit, action):
 
 
 def idle(root):
+    if (root/'data/nni/work/current.json').exists():raise RuntimeError('checkpoint_distributed_work_active')
     config=tomllib.loads((root/'configs/config.toml').read_text())['database']
     path=Path(config['sqlite_path']);path=path if path.is_absolute() else root/path
     with contextlib.closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True,timeout=5)) as db:

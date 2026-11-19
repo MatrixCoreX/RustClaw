@@ -46,6 +46,10 @@ class Checkpoints(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'foreground_not_idle'):self.create()
         with self.assertRaisesRegex(RuntimeError,'other_filesystem'):
             checkpoint.create(self.root,self.destination,mode='systemd-system',unit='fixture.service',reserve=0)
+    def test_distributed_work_prevents_service_shutdown(self):
+        work=self.root/'data/nni/work';work.mkdir(parents=True);(work/'current.json').write_text('{}')
+        with self.assertRaisesRegex(RuntimeError,'distributed_work_active'):self.create()
+
     def test_stopped_service_is_restarted_after_failed_backup(self):
         calls=[]
         original=Path.stat
