@@ -2,7 +2,7 @@ name: Completed branch integration verification
 
 "on":
   push:
-    branches: ["ci/runtime-custody-integration-*", "ci/completed-branches-*"]
+    branches: ["ci/runtime-custody-integration-*", "ci/completed-branches-*", "ci/runtime-priority-optimization-*"]
   workflow_dispatch:
 
 permissions:

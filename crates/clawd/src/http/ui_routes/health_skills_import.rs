@@ -957,7 +957,7 @@ async fn import_external_skill(
     import_external_skill_from_source(
         &state,
         req.source.trim(),
-        req.enabled.unwrap_or(true),
+        req.enabled.unwrap_or(false),
         req.allow_network.unwrap_or(false),
     )
     .await

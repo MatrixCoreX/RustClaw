@@ -111,8 +111,12 @@ pub(super) fn async_poll_terminal_projection_without_visible_reply(raw_result_js
             == Some("async_poll_completed")
         && lifecycle
             .get("resume_executor_result_projection")
-            .and_then(|value| value.get("final_result_json"))
-            .is_some()
+            .is_some_and(|projection| {
+                projection.get("final_result_json").is_some()
+                    || projection
+                        .get("final_result_ref")
+                        .is_some_and(crate::task_result_objects::valid_reference)
+            })
 }
 
 fn result_has_visible_reply(result_json: &Value) -> bool {

@@ -173,6 +173,10 @@ export function HostSystemSummaryPanel({
         </div>
       </div>
 
+      {summary?.version && <div className="mt-4 border-t border-white/8 pt-3 text-xs text-white/60">
+        <p>{t("运行版本", "Running version")} {summary.version.package_version} · {summary.version.build_revision?.slice(0, 12) || t("版本来源未知", "Revision unavailable")}</p>
+        <p className="mt-1">{summary.version.source_match === "matched" ? t("运行程序与本机源码提交一致", "Running binary matches the local source revision") : summary.version.source_match === "different" ? t("源码已更新，运行程序尚未同步，请安装完整更新。", "Source and running binary differ. Install a complete update.") : t("无法核对本机源码；此状态不代表程序已经更新。", "Local source could not be checked; this does not confirm an update.")}</p>
+      </div>}
       {errorCode && !summary ? (
         <div className="mt-4 flex items-center gap-3 border-t border-white/8 py-5 text-sm text-white/60">
           <Server className="h-5 w-5 shrink-0" />

@@ -5,6 +5,7 @@ const HOST_COMMAND_LIMIT_BYTES: usize = 4096;
 #[derive(Debug, Clone, Serialize)]
 struct HostSystemSummary {
     schema_version: u32,
+    version: RuntimeVersionSummary,
     collected_at_ts: i64,
     os: HostOperatingSystem,
     architecture: String,
@@ -136,6 +137,7 @@ async fn host_system_summary(
     })
     .await
     .unwrap_or_else(|_| HostSystemSummary::collection_failed());
+    summary.version = collect_runtime_version(&state.skill_rt.workspace_root).await;
     if redact_details {
         summary.redact_admin_details();
     }
@@ -178,6 +180,7 @@ impl HostSystemSummary {
         .collect();
         Self {
             schema_version: 4,
+            version: RuntimeVersionSummary::default(),
             collected_at_ts: now_unix_seconds(),
             os: HostOperatingSystem {
                 family: std::env::consts::OS.to_string(),
@@ -310,6 +313,7 @@ fn collect_host_system_summary(
 
     HostSystemSummary {
         schema_version: 4,
+        version: RuntimeVersionSummary::default(),
         collected_at_ts: now_unix_seconds(),
         os: HostOperatingSystem {
             family: std::env::consts::OS.to_string(),

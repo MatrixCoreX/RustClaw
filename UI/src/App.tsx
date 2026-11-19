@@ -80,6 +80,7 @@ import { useChannelBindRuntime, useFeishuBindRuntime } from "./hooks/useFeishuBi
 import { useChatRuntime } from "./hooks/useChatRuntime";
 import { useAgentConfigRuntime } from "./hooks/useAgentConfigRuntime";
 import { useTaskRuntime } from "./hooks/useTaskRuntime";
+import { StorageGovernancePanel } from "./components/StorageGovernancePanel";
 import { useSystemRuntime } from "./hooks/useSystemRuntime";
 import { useConsoleProjections } from "./hooks/useConsoleProjections";
 
@@ -722,6 +723,9 @@ export default function App() {
     fetchSkillStoreDependencies,
     saveSkillSwitches,
     importExternalSkill,
+    approveImportedSkillPolicy,
+    reviewSkillPolicies,
+    skillPolicyReviews,
     uploadImportedSkillFiles,
     installSkillFromStore,
     removeSkillFromStore,
@@ -2040,6 +2044,7 @@ export default function App() {
               onboardingSteps={onboardingSteps}
               dashboardOverviewItems={dashboardOverviewItems}
               hostSystemSummary={hostSystemSummary}
+              storageGovernancePanel={isAdminIdentity ? <StorageGovernancePanel key={activeUiRequestScope} t={t} apiFetch={apiFetch} requestScope={activeUiRequestScope} /> : null}
               hostSystemLoading={hostSystemLoading}
               hostSystemErrorCode={hostSystemErrorCode}
               hostDependencies={hostDependencies}
@@ -2648,6 +2653,9 @@ export default function App() {
               fileImportInputRef={fileImportInputRef}
               onSkillImportSourceChange={setSkillImportSource}
               onImportExternalSkill={importExternalSkill}
+              onApproveSkillPolicy={approveImportedSkillPolicy}
+              onReviewSkillPolicies={reviewSkillPolicies}
+              skillPolicyReviews={skillPolicyReviews}
               onLocalImportPickerOpenChange={setLocalImportPickerOpen}
               onUploadImportedSkillFiles={uploadImportedSkillFiles}
               onDismissSkillImportPreview={() => setSkillImportPreview(null)}

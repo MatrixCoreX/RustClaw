@@ -19,7 +19,10 @@ fn write_workspace_and_mounted_file(
     let mounted_path = workspace_root.join("docker/config").join(mounted_relative);
     let paths = [active_path, mounted_path];
     crate::configuration_files::with_locked_files(&paths, || {
-        let targets = paths.iter().map(|path| crate::configuration_files::Target::workspace(workspace_root, path.clone())).collect();
+        let targets = paths
+            .iter()
+            .map(|path| crate::configuration_files::Target::workspace(workspace_root, path.clone()))
+            .collect();
         crate::configuration_files::publish_copies(targets, raw.as_bytes())
     })?
 }
@@ -38,14 +41,29 @@ fn write_runtime_config_to_paths(
     persisted_path: Option<&Path>,
     raw: &str,
 ) -> std::io::Result<()> {
-    let paths = std::iter::once(active_path.to_path_buf()).chain(persisted_path.map(Path::to_path_buf)).collect::<Vec<_>>();
+    let paths = std::iter::once(active_path.to_path_buf())
+        .chain(persisted_path.map(Path::to_path_buf))
+        .collect::<Vec<_>>();
     crate::configuration_files::with_locked_files(&paths, || {
-        publish_runtime_config_to_paths(active_path.parent().ok_or_else(|| std::io::Error::other("configuration_parent_missing"))?, active_path, persisted_path, raw)
+        publish_runtime_config_to_paths(
+            active_path
+                .parent()
+                .ok_or_else(|| std::io::Error::other("configuration_parent_missing"))?,
+            active_path,
+            persisted_path,
+            raw,
+        )
     })?
 }
 
-fn publish_runtime_config_to_paths(root: &Path, active: &Path, persisted: Option<&Path>, raw: &str) -> std::io::Result<()> {
-    let targets = std::iter::once(active).chain(persisted)
+fn publish_runtime_config_to_paths(
+    root: &Path,
+    active: &Path,
+    persisted: Option<&Path>,
+    raw: &str,
+) -> std::io::Result<()> {
+    let targets = std::iter::once(active)
+        .chain(persisted)
         .map(|path| crate::configuration_files::Target::configured(root, path.to_path_buf()))
         .collect::<std::io::Result<Vec<_>>>()?;
     crate::configuration_files::publish_copies(targets, raw.as_bytes())
@@ -136,7 +154,7 @@ fn detect_import_plan(
     bundle_dir: &Path,
     bundle_rel_dir: &str,
     source: &str,
-    enabled: bool,
+    _enabled: bool,
 ) -> anyhow::Result<ImportedSkillPlan> {
     let frontmatter = parse_skill_frontmatter(interface_md);
     let manifest_path = bundle_dir.join("skill.toml");
@@ -189,7 +207,6 @@ fn detect_import_plan(
             .package
             .source
             .unwrap_or_else(|| source.to_string()),
-        enabled,
     })
 }
 
@@ -487,7 +504,9 @@ fn skill_upload_error(
     )
 }
 
-async fn read_bounded_multipart_text(mut field: axum::extract::multipart::Field<'_>) -> Result<String, ()> {
+async fn read_bounded_multipart_text(
+    mut field: axum::extract::multipart::Field<'_>,
+) -> Result<String, ()> {
     let mut bytes = Vec::new();
     while let Some(chunk) = field.chunk().await.map_err(|_| ())? {
         if bytes.len().saturating_add(chunk.len()) > SKILL_UPLOAD_MAX_METADATA_BYTES {
@@ -527,9 +546,7 @@ async fn stream_multipart_field_to_file(
     })? {
         file_bytes = file_bytes.saturating_add(chunk.len());
         *total_bytes = total_bytes.saturating_add(chunk.len());
-        if file_bytes > SKILL_UPLOAD_MAX_FILE_BYTES
-            || *total_bytes > SKILL_UPLOAD_MAX_TOTAL_BYTES
-        {
+        if file_bytes > SKILL_UPLOAD_MAX_FILE_BYTES || *total_bytes > SKILL_UPLOAD_MAX_TOTAL_BYTES {
             drop(file);
             let _ = tokio::fs::remove_file(target_path).await;
             return Err(SkillUploadError {
@@ -706,24 +723,6 @@ async fn finalize_imported_bundle(
             );
         }
     };
-    let grant = match imported_host_policy_grant(&verified.manifest) {
-        Ok(grant) => grant,
-        Err(error) => {
-            let _ = restore_import_install_pointer(
-                state,
-                &plan.canonical_name,
-                previous_pointer.as_ref(),
-            );
-            return (
-                StatusCode::CONFLICT,
-                Json(ApiResponse {
-                    ok: false,
-                    data: None,
-                    error: Some(format!("host policy grant failed: {error}")),
-                }),
-            );
-        }
-    };
     let service = match admission_service(state) {
         Ok(service) => service,
         Err(error) => {
@@ -752,12 +751,8 @@ async fn finalize_imported_bundle(
             group: "extensions".to_string(),
         },
         prompt: render_imported_skill_prompt(&plan, interface_md),
-        state: if plan.enabled {
-            skill_sdk::AdmissionState::Enabled
-        } else {
-            skill_sdk::AdmissionState::InstalledDisabled
-        },
-        grant: Some(grant.clone()),
+        state: skill_sdk::AdmissionState::AwaitingPolicyApproval,
+        grant: None,
     }) {
         Ok(snapshot) => snapshot,
         Err(error) => {
@@ -822,10 +817,12 @@ async fn finalize_imported_bundle(
                 "source": plan.source_url,
                 "registry_generation": admission.generation,
                 "registry_generation_digest": admission.generation_digest,
-                "policy_grant_digest": grant.digest(&verified.manifest).ok(),
+                "policy_grant_digest": Value::Null,
+                "admission_state": "awaiting_policy_approval",
+                "policy_review": external_policy_review_value(&verified.manifest, admission.generation, skill_sdk::AdmissionState::AwaitingPolicyApproval).ok(),
                 "reload": reload,
                 "installed": true,
-                "enabled": plan.enabled
+                "enabled": false
             })),
             error: None,
         }),

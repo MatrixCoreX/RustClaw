@@ -23,6 +23,9 @@ const STORE_TEST_KEY: &str = "skill-store-test-admin";
 #[path = "skill_switch_update_tests.rs"]
 mod skill_switch_update_tests;
 
+#[path = "skill_policy_review_tests.rs"]
+mod skill_policy_review_tests;
+
 #[tokio::test]
 async fn skill_store_catalog_paginates_and_filters_before_metadata_projection() {
     let (state, workspace) = isolated_skill_store_state();
@@ -487,6 +490,16 @@ async fn register_external_skill_fixture(state: &AppState, workspace: &Path, ski
     .await;
     assert_eq!(status, StatusCode::OK);
     assert!(response.0.ok);
+    let review = &response.0.data.as_ref().unwrap()["policy_review"];
+    let router = axum::Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state.clone());
+    let (status, approved) = call_skill_store_api(router, Method::POST, &format!("/v1/skills/{skill_name}/policy"), Some(serde_json::json!({
+        "decision":"approve", "enable":true, "registry_generation":review["registry_generation"],
+        "manifest_digest":review["manifest_digest"],"capability_request_digest":review["capability_request_digest"]
+    }))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(approved["data"]["admission_state"], "enabled");
     assert_eq!(
         response
             .0

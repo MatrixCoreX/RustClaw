@@ -207,6 +207,9 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             post(set_git_credential_handler).delete(delete_git_credential_handler),
         )
         .route("/system/host-summary", get(host_system_summary))
+        .route("/system/storage-summary", get(get_storage_inventory))
+        .route("/system/storage-scan", post(record_storage_inventory))
+        .route("/system/storage-compact", post(compact_stored_results))
         .route("/system/dependencies", get(host_dependencies))
         .route("/system/diagnostics/export", get(export_system_diagnostics))
         .route(
@@ -283,6 +286,8 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             post(import_external_skill_upload).layer(DefaultBodyLimit::disable()),
         )
         .route("/skills/uninstall", post(uninstall_external_skill))
+        .route("/skills/policy-reviews", get(list_external_skill_policies))
+        .route("/skills/{skill_name}/policy", get(get_external_skill_policy).post(update_external_skill_policy))
         .route("/llm/config", get(get_llm_config).post(update_llm_config))
         .route("/llm/test", post(test_llm_config))
         .route("/models/catalog", get(get_model_catalog))
@@ -513,7 +518,9 @@ use self::aipp_engagement::aipp_engagement;
 include!("ui_routes/config_helpers.rs");
 include!("ui_routes/agent_config.rs");
 include!("ui_routes/git_remote_config.rs");
+include!("ui_routes/runtime_version.rs");
 include!("ui_routes/host_system.rs");
+include!("ui_routes/storage_governance.rs");
 include!("ui_routes/host_dependencies.rs");
 include!("ui_routes/system_diagnostics.rs");
 include!("ui_routes/managed_runtime_assets.rs");
@@ -559,6 +566,7 @@ include!("ui_routes/model_settings_mutations.rs");
 include!("ui_routes/model_settings_api.rs");
 include!("ui_routes/model_catalog_read.rs");
 include!("ui_routes/skill_import_config.rs");
+include!("ui_routes/skill_policy_review.rs");
 include!("ui_routes/skill_store_installation.rs");
 include!("ui_routes/skill_store.rs");
 include!("ui_routes/skill_store_operations.rs");

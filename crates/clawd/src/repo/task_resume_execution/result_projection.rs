@@ -996,7 +996,11 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    let changed = db.execute(
+    let tx = db.unchecked_transaction()?;
+    let mut packed_result: Value = serde_json::from_str(&updated_result_json)?;
+    crate::task_result_objects::compact_projection(&tx, task_id, &mut packed_result)?;
+    let updated_result_json = packed_result.to_string();
+    let changed = tx.execute(
         "UPDATE tasks
          SET status = ?2,
              result_json = ?3,
@@ -1018,6 +1022,10 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
             claim_attempt
         ],
     )?;
+    if changed == 0 {
+        return Ok(false);
+    }
+    tx.commit()?;
     if changed > 0
         && claw_core::provider_failure_policy::is_terminal_quota_lifecycle(
             &terminal_result["task_lifecycle"],

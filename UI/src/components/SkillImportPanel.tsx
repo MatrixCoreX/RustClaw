@@ -1,7 +1,8 @@
 import type { RefObject } from "react";
 import { ChevronDown, Loader2, Sparkles } from "lucide-react";
 
-import type { ImportedSkillResponse } from "../types/api";
+import { SkillPolicyReviewPanel } from "./SkillPolicyReviewPanel";
+import type { SkillPolicyReview, ImportedSkillResponse } from "../types/api";
 
 type Translate = (zh: string, en: string) => string;
 
@@ -21,6 +22,9 @@ export interface SkillImportPanelProps {
   onLocalImportPickerOpenChange: (value: boolean | ((previous: boolean) => boolean)) => void;
   onUploadImportedSkillFiles: (fileList: FileList | null) => unknown | Promise<unknown>;
   onDismissSkillImportPreview: () => void;
+  skillPolicyReviews?: SkillPolicyReview[];
+  onReviewSkillPolicies?: () => unknown;
+  onApproveSkillPolicy?: (review: SkillPolicyReview, decision: "approve" | "revoke") => unknown;
 }
 
 export function SkillImportPanel({
@@ -39,6 +43,7 @@ export function SkillImportPanel({
   onLocalImportPickerOpenChange,
   onUploadImportedSkillFiles,
   onDismissSkillImportPreview,
+  skillPolicyReviews = [], onReviewSkillPolicies, onApproveSkillPolicy,
 }: SkillImportPanelProps) {
   return (
     <div className="mb-5">
@@ -51,8 +56,8 @@ export function SkillImportPanel({
             </h3>
             <p className="mt-2 text-sm text-white/65">
               {t(
-                "请选择包含 skill.toml 和 INTERFACE.md 的本地技能包。构建、协议冒烟和回执验证全部通过后才会开启。",
-                "Choose a local package containing skill.toml and INTERFACE.md. It is enabled only after build, protocol smoke, and receipt verification pass.",
+                "请选择包含 skill.toml 和 INTERFACE.md 的本地技能包。验证通过后先完成安装；查看并批准运行权限后才会开启。",
+                "Choose a local package containing skill.toml and INTERFACE.md. Verification installs the package. Review and approve runtime permissions separately before enabling it.",
               )}
             </p>
           </div>
@@ -152,6 +157,8 @@ export function SkillImportPanel({
             {systemRestartMessage}
           </p>
         ) : null}
+        <button type="button" className="theme-secondary-btn mt-3 px-3 py-2 text-sm" disabled={skillImportLoading || !onReviewSkillPolicies} onClick={() => void onReviewSkillPolicies?.()}>{t("查看已安装技能的权限", "Review installed skill permissions")}</button>
+        <SkillPolicyReviewPanel t={t} reviews={skillPolicyReviews} loading={skillImportLoading} onDecision={onApproveSkillPolicy} />
         {skillImportPreview ? (
           <div className="mt-3 rounded-lg border border-white/10 bg-[#12151f] px-3 py-3 text-xs text-white/75">
             <div className="flex flex-wrap items-start justify-between gap-2">
@@ -172,8 +179,8 @@ export function SkillImportPanel({
             <p className="mt-2 text-sm text-white/85">{skillImportPreview.description}</p>
             <p className="mt-2 text-sm text-emerald-200">
               {t(
-                "技能已经安装并加入 Skill Store；你可以在工具/技能页关闭它，或在这里删除后再重新安装。",
-                "The skill is installed and listed in Skill Store. Disable it in Tools/Skills, or remove and reinstall it here.",
+                skillImportPreview.enabled ? "技能已授权并开启，可以在工具/技能页关闭。" : "技能已安装，尚未授予运行权限；请在上方审阅后决定是否开启。",
+                skillImportPreview.enabled ? "The skill is approved and enabled. Disable it in Tools/Skills." : "The package is installed without runtime approval. Review the permissions above before enabling it.",
               )}
             </p>
             <p className="mt-2 text-white/55">

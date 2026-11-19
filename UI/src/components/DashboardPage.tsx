@@ -101,6 +101,7 @@ export interface DashboardPageProps {
   onboardingSteps: DashboardOnboardingStep[];
   dashboardOverviewItems: DashboardOverviewItem[];
   hostSystemSummary: HostSystemSummary | null;
+  storageGovernancePanel?: ReactNode;
   hostSystemLoading: boolean;
   hostSystemErrorCode: string | null;
   hostDependencies: HostDependenciesSnapshot | null;
@@ -182,6 +183,7 @@ export function DashboardPage({
   onboardingSteps,
   dashboardOverviewItems,
   hostSystemSummary,
+  storageGovernancePanel,
   hostSystemLoading,
   hostSystemErrorCode,
   hostDependencies,
@@ -574,6 +576,7 @@ export function DashboardPage({
             errorCode={hostSystemErrorCode}
             onRefresh={onFetchHostSystemSummary}
           />
+          {isAdminIdentity && storageGovernancePanel}
         </>
       ) : null}
 

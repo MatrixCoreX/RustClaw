@@ -2,6 +2,41 @@ use super::*;
 use crate::skill_admission::AdmissionStateChange;
 
 impl SkillAdmissionService {
+    /// Read the immutable manifest admitted by this generation, never a mutable install pointer.
+    pub(crate) fn external_policy_review(
+        &self,
+        skill_name: &str,
+    ) -> Result<(PackageManifest, u64, AdmissionState)> {
+        self.with_mutation_lock(|| {
+            let (pointer, record, root) = self
+                .read_current_generation()?
+                .ok_or_else(|| error("skill_admission_missing", "skill_admission_missing"))?;
+            self.validate_generation(&pointer, &record, &root, false)?;
+            let skill = record
+                .skills
+                .get(skill_name)
+                .filter(|skill| {
+                    skill.source == SkillAdmissionSource::ExternalOverlay
+                        && skill.state != AdmissionState::Tombstoned
+                })
+                .ok_or_else(|| error("skill_admission_missing", "skill_admission_missing"))?;
+            let manifest =
+                PackageManifest::load(&root.join("manifests").join(skill_name).join("skill.toml"))
+                    .map_err(|source| error("skill_manifest_invalid", source.to_string()))?;
+            if manifest
+                .digest()
+                .map_err(|source| error("skill_manifest_invalid", source.to_string()))?
+                != skill.manifest_digest
+            {
+                return Err(error(
+                    "skill_admission_manifest_mismatch",
+                    "skill_admission_manifest_mismatch",
+                ));
+            }
+            Ok((manifest, pointer.generation, skill.state))
+        })
+    }
+
     pub(crate) fn set_state(
         &self,
         skill_name: &str,

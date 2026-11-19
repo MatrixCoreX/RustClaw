@@ -20,6 +20,7 @@ import type {
   ApiResponse,
   BrowserFileWithPath,
   ImportedSkillResponse,
+  SkillPolicyReview,
   SkillListItem,
   SkillStoreDependencyResponse,
   SkillStoreOperationResponse,
@@ -43,6 +44,7 @@ export function useSkillsRuntime({ apiFetch, t, requestScope }: UseSkillsRuntime
   const isCurrent = useRequestOwner(requestScope);
   const owner = useMemo(() => ({
     draft: new SkillSwitchDraft(), configReads: new PageRequestLifecycle(), metadataReads: new PageRequestLifecycle(),
+    policyReads: new PageRequestLifecycle(), policyWriting: false,
     saving: false, storeFetch: null as Promise<void> | null, storeFetchedAt: 0, storePage: 1, storeQuery: "",
     previousOperation: null as SkillStoreResponse["active_operation"],
   }), [isCurrent]);
@@ -64,6 +66,7 @@ export function useSkillsRuntime({ apiFetch, t, requestScope }: UseSkillsRuntime
   const [skillImportError, setSkillImportError] = useState<string | null>(null);
   const [skillImportMessage, setSkillImportMessage] = useState<string | null>(null);
   const [skillImportPreview, setSkillImportPreview] = useState<ImportedSkillResponse | null>(null);
+  const [skillPolicyReviews, setSkillPolicyReviews] = useState<SkillPolicyReview[]>([]);
   const [recentImportedSkillName, setRecentImportedSkillName] = useState<string | null>(null);
   const [localImportPickerOpen, setLocalImportPickerOpen] = useState(false);
   const folderImportInputRef = useRef<HTMLInputElement | null>(null);
@@ -76,7 +79,7 @@ export function useSkillsRuntime({ apiFetch, t, requestScope }: UseSkillsRuntime
     setSkillStoreData(null); setSkillStoreLoading(false); setSkillStoreError(null); setSkillStoreMessage(null);
     setLocalSkillStoreActionName(null); setSkillsSearchQuery(""); setSkillImportSource("");
     setSkillImportLoading(false); setSkillImportError(null); setSkillImportMessage(null); setSkillImportPreview(null);
-    setRecentImportedSkillName(null); setLocalImportPickerOpen(false);
+    setRecentImportedSkillName(null); setLocalImportPickerOpen(false); setSkillPolicyReviews([]);
     if (folderImportInputRef.current) folderImportInputRef.current.value = "";
     if (fileImportInputRef.current) fileImportInputRef.current.value = "";
   }, [owner]);
@@ -467,7 +470,7 @@ export function useSkillsRuntime({ apiFetch, t, requestScope }: UseSkillsRuntime
       const res = await apiFetch(`/v1/skills/import`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source, enabled: true, allow_network: allowNetwork }),
+        body: JSON.stringify({ source, enabled: false, allow_network: allowNetwork }),
       });
       const body = (await res.json()) as ApiResponse<ImportedSkillResponse>;
       if (!isCurrent()) return;
@@ -477,11 +480,12 @@ export function useSkillsRuntime({ apiFetch, t, requestScope }: UseSkillsRuntime
           : body.error || `skill_import_http_${res.status}`);
       }
       setSkillImportPreview(body.data);
+      if (body.data.policy_review) setSkillPolicyReviews([body.data.policy_review]);
       setRecentImportedSkillName(body.data.skill_name);
       setSkillImportMessage(
         t(
-          `已导入并安装 ${body.data.display_name}，现在可以使用。`,
-          `${body.data.display_name} was imported, installed, and is ready to use.`,
+          `已安装 ${body.data.display_name}，请查看并批准运行权限后开启。`,
+          `${body.data.display_name} is installed. Review and approve runtime permissions before enabling it.`,
         ),
       );
       setSkillsSearchQuery(body.data.skill_name);
@@ -496,6 +500,50 @@ export function useSkillsRuntime({ apiFetch, t, requestScope }: UseSkillsRuntime
     } finally {
       if (isCurrent()) setSkillImportLoading(false);
     }
+  };
+
+  const reviewSkillPolicies = async () => {
+    if (!isCurrent()) return;
+    const request = owner.policyReads.begin(false)!;
+    const ownsRead = () => isCurrent() && owner.policyReads.isCurrent(request);
+    setSkillImportLoading(true); setSkillImportError(null);
+    try {
+      const res = await apiFetch("/v1/skills/policy-reviews"); const body = await res.json();
+      if (!ownsRead()) return;
+      if (!res.ok || !body.ok) throw new Error(body.error || "skill_policy_review_failed");
+      setSkillPolicyReviews(body.data.reviews);
+    } catch (error) { if (ownsRead()) setSkillImportError(formatUiError(error, t, "权限信息读取失败，请重试。", "Permission details could not be loaded. Try again.")); }
+    finally { if (ownsRead() && owner.policyReads.finish(request) && !owner.policyWriting) setSkillImportLoading(false); }
+  };
+
+  const approveImportedSkillPolicy = async (selected?: SkillPolicyReview, decision: "approve" | "revoke" = "approve") => {
+    const review = selected || skillImportPreview?.policy_review;
+    if (!review || !isCurrent() || owner.policyWriting) return;
+    owner.policyWriting = true;
+    const approved = await showConfirm({
+      title: decision === "approve" ? t("批准运行权限并开启技能？", "Approve permissions and enable this skill?") : t("撤销这个技能的运行授权？", "Revoke this skill’s runtime permissions?"),
+      message: t("请确认下面列出的权限是完成技能工作所必需的。之后可以关闭技能或撤销授权。", "Confirm that the listed permissions are needed. You can disable the skill or revoke this approval later."),
+      confirmLabel: decision === "approve" ? t("批准并开启", "Approve and enable") : t("撤销授权", "Revoke approval"), cancelLabel: t("暂不开启", "Not now"),
+    });
+    if (!approved || !isCurrent()) { owner.policyWriting = false; return; }
+    owner.policyReads.invalidate();
+    setSkillImportLoading(true);
+    try {
+      const res = await apiFetch(`/v1/skills/${encodeURIComponent(review.skill_name)}/policy`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision, enable: decision === "approve", registry_generation: review.registry_generation,
+          manifest_digest: review.manifest_digest, capability_request_digest: review.capability_request_digest }),
+      });
+      const body = await res.json();
+      if (!isCurrent()) return;
+      if (!res.ok || !body.ok) throw new Error(body.error || "skill_policy_review_failed");
+      setSkillImportPreview((previous) => previous?.skill_name === review.skill_name ? { ...previous, enabled: decision === "approve", admission_state: body.data.admission_state, policy_review: body.data } : previous);
+      setSkillImportMessage(decision === "approve" ? t("权限已批准，技能已开启。", "Permissions approved. The skill is enabled.") : t("运行授权已撤销，技能已停用。", "Runtime approval revoked. The skill is disabled."));
+      await reviewSkillPolicies();
+      await fetchSkillsConfig(); await fetchSkills(); await fetchSkillStore(true);
+    } catch (error) {
+      if (isCurrent()) setSkillImportError(formatUiError(error, t, "授权未完成，请重新查看权限后重试。", "Approval did not complete. Refresh the permission review and try again."));
+    } finally { owner.policyWriting = false; if (isCurrent()) setSkillImportLoading(false); }
   };
 
   const uploadImportedSkillFiles = async (fileList: FileList | null) => {
@@ -521,7 +569,7 @@ export function useSkillsRuntime({ apiFetch, t, requestScope }: UseSkillsRuntime
       "uploaded-skill";
     const formData = new FormData();
     formData.append("bundle_name", guessedBundleName);
-    formData.append("enabled", "true");
+    formData.append("enabled", "false");
     formData.append("allow_network", String(allowNetwork));
     for (const file of files) {
       const relativePath = file.webkitRelativePath?.trim() || file.name;
@@ -544,11 +592,12 @@ export function useSkillsRuntime({ apiFetch, t, requestScope }: UseSkillsRuntime
           : body.error || `local_skill_import_http_${res.status}`);
       }
       setSkillImportPreview(body.data);
+      if (body.data.policy_review) setSkillPolicyReviews([body.data.policy_review]);
       setRecentImportedSkillName(body.data.skill_name);
       setSkillImportMessage(
         t(
-          `已导入并安装 ${body.data.display_name}，现在可以使用。`,
-          `${body.data.display_name} was imported, installed, and is ready to use.`,
+          `已安装 ${body.data.display_name}，请查看并批准运行权限后开启。`,
+          `${body.data.display_name} is installed. Review and approve runtime permissions before enabling it.`,
         ),
       );
       setSkillsSearchQuery(body.data.skill_name);
@@ -720,6 +769,9 @@ export function useSkillsRuntime({ apiFetch, t, requestScope }: UseSkillsRuntime
     fetchSkillStoreDependencies,
     saveSkillSwitches,
     importExternalSkill,
+    approveImportedSkillPolicy,
+    reviewSkillPolicies,
+    skillPolicyReviews,
     uploadImportedSkillFiles,
     installSkillFromStore,
     removeSkillFromStore,

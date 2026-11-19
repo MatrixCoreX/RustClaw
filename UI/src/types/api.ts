@@ -1114,7 +1114,22 @@ export interface FactoryResetResponse {
   warnings?: string[];
 }
 
+export interface SkillPolicyReview {
+  schema_version: number;
+  skill_name: string;
+  package_version: string;
+  manifest_digest: string;
+  capability_request_digest: string;
+  registry_generation: number;
+  admission_state: "awaiting_policy_approval" | "installed_disabled" | "enabled";
+  risk_level: "low" | "medium" | "high";
+  permissions: { network: boolean; filesystem_read: boolean; filesystem_write: boolean; subprocess: boolean; package_install: boolean; privilege_escalation: boolean; external_publish: boolean; llm_gateway: boolean; credential_refs: string[] };
+  capabilities: Array<{ name: string; action: string | null; effect: string }>;
+}
+
 export interface ImportedSkillResponse {
+  admission_state?: SkillPolicyReview["admission_state"];
+  policy_review?: SkillPolicyReview | null;
   skill_name: string;
   display_name: string;
   description: string;
@@ -2091,6 +2106,7 @@ export interface HostCapacitySummary {
 }
 
 export interface HostSystemSummary {
+  version?: { package_version: string; build_revision: string | null; source_revision: string | null; source_match: "matched" | "different" | "unavailable" };
   schema_version: number;
   collected_at_ts: number;
   os: {
