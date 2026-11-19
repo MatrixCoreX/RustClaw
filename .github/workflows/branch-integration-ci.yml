@@ -2,7 +2,7 @@ name: Completed branch integration verification
 
 "on":
   push:
-    branches: ["ci/runtime-custody-integration-*", "ci/completed-branches-*", "ci/runtime-priority-optimization-*"]
+    branches: ["ci/runtime-custody-integration-*", "ci/completed-branches-*", "ci/runtime-priority-optimization-*", "ci/runtime-maintenance-*"]
   workflow_dispatch:
 
 permissions:
@@ -104,6 +104,8 @@ jobs:
           python3 -m unittest discover -s scripts/tests -p test_memory_project_process_probe.py
           python3 -m unittest discover -s scripts/tests -p test_clean_dev_artifacts.py
           python3 -m unittest discover -s scripts/tests -p test_check_staged_secrets.py
+          python3 -m unittest discover -s scripts/tests -p test_runtime_checkpoint.py -v
+          python3 -m unittest discover -s scripts/tests -p test_deployment_staging_deduplication.py -v
           npm ci --ignore-scripts --prefix UI
           npm run lint --prefix UI
           npm test --prefix UI

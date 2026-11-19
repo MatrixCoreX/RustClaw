@@ -137,6 +137,9 @@ fn build_openai_request(
         ("messages".to_string(), Value::Array(messages)),
         ("stream".to_string(), Value::Bool(request.stream)),
     ]);
+    if request.stream {
+        body.insert("stream_options".to_string(), json!({"include_usage": true}));
+    }
     if let Some(value) = hints.temperature.or(params.default_temperature) {
         body.insert("temperature".to_string(), json!(value));
     }

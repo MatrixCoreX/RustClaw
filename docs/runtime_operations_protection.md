@@ -13,3 +13,69 @@ Authenticated `GET /v1/memory/jobs` returns the caller's latest 100 job snapshot
 Detached launchers preserve the previous log before starting a daemon and then append to the new log. Each prior run is gzip-compressed, byte-verified and retained as `<component>.log.previous.<timestamp>.<pid>.log.gz`, with the newest 20 prior runs retained per component. Compression failure retains the uncompressed prior run and fails startup rather than truncating evidence. Never invoke the rotation helper against a live writer. Model I/O continues to use its existing daily rotation policy.
 
 Validation runs through the exact-SHA `runtime-operations-ci.yml` candidate workflow on Linux and macOS, plus ARM64 cross compilation. Tests cover typed permanent/transient errors, model reconstruction, stale lease fencing, principal boundaries, stalled blocking work, disk thresholds, restart recovery and lossless log rotation including disk-write failure.
+
+## Verified control-plane checkpoints
+
+`python3 scripts/runtime_checkpoint.py create --root ROOT --destination BACKUP_ROOT`
+creates an owner-private checkpoint on a different filesystem. It checks that foreground
+work is idle, stops the selected runtime service, checkpoints SQLite WAL files, holds
+writer fences, freezes a local snapshot and immediately resumes the runtime. Compression
+and database/control-file SHA-256 verification happen after service recovery, before atomic
+publication. The runtime is restarted on both success and failure. The snapshot requires a
+temporary filesystem with enough space and, when using Linux tmpfs, explicit RAM headroom.
+An active task, unavailable service controller or insufficient destination space blocks the
+operation. Older checkpoints are retired only after a complete new checkpoint is verified.
+No build is performed. The default retention is one checkpoint; choose a larger value only
+when the destination can accommodate the extra verified copy plus the next staging peak.
+
+The scope includes runtime/audit and skill SQLite databases, configuration, local broker
+credentials, runtime binaries, UI, admission generations and installed-package pointers.
+This is a **control-plane checkpoint**, not a full machine backup. Keep task attachment
+files, models, immutable installed package payloads and external connector storage
+separately. The manifest lists these exclusions. A restored runtime requires the exact
+matching installed packages and their receipts; never mix old programs with a newer database.
+
+`verify --checkpoint PATH` rechecks every archive/member and original database digest.
+`restore --checkpoint PATH --output NEW_DIRECTORY` refuses existing output, rejects
+links/path escapes, verifies each restored digest and runs SQLite quick checks. It does
+not replace or activate the live runtime. Retain the currently working installation until
+the restored configuration, package receipts, authentication and a real task are verified.
+
+`install_runtime_checkpoint_timer.py --root ROOT --destination BACKUP_ROOT --install`
+installs a daily systemd timer on Linux; it uses the current operator account and the
+existing non-interactive service-control permissions. Preview without `--install`.
+Unsupported service managers return an explicit unsupported result; macOS supports
+verified offline checkpoints/restores, with service quiescence managed by the operator.
+The administrator console shows the latest attempted checkpoint status without exposing
+backup paths or credentials. A failed attempt does not mean an older backup was removed.
+
+## Historical memory job review
+
+`GET /v1/memory/jobs/review` projects only the authenticated principal's latest 100 failed
+jobs. `POST /v1/memory/jobs/:job_id/disposition` accepts `archive`, `unarchive`, or `retry`
+with the current `review_token`. Stale, cross-principal and running-job mutations fail.
+Archive is a reversible checkpoint annotation: it retains source evidence, errors, attempts
+and job status and excludes that job from legacy bulk repair. Retry uses the existing
+conservative legacy model-binding repair, including ownership/source/consent/quota/model
+checks; an unsuccessful preflight never becomes a model call or an implicit success.
+
+## Usage and shutdown diagnostics
+
+Both OpenAI-compatible request paths request `stream_options.include_usage=true` for
+streamed completions. Non-stream requests are unchanged. Terminal usage frames remain
+separate from model text and survive bounded diagnostic logging. An interrupted stream or
+a provider that omits usage still reports unknown cost, never zero or an invented estimate;
+historical missing usage cannot be reconstructed from text length.
+
+The last browser-service owner now cancels the background reaper and asks each bridge to
+close its browser children before exiting. A bounded five-second grace period retains the
+process-group kill fallback. Dropping one clone does not close another clone's sessions.
+Regression tests require the original parent and all observed descendants to disappear;
+failure diagnostics retain process-group members and `/proc` states on Linux.
+
+Old deployment staging can be deduplicated with
+`deduplicate_deployment_staging.py --root ROOT --apply`: only identical inactive regular
+files with matching modes are hard-linked. Paths, database backups and evidence remain.
+Never edit those historical staging files in place after deduplication; replace a path when
+creating a different version. The command previews by default and refuses incomplete
+process-reference audits.

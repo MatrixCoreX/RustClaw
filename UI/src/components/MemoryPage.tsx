@@ -21,6 +21,7 @@ import type { MemoryListFilters } from "../hooks/useMemoryRuntime";
 import type { KbIdentity } from "../lib/kb-maintenance";
 import { KbMaintenancePanel } from "./KbMaintenancePanel";
 import { MemoryCapacityPanel } from "./MemoryCapacityPanel";
+import { MemoryJobReviewPanel } from "./MemoryJobReviewPanel";
 import { MemoryImportControls } from "./MemoryImportControls";
 import { ExpandableMemoryText } from "./ExpandableMemoryText";
 import type { MemoryImportProgress } from "../lib/memory-import-upload";
@@ -199,6 +200,7 @@ export function MemoryPage({
       <MemoryCapacityPanel t={t} lang={lang} requestScope={requestScope} settings={memorySettings}
         scope={memorySettingScope} conversationId={activeConversationId} apiFetch={apiFetch} />
       <KbMaintenancePanel t={t} apiFetch={apiFetch} identity={kbIdentity} />
+      <MemoryJobReviewPanel t={t} apiFetch={apiFetch} requestScope={requestScope} />
 
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">

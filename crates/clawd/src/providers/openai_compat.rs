@@ -49,6 +49,9 @@ pub(super) async fn call_openai_compat(
         ],
         "stream": effective_stream
     });
+    if effective_stream {
+        req_body["stream_options"] = json!({"include_usage": true});
+    }
     if let Some(map) = req_body.as_object_mut() {
         if let Some(t) = effective_temperature {
             map.insert("temperature".to_string(), json!(t));

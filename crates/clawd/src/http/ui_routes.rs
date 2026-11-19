@@ -208,6 +208,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         )
         .route("/system/host-summary", get(host_system_summary))
         .route("/system/storage-summary", get(get_storage_inventory))
+        .route("/system/checkpoint-status", get(get_checkpoint_status))
         .route("/system/storage-scan", post(record_storage_inventory))
         .route("/system/storage-compact", post(compact_stored_results))
         .route("/system/dependencies", get(host_dependencies))

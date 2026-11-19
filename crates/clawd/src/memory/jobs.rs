@@ -9,6 +9,8 @@ use sha2::{Digest, Sha256};
 use tracing::{info, warn};
 #[path = "job_recovery.rs"]
 pub(crate) mod recovery;
+#[path = "job_review.rs"]
+pub(crate) mod review;
 #[path = "job_sources.rs"]
 mod sources;
 

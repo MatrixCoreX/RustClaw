@@ -68,6 +68,15 @@ fn native_request_maps_messages_and_function_tools() {
         json!(["capability", "args"])
     );
     assert_eq!(body["parallel_tool_calls"], true);
+    assert!(body.get("stream_options").is_none());
+}
+
+#[test]
+fn streaming_request_explicitly_requests_terminal_usage() {
+    let mut request = native_request();
+    request.stream = true;
+    let body = build_openai_request(&provider(), &request, &ChatRequestHints::default()).unwrap();
+    assert_eq!(body["stream_options"], json!({"include_usage": true}));
 }
 
 #[test]

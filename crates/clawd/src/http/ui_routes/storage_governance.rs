@@ -229,6 +229,22 @@ async fn get_storage_inventory(
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
     run_storage_inventory(state, headers, false).await
 }
+
+async fn get_checkpoint_status(State(state): State<AppState>, headers: HeaderMap) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err(response)=require_ui_admin(&state,&headers) { return response; }
+    let path=state.skill_rt.workspace_root.join("data/runtime-checkpoint-status.json");
+    let value=tokio::task::spawn_blocking(move || -> Option<Value> {
+        let meta=fs::symlink_metadata(&path).ok()?;
+        if !meta.is_file() || meta.len()>65536 { return None; }
+        let report: Value=serde_json::from_slice(&fs::read(path).ok()?).ok()?;
+        let mut safe=serde_json::Map::new();
+        for key in ["schema_version","status","error_code","created_at_ts","attempted_at_ts","bytes","database_count"] {
+            if let Some(value)=report.get(key) { safe.insert(key.into(),value.clone()); }
+        }
+        Some(Value::Object(safe))
+    }).await.ok().flatten().unwrap_or_else(||json!({"schema_version":1,"status":"unavailable"}));
+    crate::api_ok(value)
+}
 async fn record_storage_inventory(
     State(state): State<AppState>,
     headers: HeaderMap,

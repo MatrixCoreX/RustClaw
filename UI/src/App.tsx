@@ -81,6 +81,7 @@ import { useChatRuntime } from "./hooks/useChatRuntime";
 import { useAgentConfigRuntime } from "./hooks/useAgentConfigRuntime";
 import { useTaskRuntime } from "./hooks/useTaskRuntime";
 import { StorageGovernancePanel } from "./components/StorageGovernancePanel";
+import { RuntimeCheckpointPanel } from "./components/RuntimeCheckpointPanel";
 import { useSystemRuntime } from "./hooks/useSystemRuntime";
 import { useConsoleProjections } from "./hooks/useConsoleProjections";
 
@@ -2044,7 +2045,7 @@ export default function App() {
               onboardingSteps={onboardingSteps}
               dashboardOverviewItems={dashboardOverviewItems}
               hostSystemSummary={hostSystemSummary}
-              storageGovernancePanel={isAdminIdentity ? <StorageGovernancePanel key={activeUiRequestScope} t={t} apiFetch={apiFetch} requestScope={activeUiRequestScope} /> : null}
+              storageGovernancePanel={isAdminIdentity ? <div className="space-y-4"><StorageGovernancePanel key={activeUiRequestScope} t={t} apiFetch={apiFetch} requestScope={activeUiRequestScope} /><RuntimeCheckpointPanel key={`checkpoint-${activeUiRequestScope}`} t={t} apiFetch={apiFetch} requestScope={activeUiRequestScope} /></div> : null}
               hostSystemLoading={hostSystemLoading}
               hostSystemErrorCode={hostSystemErrorCode}
               hostDependencies={hostDependencies}

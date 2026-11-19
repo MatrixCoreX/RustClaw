@@ -128,6 +128,7 @@ async fn configured_stream_reads_fragmented_text_and_terminal_usage() {
     let f = fixture(true, 200, "text/event-stream", body).await;
     let response = call(&f).await.expect("configured stream must decode SSE");
     assert_eq!(response.text, "hello world");
+    assert_eq!(f.requests.lock().unwrap()[0]["stream_options"], json!({"include_usage": true}));
     assert_eq!(response.usage.unwrap().total_tokens, Some(18));
     assert_eq!(response.request_payload["stream"], true);
     assert!(response.request_payload.get("tools").is_none());

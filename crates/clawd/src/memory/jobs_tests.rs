@@ -635,3 +635,15 @@ fn pinned_vendor_identity_does_not_select_a_transport_protocol() {
         job.provider_type
     );
 }
+
+#[test]
+fn archived_legacy_jobs_are_never_implicitly_retried() {
+    let state = operations_state();
+    insert_operations_job(&state, "failed");
+    let db = state.core.db.get().unwrap();
+    db.execute("UPDATE memory_jobs SET checkpoint_json='{\"disposition\":{\"archived\":true}}' WHERE job_id='operations-job'", []).unwrap();
+    drop(db);
+    assert_eq!(recovery::retry_unavailable(&state,"principal-fixture").unwrap()["requeued_jobs"],0);
+    let db = state.core.db.get().unwrap();
+    assert_eq!(load_job(&db,"operations-job").unwrap().unwrap().status,"failed");
+}

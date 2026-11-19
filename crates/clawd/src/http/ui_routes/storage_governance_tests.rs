@@ -77,6 +77,7 @@ async fn storage_and_policy_endpoints_require_admin_and_do_not_mutate_on_denial(
             .with_state(state.clone());
         for (method, path, body) in [
             (Method::GET, "/v1/system/storage-summary", ""),
+            (Method::GET, "/v1/system/checkpoint-status", ""),
             (Method::POST, "/v1/system/storage-scan", ""),
             (Method::POST, "/v1/system/storage-compact", ""),
             (Method::GET, "/v1/skills/policy-reviews", ""),

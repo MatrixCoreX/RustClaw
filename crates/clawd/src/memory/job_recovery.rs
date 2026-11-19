@@ -24,6 +24,14 @@ pub(crate) fn retry_unavailable(
     state: &crate::AppState,
     principal: &str,
 ) -> anyhow::Result<serde_json::Value> {
+    retry_selected(state, principal, None)
+}
+
+pub(crate) fn retry_selected(
+    state: &crate::AppState,
+    principal: &str,
+    selected: Option<&str>,
+) -> anyhow::Result<serde_json::Value> {
     let mut requeued = 0;
     let mut blocked = 0;
     let jobs = {
@@ -32,9 +40,11 @@ pub(crate) fn retry_unavailable(
             AND ((provider_name = 'unavailable' AND provider_type = 'unavailable' AND model_name = 'unavailable')
               OR (error_code = 'memory_job_provider_unavailable'
                 AND json_extract(checkpoint_json, '$.legacy_repair.reason_code') = 'legacy_empty_model_binding'))
-            AND progress_current = 0 AND cancel_requested = 0 ORDER BY created_at_ts, job_id LIMIT 100")?;
+            AND progress_current = 0 AND cancel_requested = 0
+            AND COALESCE(json_extract(checkpoint_json, '$.disposition.archived'), 0) = 0
+            AND (?2 IS NULL OR job_id = ?2) ORDER BY created_at_ts, job_id LIMIT 100")?;
         let ids = stmt
-            .query_map([principal], |row| row.get::<_, String>(0))?
+            .query_map(params![principal, selected], |row| row.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
         ids.into_iter()
             .map(|id| {
@@ -117,20 +127,22 @@ pub(crate) fn retry_unavailable(
                         '$.model_binding_repair', json(?7))
                     WHERE job_id = ?1 AND principal_id = ?8 AND status = 'failed' AND cancel_requested = 0
                     AND progress_current = 0
+                    AND checkpoint_json = ?9
                     AND ((provider_name = 'unavailable' AND provider_type = 'unavailable' AND model_name = 'unavailable')
                       OR (error_code = 'memory_job_provider_unavailable'
                         AND json_extract(checkpoint_json, '$.legacy_repair.reason_code') = 'legacy_empty_model_binding'))",
                     params![job.job_id, name, provider, model, digest, now,
                         json!({"reason_code":if job.provider_name == "unavailable" { "legacy_empty_model_binding" } else { "provider_protocol_binding_corrected" }, "previous_attempts":job.attempt,
-                            "previous_error_code":job.error_code, "repaired_at_ts":now}).to_string(), principal])?;
+                            "previous_error_code":job.error_code, "repaired_at_ts":now}).to_string(), principal, job.checkpoint_json])?;
             }
             Err(error) => {
                 let failure = JobFailure::from_error(&error);
                 blocked += 1;
                 db.execute("UPDATE memory_jobs SET error_code = ?2, retryable = 0,
                     checkpoint_json = json_set(checkpoint_json, '$.failure', json(?3)), updated_at_ts = ?4
-                    WHERE job_id = ?1 AND principal_id = ?5 AND status = 'failed' AND cancel_requested = 0",
-                    params![job.job_id, failure.error_code, serde_json::to_string(&failure)?, now, principal])?;
+                    WHERE job_id = ?1 AND principal_id = ?5 AND status = 'failed' AND cancel_requested = 0
+                    AND checkpoint_json = ?6",
+                    params![job.job_id, failure.error_code, serde_json::to_string(&failure)?, now, principal, job.checkpoint_json])?;
             }
         }
     }
