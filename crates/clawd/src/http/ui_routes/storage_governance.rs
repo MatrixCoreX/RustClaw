@@ -81,6 +81,28 @@ fn scan_storage_category(
     category
 }
 
+fn scan_storage_categories(
+    roots: &[(&str, PathBuf)],
+    allowed: &Path,
+    budget: &mut usize,
+) -> Vec<StorageCategory> {
+    let mut categories = Vec::with_capacity(roots.len());
+    for (index, (id, path)) in roots.iter().enumerate() {
+        // Reserve a share for every remaining category, including small roots
+        // after large evidence/package trees. Unused entries remain available.
+        let allocated = *budget / (roots.len() - index);
+        let mut category_budget = allocated;
+        categories.push(scan_storage_category(
+            id,
+            path,
+            allowed,
+            &mut category_budget,
+        ));
+        *budget -= allocated - category_budget;
+    }
+    categories
+}
+
 fn storage_inventory(state: &AppState, persist: bool) -> anyhow::Result<StorageInventory> {
     let root = state.skill_rt.workspace_root.canonicalize()?;
     let private = claw_core::workspace_state::workspace_state_root(&root);
@@ -106,10 +128,7 @@ fn storage_inventory(state: &AppState, persist: bool) -> anyhow::Result<StorageI
         ),
         ("runtime_binaries", root.join("target/release")),
     ];
-    let mut categories = roots
-        .iter()
-        .map(|(id, path)| scan_storage_category(id, path, &root, &mut budget))
-        .collect::<Vec<_>>();
+    let mut categories = scan_storage_categories(&roots, &root, &mut budget);
     // Database paths come from SQLite, never a caller-controlled filesystem parameter.
     let db = state
         .core

@@ -3,6 +3,36 @@ use axum::body::{to_bytes, Body};
 use axum::http::{Method, Request};
 use tower::ServiceExt;
 #[test]
+fn large_first_category_cannot_starve_later_categories() {
+    let root = std::env::temp_dir().join(format!("storage-fairness-{}", uuid::Uuid::new_v4()));
+    for name in ["large", "logs", "programs"] {
+        fs::create_dir_all(root.join(name)).unwrap();
+    }
+    for index in 0..64 {
+        fs::write(root.join("large").join(index.to_string()), [1; 32]).unwrap();
+    }
+    fs::write(root.join("logs/current"), [2; 64]).unwrap();
+    fs::write(root.join("programs/runner"), [3; 128]).unwrap();
+    let root = root.canonicalize().unwrap();
+    let roots = [
+        ("large", root.join("large")),
+        ("logs", root.join("logs")),
+        ("programs", root.join("programs")),
+    ];
+    let mut budget = 12;
+    let counts = scan_storage_categories(&roots, &root, &mut budget);
+    assert!(counts[0].partial);
+    assert_eq!(counts[1].bytes, 64);
+    assert_eq!(counts[2].bytes, 128);
+    assert!(!counts[1].partial && !counts[2].partial);
+    assert!(budget < 12);
+    let mut exhausted = 0;
+    let counts = scan_storage_categories(&roots, &root, &mut exhausted);
+    assert!(counts.iter().all(|count| count.partial && count.bytes == 0));
+    assert_eq!(exhausted, 0);
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
 fn inventory_is_bounded_and_never_changes_files() {
     let root = std::env::temp_dir().join(format!("storage-inventory-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&root).unwrap();
