@@ -97,6 +97,14 @@ fn storage_inventory(state: &AppState, persist: bool) -> anyhow::Result<StorageI
         ("logs", root.join("logs")),
         ("models", root.join("data/models")),
         ("backups", root.join("data/backups")),
+        ("release_backups", root.join(".release-backups")),
+        ("release_downloads", root.join("data/runtime-upgrades")),
+        ("prebuilt_packages", root.join("prebuilt/skill-packages")),
+        (
+            "runtime_dependencies",
+            root.join("data/runtime-dependencies"),
+        ),
+        ("runtime_binaries", root.join("target/release")),
     ];
     let mut categories = roots
         .iter()
@@ -129,7 +137,7 @@ fn storage_inventory(state: &AppState, persist: bool) -> anyhow::Result<StorageI
         }
     }
     categories.push(database);
-    let result_compaction=db.query_row("SELECT last_rowid,saved_bytes,compacted_rows FROM runtime_result_object_maintenance WHERE singleton=1",[],|r|Ok(json!({"cursor":r.get::<_,i64>(0)?,"saved_logical_bytes":r.get::<_,u64>(1)?,"compacted_rows":r.get::<_,u64>(2)?}))).unwrap_or_else(|_|json!({"cursor":0,"saved_logical_bytes":0,"compacted_rows":0}));
+    let result_compaction = storage_compaction_stats(&db)?;
     let collected_at_ts = now_unix_seconds();
     if persist {
         db.execute_batch("CREATE TABLE IF NOT EXISTS runtime_storage_inventory_samples(sample_id INTEGER PRIMARY KEY,collected_at INTEGER NOT NULL,snapshot_json TEXT NOT NULL)")?;
@@ -138,11 +146,7 @@ fn storage_inventory(state: &AppState, persist: bool) -> anyhow::Result<StorageI
         tx.execute("DELETE FROM runtime_storage_inventory_samples WHERE sample_id NOT IN (SELECT sample_id FROM runtime_storage_inventory_samples ORDER BY sample_id DESC LIMIT 24)",[])?;
         tx.commit()?;
     }
-    let history=(||->rusqlite::Result<Vec<Value>> {
-        let mut query=db.prepare("SELECT collected_at,snapshot_json FROM runtime_storage_inventory_samples ORDER BY sample_id DESC LIMIT 24")?;
-        let rows=query.query_map([],|r| {let raw:String=r.get(1)?;Ok(json!({"collected_at_ts":r.get::<_,i64>(0)?,"categories":serde_json::from_str::<Value>(&raw).unwrap_or(Value::Null)}))})?.collect();
-        rows
-    })().unwrap_or_default();
+    let history = storage_inventory_history(&db)?;
     Ok(StorageInventory {
         schema_version: 1,
         collected_at_ts,
@@ -150,6 +154,55 @@ fn storage_inventory(state: &AppState, persist: bool) -> anyhow::Result<StorageI
         result_compaction,
         history,
     })
+}
+fn storage_compaction_stats(db: &rusqlite::Connection) -> anyhow::Result<Value> {
+    let exists: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='runtime_result_object_maintenance')",
+        [],
+        |row| row.get(0),
+    )?;
+    let stats: Option<Value> = if exists {
+        db.query_row(
+            "SELECT last_rowid,saved_bytes,compacted_rows FROM runtime_result_object_maintenance WHERE singleton=1",
+            [], |row| Ok(json!({
+                "cursor":row.get::<_,i64>(0)?,
+                "saved_logical_bytes":row.get::<_,u64>(1)?,
+                "compacted_rows":row.get::<_,u64>(2)?,
+            })),
+        ).optional()?
+    } else {
+        None
+    };
+    let mut value =
+        stats.unwrap_or_else(|| json!({"cursor":0,"saved_logical_bytes":0,"compacted_rows":0}));
+    let pages: u64 = db.query_row("PRAGMA freelist_count", [], |row| row.get(0))?;
+    let page_bytes: u64 = db.query_row("PRAGMA page_size", [], |row| row.get(0))?;
+    value["database_reusable_bytes"] = json!(pages.saturating_mul(page_bytes));
+    Ok(value)
+}
+fn storage_inventory_history(db: &rusqlite::Connection) -> anyhow::Result<Vec<Value>> {
+    let exists: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='runtime_storage_inventory_samples')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        return Ok(Vec::new());
+    }
+    let mut query=db.prepare("SELECT collected_at,snapshot_json FROM runtime_storage_inventory_samples ORDER BY sample_id DESC LIMIT 24")?;
+    let rows = query
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|(ts, raw)| {
+            serde_json::from_str::<Vec<StorageCategory>>(&raw)
+                .ok()
+                .map(|categories| json!({"collected_at_ts":ts,"categories":categories}))
+        })
+        .collect())
 }
 async fn get_storage_inventory(
     State(state): State<AppState>,

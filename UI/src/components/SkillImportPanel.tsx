@@ -24,7 +24,7 @@ export interface SkillImportPanelProps {
   onDismissSkillImportPreview: () => void;
   skillPolicyReviews?: SkillPolicyReview[];
   onReviewSkillPolicies?: () => unknown;
-  onApproveSkillPolicy?: (review: SkillPolicyReview, decision: "approve" | "revoke") => unknown;
+  onApproveSkillPolicy?: (review: SkillPolicyReview, decision: "approve" | "revoke" | "discard") => unknown;
 }
 
 export function SkillImportPanel({
@@ -179,8 +179,8 @@ export function SkillImportPanel({
             <p className="mt-2 text-sm text-white/85">{skillImportPreview.description}</p>
             <p className="mt-2 text-sm text-emerald-200">
               {t(
-                skillImportPreview.enabled ? "技能已授权并开启，可以在工具/技能页关闭。" : "技能已安装，尚未授予运行权限；请在上方审阅后决定是否开启。",
-                skillImportPreview.enabled ? "The skill is approved and enabled. Disable it in Tools/Skills." : "The package is installed without runtime approval. Review the permissions above before enabling it.",
+                !skillImportPreview.installed ? "安装记录已移除，配置和数据已保留。" : skillImportPreview.enabled ? "技能已授权并开启，可以在工具/技能页关闭。" : "技能已安装，尚未授予运行权限；请在上方审阅后决定是否开启。",
+                !skillImportPreview.installed ? "Installation removed; configuration and data are retained." : skillImportPreview.enabled ? "The skill is approved and enabled. Disable it in Tools/Skills." : "The package is installed without runtime approval. Review the permissions above before enabling it.",
               )}
             </p>
             <p className="mt-2 text-white/55">

@@ -53,3 +53,21 @@ SQLite free pages are not returned to the filesystem by compression alone. VACUU
 for the compact output. Keep the backup through post-deployment replay, history, authentication and
 task execution checks. A rollback to a runtime without this codec must restore its paired database
 backup; replacing only the executable cannot decode version 2 records.
+
+## Terminal result snapshots
+
+Large `task_lifecycle.resume_executor_result_projection.final_result_json` objects (at least 16 KiB)
+are verified and stored as immutable compressed task-event artifacts when the existing codec saves
+space. The terminal row keeps `final_result_ref` with schema version, artifact ID, original length and
+SHA-256; top-level replies, journals and checkpoint payloads remain intact. The reference is scoped
+to the same task and resolves through the authenticated
+`GET /v1/tasks/{task_id}/events/artifacts/{artifact_id}` contract. Snapshot publication and the result
+row update commit in the same SQLite transaction. A corrupt existing object cannot replace inline
+evidence. Existing running tasks are not rewritten by historical backfill.
+
+The supervised maintenance tick and administrator storage action process bounded, resumable batches
+of at most 64 result rows, verifying exact content before replacing an inline duplicate. The cursor
+and cumulative logical savings are transactional. After reaching the end, a later sweep checks again
+for tasks that completed through another writer. Normal artifact retention and delivery acknowledgment
+rules remain authoritative; compression does not change them. Rolling back to a runtime that cannot
+read these references requires the paired pre-upgrade database backup.

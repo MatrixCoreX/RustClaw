@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import React from "react";
+import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { StorageGovernancePanel } from "../components/StorageGovernancePanel";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SkillPolicyReviewPanel } from "../components/SkillPolicyReviewPanel";
 import type { SkillPolicyReview } from "../types/api";
@@ -12,4 +14,37 @@ test("permission review distinguishes installed and approved and discloses requi
 test("approved skill offers revocation and is translated into English",()=>{
  const markup=renderToStaticMarkup(<SkillPolicyReviewPanel t={(_,en)=>en} reviews={[{...review,admission_state:"enabled"}]} loading={false} onDecision={()=>undefined}/>);
  assert.match(markup,/Approved and enabled/);assert.match(markup,/Revoke approval/);assert.doesNotMatch(markup,/Approve permissions and enable/);
+});
+
+const inventory = { collected_at_ts:20, categories:[{id:"user_outputs",bytes:4096,files:1,partial:true,protected:true}],history:[],result_compaction:{compacted_rows:2,saved_logical_bytes:32000} };
+const english=(_zh:string,en:string)=>en;
+test("storage review is manual, reports partial counts and serializes compaction",async()=>{
+ globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+ const calls:string[]=[];
+ const apiFetch=async(path:string)=>{calls.push(path);return new Response(JSON.stringify({ok:true,data:path.endsWith("storage-compact")?{scanned_rows:64,compacted_rows:2,saved_logical_bytes:32000}:inventory}));};
+ let renderer!:ReactTestRenderer;
+ await act(async()=>{renderer=create(<StorageGovernancePanel t={english} apiFetch={apiFetch} requestScope="owner-a"/>);});
+ try {
+  assert.deepEqual(calls,[]);
+  await act(async()=>{renderer.root.findByType("button").props.onClick();});
+  assert.deepEqual(calls,["/v1/system/storage-scan"]);
+  assert.match(JSON.stringify(renderer.toJSON()),/At least/);assert.match(JSON.stringify(renderer.toJSON()),/Retained/);
+  await act(async()=>{const button=renderer.root.findAllByType("button")[1];button.props.onClick();button.props.onClick();});
+  assert.deepEqual(calls,["/v1/system/storage-scan","/v1/system/storage-compact","/v1/system/storage-scan"]);
+ } finally {await act(async()=>{renderer.unmount();});}
+});
+test("changing server identity prevents a stale compaction from scanning the next server",async()=>{
+ globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+ let resolve!:(response:Response)=>void;const pending=new Promise<Response>(done=>{resolve=done;});const calls:string[]=[];
+ const apiFetch=async(path:string)=>{calls.push(path);return path.endsWith("storage-compact")?pending:new Response(JSON.stringify({ok:true,data:inventory}));};
+ let renderer!:ReactTestRenderer;
+ await act(async()=>{renderer=create(<StorageGovernancePanel t={english} apiFetch={apiFetch} requestScope="owner-a"/>);});
+ try {
+  await act(async()=>{renderer.root.findByType("button").props.onClick();});
+  await act(async()=>{renderer.root.findAllByType("button")[1].props.onClick();});
+  await act(async()=>{renderer.update(<StorageGovernancePanel t={english} apiFetch={apiFetch} requestScope="owner-b"/>);});
+  await act(async()=>{resolve(new Response(JSON.stringify({ok:true,data:{scanned_rows:1,compacted_rows:1,saved_logical_bytes:2048}})));});
+  assert.deepEqual(calls,["/v1/system/storage-scan","/v1/system/storage-compact"]);
+  assert.doesNotMatch(JSON.stringify(renderer.toJSON()),/Compacted 2 historical/);
+ } finally {await act(async()=>{renderer.unmount();});}
 });

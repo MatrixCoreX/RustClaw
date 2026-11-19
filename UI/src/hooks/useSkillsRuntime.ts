@@ -516,14 +516,14 @@ export function useSkillsRuntime({ apiFetch, t, requestScope }: UseSkillsRuntime
     finally { if (ownsRead() && owner.policyReads.finish(request) && !owner.policyWriting) setSkillImportLoading(false); }
   };
 
-  const approveImportedSkillPolicy = async (selected?: SkillPolicyReview, decision: "approve" | "revoke" = "approve") => {
+  const approveImportedSkillPolicy = async (selected?: SkillPolicyReview, decision: "approve" | "revoke" | "discard" = "approve") => {
     const review = selected || skillImportPreview?.policy_review;
     if (!review || !isCurrent() || owner.policyWriting) return;
     owner.policyWriting = true;
     const approved = await showConfirm({
-      title: decision === "approve" ? t("批准运行权限并开启技能？", "Approve permissions and enable this skill?") : t("撤销这个技能的运行授权？", "Revoke this skill’s runtime permissions?"),
-      message: t("请确认下面列出的权限是完成技能工作所必需的。之后可以关闭技能或撤销授权。", "Confirm that the listed permissions are needed. You can disable the skill or revoke this approval later."),
-      confirmLabel: decision === "approve" ? t("批准并开启", "Approve and enable") : t("撤销授权", "Revoke approval"), cancelLabel: t("暂不开启", "Not now"),
+      title: decision === "discard" ? t("移除待授权技能？", "Remove this unapproved skill?") : decision === "approve" ? t("批准运行权限并开启技能？", "Approve permissions and enable this skill?") : t("撤销这个技能的运行授权？", "Revoke this skill’s runtime permissions?"),
+      message: decision === "discard" ? t("会移除安装记录，保留技能文件、配置和数据。", "The installation entry will be removed. Package files, configuration and data are retained.") : t("请确认下面列出的权限是完成技能工作所必需的。之后可以关闭技能或撤销授权。", "Confirm that the listed permissions are needed. You can disable the skill or revoke this approval later."),
+      confirmLabel: decision === "discard" ? t("移除", "Remove") : decision === "approve" ? t("批准并开启", "Approve and enable") : t("撤销授权", "Revoke approval"), cancelLabel: t("暂不开启", "Not now"),
     });
     if (!approved || !isCurrent()) { owner.policyWriting = false; return; }
     owner.policyReads.invalidate();
@@ -537,8 +537,8 @@ export function useSkillsRuntime({ apiFetch, t, requestScope }: UseSkillsRuntime
       const body = await res.json();
       if (!isCurrent()) return;
       if (!res.ok || !body.ok) throw new Error(body.error || "skill_policy_review_failed");
-      setSkillImportPreview((previous) => previous?.skill_name === review.skill_name ? { ...previous, enabled: decision === "approve", admission_state: body.data.admission_state, policy_review: body.data } : previous);
-      setSkillImportMessage(decision === "approve" ? t("权限已批准，技能已开启。", "Permissions approved. The skill is enabled.") : t("运行授权已撤销，技能已停用。", "Runtime approval revoked. The skill is disabled."));
+      setSkillImportPreview((previous) => previous?.skill_name === review.skill_name ? { ...previous, installed: decision !== "discard", enabled: decision === "approve", admission_state: body.data.admission_state, policy_review: body.data } : previous);
+      setSkillImportMessage(decision === "discard" ? t("待授权安装已移除，文件和数据已保留。", "Unapproved installation removed. Files and data are retained.") : decision === "approve" ? t("权限已批准，技能已开启。", "Permissions approved. The skill is enabled.") : t("运行授权已撤销，技能已停用。", "Runtime approval revoked. The skill is disabled."));
       await reviewSkillPolicies();
       await fetchSkillsConfig(); await fetchSkills(); await fetchSkillStore(true);
     } catch (error) {

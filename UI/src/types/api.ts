@@ -1121,7 +1121,7 @@ export interface SkillPolicyReview {
   manifest_digest: string;
   capability_request_digest: string;
   registry_generation: number;
-  admission_state: "awaiting_policy_approval" | "installed_disabled" | "enabled";
+  admission_state: "awaiting_policy_approval" | "installed_disabled" | "enabled" | "tombstoned";
   risk_level: "low" | "medium" | "high";
   permissions: { network: boolean; filesystem_read: boolean; filesystem_write: boolean; subprocess: boolean; package_install: boolean; privilege_escalation: boolean; external_publish: boolean; llm_gateway: boolean; credential_refs: string[] };
   capabilities: Array<{ name: string; action: string | null; effect: string }>;

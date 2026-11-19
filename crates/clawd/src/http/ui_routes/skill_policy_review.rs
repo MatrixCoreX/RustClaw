@@ -4,6 +4,7 @@
 enum SkillPolicyDecision {
     Approve,
     Revoke,
+    Discard,
 }
 
 #[derive(Debug, Deserialize)]
@@ -85,7 +86,7 @@ async fn update_external_skill_policy(
     }
     match tokio::task::spawn_blocking(move || {
         let service = admission_service(&state)?;
-        let (manifest, generation, _) = service
+        let (manifest, generation, current_state) = service
             .external_policy_review(&name)
             .map_err(|e| e.code.to_string())?;
         if generation != request.registry_generation
@@ -108,6 +109,12 @@ async fn update_external_skill_policy(
             ),
             SkillPolicyDecision::Revoke => {
                 (skill_sdk::AdmissionState::AwaitingPolicyApproval, None)
+            }
+            SkillPolicyDecision::Discard => {
+                if current_state != skill_sdk::AdmissionState::AwaitingPolicyApproval {
+                    return Err("skill_policy_discard_requires_unapproved".to_string());
+                }
+                (skill_sdk::AdmissionState::Tombstoned, None)
             }
         };
         let published = service

@@ -763,7 +763,10 @@ flowchart LR
 常用接口（请求时带上当前 UI/user key 的 `X-Agent-Key`）：
 
 - `GET /v1/health`
-- `GET /v1/system/host-summary`：返回经过鉴权、带版本且不含密钥的首页主机摘要，包括系统/版本、架构、内存、Agent Runtime 数据卷存储、运行时长和机器可读的缺失字段
+- `GET /v1/system/host-summary`：返回经过鉴权、带版本且不含密钥的首页主机摘要，包括系统/版本、架构、内存、Agent Runtime 数据卷存储、运行时长和机器可读的缺失字段；`version` 单独报告编译提交、本机源码提交和一致/不同/不可核对状态，不能把版本来源未知当成更新成功
+- `GET /v1/system/storage-summary`：管理员只读查看主要运行目录的占用，扫描有数量/时间上限，不跟随符号链接，不删除任务文件、证据、技能包或模型
+- `POST /v1/system/storage-scan`：记录本次占用，最多保留最近 24 次样本用于比较增减
+- `POST /v1/system/storage-compact`：每批最多检查 64 条历史任务并验证无损压缩；显示逻辑节省量，数据库文件不一定立即变小
 - `GET /v1/system/dependencies`：返回 Linux/macOS 依赖、已安装版本、使用该依赖的工具/技能和可安装状态
 - `GET /v1/system/diagnostics/export`：返回首页下载使用的、经过鉴权、大小受限且默认脱敏的只读诊断摘要
 - `POST /v1/admin/system-dependencies/install`：管理员按固定 `dependency_id` 启动受控异步安装，不接受任意命令或包名
@@ -798,7 +801,9 @@ flowchart LR
 - `GET/POST /v1/skills/config`：读取或更新技能开关；每个多模态技能可以独立开关，关闭时保留已有模型配置
 - `GET /v1/skills/store`：返回由 registry 驱动的可选内置技能与导入技能目录，并区分“已安装”和“已启用”状态
 - `GET /v1/skills/store/{skill_name}/dependencies`：返回 manifest 声明的依赖，以及后端实际检查到的已安装、缺失或不适用状态
-- `POST /v1/skills/store/install`：安装并启用可选技能，然后刷新运行时技能视图
+- `POST /v1/skills/store/install`：安装并启用已经发行授权的可选内置技能，然后刷新运行时技能视图；外部技能首次导入仍需单独审核权限
+- `GET /v1/skills/policy-reviews` 和 `GET /v1/skills/{skill_name}/policy`：管理员查看已准入不可变 manifest 的权限申请和授权状态
+- `POST /v1/skills/{skill_name}/policy`：显式批准或撤销外部技能授权，也能移除待授权记录并保留文件和数据。批准绑定审阅时的 generation、manifest digest、capability-request digest，并重新核对收据/产物。导入时即使传入 `enabled=true`，也只安装并等待授权
 - `POST /v1/skills/store/remove`：从运行时和 planner 可见范围移除可选技能，同时保留可重新安装的内置或导入包；常驻 core/tool 技能会拒绝该操作
 
 本机内部 API 示例（不得暴露或转发 `8787`）：

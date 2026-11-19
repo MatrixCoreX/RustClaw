@@ -799,6 +799,12 @@ impl SkillAdmissionService {
             .join("registry.d")
             .join(format!("{name}.toml"));
         let registry_fragment_digest = match (mutation.metadata.source, mutation.state) {
+            (SkillAdmissionSource::ExternalOverlay, AdmissionState::Tombstoned)
+                if persisted_grant.is_none() =>
+            {
+                remove_optional_file(&registry_path)?;
+                None
+            }
             (
                 SkillAdmissionSource::ExternalOverlay,
                 AdmissionState::Enabled
@@ -1046,7 +1052,7 @@ impl SkillAdmissionService {
                 (
                     SkillAdmissionSource::ExternalOverlay,
                     None,
-                    AdmissionState::AwaitingPolicyApproval,
+                    AdmissionState::AwaitingPolicyApproval | AdmissionState::Tombstoned,
                 )
                 | (SkillAdmissionSource::BundledBase, None, _)
                     if !registry_path.exists() => {}

@@ -102,3 +102,21 @@ fn small_results_and_invalid_references_are_not_rewritten() {
         assert!(!valid_reference(&reference));
     }
 }
+
+#[test]
+fn published_snapshot_is_readable_through_existing_artifact_contract() {
+    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let mut value = result();
+    let original = value.pointer(PROJECTION).unwrap()["final_result_json"].clone();
+    let db = state.core.db.get().unwrap();
+    compact_projection(&db, "public-artifact-probe", &mut value).unwrap();
+    drop(db);
+    let id = value.pointer(PROJECTION).unwrap()["final_result_ref"]["artifact_id"]
+        .as_str()
+        .unwrap();
+    assert_eq!(
+        crate::task_event_transport::read_event_artifact(&state, "public-artifact-probe", id)
+            .unwrap(),
+        Some(original)
+    );
+}

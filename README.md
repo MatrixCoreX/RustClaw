@@ -809,7 +809,14 @@ Useful endpoints (send `X-Agent-Key` for the current UI/user key):
 - `GET /v1/health`
 - `GET /v1/system/host-summary`: returns a versioned, authenticated, secret-free
   host summary for the dashboard, including OS/version, architecture, memory,
-  Agent Runtime data-volume storage, uptime, and machine-readable unavailable fields
+  Agent Runtime data-volume storage, uptime, and machine-readable unavailable fields. `version`
+  reports the compiled revision, local source revision and `matched`/`different`/`unavailable`;
+  unavailable provenance never implies a successful update
+- `GET /v1/system/storage-summary`: administrator-only, bounded inventory of major runtime directories;
+  does not follow symlinks or delete outputs, evidence, packages or models
+- `POST /v1/system/storage-scan`: records a bounded usage sample; retains the latest 24 samples
+- `POST /v1/system/storage-compact`: verifies and compresses at most 64 historical result rows;
+  reports logical savings rather than promising immediate filesystem reclamation
 - `GET /v1/system/dependencies`: returns Linux/macOS dependency state, installed
   versions, consuming tools/skills, and controlled-install availability
 - `GET /v1/system/diagnostics/export`: returns the authenticated, bounded, and
@@ -850,7 +857,9 @@ Useful endpoints (send `X-Agent-Key` for the current UI/user key):
 - `GET/POST /v1/skills/config`: reads or updates skill enablement; each multimodal skill can be switched independently without discarding its model settings
 - `GET /v1/skills/store`: returns the registry-driven catalog for optional bundled and imported skills, including separate `installed` and `enabled` states
 - `GET /v1/skills/store/{skill_name}/dependencies`: reports the manifest-declared dependencies and their observed installed, missing, or not-applicable state
-- `POST /v1/skills/store/install`: installs and enables an optional catalog skill, then reloads runtime skill views
+- `POST /v1/skills/store/install`: installs and enables a release-authorized optional bundled skill, then reloads runtime skill views; an external import remains installed and awaiting policy approval
+- `GET /v1/skills/policy-reviews` and `GET /v1/skills/{skill_name}/policy`: administrators review the immutable admitted manifest, requested access and current grant state
+- `POST /v1/skills/{skill_name}/policy`: explicitly approve or revoke an external skill, or discard an unapproved installation entry while retaining its files/data; approval binds the reviewed generation, manifest digest and capability-request digest and verifies installed receipts/artifacts before publication. Import-time `enabled` flags never grant execution authority
 - `POST /v1/skills/store/remove`: removes an optional skill from runtime and planner visibility while retaining its bundled or imported package for reinstallation; always-on core and tool skills reject this action
 
 Machine-local API example (`8787` must not be exposed or port-forwarded):

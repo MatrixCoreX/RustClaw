@@ -104,3 +104,70 @@ fn runtime_revision_does_not_invent_source_or_build_evidence() {
         None
     );
 }
+
+#[tokio::test]
+async fn inventory_get_is_read_only_and_recorded_trend_is_bounded() {
+    let root = std::env::temp_dir().join(format!("storage-admin-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(root.join("logs")).unwrap();
+    fs::write(root.join("logs/private-log-name"), "private-log-body").unwrap();
+    let mut state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    state.skill_rt.workspace_root = root.clone();
+    state.seed_test_auth_identity("inventory-admin", "admin");
+    let router = Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state.clone());
+    let read = || {
+        Request::builder()
+            .uri("/v1/system/storage-summary")
+            .header("x-agent-key", "inventory-admin")
+            .body(Body::empty())
+            .unwrap()
+    };
+    let response = router.clone().oneshot(read()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let raw = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+    let text = String::from_utf8_lossy(&raw);
+    assert!(!text.contains("private-log-name"));
+    assert!(!text.contains("private-log-body"));
+    assert!(!text.contains(root.to_str().unwrap()));
+    let db = state.core.db.get().unwrap();
+    let count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name='runtime_storage_inventory_samples'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 0);
+    drop(db);
+    for _ in 0..27 {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/v1/system/storage-scan")
+                    .header("x-agent-key", "inventory-admin")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+    let db = state.core.db.get().unwrap();
+    let count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM runtime_storage_inventory_samples",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 24);
+    drop(db);
+    assert_eq!(
+        fs::read_to_string(root.join("logs/private-log-name")).unwrap(),
+        "private-log-body"
+    );
+    fs::remove_dir_all(root).unwrap();
+}

@@ -114,3 +114,28 @@ async fn tampered_manifest_review_cannot_publish_a_grant() {
         .contains("policy_probe"));
     std::fs::remove_dir_all(workspace).unwrap();
 }
+
+#[tokio::test]
+async fn unapproved_install_can_be_discarded_without_creating_a_grant_or_deleting_files() {
+    let (state, workspace, router, data) = installed_unapproved().await;
+    let (status, removed) = call_skill_store_api(
+        router.clone(),
+        Method::POST,
+        "/v1/skills/policy_probe/policy",
+        Some(decision(&data["policy_review"], "discard")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(removed["data"]["admission_state"], "tombstoned");
+    let snapshot = admission_service(&state)
+        .unwrap()
+        .catalog_snapshot()
+        .unwrap();
+    assert!(snapshot.tombstoned.contains("policy_probe"));
+    assert!(!snapshot.enabled.contains("policy_probe"));
+    let (_, list) =
+        call_skill_store_api(router, Method::GET, "/v1/skills/policy-reviews", None).await;
+    assert_eq!(list["data"]["total"], 0);
+    assert!(installed_package_pointer(&workspace, "policy_probe").exists());
+    std::fs::remove_dir_all(workspace).unwrap();
+}

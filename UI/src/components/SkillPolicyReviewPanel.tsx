@@ -2,7 +2,7 @@ import type { SkillPolicyReview } from "../types/api";
 type Translate = (zh: string, en: string) => string;
 export function SkillPolicyReviewPanel({ t, reviews, loading, onDecision }: {
   t: Translate; reviews: SkillPolicyReview[]; loading: boolean;
-  onDecision?: (review: SkillPolicyReview, decision: "approve" | "revoke") => unknown;
+  onDecision?: (review: SkillPolicyReview, decision: "approve" | "revoke" | "discard") => unknown;
 }) {
   const labels: Array<[keyof SkillPolicyReview["permissions"], string, string]> = [
     ["filesystem_read", "读取文件", "Read files"], ["filesystem_write", "修改文件", "Modify files"],
@@ -21,6 +21,7 @@ export function SkillPolicyReviewPanel({ t, reviews, loading, onDecision }: {
       {review.risk_level === "high" && <p className="mt-2 text-sm text-amber-600 dark:text-amber-300">{t("包含修改或外部操作，执行时仍需要确认。", "Includes changes or external actions. Confirmation is still required at execution.")}</p>}
       <details className="mt-2 text-xs opacity-60"><summary>{t("查看能力与版本依据", "Capabilities and version details")}</summary><ul className="mt-2">{review.capabilities.map((capability) => <li key={`${capability.name}:${capability.action}`}>{capability.name}{capability.action ? ` / ${capability.action}` : ""}</li>)}</ul><p className="mt-2 break-all">{review.manifest_digest}</p></details>
       <div className="mt-3 flex flex-wrap gap-2">{!enabled && <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" disabled={loading || !onDecision} onClick={() => onDecision?.(review, "approve")}>{t("批准权限并开启", "Approve permissions and enable")}</button>}
+      {review.admission_state === "awaiting_policy_approval" && <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" disabled={loading || !onDecision} onClick={() => onDecision?.(review, "discard")}>{t("移除待授权技能", "Remove unapproved skill")}</button>}
       {review.admission_state !== "awaiting_policy_approval" && <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" disabled={loading || !onDecision} onClick={() => onDecision?.(review, "revoke")}>{t("撤销授权", "Revoke approval")}</button>}</div>
     </section>;
   })}</div>;

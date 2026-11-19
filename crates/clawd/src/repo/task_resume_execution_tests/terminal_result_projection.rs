@@ -1488,3 +1488,6 @@ fn failed_agent_loop_async_poll_projects_recovery_checkpoint_instead_of_terminal
         crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound
     );
 }
+
+#[path = "terminal_result_object_tests.rs"]
+mod result_object_tests;
