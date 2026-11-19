@@ -878,7 +878,10 @@ async fn internal_extension_admission_uses_the_same_overlay_without_source_write
     assert!(payload["data"]["registry_generation"]
         .as_u64()
         .is_some_and(|generation| generation > 0));
-    assert!(state.get_skills_list().contains(skill_name));
+    assert_eq!(payload["data"]["enabled"], false);
+    assert_eq!(payload["data"]["admission_state"], "awaiting_policy_approval");
+    assert!(!state.get_skills_list().contains(skill_name));
+    assert!(admission_service(&state).unwrap().catalog_snapshot().unwrap().awaiting_policy.contains(skill_name));
     assert_eq!(
         std::fs::read(config_path).expect("config after"),
         config_before

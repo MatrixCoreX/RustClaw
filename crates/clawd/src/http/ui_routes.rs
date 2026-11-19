@@ -287,7 +287,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         )
         .route("/skills/uninstall", post(uninstall_external_skill))
         .route("/skills/policy-reviews", get(list_external_skill_policies))
-        .route("/skills/{skill_name}/policy", get(get_external_skill_policy).post(update_external_skill_policy))
+        .route("/skills/:skill_name/policy", get(get_external_skill_policy).post(update_external_skill_policy))
         .route("/llm/config", get(get_llm_config).post(update_llm_config))
         .route("/llm/test", post(test_llm_config))
         .route("/models/catalog", get(get_model_catalog))

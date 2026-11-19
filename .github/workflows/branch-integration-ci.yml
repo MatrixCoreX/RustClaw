@@ -31,6 +31,7 @@ jobs:
       CARGO_BUILD_JOBS: "3"
       CARGO_TERM_COLOR: always
       APP_REQUIRE_REFERENCE_ADAPTERS: "1"
+      APP_PTY_SESSION_RUNNER: ${{ github.workspace }}/target/debug/pty-session-runner
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
@@ -118,6 +119,15 @@ jobs:
         run: |
           set -euo pipefail
           cargo build --locked -p clawd --bins -p skill-runner --bin skill-runner -p agent-skill-sdk --bin skillctl
+      - name: Verify priority regression boundaries before the full suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x "$APP_PTY_SESSION_RUNNER"
+          for prefix in http::ui_routes::skill_store_tests:: http::ui_routes::storage_governance_tests:: task_result_objects::tests:: repo::tasks::tests::task_resume_execution_tests::terminal_result_projection::result_object_tests:: skills::builtin::builtin_pty_session::tests::; do
+            cargo test --locked -p clawd --bin clawd "$prefix" -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py --prefix "$prefix"
+            cargo test --locked -p clawd --bin clawd "$prefix" -- --test-threads=1 --nocapture
+          done
       - name: Verify shared SDK consumers and native runtime
         shell: bash
         run: |
