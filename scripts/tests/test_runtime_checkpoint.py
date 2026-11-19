@@ -55,8 +55,18 @@ class Checkpoints(unittest.TestCase):
             if path==self.destination:
                 values=list(value);values[2]+=1;return os.stat_result(values)
             return value
-        with patch.object(Path,'stat',stat),patch.object(checkpoint,'controller',side_effect=lambda mode,unit,action:(calls.append(action) or True)),patch.object(checkpoint,'backup_files',side_effect=RuntimeError('checkpoint_simulated')):
+        with patch.object(checkpoint,'running_revision',return_value='fixture-revision'),patch.object(Path,'stat',stat),patch.object(checkpoint,'controller',side_effect=lambda mode,unit,action:(calls.append(action) or True)),patch.object(checkpoint,'freeze',side_effect=RuntimeError('checkpoint_simulated')):
             with self.assertRaises(RuntimeError):checkpoint.create(self.root,self.destination,mode='systemd-system',unit='fixture.service',reserve=0)
         self.assertEqual(calls,['is-active','stop','start'])
+
+    def test_manifest_traversal_and_checkpoint_symlink_are_rejected(self):
+        result=self.create();backup=Path(result['checkpoint'])
+        link=self.base/'alias';link.symlink_to(backup,target_is_directory=True)
+        with self.assertRaisesRegex(RuntimeError,'root_symlink'):verify_checkpoint(link)
+        path=backup/'manifest.json';value=json.loads(path.read_text());value['files'][0]['path']='../escaped'
+        path.write_text(json.dumps(value))
+        with self.assertRaisesRegex(RuntimeError,'path_invalid'):restore_checkpoint(backup,self.base/'unsafe-restore')
+        self.assertFalse((self.base/'escaped').exists())
+
 
 if __name__=='__main__':unittest.main()

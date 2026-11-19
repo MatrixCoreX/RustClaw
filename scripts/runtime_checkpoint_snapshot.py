@@ -10,10 +10,18 @@ import tempfile
 
 def snapshot_parent(required):
     candidates=[Path(tempfile.gettempdir())]
-    if sys.platform=='linux' and Path('/dev/shm').is_dir():candidates.append(Path('/dev/shm'))
+    if sys.platform=='linux' and Path('/dev/shm').is_dir():candidates.insert(0,Path('/dev/shm'))
     for parent in candidates:
         if shutil.disk_usage(parent).free<required+128*1024**2:continue
-        if parent==Path('/dev/shm'):
+        # /tmp can also be tmpfs. Apply a memory reserve to any Linux tmpfs snapshot.
+        memory_backed=parent==Path('/dev/shm')
+        if sys.platform=='linux':
+            mounts=[]
+            for line in Path('/proc/self/mountinfo').read_text().splitlines():
+                before,after=line.split(' - ',1);point=Path(before.split()[4])
+                if parent.resolve().is_relative_to(point):mounts.append((len(point.parts),after.split()[0]))
+            memory_backed=bool(mounts and max(mounts)[1]=='tmpfs')
+        if memory_backed:
             try:
                 entries=dict(line.split(':',1) for line in Path('/proc/meminfo').read_text().splitlines())
                 available=int(entries['MemAvailable'].strip().split()[0])*1024

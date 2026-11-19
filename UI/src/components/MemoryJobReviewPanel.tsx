@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { readJsonApiResponse } from "../lib/api-response";
 import { useRequestOwner } from "../hooks/useRequestOwner";
 import { useUiDialog } from "./UiDialogProvider";
@@ -15,7 +15,11 @@ function reason(code: string | null, t: T) {
 }
 export function MemoryJobReviewPanel({ t, apiFetch, requestScope }: { t: T; apiFetch: (path: string, init?: RequestInit) => Promise<Response>; requestScope: string }) {
   const owns = useRequestOwner(requestScope);
-  const flight = useMemo(() => ({ busy: false }), [owns]);
+  const flight = useMemo(() => ({ busy: false, confirmation: new AbortController() }), [owns]);
+  useLayoutEffect(() => {
+    flight.confirmation = new AbortController();
+    return () => flight.confirmation.abort();
+  }, [flight]);
   const empty = useMemo(() => ({ owner: owns, report: null as Report | null, busy: false, error: false, message: "" }), [owns]);
   const [stored, setStored] = useState(empty);
   const view = stored.owner === owns ? stored : empty;
@@ -40,7 +44,7 @@ export function MemoryJobReviewPanel({ t, apiFetch, requestScope }: { t: T; apiF
   }, [owns]);
   async function act(job: Job, action: "archive" | "unarchive" | "retry") {
     if (!owns() || flight.busy) return;
-    const accepted = await confirm({ title: t("处理历史记忆任务", "Review a historical memory job"),
+    const accepted = await confirm({ signal: flight.confirmation.signal, title: t("处理历史记忆任务", "Review a historical memory job"),
       message: action === "retry" ? t("只有来源、授权和模型配置都通过核验才会重新排队。无法核验的任务会继续保留。", "The job is queued only after source, consent and model checks pass. Unverified jobs remain blocked.") : t("归档只整理失败记录，不会删除记忆或原始证据；之后可以恢复显示。", "Archiving organizes failed records without deleting memories or evidence. You can show them again later."),
       confirmLabel: t("确认", "Confirm"), cancelLabel: t("取消", "Cancel") });
     if (!accepted || !owns() || flight.busy) return;
@@ -69,6 +73,7 @@ export function MemoryJobReviewPanel({ t, apiFetch, requestScope }: { t: T; apiF
         <details className="mt-2 text-xs opacity-60"><summary>{t("诊断信息", "Diagnostics")}</summary><p>{job.error_code ?? "unknown"} · {job.attempt}</p></details>
       </div>)}
       {view.report.total_failed === 0 && <p className="mt-3 text-sm">{t("目前没有失败的后台记忆任务。", "There are no failed memory background jobs.")}</p>}
+      {view.report.total_failed > 0 && !showArchived && view.report.jobs.every(job => job.archived) && <p className="mt-3 text-sm">{t("本页失败记录均已归档，勾选上方选项可查看。", "All failed records on this page are archived. Select the option above to view them.")}</p>}
     </>}
     {view.message && <p role="status" className="mt-3 text-sm">{view.message}</p>}
   </section>;

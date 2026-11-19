@@ -110,7 +110,7 @@ def verify_checkpoint(checkpoint):
 
 
 def restore_checkpoint(checkpoint, output):
-    checkpoint=Path(checkpoint);output=Path(output);verify_checkpoint(checkpoint);value=manifest(checkpoint)
+    checkpoint=Path(checkpoint);output=Path(output).absolute();verify_checkpoint(checkpoint);value=manifest(checkpoint)
     if output.exists() or output.is_symlink():raise RuntimeError('checkpoint_output_exists')
     required=sum(r['raw_bytes'] for r in value['files'])
     parent=output.parent.resolve();parent.mkdir(parents=True,exist_ok=True)

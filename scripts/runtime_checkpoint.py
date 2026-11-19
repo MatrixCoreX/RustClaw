@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 import tomllib
+import urllib.request
 
 from runtime_checkpoint_storage import backup_files, compress_file, restore_checkpoint, verify_checkpoint, write_json, selected_files
 from runtime_checkpoint_snapshot import snapshot_parent, freeze
@@ -38,6 +39,19 @@ def database_paths(root):
             with path.open('rb') as stream:magic=stream.read(16)
             if magic==b'SQLite format 3\0':paths.append(path)
     return sorted(set(paths))
+
+
+def running_revision(root):
+    config=tomllib.loads((root/'configs/config.toml').read_text())['database']
+    path=Path(config['sqlite_path']);path=path if path.is_absolute() else root/path
+    with contextlib.closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True,timeout=5)) as db:
+        key=db.execute("SELECT user_key FROM auth_keys WHERE role='admin' AND enabled=1 LIMIT 1").fetchone()
+    if not key:raise RuntimeError('checkpoint_admin_identity_unavailable')
+    request=urllib.request.Request('http://127.0.0.1:8787/v1/system/host-summary',headers={'x-agent-key':key[0]})
+    with urllib.request.urlopen(request,timeout=10) as response:report=json.load(response)
+    version=report['data']['version'];revision=version.get('build_revision')
+    if not revision or version.get('source_match')=='different':raise RuntimeError('checkpoint_cohort_mismatch')
+    return revision
 
 
 def controller(mode, unit, action):
@@ -83,7 +97,7 @@ def create(root, destination, *, mode, unit, retain=1, reserve=2*1024**3, offlin
             databases=database_paths(root);files=selected_files(root)
             required=sum(p.stat().st_size for p in databases+files)
             frozen=Path(tempfile.mkdtemp(prefix='runtime-checkpoint-',dir=snapshot_parent(required)))
-            revision=subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip()
+            revision=running_revision(root) if not offline else subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip()
             paused_at=time.monotonic()
             try:
                 if not offline:
@@ -96,7 +110,7 @@ def create(root, destination, *, mode, unit, retain=1, reserve=2*1024**3, offlin
             finally:
                 if stopped:controller(mode,unit,'start');stopped=False
             pause_seconds=round(time.monotonic()-paused_at,3) if not offline else 0
-            if revision!=subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip():
+            if offline and revision!=subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip():
                 raise RuntimeError('checkpoint_source_changed')
             staging=Path(tempfile.mkdtemp(prefix='.pending-',dir=destination))
             manifest={'schema_version':1,'kind':'runtime_control_checkpoint','created_at_ts':int(time.time()),
