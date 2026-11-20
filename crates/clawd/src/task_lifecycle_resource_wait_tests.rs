@@ -16,3 +16,10 @@ fn resource_diagnostics_remain_during_wait_but_not_after_resume_or_completion() 
     append_lifecycle_product_contract_fields(&mut current, &json!({}), "background");
     assert!(!current.contains_key("resource_wait"));
 }
+
+#[test]
+fn null_resume_reason_does_not_hide_a_new_authoritative_reason_code() {
+    let mut current=json!({"resume_reason":null,"reason_code":"pending_async_job","message_key":"clawd.task.resource_waiting","resource_wait":{"schema_version":1,"reason_code":"storage_pressure"}}).as_object().unwrap().clone();
+    append_lifecycle_product_contract_fields(&mut current, &json!({}), "background");
+    assert!(!current.contains_key("resource_wait"));
+}

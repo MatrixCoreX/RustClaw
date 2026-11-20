@@ -909,8 +909,8 @@ fn append_lifecycle_product_contract_fields(
 ) {
     let current_reason = obj
         .get("resume_reason")
-        .or_else(|| obj.get("reason_code"))
-        .and_then(Value::as_str);
+        .and_then(Value::as_str)
+        .or_else(|| obj.get("reason_code").and_then(Value::as_str));
     let resource_waiting = lifecycle_state_token_is_paused(state)
         && current_reason.map_or_else(
             || {
