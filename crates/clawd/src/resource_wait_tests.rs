@@ -41,7 +41,7 @@ fn canonical_retryable_skill_error_round_trips_to_public_diagnostics() {
         "fixture diagnostic",
         None,
         Some(
-            json!({"retryable":true,"wait_reason":"storage_pressure","storage_pressure":{"volumes":[
+            json!({"retryable":true,"side_effect_applied":false,"failure_phase":"pre_dispatch","wait_reason":"storage_pressure","storage_pressure":{"volumes":[
                 {"role":"system","state":"critical","available_bytes":1,"critical_reserve_bytes":2}
             ]}}),
         ),
@@ -49,4 +49,16 @@ fn canonical_retryable_skill_error_round_trips_to_public_diagnostics() {
     let value = from_error(&raw).unwrap();
     assert_eq!(value["reason_code"], "storage_pressure");
     assert_eq!(value["volumes"][0]["shortfall_bytes"], 2);
+}
+
+#[test]
+fn diagnostics_require_the_complete_host_admission_refusal_contract() {
+    let raw = crate::skills::structured_skill_error_from_parts(
+        "fixture",
+        "resource_admission_unavailable",
+        "fixture",
+        None,
+        Some(json!({"retryable":true,"wait_reason":"storage_pressure"})),
+    );
+    assert!(from_error(&raw).is_none());
 }

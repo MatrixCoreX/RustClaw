@@ -2133,7 +2133,7 @@ fn resource_wait_checkpoint_retains_numeric_diagnostics_from_the_failed_step() {
         "fixture",
         None,
         Some(
-            serde_json::json!({"retryable":true,"wait_reason":"storage_pressure","storage_pressure":{"volumes":[{"role":"system","state":"critical","available_bytes":100,"critical_reserve_bytes":200,"path":"PRIVATE_FIXTURE"}]}}),
+            serde_json::json!({"retryable":true,"side_effect_applied":false,"failure_phase":"pre_dispatch","wait_reason":"storage_pressure","storage_pressure":{"volumes":[{"role":"system","state":"critical","available_bytes":100,"critical_reserve_bytes":200,"path":"PRIVATE_FIXTURE"}]}}),
         ),
     );
     loop_state
