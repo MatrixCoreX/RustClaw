@@ -1,6 +1,24 @@
 use super::*;
 use serde_json::json;
 
+fn with_native_semantics(
+    state: &AppState,
+    task: &ClaimedTask,
+    capability: &str,
+    index: &str,
+) -> String {
+    let descriptions = crate::capability_map::planner_disclosed_native_capability_groups_for_task(
+        state,
+        task,
+        &BTreeSet::new(),
+    )
+    .into_iter()
+    .filter(|group| group.capability_names.iter().any(|name| name == capability))
+    .map(|group| group.native_description_for(capability))
+    .collect::<Vec<_>>();
+    format!("{index}\n{}", descriptions.join("\n"))
+}
+
 fn task() -> crate::ClaimedTask {
     crate::ClaimedTask {
         claim_attempt: 0,
@@ -157,6 +175,7 @@ fn first_round_uses_complete_compact_index_without_playbooks() {
         .lines()
         .find(|line| line.contains("kb.search(action=search"))
         .expect("KB compact-index line");
+    let kb_line = with_native_semantics(&state, &task, "kb.search", kb_line);
     assert!(
         kb_line.contains("namespace is a logical KB identifier")
             && kb_line.contains("semantic_tags=knowledge_base_search")
@@ -167,7 +186,12 @@ fn first_round_uses_complete_compact_index_without_playbooks() {
         context.text.contains("schedule.create_structured"),
         "fixed-on eager schedule capabilities must remain visible in the first round"
     );
-    let task_control_line = task_control_line.expect("task_control compact-index line");
+    let task_control_line = with_native_semantics(
+        &state,
+        &task,
+        "task_control.list",
+        task_control_line.expect("task_control compact-index line"),
+    );
     assert!(
         task_control_line.contains("provider_cause_policy"),
         "task_control_line={task_control_line}"
@@ -191,11 +215,23 @@ fn first_round_uses_complete_compact_index_without_playbooks() {
         .lines()
         .find(|line| line.contains("system.runtime_status(action=runtime_status"))
         .expect("system_basic compact-index line");
-    assert!(
-        system_basic_line.contains("system.runtime_status(action=runtime_status")
-            && system_basic_line.contains("required=kind"),
-        "system_basic_line={system_basic_line}"
-    );
+    assert!(system_basic_line.contains("system.runtime_status(action=runtime_status"));
+    let entries = super::super::capability_catalog::catalog_entries_for_task(&state, &task);
+    let entry = entries
+        .iter()
+        .find(|entry| entry.capability_id == "system.runtime_status")
+        .unwrap();
+    let (expanded, _) = super::super::capability_catalog::expand_catalog(
+        &state,
+        &task,
+        &[entry.capability_ref.clone()],
+    )
+    .unwrap();
+    assert!(expanded["contracts"][0]["contract"]["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value == "kind"));
     let fs_basic_line = context
         .text
         .lines()
@@ -235,6 +271,24 @@ fn discovery_index_retains_every_authorized_reference_without_duplicating_policy
     let task = task();
     let context = build_planner_skill_context(&state, &task, &super::super::LoopState::default());
     let entries = super::super::capability_catalog::catalog_entries_for_task(&state, &task);
+    let (expanded, _) = super::super::capability_catalog::expand_catalog(
+        &state,
+        &task,
+        &entries
+            .iter()
+            .map(|entry| entry.capability_ref.clone())
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    let contracts = expanded["contracts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| (entry["capability_ref"].as_str().unwrap(), entry))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert!(context
+        .quick_index_text
+        .contains("catalog_contract_sha256="));
     let mut previous_chars = 0;
     for skill in state.planner_available_skills_for_task(&task) {
         let manifest = state.skill_manifest(&skill).unwrap();
@@ -248,7 +302,28 @@ fn discovery_index_retains_every_authorized_reference_without_duplicating_policy
             "missing {}",
             entry.capability_ref
         );
-        assert!(context.quick_index_text.contains(&entry.contract_sha256));
+        assert_eq!(
+            contracts[entry.capability_ref.as_str()]["contract_sha256"],
+            entry.contract_sha256
+        );
+        assert_eq!(
+            contracts[entry.capability_ref.as_str()]["contract"],
+            entry.contract
+        );
+        let surface = with_native_semantics(
+            &state,
+            &task,
+            &entry.capability_id,
+            &context.quick_index_text,
+        );
+        assert!(
+            surface.contains(&entry.purpose),
+            "missing purpose for {}",
+            entry.capability_ref
+        );
+        for tag in &entry.semantic_tags {
+            assert!(surface.contains(tag), "missing semantic tag {tag}");
+        }
         assert_eq!(
             context
                 .quick_index_text
@@ -256,7 +331,10 @@ fn discovery_index_retains_every_authorized_reference_without_duplicating_policy
                 .count(),
             1
         );
-        previous_chars += entry.capability_id.chars().count()
+        previous_chars += super::super::capability_catalog::discovery_catalog_line(entry)
+            .chars()
+            .count()
+            + entry.capability_id.chars().count()
             + entry.contract_sha256.len()
             + entry.capability_ref.len()
             + 32;
@@ -291,6 +369,7 @@ fn first_round_media_capability_eagerly_exposes_app_and_web_share_default_downlo
         .lines()
         .find(|line| line.contains("media_download.download(action=download"))
         .expect("media download compact-index line");
+    let media_line = with_native_semantics(&state, &task, "media_download.download", media_line);
 
     for expected in [
         "purpose=Default action for one current supported public copied App share",

@@ -113,6 +113,18 @@ pub(super) fn native_group_leaf_tool_name(
     }
 }
 
+impl crate::capability_map::PlannerNativeCapabilityGroup {
+    pub(in crate::agent_engine) fn native_description_for(&self, capability: &str) -> String {
+        if self.capability_names.len() == 1 {
+            self.description.clone()
+        } else {
+            self.capability_descriptions.get(capability).cloned().unwrap_or_else(|| format!(
+                "runtime_capability_leaf_v1; source_group={}; capability={capability}; dispatch=resolver_verifier",self.skill_name
+            ))
+        }
+    }
+}
+
 pub(super) fn native_group_tool_definitions(
     group: &crate::capability_map::PlannerNativeCapabilityGroup,
 ) -> Vec<ModelToolDefinition> {
@@ -120,20 +132,7 @@ pub(super) fn native_group_tool_definitions(
         .capability_names
         .iter()
         .map(|capability| {
-            let description = if group.capability_names.len() == 1 {
-                group.description.clone()
-            } else {
-                group
-                    .capability_descriptions
-                    .get(capability)
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        format!(
-                            "runtime_capability_leaf_v1; source_group={}; capability={capability}; dispatch=resolver_verifier",
-                            group.skill_name
-                        )
-                    })
-            };
+            let description = group.native_description_for(capability);
             native_capability_tool_definition(
                 &native_group_leaf_tool_name(group, capability),
                 &description,

@@ -189,6 +189,32 @@ pub(super) fn build_skill_quick_index_text_scoped(
     }
     let registry = state.get_skills_registry();
     let catalog_entries = super::capability_catalog::catalog_entries_for_task(state, task);
+    let native_descriptions =
+        crate::capability_map::planner_disclosed_native_capability_groups_for_task(
+            state,
+            task,
+            &BTreeSet::new(),
+        )
+        .into_iter()
+        .flat_map(|group| {
+            group
+                .capability_names
+                .iter()
+                .map(|name| (name.clone(), group.native_description_for(name)))
+                .collect::<Vec<_>>()
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let catalog_digest = {
+        use sha2::{Digest, Sha256};
+        let mut hash = Sha256::new();
+        for entry in &catalog_entries {
+            hash.update(entry.capability_ref.as_bytes());
+            hash.update([0]);
+            hash.update(entry.contract_sha256.as_bytes());
+            hash.update([0]);
+        }
+        format!("{:x}", hash.finalize())
+    };
     enabled.sort_by(|left, right| {
         let eager = |skill: &str| {
             registry
@@ -226,7 +252,14 @@ pub(super) fn build_skill_quick_index_text_scoped(
         let capability_entries = catalog_entries
             .iter()
             .filter(|entry| entry.skill_id == *skill)
-            .map(super::capability_catalog::discovery_catalog_line)
+            .map(|entry| {
+                super::capability_catalog::navigation_catalog_line(
+                    entry,
+                    native_descriptions
+                        .get(&entry.capability_id)
+                        .map(String::as_str),
+                )
+            })
             .collect::<Vec<_>>();
         if !capability_entries.is_empty() {
             catalog_lines.push(format!(
@@ -236,7 +269,7 @@ pub(super) fn build_skill_quick_index_text_scoped(
         }
     }
     format!(
-        "capability_catalog_v1 complete=true skill_count={} contract_details=load_capability_groups(op=expand)\n{}",
+        "capability_catalog_v1 complete=true skill_count={} catalog_contract_sha256={catalog_digest} contract_details=load_capability_groups(op=expand)\n{}",
         catalog_lines.len(),
         catalog_lines.join("\n")
     )

@@ -182,16 +182,42 @@ pub(super) fn expand_catalog(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn discovery_catalog_line(entry: &CapabilityCatalogEntry) -> String {
+    catalog_line(entry, true, None)
+}
+
+pub(super) fn navigation_catalog_line(
+    entry: &CapabilityCatalogEntry,
+    native_description: Option<&str>,
+) -> String {
+    catalog_line(entry, false, native_description)
+}
+
+fn catalog_line(
+    entry: &CapabilityCatalogEntry,
+    include_contract: bool,
+    native_description: Option<&str>,
+) -> String {
     let mut attrs = Vec::new();
     if let Some(action) = &entry.action {
         attrs.push(format!("action={action}"));
     }
-    attrs.push(format!("purpose={}", entry.purpose));
+    // Omit purpose only when the exact complete text already exists in the
+    // native tool supplied to this model request. All semantic tags remain in
+    // navigation; truncated native descriptions never erase discovery evidence.
+    if !native_description.is_some_and(|text| text.contains(entry.purpose.as_str())) {
+        attrs.push(format!("purpose={}", entry.purpose));
+    }
     if !entry.semantic_tags.is_empty() {
         attrs.push(format!("semantic_tags={}", entry.semantic_tags.join("|")));
     }
-    if let Some(required) = entry.contract.get("required").and_then(Value::as_array) {
+    if let Some(required) = entry
+        .contract
+        .get("required")
+        .and_then(Value::as_array)
+        .filter(|_| include_contract)
+    {
         if !required.is_empty() {
             attrs.push(format!(
                 "required={}",
@@ -203,7 +229,9 @@ pub(super) fn discovery_catalog_line(entry: &CapabilityCatalogEntry) -> String {
             ));
         }
     }
-    attrs.push(format!("contract_sha256={}", entry.contract_sha256));
+    if include_contract {
+        attrs.push(format!("contract_sha256={}", entry.contract_sha256));
+    }
     attrs.push(format!("expand_ref={}", entry.capability_ref));
     format!("{}({})", entry.capability_id, attrs.join(","))
 }
