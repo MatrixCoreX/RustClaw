@@ -5,7 +5,7 @@ Chinese version: `README.zh-CN.md`
 Agent Runtime is a self-hosted agent platform written in Rust and centered on the `clawd` daemon. It combines multi-channel chat access, task execution, tool and skill routing, memory, scheduling, a browser UI, and `user_key`-based identity in one deployable stack.
 
 <!-- ai-learning-stage: foundations -->
-- Host free-space admission, supervised background jobs, typed memory failures and restart-safe log retention: [operations protection](docs/runtime_operations_protection.md).
+- Host free-space admission and growth estimates, supervised jobs, typed memory failures, incremental encrypted backups with retry recovery, and restart-safe log retention: [operations protection](docs/runtime_operations_protection.md).
 
 ## Overview
 

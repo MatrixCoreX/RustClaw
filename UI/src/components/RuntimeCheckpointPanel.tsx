@@ -23,9 +23,12 @@ export function RuntimeCheckpointPanel({ t, apiFetch, requestScope }: { t: (zh: 
     finally { flight.busy = false; }
   }
   useEffect(() => { void refresh();
+    const timer=setInterval(()=>{if(typeof document==="undefined"||document.visibilityState!=="hidden")void refresh();},60000);
+    return ()=>clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [owns]);
   const ready = ["verified", "verified_remote", "verified_local_remote_failed"].includes(view.report?.status ?? "");
+  const pendingRun=["local","remote","deferred","retry_pending","attention"].includes(view.report?.backup_run?.phase??"");
   const failure = ["checkpoint_foreground_not_idle", "checkpoint_distributed_work_active"].includes(view.report?.error_code ?? "")
     ? t("正在执行任务，本次备份已延后。原有备份会保留。", "Work is in progress; this checkpoint was deferred. The previous checkpoint is retained.")
     : view.report?.error_code === "checkpoint_read_fence_timeout"
@@ -35,7 +38,7 @@ export function RuntimeCheckpointPanel({ t, apiFetch, requestScope }: { t: (zh: 
       : t("最近一次备份未完成，请检查目标磁盘空间和服务权限。原备份会保留。", "The latest checkpoint failed. Check destination space and service permissions. The previous checkpoint is retained.");
   return <section className="theme-panel-soft p-4 sm:p-5">
     <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">{t("自动备份", "Automatic backups")}</h3><button className="theme-secondary-btn px-3 py-2 text-sm" disabled={view.busy || !requestScope} onClick={() => void refresh()}>{t("刷新状态", "Refresh status")}</button></div>
-    <p className="mt-2 text-sm">{ready ? t("最近一次备份已完成并通过校验。", "The latest checkpoint completed and passed verification.") : view.report?.status === "failed" ? failure : t("暂未取得已验证的备份，请检查备份计划。", "No verified checkpoint is available. Check the backup schedule.")}</p>
+    <p className="mt-2 text-sm">{ready ? pendingRun?t("已有通过校验的备份；本次自动流程尚未完成。","An existing copy passed verification; the current backup run has not completed."):t("最近一次备份已完成并通过校验。", "The latest checkpoint completed and passed verification.") : view.report?.status === "failed" ? failure : t("暂未取得已验证的备份，请检查备份计划。", "No verified checkpoint is available. Check the backup schedule.")}</p>
     {view.report?.status === "verified_remote" && <p className="mt-2 text-xs opacity-65">{t("异机副本也已通过校验。", "The copy on another host also passed verification.")}</p>}
     {view.report?.status === "verified_local_remote_failed" && <p role="alert" className="mt-2 text-sm">{t("本地备份可用，异机复制尚未完成。请检查服务器连接。", "The local checkpoint is available, but the remote copy did not complete. Check the server connection.")}</p>}
     {ready && <p className="mt-2 text-xs opacity-65">{formatUnixDateTime(view.report?.created_at_ts, t("zh-CN", "en-US"))} · {formatBytes(view.report?.bytes ?? 0)}</p>}

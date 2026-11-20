@@ -43,3 +43,16 @@ test("exhausted retry budgets remain actionable without presenting a failed copy
   assert(text.includes("recovery key"));
   assert(!text.includes("Incremental encrypted copy verified"));
 });
+test("backup notices refresh automatically and retired timers cannot use an expired owner",async(context)=>{
+  globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+  let tick:(()=>void)|undefined;let cleared=0;let calls=0;
+  context.mock.method(globalThis,"setInterval",(...args:unknown[])=>{const callback=args[0];if(typeof callback==="function")tick=()=>{callback();};return 0 as unknown as ReturnType<typeof setInterval>;});
+  context.mock.method(globalThis,"clearInterval",()=>{cleared++;});
+  const apiFetch=async()=>{calls++;return new Response(JSON.stringify({ok:true,data:{status:"verified",backup_run:{phase:"retry_pending",next_retry_at_ts:2000}}}));};
+  let view!:ReactTestRenderer;
+  await act(async()=>{view=create(<RuntimeCheckpointPanel t={t} apiFetch={apiFetch} requestScope="timer-owner"/>);});
+  assert.equal(calls,1);assert(JSON.stringify(view.toJSON()).includes("current backup run has not completed"));
+  await act(async()=>{tick?.();});assert.equal(calls,2);
+  await act(async()=>{view.unmount();});assert.equal(cleared,1);
+  await act(async()=>{tick?.();});assert.equal(calls,2);
+});

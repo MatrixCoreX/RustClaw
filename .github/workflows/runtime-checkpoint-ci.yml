@@ -8,7 +8,7 @@ permissions:
 jobs:
   runtime-reference:
     runs-on: ubuntu-22.04
-    timeout-minutes: 35
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -20,14 +20,14 @@ jobs:
         run: |
           python3 - <<'PY'
           import json,os,subprocess,time
-          allowed={'.github/workflows/runtime-checkpoint-ci.yml','scripts/runtime_checkpoint.py','scripts/runtime_checkpoint_storage.py','scripts/runtime_checkpoint_snapshot.py','scripts/install_runtime_checkpoint_timer.py','scripts/tests/test_runtime_checkpoint.py','scripts/runtime_checkpoint_remote.py','scripts/tests/test_runtime_checkpoint_remote.py','docs/runtime_operations_protection.md','UI/src/components/RuntimeCheckpointPanel.tsx','UI/src/lib/checkpoint-status.test.tsx'}
+          allowed={'.github/workflows/runtime-checkpoint-ci.yml','scripts/runtime_checkpoint.py','scripts/runtime_checkpoint_storage.py','scripts/runtime_checkpoint_snapshot.py','scripts/install_runtime_checkpoint_timer.py','scripts/tests/test_runtime_checkpoint.py','scripts/runtime_checkpoint_remote.py','scripts/tests/test_runtime_checkpoint_remote.py','docs/runtime_operations_protection.md','UI/src/components/RuntimeCheckpointPanel.tsx','UI/src/lib/checkpoint-status.test.tsx','README.md','README.zh-CN.md','scripts/runtime_backup_schedule.py','scripts/runtime_checkpoint_requirements.txt','scripts/runtime_checkpoint_vault.py','scripts/runtime_vault_cipher.py','scripts/runtime_vault_payloads.py','scripts/runtime_vault_receiver.py','scripts/runtime_vault_restore.py','scripts/runtime_vault_verify.py','scripts/storage_lifecycle.py','scripts/tests/test_install_runtime_checkpoint_timer.py','scripts/tests/test_runtime_backup_schedule.py','scripts/tests/test_runtime_vault.py','scripts/tests/test_storage_lifecycle.py'}
           runs=json.loads(subprocess.check_output(['gh','api','repos/'+os.environ['CHECKPOINT_REPOSITORY']+'/actions/workflows/branch-integration-ci.yml/runs?per_page=100'],text=True))['workflow_runs']
           for run in runs:
               source=run['head_sha']
               if subprocess.run(['git','merge-base','--is-ancestor',source,'HEAD'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode:continue
               changed=set(subprocess.check_output(['git','diff','--name-only',source,'HEAD'],text=True).splitlines())
               if not changed.issubset(allowed):continue
-              for attempt in range(120):
+              for attempt in range(360):
                   current=json.loads(subprocess.check_output(['gh','api','repos/'+os.environ['CHECKPOINT_REPOSITORY']+'/actions/runs/'+str(run['id'])],text=True))
                   if current['status']=='completed':
                       if current['conclusion']!='success':raise SystemExit('checkpoint_reference_runtime_failed')
@@ -60,6 +60,11 @@ jobs:
           node-version: "22"
       - name: Test snapshot isolation, quota failure, recovery and preserved paths
         run: |
+          python3 -m pip install --only-binary=:all: -r scripts/runtime_checkpoint_requirements.txt
+          python3 -m unittest discover -s scripts/tests -p test_runtime_vault.py -v
+          python3 -m unittest discover -s scripts/tests -p test_runtime_backup_schedule.py -v
+          python3 -m unittest discover -s scripts/tests -p test_install_runtime_checkpoint_timer.py -v
+          python3 -m unittest discover -s scripts/tests -p test_storage_lifecycle.py -v
           python3 -m unittest discover -s scripts/tests -p test_runtime_checkpoint.py -v
           python3 -m unittest discover -s scripts/tests -p test_runtime_checkpoint_remote.py -v
           python3 -m unittest discover -s scripts/tests -p test_deployment_staging_deduplication.py -v

@@ -121,3 +121,103 @@ The timer installer accepts `--remote-host SSH_HOST --remote-directory PRIVATE_D
 A failed remote copy retains the verified local checkpoint and the previous remote copy;
 the console distinguishes that state from a failed local checkpoint. An independent host
 protects against loss of the local disk; two local partitions alone do not.
+
+## Incremental encrypted payload backups and retry recovery
+
+`runtime_backup_schedule.py` is the single daily/retry coordinator. Its private state
+records the current phase and verified local checkpoint. Busy foreground/distributed work
+defers the attempt without consuming the failure budget. Other transient failures use
+bounded backoff; a failed remote phase reuses the verified local snapshot. An interrupted
+run also discovers a local checkpoint published before its phase state was saved. A changed
+runtime cohort requires a fresh local checkpoint. Expired/permanent failures retain all
+existing copies and expose an administrator notice instead of repeatedly replaying work.
+
+The systemd installer now creates a daily timer and a separate 15-minute retry timer under
+the operator account. Both share a process lock, retain ExecStopPost service recovery,
+and invoke the same coordinator. Retry ticks also record an hourly storage sample without
+creating agent tasks or calling a model. An older ExecStart drop-in must be reviewed before
+installation can succeed; the installer will not silently enable a conflicting schedule.
+
+Add `--vault-key-file PRIVATE_KEY --scopes packages models --retain-versions 3` to
+`install_runtime_checkpoint_timer.py` to select encrypted backups. Install its pinned
+optional dependency from `scripts/runtime_checkpoint_requirements.txt` using binary wheels.
+The key is a 32-byte random recovery secret, stored owner-only **outside** the workspace
+and outside the vault. Preserve an independent recovery copy before relying on encryption.
+Never put it into Git, command-line values, application logs or the unprivileged receiver's
+directory. The receiving account stores encrypted objects and has no decryption key.
+
+Encrypted vaults include the validated base checkpoint. Optional scopes add exact installed
+package versions, runtime dependencies/toolchains (`packages`), local model files (`models`),
+and committed task files (`attachments`). Package versions come from the frozen checkpoint's
+host pointer schema, not a newly changed live current pointer. Source files and receipts are
+retained. External system dependencies are recorded separately and must be available on a
+recovery host; a backup is not an operating-system image or a new skill permission grant.
+
+Four-MiB plaintext chunks use domain-separated keyed identities and authenticated encryption.
+Unchanged chunks are reused across versions. Both file names and file manifests are encrypted.
+Transfers use one SSH TAR stream instead of a separate network round trip for each file.
+The receiver rejects links, traversal, duplicate members, corruption, excessive sizes and
+space pressure. It publishes a durable index only after checking every referenced ciphertext
+digest. Retention deletes only previously indexed snapshots and objects no retained snapshot
+references. A transaction journal recovers interrupted publication and garbage collection;
+a lost publication acknowledgement never deletes newly committed objects. Unknown files are
+retained. The default is three encrypted versions, with a configurable bound of one to eight.
+
+`runtime_vault_restore.py --host SSH_HOST --remote-directory VAULT_DIRECTORY --key-file
+PRIVATE_KEY --verify-only` decrypts and checks all file hashes as a stream, avoiding a second
+full database-sized temporary copy. It does not claim a new SQLite quick-check execution.
+For an actual restore, replace `--verify-only` with `--output NEW_DIRECTORY`; optional repeated
+`--prefix RELATIVE_PREFIX` selects a recovery subset. Restored SQLite files receive a real
+quick-check. Content hashes, links, permissions and output ownership are verified in a new
+private directory. Existing output is refused and the live runtime is never activated or
+overwritten automatically. Verify matching package receipts and required external dependencies
+before considering activation.
+
+Capacity is checked before selecting clearly oversized attachment sets and continuously on
+the receiver, which preserves a 2-GiB floor. A full attachment scope is not enabled merely
+because the feature exists: it must fit the selected destination. No source attachment,
+model or installed package is removed by backup retention.
+
+```mermaid
+flowchart LR
+    D[Daily timer] --> S[Durable backup phase]
+    R[Retry timer] --> S
+    S --> L[Verified local checkpoint]
+    L --> E[Incremental encryption]
+    S -->|Retry remote phase| E
+    E --> V[Verify and publish remote copy]
+    V --> K[Retain selected versions]
+    K --> N[Restore and verify in a new directory]
+```
+
+## Storage trends and safe relocation
+
+The administrator inventory includes category growth and volume-capacity estimates. Only
+complete category samples at least an hour apart are comparable; volume estimates require
+matching volume role and capacity. Negative growth is retained, missing/short/partial evidence
+stays unknown, and estimates are not deletion or write-admission authority. Existing real-time
+space guards remain authoritative. The history reader supports old category-only samples.
+
+`storage_lifecycle.py policy` describes conservative retention: task files and models require
+explicit user deletion, evidence is retained, installed packages follow admission/leases,
+local checkpoints retire only after verified replacement, and encrypted versions follow the
+verified index. `storage_lifecycle.py relocate --root ROOT --source ARCHIVE --destination
+OTHER_FILESYSTEM` previews relocation of a cold `.release-backups/.../files.tar.gz` only.
+It checks ownership, free space, active references and filesystem identity. `--apply` copies,
+fsyncs and verifies the archive before atomically replacing the original path with a reference
+to the verified copy. Databases, editable user files, models and installed packages are not
+accepted as implicit relocation targets. No extra storage is assumed to exist.
+
+## Native planner input size
+
+Native model requests carry their exact argument contracts in tool definitions. The system
+message uses a sorted complete capability-group index instead of repeating parameter schemas
+and policy descriptions. Discovery retains every authorized reference and semantic tag; a
+purpose is omitted from navigation only if its complete exact text is already supplied in
+the corresponding native tool. A single catalog contract digest replaces repeated leaf
+digests; individual digests and required parameters remain in explicit contract expansion.
+The authorized discovery catalog, explicit contract expansion,
+resolver, verifier, host permissions and generation pinning remain authoritative. Semantic
+decisions still use the ordinary agent loop. Section and tool-surface budget telemetry remains
+available for before/after measurements; input size must be assessed with real provider usage,
+not inferred from output length.
