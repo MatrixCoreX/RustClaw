@@ -35,6 +35,17 @@ class Checkpoints(unittest.TestCase):
         with patch.object(checkpoint,'backup_files',side_effect=RuntimeError('checkpoint_simulated_write_failure')):
             with self.assertRaises(RuntimeError):self.create()
         self.assertTrue(backup.exists());self.assertFalse(list(self.destination.glob('.pending-*')))
+    def test_node_configuration_is_restored_without_copying_transient_work_or_hardware_identity(self):
+        node=self.root/'data/nni';node.mkdir();config=node/'runtime-config.json';config.write_text('{"enabled":true,"server":"https://fixture.invalid"}')
+        work=node/'work';work.mkdir();(work/'old-result.json').write_text('transient result')
+        (node/'hardware-private.fixture').write_text('fixture hardware binding')
+        result=self.create();output=self.base/'restored-node';restore_checkpoint(Path(result['checkpoint']),output)
+        self.assertEqual((output/'data/nni/runtime-config.json').read_bytes(),config.read_bytes())
+        self.assertFalse((output/'data/nni/work').exists());self.assertFalse((output/'data/nni/hardware-private.fixture').exists())
+    def test_node_configuration_cannot_escape_through_a_parent_symlink(self):
+        outside=self.base/'outside-node';outside.mkdir();(outside/'runtime-config.json').write_text('{}')
+        (self.root/'data/nni').symlink_to(outside,target_is_directory=True)
+        with self.assertRaisesRegex(RuntimeError,'checkpoint_source_escaped'):self.create()
     def test_corruption_symlinks_and_low_space_are_rejected(self):
         result=self.create();backup=Path(result['checkpoint']);record=json.loads((backup/'manifest.json').read_text())['files'][0]
         (backup/record['archive']).write_bytes(b'corrupt')

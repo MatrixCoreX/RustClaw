@@ -1,4 +1,6 @@
+import hashlib
 import json
+import tarfile
 from pathlib import Path
 import tempfile
 import sys
@@ -13,19 +15,64 @@ class ScheduleTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.base=Path(self.tmp.name).resolve();self.root=self.base/'root';(self.root/'data').mkdir(parents=True)
-        self.destination=self.base/'backups';self.destination.mkdir()
+        self.destination=self.base/'backups';self.destination.mkdir(mode=0o700)
         self.settings={'root':self.root,'destination':self.destination,'service_mode':'systemd-system','service_unit':'fixture.service','reserve_bytes':0,'read_fence_seconds':1800,'remote_host':'fixture-host','remote_directory':'/private/backups','vault_key_file':None,'scopes':['models'],'retain_versions':3,'retry_limit':3}
         self.now=1000
         self.clock=patch.object(schedule.time,'time',side_effect=lambda:self.now);self.clock.start();self.addCleanup(self.clock.stop)
         self.sample=patch.object(schedule,'sample_inventory');self.sample.start();self.addCleanup(self.sample.stop)
         self.revision=patch.object(schedule.checkpoint,'running_revision',return_value='a'*40);self.revision.start();self.addCleanup(self.revision.stop)
     def state(self):return json.loads((self.root/'data/runtime-backup-schedule.json').read_text())
+    def create_unpublished(self,settings):
+        path=self.destination/('checkpoint-'+str(self.now));path.mkdir(mode=0o700)
+        control=path/'control-files.tar.xz'
+        with tarfile.open(control,'w:xz'):pass
+        write_json(path/'manifest.json',{'schema_version':1,'kind':'runtime_control_checkpoint','created_at_ts':self.now,'source_revision':'a'*40,'files':[],'scope':{},'runtime_pause_seconds':0,'control_archive':{'name':control.name,'sha256':hashlib.sha256(control.read_bytes()).hexdigest(),'bytes':control.stat().st_size}})
+        return {'schema_version':1,'status':'verified','checkpoint':str(path),'created_at_ts':self.now}
     def create(self,settings):
-        path=self.destination/('checkpoint-'+str(self.now));path.mkdir()
-        write_json(path/'manifest.json',{'schema_version':1,'kind':'runtime_control_checkpoint','created_at_ts':self.now,'source_revision':'a'*40,'files':[]})
-        result={'schema_version':1,'status':'verified','checkpoint':str(path),'created_at_ts':self.now}
+        result=self.create_unpublished(settings)
         write_json(self.root/'data/runtime-checkpoint-status.json',result);return result
     def due(self):self.now=self.state()['next_retry_at_ts']+1
+    def test_library_create_result_is_persisted_before_real_remote_status_binding(self):
+        import runtime_checkpoint_remote
+        previous={'schema_version':1,'status':'verified','checkpoint':str(self.destination/'checkpoint-retired'),'created_at_ts':self.now-1}
+        write_json(self.root/'data/runtime-checkpoint-status.json',previous)
+        with patch.object(schedule.checkpoint,'create',side_effect=lambda *args,**kwargs:self.create_unpublished(self.settings)) as create,patch.object(runtime_checkpoint_remote,'sync',return_value={'status':'verified'}):
+            result=schedule.run_cycle(self.settings)
+        self.assertEqual(result['status'],'verified');self.assertEqual(create.call_count,1)
+        status=json.loads((self.root/'data/runtime-checkpoint-status.json').read_text())
+        self.assertEqual(status['checkpoint'],self.state()['checkpoint']);self.assertEqual(status['status'],'verified_remote')
+    def test_crash_after_directory_publication_before_status_or_journal_update_reuses_it(self):
+        def interrupted(*args,**kwargs):
+            self.create_unpublished(self.settings)
+            raise KeyboardInterrupt('fixture crash before library return')
+        with patch.object(schedule.checkpoint,'create',side_effect=interrupted):
+            with self.assertRaises(KeyboardInterrupt):schedule.run_cycle(self.settings)
+        self.assertEqual(self.state()['phase'],'local');self.assertFalse((self.root/'data/runtime-checkpoint-status.json').exists())
+        with patch.object(schedule.checkpoint,'create') as create,patch.object(schedule,'send_remote',return_value={'status':'verified'}):
+            self.assertEqual(schedule.run_cycle(self.settings,retry_only=True)['status'],'verified');create.assert_not_called()
+        self.assertEqual(json.loads((self.root/'data/runtime-checkpoint-status.json').read_text())['checkpoint'],self.state()['checkpoint'])
+    def test_remote_resume_repairs_retired_status_without_creating_or_restarting_local(self):
+        import runtime_checkpoint_remote
+        with patch.object(schedule,'create_local',side_effect=self.create),patch.object(schedule,'send_remote',side_effect=RuntimeError('vault_remote_receive_failed')):schedule.run_cycle(self.settings)
+        state=self.state();self.due()
+        write_json(self.root/'data/runtime-checkpoint-status.json',{'schema_version':1,'status':'verified','checkpoint':str(self.destination/'checkpoint-deleted'),'created_at_ts':1})
+        with patch.object(schedule.checkpoint,'create') as create,patch.object(runtime_checkpoint_remote,'sync',return_value={'status':'verified'}):
+            self.assertEqual(schedule.run_cycle(self.settings,retry_only=True)['status'],'verified');create.assert_not_called()
+        self.assertEqual(json.loads((self.root/'data/runtime-checkpoint-status.json').read_text())['checkpoint'],state['checkpoint'])
+    def test_remote_resume_never_replaces_a_newer_independent_checkpoint_status(self):
+        import runtime_checkpoint_remote
+        with patch.object(schedule,'create_local',side_effect=self.create),patch.object(schedule,'send_remote',side_effect=RuntimeError('vault_remote_receive_failed')):schedule.run_cycle(self.settings)
+        self.now+=1;newer=self.create(self.settings);before=(self.root/'data/runtime-checkpoint-status.json').read_bytes();self.due()
+        with patch.object(runtime_checkpoint_remote,'sync') as send:
+            result=schedule.run_cycle(self.settings,retry_only=True);send.assert_not_called()
+        self.assertEqual(result['error_code'],'backup_local_checkpoint_changed')
+        self.assertEqual((self.root/'data/runtime-checkpoint-status.json').read_bytes(),before);self.assertTrue(Path(newer['checkpoint']).exists())
+    def test_unverified_published_directory_is_not_adopted_as_success(self):
+        self.create_unpublished(self.settings);(self.destination/'checkpoint-1000/control-files.tar.xz').write_bytes(b'corrupt fixture')
+        with patch.object(schedule.checkpoint,'create') as create,patch.object(schedule,'send_remote') as send:
+            result=schedule.run_cycle(self.settings)
+        self.assertEqual(result['status'],'retry_scheduled');create.assert_not_called();send.assert_not_called()
+        self.assertFalse((self.root/'data/runtime-checkpoint-status.json').exists())
     def test_remote_recovery_reuses_verified_local_without_stopping_service_again(self):
         with patch.object(schedule,'create_local',side_effect=self.create) as create,patch.object(schedule,'send_remote',side_effect=[RuntimeError('vault_remote_receive_failed'),{'status':'verified_encrypted'}]) as send:
             first=schedule.run_cycle(self.settings);self.assertEqual(first['status'],'retry_scheduled');self.assertEqual(create.call_count,1)

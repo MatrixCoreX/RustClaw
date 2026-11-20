@@ -49,6 +49,10 @@ def selected_files(root):
                 if path.is_file() and not path.is_symlink():files.append(path)
     for path in (root/'data/skill-packages').glob('*/current.json'):
         if not path.is_symlink():files.append(path)
+    node_config=root/'data/nni/runtime-config.json'
+    if node_config.is_file() and not node_config.is_symlink():
+        if not node_config.resolve().is_relative_to(root.resolve()):raise RuntimeError('checkpoint_source_escaped')
+        files.append(node_config)
     for name in ['.release-tag','.release-manifest-digest']:
         if (root/name).is_file():files.append(root/name)
     return sorted(set(files))

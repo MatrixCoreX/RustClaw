@@ -127,8 +127,10 @@ protects against loss of the local disk; two local partitions alone do not.
 `runtime_backup_schedule.py` is the single daily/retry coordinator. Its private state
 records the current phase and verified local checkpoint. Busy foreground/distributed work
 defers the attempt without consuming the failure budget. Other transient failures use
-bounded backoff; a failed remote phase reuses the verified local snapshot. An interrupted
-run also discovers a local checkpoint published before its phase state was saved. A changed
+bounded backoff; a failed remote phase reuses the verified local snapshot. The coordinator persists the library result before remote synchronization. An interrupted
+run discovers and verifies a local checkpoint published before its status or phase state was saved,
+and repairs a status pointer to a retired older copy without another service pause. It refuses
+to replace a newer, unrelated checkpoint status. A changed
 runtime cohort requires a fresh local checkpoint. Expired/permanent failures retain all
 existing copies and expose an administrator notice instead of repeatedly replaying work.
 
@@ -145,6 +147,9 @@ The key is a 32-byte random recovery secret, stored owner-only **outside** the w
 and outside the vault. Preserve an independent recovery copy before relying on encryption.
 Never put it into Git, command-line values, application logs or the unprivileged receiver's
 directory. The receiving account stores encrypted objects and has no decryption key.
+
+Base checkpoints also preserve the host distributed-node runtime configuration. Transient
+node work and hardware-bound identity files are not cloned automatically.
 
 Encrypted vaults include the validated base checkpoint. Optional scopes add exact installed
 package versions, runtime dependencies/toolchains (`packages`), local model files (`models`),

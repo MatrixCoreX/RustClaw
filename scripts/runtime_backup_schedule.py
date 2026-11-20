@@ -14,7 +14,8 @@ import tomllib
 import urllib.request
 
 import runtime_checkpoint as checkpoint
-from runtime_checkpoint_storage import manifest, write_json
+from runtime_checkpoint_storage import write_json
+from runtime_backup_local import checked_local, publish_local_status, recover_published_checkpoint
 
 BUSY={'checkpoint_foreground_not_idle','checkpoint_distributed_work_active','checkpoint_already_running'}
 PERMANENT={'vault_key_invalid','vault_key_not_private','vault_crypto_dependency_missing','vault_scope_invalid','vault_retention_invalid','vault_existing_object_corrupt','vault_attachments_exceed_capacity','checkpoint_cohort_mismatch','vault_receiver_not_committed'}
@@ -32,11 +33,14 @@ def sample_inventory(root):
 
 
 def create_local(settings):
-    return checkpoint.create(settings['root'],settings['destination'],mode=settings['service_mode'],unit=settings['service_unit'],retain=1,reserve=settings['reserve_bytes'],read_fence_seconds=settings['read_fence_seconds'])
+    result=checkpoint.create(settings['root'],settings['destination'],mode=settings['service_mode'],unit=settings['service_unit'],retain=1,reserve=settings['reserve_bytes'],read_fence_seconds=settings['read_fence_seconds'])
+    write_json(settings['root']/'data/runtime-checkpoint-status.json',result)
+    return result
 
 
 def send_remote(settings,local):
     root=settings['root']
+    publish_local_status(settings,local)
     if settings.get('vault_key_file'):
         from runtime_checkpoint_vault import RemoteTransport,build_snapshot
         from runtime_vault_cipher import load_key
@@ -60,16 +64,6 @@ def read_state(path):
     value=json.loads(path.read_text())
     if value.get('schema_version')!=1:raise RuntimeError('backup_run_state_invalid')
     return value
-
-
-def checked_local(settings,state):
-    path=Path(state['checkpoint'])
-    if path.is_symlink() or path.parent.resolve()!=settings['destination'].resolve() or not path.name.startswith('checkpoint-'):
-        raise RuntimeError('backup_run_checkpoint_invalid')
-    value=manifest(path)
-    if value['created_at_ts']<state['cycle_started_at_ts']:raise RuntimeError('backup_run_checkpoint_stale')
-    if value['source_revision']!=checkpoint.running_revision(settings['root']):raise RuntimeError('backup_run_cohort_changed')
-    return {'checkpoint':str(path),'created_at_ts':value['created_at_ts']}
 
 
 def run_cycle(settings,*,retry_only=False):
@@ -105,13 +99,7 @@ def run_cycle(settings,*,retry_only=False):
                 else:raise
         if phase=='local':
             state.update(phase='local',resume_phase='local');state.pop('next_retry_at_ts',None);write_json(path,state)
-            local=None
-            existing=root/'data/runtime-checkpoint-status.json'
-            if existing.is_file() and not existing.is_symlink():
-                previous=json.loads(existing.read_text())
-                if previous.get('status') in ('verified','verified_remote','verified_local_remote_failed') and previous.get('created_at_ts',0)>=state['cycle_started_at_ts']:
-                    try:local=checked_local(settings,{**state,'checkpoint':previous['checkpoint']})
-                    except (KeyError,FileNotFoundError,RuntimeError):pass
+            local=recover_published_checkpoint(settings,state)
             if local is None:local=create_local(settings)
             state.update(phase='remote',resume_phase='remote',checkpoint=local['checkpoint']);write_json(path,state)
             phase='remote'
