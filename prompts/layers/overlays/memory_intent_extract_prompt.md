@@ -30,7 +30,7 @@ Rules:
 10. For `delete` actions, `value` should be an empty string, `normalized_value` should be `null`, `ttl_policy` should be `long_term`, and `key` must be filled when the target preference/fact key is identifiable. For `expire` actions, use `ttl_policy="explicit_until"` only when `expires_at_ts` is known. If the target cannot be identified, return no action or a conservative `noop`.
 11. `source.source_kind` must be `llm_memory_extract`; `source.source_ref` must be `__SOURCE_REF__`; `source.source_text` must contain the relevant user text span.
 12. Confidence should reflect how explicit and durable the memory intent is. Use high confidence only for clear, stable memory.
-13. If there is no memory action, return `{"memory_actions":[]}`.
+13. If there is no memory action, return `{"memory_actions":[]}`. When an additional summary review context is supplied, also include its requested typed `summary_update_needed` decision.
 
 Current user message:
 ```text

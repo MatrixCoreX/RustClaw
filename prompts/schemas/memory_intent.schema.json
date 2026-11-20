@@ -7,6 +7,10 @@
   "additionalProperties": true,
   "required": ["memory_actions"],
   "properties": {
+    "summary_update_needed": {
+      "type": "boolean",
+      "description": "Optional model decision requested by a summary review context. False means the complete eligible turn contains no durable information requiring long-term consolidation. Missing means unknown; runtime performs normal consolidation."
+    },
     "memory_actions": {
       "type": "array",
       "description": "Structured actions proposed by the model. Runtime may reject any action that fails policy validation.",

@@ -110,7 +110,7 @@ name = "media_download"
 enabled = false
 kind = "runner"
 planner_kind = "skill"
-planner_eager_load = true
+planner_eager_load = false
 group = "video"
 timeout_seconds = 86400
 supported_os = ["linux", "macos"]
@@ -2348,7 +2348,7 @@ name = "kb"
 resource_request = { class = "memory", cpu_cores = 1, memory_mb = 512, disk_io_weight = 25 }
 enabled = true
 fixed_on = true
-planner_eager_load = true
+planner_eager_load = false
 kind = "runner"
 planner_kind = "skill"
 group = "memory"

@@ -407,8 +407,8 @@ fn first_round_media_capability_eagerly_exposes_app_and_web_share_default_downlo
         .get("media_download")
         .expect("media download registry entry");
     assert!(
-        download.planner_eager_load,
-        "single-share media delivery must be callable in the first round"
+        !download.planner_eager_load,
+        "media delivery must retain complete discovery metadata with its schemas loaded on demand"
     );
     let discovery = registry
         .get("media_discovery")
@@ -477,16 +477,24 @@ fn first_round_media_capability_eagerly_exposes_app_and_web_share_default_downlo
             .all(|group| group.skill_name != "media_discovery"),
         "media discovery must not bypass semantic capability loading"
     );
-    let download_group = initial
+    assert!(initial
+        .iter()
+        .all(|group| group.skill_name != "media_download"));
+    let expanded = crate::capability_map::planner_disclosed_native_capability_groups_for_task(
+        &state,
+        &task,
+        &BTreeSet::from(["media_download".to_string()]),
+    );
+    let download_group = expanded
         .iter()
         .find(|group| group.skill_name == "media_download")
-        .expect("media download must be exposed as a first-round native capability group");
+        .expect("explicitly loaded media download must expose its native capability group");
     assert!(
         download_group
             .capability_names
             .iter()
             .any(|name| name == "media_download.download"),
-        "first-round media group must expose media_download.download: {download_group:?}"
+        "loaded media group must expose media_download.download: {download_group:?}"
     );
     let loadable = crate::capability_map::planner_loadable_capability_group_names_for_task(
         &state,
@@ -494,7 +502,7 @@ fn first_round_media_capability_eagerly_exposes_app_and_web_share_default_downlo
         &BTreeSet::new(),
     );
     let available = state.planner_available_skills_for_task(&task);
-    for skill in ["media_discovery"] {
+    for skill in ["media_discovery", "media_download"] {
         assert_eq!(
             loadable.iter().any(|candidate| candidate == skill),
             available.iter().any(|candidate| candidate == skill),
@@ -502,10 +510,10 @@ fn first_round_media_capability_eagerly_exposes_app_and_web_share_default_downlo
         );
     }
     assert!(
-        !loadable
+        loadable
             .iter()
             .any(|candidate| candidate == "media_download"),
-        "eager media delivery must not also appear in the deferred capability list"
+        "media delivery must remain discoverable before explicit loading"
     );
 }
 

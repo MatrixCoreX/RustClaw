@@ -183,6 +183,16 @@ fn respond_tool_does_not_claim_runtime_mutations_without_evidence() {
         .expect("exact visible line count description");
     assert!(line_count_description.contains("final requested line"));
     assert!(line_count_description.contains("explicitly requests an additional line"));
+    assert!(line_count_description.contains("object and observed_object always use 0"));
+    for field in ["items", "fields", "observed_fields"] {
+        let schema = &respond.input_schema["properties"][field];
+        assert_eq!(schema["type"], "array");
+        let description = schema["description"].as_str().unwrap();
+        assert!(
+            description.contains("[]") && description.contains("{}"),
+            "{field}"
+        );
+    }
 }
 
 #[test]

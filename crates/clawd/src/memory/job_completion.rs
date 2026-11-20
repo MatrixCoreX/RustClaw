@@ -34,7 +34,7 @@ pub(super) fn phase(checkpoint: &str) -> JobPhase {
         object.keys().all(|key| {
             matches!(
                 key.as_str(),
-                "failure" | "legacy_repair" | "model_binding_repair"
+                "failure" | "legacy_repair" | "model_binding_repair" | "generation_review"
             )
         })
     }) {
@@ -98,7 +98,9 @@ pub(super) fn mark_committed(db: &Connection, lease: GenerationLease<'_>) -> any
         "UPDATE memory_jobs SET checkpoint_json = json_patch(checkpoint_json, ?1),
         progress_current = 2, progress_total = 2, updated_at_ts = ?2,
         background_cost_pending_microunits = CASE
-            WHEN background_cost_settled_at_ts IS NULL THEN ?3 ELSE 0 END
+            WHEN background_cost_settled_at_ts IS NOT NULL THEN 0
+            WHEN json_extract(checkpoint_json,'$.generation_review.summary_reused')=1 THEN 0
+            ELSE ?3 END
         WHERE job_id = ?4 AND principal_id = ?5 AND status = 'running'
           AND lease_owner = ?6 AND cancel_requested = 0",
         params![

@@ -1,4 +1,9 @@
 [[prompts]]
+logical_path = "prompts/memory_generation_review.md"
+base = []
+overlay = ["prompts/layers/overlays/memory_generation_review.md"]
+
+[[prompts]]
 logical_path = "prompts/agent_tool_spec.md"
 base = ["prompts/layers/base/system_truth.md"]
 overlay = ["prompts/layers/overlays/agent_tool_spec.md"]

@@ -33,6 +33,10 @@ const CORE_PROMPT_REGISTRY: &[(&str, &str)] = &[
         "long_term_summary (memory.service)",
     ),
     (
+        "prompts/memory_generation_review.md",
+        "memory_generation_review (memory.generation_review)",
+    ),
+    (
         "prompts/schedule_intent_prompt.md",
         "schedule_intent (schedule_service)",
     ),

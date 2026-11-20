@@ -192,6 +192,7 @@ fn memory_intent_schema_rejects_bad_enum() {
 fn memory_intent_validation_accepts_valid_preference() {
     let validation = validate_memory_intent_actions(
         MemoryIntentOut {
+            summary_update_needed: None,
             memory_actions: vec![action()],
         },
         0.72,
@@ -208,6 +209,7 @@ fn memory_intent_validation_rejects_low_confidence_long_term_fact() {
     action.confidence = 0.5;
     let validation = validate_memory_intent_actions(
         MemoryIntentOut {
+            summary_update_needed: None,
             memory_actions: vec![action],
         },
         0.72,
@@ -225,6 +227,7 @@ fn memory_intent_validation_rejects_project_fact_outside_project_scope() {
     action.value = "cargo check -p clawd".to_string();
     let validation = validate_memory_intent_actions(
         MemoryIntentOut {
+            summary_update_needed: None,
             memory_actions: vec![action],
         },
         0.72,
@@ -242,6 +245,7 @@ fn memory_intent_validation_rejects_injection_like_non_safety_action() {
     action.risk.injection_like = true;
     let validation = validate_memory_intent_actions(
         MemoryIntentOut {
+            summary_update_needed: None,
             memory_actions: vec![action],
         },
         0.72,
@@ -261,6 +265,7 @@ fn memory_intent_validation_delete_requires_key_or_source_ref() {
     action.source.source_ref = None;
     let validation = validate_memory_intent_actions(
         MemoryIntentOut {
+            summary_update_needed: None,
             memory_actions: vec![action],
         },
         0.72,
@@ -279,6 +284,7 @@ fn memory_intent_validation_explicit_until_requires_expiry() {
     action.expires_at_ts = None;
     let validation = validate_memory_intent_actions(
         MemoryIntentOut {
+            summary_update_needed: None,
             memory_actions: vec![action],
         },
         0.72,
@@ -301,6 +307,7 @@ fn memory_intent_validation_delete_ignores_ttl_expiry_shape() {
     action.expires_at_ts = None;
     let validation = validate_memory_intent_actions(
         MemoryIntentOut {
+            summary_update_needed: None,
             memory_actions: vec![action],
         },
         0.72,

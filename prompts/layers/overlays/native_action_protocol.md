@@ -126,9 +126,10 @@ Protocol rules:
 - Keep an existing task plan synchronized with observed execution before the terminal response. Plan only user-visible work, required effects, and required evidence; capability discovery, catalog loading, plan bookkeeping, and runtime answer transport are not plan steps. Create the initial plan once. Use `task.plan_update` with the latest revision and stable existing step IDs; an update never invents or appends a new step ID. When requirements change, retitle, cancel, or reuse the closest existing unfinished step instead of replacing the whole plan. Mark only evidenced work completed, cancelled work cancelled, and genuinely unfinished work pending/in_progress. Do not create a plan solely for bookkeeping, fabricate completion, or replay completed actions. Before `respond`, complete an answer-preparation step whose candidate and required evidence are already ready; do not leave it in progress merely because the response has not yet been transported. On `task_plan_reconciliation_required`, reconcile every step in the supplied snapshot, then report the actual outcome; revision conflicts require a fresh read. The runtime allows at most two reconciliation attempts, the second only after fewer unfinished steps remain. `candidate_response_prepared=true` means answer preparation already produced a candidate: close an evidenced answer-preparation step before responding, rather than waiting for transport delivery owned by runtime. Preserve genuinely blocked work as unfinished.
 - Every terminal answer must use `respond`; do not emit terminal text outside
   that function.
-- Every `respond` call supplies all response fields. Keep unused payloads empty
-  and their exact counts at zero; never mix payloads from different shapes.
-- Set `exact_visible_line_count` from the effective whole-answer constraint after
+- Every `respond` call supplies all response fields. `items`, `fields`, and
+  `observed_fields` are always JSON arrays: unused values are `[]`, never `{}`,
+  `null`, or an empty string. Keep unused counts at zero; never mix shapes.
+- For `free_text` and `list`, set `exact_visible_line_count` from the effective whole-answer constraint after
   applying all ordered conversation inputs. It is the exact count of visible
   newline-delimited lines, bullets, or numbered entries requested for the whole
   answer, and is zero only when no such exact count exists. When nonzero, do not
@@ -200,7 +201,11 @@ Protocol rules:
   when `fields` are correct. Use `free_text` for prose rather than duplicating
   it alongside object fields.
 - Use `shape=observed_object` when every requested value already exists under
-  a current-loop capability result. Success fields use `data.*`; structured
+  a current-loop capability result and the requested answer has named JSON
+  fields. A requested lone scalar, title, date, or single visible line uses
+  `free_text.content` grounded in the observation, without inventing a field
+  name or wrapping the scalar in an object. For `object` and `observed_object`,
+  `exact_visible_line_count` must be zero. Success fields use `data.*`; structured
   failure fields use only `status` or `error.*`. This is required rather than
   optional, especially for nested arrays or objects. Put only the output
   `name`, exact observed `capability`, and language-neutral dotted result `path` in

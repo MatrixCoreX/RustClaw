@@ -29,14 +29,27 @@ impl GenerationFixture {
     }
 
     pub(super) async fn for_kind(kind: &str) -> Self {
-        Self::with_provider_layout(kind, false).await
+        Self::with_provider_layout(kind, false, None, false).await
     }
 
     pub(super) async fn for_vendor_kind(kind: &str) -> Self {
-        Self::with_provider_layout(kind, true).await
+        Self::with_provider_layout(kind, true, None, false).await
     }
 
-    async fn with_provider_layout(kind: &str, vendor: bool) -> Self {
+    pub(super) async fn with_summary_review(needed: bool) -> Self {
+        Self::with_provider_layout("extract", false, Some(needed), false).await
+    }
+
+    pub(super) async fn with_forced_summary_review() -> Self {
+        Self::with_provider_layout("extract", false, Some(false), true).await
+    }
+
+    async fn with_provider_layout(
+        kind: &str,
+        vendor: bool,
+        review: Option<bool>,
+        force: bool,
+    ) -> Self {
         let mut fixture = Fixture::file();
         let task = crate::ClaimedTask {
             claim_attempt: 1,
@@ -50,7 +63,12 @@ impl GenerationFixture {
             kind: "ask".into(),
             payload_json: "{}".into(),
         };
-        let output = if kind == "extract" {
+        let output = if let Some(needed) = review {
+            json!({"memory_actions":[],"summary_update_needed":needed,
+                "summary":"The user prefers markdown for technical explanations.",
+                "fact_candidates":[],"knowledge_candidates":[]})
+            .to_string()
+        } else if kind == "extract" {
             json!({"memory_actions":[{
             "action":"upsert","kind":"preference","scope":"user","key":"response_format",
             "value":"markdown","normalized_value":"markdown","confidence":1.0,
@@ -176,7 +194,7 @@ impl GenerationFixture {
         );
         let ids = super::jobs::persist_turn_and_enqueue(fixture.state(), &task, USER_CONTENT,
             Some("Markdown output preserves code fences, nested lists, tables, and technical examples for later reference."),
-            false).expect("normal durable enqueue");
+            force).expect("normal durable enqueue");
         if ids.is_empty() {
             let db = fixture.state().core.db.get().unwrap();
             let source_counts: (i64, i64) = db
@@ -194,15 +212,17 @@ impl GenerationFixture {
         let job_id = {
             let db = fixture.state().core.db.get().unwrap();
             // Select one existing job kind, still through the real enqueue/worker.
-            db.execute(
-                "UPDATE memory_jobs SET status = 'cancelled', cancel_requested = 1
+            if review.is_none() {
+                db.execute(
+                    "UPDATE memory_jobs SET status = 'cancelled', cancel_requested = 1
                 WHERE job_kind != ?1",
-                [kind],
-            )
-            .unwrap();
+                    [kind],
+                )
+                .unwrap();
+            }
             db.execute(
-                "UPDATE memory_jobs SET not_before_ts = 1 WHERE job_kind = ?1",
-                [kind],
+                "UPDATE memory_jobs SET not_before_ts = 1 WHERE job_kind = ?1 OR ?2",
+                params![kind, review.is_some()],
             )
             .unwrap();
             db.query_row(

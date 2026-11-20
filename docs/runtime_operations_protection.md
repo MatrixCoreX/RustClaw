@@ -122,6 +122,28 @@ A failed remote copy retains the verified local checkpoint and the previous remo
 the console distinguishes that state from a failed local checkpoint. An independent host
 protects against loss of the local disk; two local partitions alone do not.
 
+## Planner disclosure and background memory review
+
+Background memory jobs may pair extraction and consolidation for the exact same
+principal, source task/range/digest, scope, consent revision/policy and pinned
+provider/model contract. Extraction can review the complete eligible turn in
+its existing model call. Only an explicit typed
+`summary_update_needed=false`, with no accepted or rejected memory writes, can
+reuse an unchanged summary. Consolidation waits for its paired extraction; a
+failed, cancelled, missing, differently scoped or stale review uses normal
+consolidation. Reuse rechecks source hashes and the summary digest in the same
+writer transaction as its completion checkpoint, has zero additional generation
+charge, and preserves source rows. Persisted provider results never wait on a
+review or replay a model request. The review has no execution or grant authority.
+
+The first planner request keeps filesystem, command and plan tools available;
+knowledge-base and media-delivery schemas load on demand through the existing
+capability loader. Their complete discovery descriptions and exact expansion
+references remain visible, and the same resolver, policy and receipt checks
+apply after loading. Response schemas explicitly distinguish empty arrays from
+objects and scalar lines from named JSON field delivery; runtime validation is
+unchanged.
+
 ## Incremental encrypted payload backups and retry recovery
 
 `runtime_backup_schedule.py` is the single daily/retry coordinator. Its private state

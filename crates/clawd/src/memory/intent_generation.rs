@@ -42,12 +42,25 @@ async fn extract(
     }
     let prompt_text = crate::utf8_safe_prefix(trimmed, cfg.llm_preference_max_chars.max(128));
     let source_ref = format!("task:{}:user", task.task_id);
-    let prompt = build_memory_intent_llm_prompt(prompt_text, &source_ref);
+    let review = match generation {
+        Some(generation) if prompt_text.len() == trimmed.len() => {
+            super::generation_review::prepare(state, task, generation)?
+        }
+        _ => None,
+    };
+    let mut prompt = build_memory_intent_llm_prompt(prompt_text, &source_ref);
+    if let Some(review) = &review {
+        prompt.push_str("\n\n");
+        prompt.push_str(&review.prompt);
+    }
     let raw = match super::generation_response::run(
         state,
         task,
         &prompt,
-        "memory_intent_extract",
+        review
+            .as_ref()
+            .map(|review| review.prompt_source.as_str())
+            .unwrap_or("memory_intent_extract"),
         generation,
     )
     .await
@@ -66,6 +79,7 @@ async fn extract(
             .into())
         }
     };
+    let summary_update_needed = intent.summary_update_needed;
     let validation =
         intent::validate_memory_intent_actions(intent, cfg.llm_preference_min_confidence);
     if !validation.rejected.is_empty() {
@@ -75,12 +89,21 @@ async fn extract(
             "memory_intent_actions_rejected"
         );
     }
-    if validation.accepted.is_empty() {
-        return Ok(());
-    }
     let user_key = effective_user_key(task.user_key.as_deref(), task.user_id, task.chat_id);
     let db = state.core.db.get()?;
     let tx = db.unchecked_transaction()?;
+    if let (Some(review), Some(generation)) = (&review, generation) {
+        // Unknown decisions and any proposed/rejected write require ordinary
+        // consolidation; an empty action list alone never authorizes reuse.
+        let needed = summary_update_needed != Some(false)
+            || !validation.accepted.is_empty()
+            || !validation.rejected.is_empty();
+        super::generation_review::record(&tx, generation.lease, review, needed)?;
+    }
+    if validation.accepted.is_empty() {
+        tx.commit()?;
+        return Ok(());
+    }
     let stats = apply::apply_memory_actions(
         state,
         &tx,

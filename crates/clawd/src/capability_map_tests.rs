@@ -541,7 +541,7 @@ fn disclosed_native_groups_keep_core_eager_and_domain_groups_loadable() {
         .map(|group| group.capability_names.len())
         .sum::<usize>();
     assert!(
-        initial_capability_count <= 64,
+        initial_capability_count <= 40,
         "the first planner turn exceeded the canonical capability budget: {initial_capability_count}"
     );
     for on_demand_group in [
@@ -552,6 +552,8 @@ fn disclosed_native_groups_keep_core_eager_and_domain_groups_loadable() {
         "system_basic",
         "git_basic",
         "task_control",
+        "kb",
+        "media_download",
     ] {
         assert!(!initial
             .iter()

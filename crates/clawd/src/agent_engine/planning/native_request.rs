@@ -117,6 +117,7 @@ pub(super) fn native_planner_request(
                 },
                 "items": {
                     "type": "array",
+                    "description": "Always a JSON array. Use [] when shape is not list; never use {}, null, or an empty string.",
                     "items": {"type": "string"},
                     "maxItems": MAX_NATIVE_RESPONSE_ITEMS
                 },
@@ -129,10 +130,11 @@ pub(super) fn native_planner_request(
                     "type": "integer",
                     "minimum": 0,
                     "maximum": MAX_NATIVE_RESPONSE_ITEMS,
-                    "description": "Exact whole-answer newline-delimited visible line count selected from the current user constraints. Use 0 when no exact whole-answer line, bullet, or numbered-entry count was requested. When nonzero, emit no blank lines, preface, heading, recap, or extra marker line. Include a required trailing marker, signature, checksum, or suffix in the final requested line; do not increase the count unless the user explicitly requests an additional line. For shape=list this must equal exact_item_count."
+                    "description": "For object and observed_object always use 0: these shapes deliver named JSON fields, not a scalar line. For free_text and list use the requested exact whole-answer newline-delimited line count, or 0 if unspecified. When nonzero emit no extra lines; put a required suffix in the final requested line; do not add a line unless the user explicitly requests an additional line. For list a nonzero value must equal exact_item_count."
                 },
                 "fields": {
                     "type": "array",
+                    "description": "Always a JSON array. Use [] unless shape=object; never use {} or null.",
                     "items": {
                         "type": "object",
                         "required": ["name", "value_json"],
@@ -155,7 +157,7 @@ pub(super) fn native_planner_request(
                 },
                 "observed_fields": {
                     "type": "array",
-                    "description": "schema:current_loop_capability_result_field_references_v3; value_source=runtime_copy; success_roots=data; failure_roots=status,error; model_value_copy=forbidden; optional_step_id=exact_current_loop_provenance_step_id; omitted_or_null_step_id=latest_eligible_capability_result",
+                    "description": "Always a JSON array; use [] unless shape=observed_object, never {} or null. observed_object delivers named JSON fields only; a lone scalar or date uses free_text.content. schema:current_loop_capability_result_field_references_v3; value_source=runtime_copy; success_roots=data; failure_roots=status,error; optional_step_id=exact_current_loop_provenance_step_id; omitted_or_null_step_id=latest_eligible_capability_result",
                     "items": {
                         "type": "object",
                         "required": ["name", "capability", "path"],

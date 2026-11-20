@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct MemoryIntentOut {
     #[serde(default)]
     pub(crate) memory_actions: Vec<MemoryAction>,
+    #[serde(default)]
+    pub(crate) summary_update_needed: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]

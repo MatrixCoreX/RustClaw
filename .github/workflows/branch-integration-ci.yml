@@ -2,7 +2,7 @@ name: Completed branch integration verification
 
 "on":
   push:
-    branches: ["ci/runtime-custody-integration-*", "ci/completed-branches-*", "ci/runtime-priority-optimization-*", "ci/runtime-maintenance-*", "ci/runtime-efficiency-*"]
+    branches: ["ci/runtime-custody-integration-*", "ci/completed-branches-*", "ci/runtime-priority-optimization-*", "ci/runtime-maintenance-*", "ci/runtime-efficiency-*", "ci/runtime-context-*"]
   workflow_dispatch:
 
 permissions:
@@ -136,7 +136,7 @@ jobs:
           target/debug/skillctl init rust offline_scaffold_cache "$fixture_root/package"
           cargo fetch --locked --manifest-path "$fixture_root/package/Cargo.toml"
           cargo test --locked -p extension-manager-skill -- --test-threads=1 --nocapture
-          for prefix in http::ui_routes::skill_store_tests:: http::ui_routes::storage_governance_tests:: task_result_objects::tests:: repo::tasks::tests::task_resume_execution_tests::terminal_result_projection::result_object_tests:: skills::builtin::builtin_pty_session::tests::; do
+          for prefix in memory::generation_review::tests:: agent_engine::planning::native_tests:: agent_engine::planner_skill_context::tests:: http::ui_routes::skill_store_tests:: http::ui_routes::storage_governance_tests:: task_result_objects::tests:: repo::tasks::tests::task_resume_execution_tests::terminal_result_projection::result_object_tests:: skills::builtin::builtin_pty_session::tests::; do
             cargo test --locked -p clawd --bin clawd "$prefix" -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py --prefix "$prefix"
             cargo test --locked -p clawd --bin clawd "$prefix" -- --test-threads=1 --nocapture
           done

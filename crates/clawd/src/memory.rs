@@ -9,6 +9,7 @@ pub(crate) mod embedding;
 pub(crate) mod embedding_jobs;
 pub(crate) mod facts;
 mod generation_response;
+mod generation_review;
 mod growth_availability;
 pub(crate) mod import_upload;
 pub(crate) mod indexing;

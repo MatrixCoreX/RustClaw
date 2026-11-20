@@ -496,6 +496,9 @@ fn enqueue_prepared_turn_jobs(
             job_ids.push(job_id);
         }
     }
+    if !force_consolidation {
+        super::generation_review::pair_turn_jobs(tx, &task.task_id)?;
+    }
     Ok(job_ids)
 }
 
@@ -732,6 +735,15 @@ fn next_admitted_job(db: &Connection, now: i64) -> anyhow::Result<Option<String>
         if super::job_completion::phase(&checkpoint) == super::job_completion::JobPhase::Committed {
             return Ok(Some(job_id));
         }
+        if matches!(
+            super::job_completion::phase(&checkpoint),
+            super::job_completion::JobPhase::Unstarted
+                | super::job_completion::JobPhase::SourceVerified
+                | super::job_completion::JobPhase::ResourceWait
+        ) && super::generation_review::waiting_for_extraction(db, &job_id)?
+        {
+            continue;
+        }
         if !storage_available || blocked.contains(&principal_id) {
             continue;
         }
@@ -877,14 +889,28 @@ async fn execute_claimed_job(
             }
         }
         "consolidate" => {
-            super::service::maybe_refresh_long_term_summary_for_range(
-                state,
-                &task,
-                true,
-                Some((source_start, source_end)),
-                Some(&generation),
-            )
-            .await?;
+            let reusable =
+                matches!(
+                    phase,
+                    JobPhase::Unstarted | JobPhase::SourceVerified | JobPhase::ResourceWait
+                ) && super::generation_review::try_reuse_summary(state, &task, job, lease)?;
+            if reusable {
+                info!(
+                    job_id = job.job_id,
+                    reason_code = "memory_summary_unchanged_after_review",
+                    "memory_summary_reused"
+                );
+                return Ok(());
+            } else {
+                super::service::maybe_refresh_long_term_summary_for_range(
+                    state,
+                    &task,
+                    true,
+                    Some((source_start, source_end)),
+                    Some(&generation),
+                )
+                .await?;
+            }
         }
         _ => return Err(permanent("memory_job_kind_not_implemented")),
     }
