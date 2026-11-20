@@ -14,7 +14,13 @@ fn with_native_semantics(
     )
     .into_iter()
     .filter(|group| group.capability_names.iter().any(|name| name == capability))
-    .map(|group| group.native_description_for(capability))
+    .flat_map(|group| {
+        group
+            .capability_names
+            .iter()
+            .map(|name| group.native_description_for(name))
+            .collect::<Vec<_>>()
+    })
     .collect::<Vec<_>>();
     format!("{index}\n{}", descriptions.join("\n"))
 }
