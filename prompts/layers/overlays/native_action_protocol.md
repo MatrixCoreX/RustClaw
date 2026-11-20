@@ -138,7 +138,7 @@ Protocol rules:
   final requested line; never increase the whole-answer count to give that
   suffix its own line unless the user explicitly requests an additional line.
   For an
-  exact payload-only bullet/numbered list, use `shape=list`, put exactly those
+  exact numbered list, use `shape=list`, put exactly those
   entries in `items`, and set both exact counts to the same value.
 - Every `respond` call also declares `conversation_relation` from the meaning of
   the current request and active task context, never from a fixed phrase list.
@@ -183,8 +183,12 @@ Protocol rules:
   A requested top-level JSON array also uses `shape=free_text`: put the complete
   valid JSON array in `content`, preserving value types, without fences or prose.
   Do not use `shape=list` for JSON arrays; that shape renders a presentation list.
-- Use `shape=list` only for an exact payload-only list. Put the items in
-  `items`, set `exact_item_count` to its length, and add no preface or recap.
+- `shape=list` renders ordinal numbers before each entry. Use it only when
+  numbered presentation is allowed. For plain identifiers, bare lines, or
+  other payload-only output without presentation markers, use `shape=free_text`
+  with exact newline-separated `content`, `items=[]`, and `exact_item_count=0`.
+  For a numbered list, put entries in `items`, set `exact_item_count` to its
+  length, and add no preface or recap.
   A request naming output fields is not a payload-only list: retain those
   names as object keys, rather than returning anonymous positional values.
 - Use `shape=object` when the user or response contract requires exact named

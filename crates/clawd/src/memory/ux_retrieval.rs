@@ -122,6 +122,10 @@ fn remove_targets(
 #[path = "ux_retrieval_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "generation_consistency_tests.rs"]
+mod generation_tests;
+
 pub(crate) fn check_memory_consistency(
     db: &Connection,
     principal_id: &str,
@@ -154,6 +158,8 @@ pub(crate) fn check_memory_consistency(
         params![principal_id, MEMORY_FACT_SOURCE_REF_PREFIX],
         |row| row.get::<_, i64>(0),
     )?;
+    // Generation source ranges are canonical memories.id values. The per-turn
+    // source_sequence restarts at one and must never be compared with that range.
     let stale_jobs = db.query_row(
         "SELECT COUNT(*) FROM memory_jobs j WHERE j.principal_id = ?1
            AND j.status IN ('queued', 'retry_wait', 'running')
@@ -162,8 +168,8 @@ pub(crate) fn check_memory_consistency(
              SELECT 1 FROM memory_source_events e
               WHERE e.principal_id = j.principal_id
                 AND e.source_task_id = j.source_task_id
-                AND e.source_sequence BETWEEN COALESCE(j.source_event_start, e.source_sequence)
-                                          AND COALESCE(j.source_event_end, e.source_sequence)
+                AND e.source_memory_id BETWEEN COALESCE(j.source_event_start, e.source_memory_id)
+                                          AND COALESCE(j.source_event_end, e.source_memory_id)
            )",
         [principal_id],
         |row| row.get::<_, i64>(0),
@@ -184,8 +190,8 @@ pub(crate) fn check_memory_consistency(
                  SELECT 1 FROM memory_source_events e
                   WHERE e.principal_id = memory_jobs.principal_id
                     AND e.source_task_id = memory_jobs.source_task_id
-                    AND e.source_sequence BETWEEN COALESCE(memory_jobs.source_event_start, e.source_sequence)
-                                              AND COALESCE(memory_jobs.source_event_end, e.source_sequence)
+                    AND e.source_memory_id BETWEEN COALESCE(memory_jobs.source_event_start, e.source_memory_id)
+                                              AND COALESCE(memory_jobs.source_event_end, e.source_memory_id)
                )",
             params![principal_id, now_ts],
         )? as i64;

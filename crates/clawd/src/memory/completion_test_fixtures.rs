@@ -1,5 +1,5 @@
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc,
 };
 
@@ -20,6 +20,8 @@ pub(super) struct GenerationFixture {
     pub(super) task: crate::ClaimedTask,
     pub(super) job_id: String,
     requests: Arc<AtomicUsize>,
+    request_started: Arc<tokio::sync::Notify>,
+    response_release: Arc<tokio::sync::Notify>,
     server: tokio::task::JoinHandle<()>,
 }
 
@@ -29,19 +31,23 @@ impl GenerationFixture {
     }
 
     pub(super) async fn for_kind(kind: &str) -> Self {
-        Self::with_provider_layout(kind, false, None, false).await
+        Self::with_provider_layout(kind, false, None, false, false).await
     }
 
     pub(super) async fn for_vendor_kind(kind: &str) -> Self {
-        Self::with_provider_layout(kind, true, None, false).await
+        Self::with_provider_layout(kind, true, None, false, false).await
     }
 
     pub(super) async fn with_summary_review(needed: bool) -> Self {
-        Self::with_provider_layout("extract", false, Some(needed), false).await
+        Self::with_provider_layout("extract", false, Some(needed), false, false).await
     }
 
     pub(super) async fn with_forced_summary_review() -> Self {
-        Self::with_provider_layout("extract", false, Some(false), true).await
+        Self::with_provider_layout("extract", false, Some(false), true, false).await
+    }
+
+    pub(super) async fn with_held_summary_review() -> Self {
+        Self::with_provider_layout("extract", false, Some(false), false, true).await
     }
 
     async fn with_provider_layout(
@@ -49,6 +55,7 @@ impl GenerationFixture {
         vendor: bool,
         review: Option<bool>,
         force: bool,
+        hold_response: bool,
     ) -> Self {
         let mut fixture = Fixture::file();
         let task = crate::ClaimedTask {
@@ -91,12 +98,26 @@ impl GenerationFixture {
             "usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}});
         let requests = Arc::new(AtomicUsize::new(0));
         let observed = requests.clone();
+        let request_started = Arc::new(tokio::sync::Notify::new());
+        let response_release = Arc::new(tokio::sync::Notify::new());
+        let started = request_started.clone();
+        let release = response_release.clone();
+        let hold = Arc::new(AtomicBool::new(hold_response));
         let app = Router::new().route(
             "/chat/completions",
             post(move || {
                 observed.fetch_add(1, Ordering::SeqCst);
                 let response = response.clone();
-                async move { Json(response) }
+                let started = started.clone();
+                let release = release.clone();
+                let hold = hold.clone();
+                async move {
+                    if hold.swap(false, Ordering::SeqCst) {
+                        started.notify_one();
+                        release.notified().await;
+                    }
+                    Json(response)
+                }
             }),
         );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -192,6 +213,15 @@ impl GenerationFixture {
                 .durable_candidate_allowed,
             "fixture source must be eligible"
         );
+        if hold_response {
+            let db = fixture.state().core.db.get().unwrap();
+            db.execute_batch(
+                "UPDATE sqlite_sequence SET seq=76000 WHERE name='memories';
+                INSERT INTO sqlite_sequence(name,seq) SELECT 'memories',76000
+                WHERE NOT EXISTS(SELECT 1 FROM sqlite_sequence WHERE name='memories');",
+            )
+            .unwrap();
+        }
         let ids = super::jobs::persist_turn_and_enqueue(fixture.state(), &task, USER_CONTENT,
             Some("Markdown output preserves code fences, nested lists, tables, and technical examples for later reference."),
             force).expect("normal durable enqueue");
@@ -237,8 +267,23 @@ impl GenerationFixture {
             task,
             job_id,
             requests,
+            request_started,
+            response_release,
             server,
         }
+    }
+
+    pub(super) async fn wait_for_held_request(&self) {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            self.request_started.notified(),
+        )
+        .await
+        .expect("provider request reached held response");
+    }
+
+    pub(super) fn release_provider_response(&self) {
+        self.response_release.notify_one();
     }
 
     pub(super) async fn run(&self) -> anyhow::Result<bool> {

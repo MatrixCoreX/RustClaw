@@ -251,3 +251,18 @@ resolver, verifier, host permissions and generation pinning remain authoritative
 decisions still use the ordinary agent loop. Section and tool-surface budget telemetry remains
 available for before/after measurements; input size must be assessed with real provider usage,
 not inferred from output length.
+
+
+## Generation source consistency
+
+Generation job source bounds refer to canonical `memories.id` values. Consistency
+scans match those bounds against `memory_source_events.source_memory_id` within
+the same principal and source task. Per-turn `source_sequence` values restart
+at one and do not identify that canonical range. Audits and repairs preserve
+queued and actively generating jobs while their owned source exists; missing
+or mismatched sources remain cancellable. A held-provider regression exercises
+the scan during generation with record IDs far above the per-turn sequence.
+
+Native response teaching distinguishes numbered presentation lists from bare
+newline-separated payloads. Bare identifiers use `free_text`; `list` adds ordinal
+numbers. Runtime response validation and bounded answer verification remain active.
