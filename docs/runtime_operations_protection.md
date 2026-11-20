@@ -135,6 +135,9 @@ consolidation. Reuse rechecks source hashes and the summary digest in the same
 writer transaction as its completion checkpoint, has zero additional generation
 charge, and preserves source rows. Persisted provider results never wait on a
 review or replay a model request. The review has no execution or grant authority.
+The extraction checkpoint pins whether review context was actually prepared
+before a provider request; a later sibling cancellation cannot change a staged
+response's original prompt or cause another provider request.
 
 The first planner request keeps filesystem, command and plan tools available;
 knowledge-base and media-delivery schemas load on demand through the existing

@@ -147,6 +147,12 @@ pub(super) fn prepare(
     let Ok(checkpoint) = serde_json::from_str::<Value>(&checkpoint) else {
         return Ok(None);
     };
+    let prepared = checkpoint["generation_review"]["context_prepared"] == true;
+    if super::job_completion::phase(&checkpoint.to_string()) == JobPhase::ResponsePersisted
+        && !prepared
+    {
+        return Ok(None);
+    }
     let Some(consolidate) = checkpoint["generation_review"]["consolidate_job_id"].as_str() else {
         return Ok(None);
     };
@@ -161,9 +167,7 @@ pub(super) fn prepare(
         [consolidate],
         |r| r.get(0),
     )?;
-    if !active
-        && super::job_completion::phase(&checkpoint.to_string()) != JobPhase::ResponsePersisted
-    {
+    if !active && !prepared {
         return Ok(None);
     }
     let Some(rows) = source::verified_turn(&db, task, generation.lease.job_id)? else {
@@ -192,12 +196,26 @@ pub(super) fn prepare(
         "prompts/memory_generation_review.md",
     )
     .map_err(anyhow::Error::msg)?;
-    Ok(Some(ReviewContext {
+    let context = ReviewContext {
         summary_digest: digest(&previous),
         source_digest: pair.source_digest,
         prompt: crate::render_prompt_template(&template, &[("__SUMMARY_REVIEW_CONTEXT__", &safe)]),
         prompt_source: format!("memory_intent_extract+{prompt_source}"),
-    }))
+    };
+    // Pin whether the extra context was actually used before the provider
+    // request. A retry cannot infer it from a sibling's later cancellation.
+    if !prepared {
+        let db = state.core.db.get()?;
+        let changed=db.execute("UPDATE memory_jobs SET checkpoint_json=json_patch(checkpoint_json,?1)
+            WHERE job_id=?2 AND principal_id=?3 AND status='running' AND lease_owner=?4 AND cancel_requested=0",
+            params![json!({"generation_review":{"context_prepared":true}}).to_string(),
+                generation.lease.job_id,generation.lease.principal_id,generation.lease.worker_id])?;
+        anyhow::ensure!(
+            changed == 1,
+            super::job_failure::permanent("memory_job_review_context_lease_lost")
+        );
+    }
+    Ok(Some(context))
 }
 
 pub(super) fn record(

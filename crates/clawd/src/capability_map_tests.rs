@@ -558,7 +558,11 @@ fn disclosed_native_groups_keep_core_eager_and_domain_groups_loadable() {
         assert!(!initial
             .iter()
             .any(|group| group.skill_name == on_demand_group));
-        assert!(loadable.contains(&on_demand_group.to_string()));
+        assert_eq!(
+            loadable.contains(&on_demand_group.to_string()),
+            full.iter().any(|group| group.skill_name == on_demand_group),
+            "deferred disclosure must follow host availability: {on_demand_group}"
+        );
     }
     let task_control = full
         .iter()

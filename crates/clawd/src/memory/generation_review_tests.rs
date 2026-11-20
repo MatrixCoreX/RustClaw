@@ -198,6 +198,29 @@ fn review_flag_is_typed_and_optional_for_older_provider_responses() {
 }
 
 #[tokio::test]
+async fn cancelling_the_sibling_cannot_change_a_persisted_extraction_prompt() {
+    let fixture = GenerationFixture::with_summary_review(false).await;
+    fixture.sql("CREATE TRIGGER fixture_review_context_failure BEFORE UPDATE OF checkpoint_json ON memory_jobs
+        WHEN NEW.job_kind='extract' AND json_type(NEW.checkpoint_json,'$.generation_review.summary_update_needed') IS NOT NULL
+        BEGIN SELECT RAISE(ABORT,'fixture_review_context_failure'); END;");
+    assert!(fixture.run().await.unwrap());
+    assert_eq!(fixture.status(), "retry_wait");
+    fixture.assert_one_provider_call();
+    fixture.sql(
+        "DROP TRIGGER fixture_review_context_failure;
+        UPDATE memory_jobs SET status='cancelled',cancel_requested=1 WHERE job_kind='consolidate';
+        UPDATE memory_jobs SET not_before_ts=0 WHERE job_kind='extract';",
+    );
+    assert!(fixture.run_reopened().await.unwrap());
+    assert_eq!(fixture.status(), "completed");
+    fixture.assert_one_provider_call();
+    assert_eq!(
+        fixture.scalar("SELECT COUNT(*) FROM memory_generation_outputs"),
+        0
+    );
+}
+
+#[tokio::test]
 async fn forced_consolidation_does_not_pair_or_reuse_a_summary() {
     let fixture = GenerationFixture::with_forced_summary_review().await;
     assert_eq!(fixture.scalar("SELECT COUNT(*) FROM memory_jobs WHERE json_type(checkpoint_json,'$.generation_review') IS NOT NULL"),0);

@@ -128,7 +128,7 @@ Protocol rules:
   that function.
 - Every `respond` call supplies all response fields. `items`, `fields`, and
   `observed_fields` are always JSON arrays: unused values are `[]`, never `{}`,
-  `null`, or an empty string. Keep unused counts at zero; never mix shapes.
+  `null`, or an empty string. Keep unused counts at zero; never mix payloads from different shapes.
 - For `free_text` and `list`, set `exact_visible_line_count` from the effective whole-answer constraint after
   applying all ordered conversation inputs. It is the exact count of visible
   newline-delimited lines, bullets, or numbered entries requested for the whole
