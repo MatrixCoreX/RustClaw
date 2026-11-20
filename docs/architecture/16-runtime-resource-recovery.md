@@ -588,3 +588,24 @@ around pressure by disabling authorization, verifier checks, durable journals, o
 validation.
 
 A legacy PID record whose leader has exited cannot establish ownership of a surviving process group. Such a group remains `unknown`: leases stay reserved and PID-based cancellation is refused. Bound owner-protocol custody is required before signalling leaderless work.
+
+## Backup capacity and retained delivery snapshots
+
+The backup coordinator and checkpoint admission share a read-only capacity calculation: destination
+free space must cover the estimated new checkpoint plus the configured reserve; the runtime
+filesystem must independently retain that reserve. Estimates use the latest local checkpoint,
+with a conservative first-run default. The console shows available, required and missing bytes.
+An unavailable probe is never reported as zero. Low space defers the run without consuming the
+failure retry budget or removing an existing backup. After a verified backup, a different running
+source revision requests a fresh cycle when idle; a failed version probe does not restart it.
+
+An operator may preview immutable delivery deduplication using
+`python3 scripts/deduplicate_task_deliveries.py --root /path/to/runtime --report /private/preview.json`.
+The default is read-only. Apply adds `--apply`, requires the runtime to be stopped and a complete
+process-reference audit, and refuses to operate if either cannot be established. Only terminal-task
+files bound to schema-v2 delivery manifests are eligible. Copies must have the same principal,
+SHA-256, size, mode, owner and filesystem. The operation atomically replaces redundant files with
+hardlinks, preserving all pathnames and result records; later host publication atomically replaces
+a path rather than editing the shared inode. Original skill invocation/source files, other owners,
+active tasks, symlinks and files without matching manifests remain untouched. Retain the private
+report and compare result/history fingerprints and available space before restarting.

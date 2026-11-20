@@ -54,6 +54,7 @@ mod planning_repair;
 mod prepare_round;
 mod skill_execution;
 pub(crate) use skill_execution::validate_skill_output_contract;
+mod skill_action_docs;
 mod skill_quick_index;
 mod subagent_runtime;
 mod support;

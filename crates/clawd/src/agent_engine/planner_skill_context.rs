@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use tracing::{debug, info, warn};
 
@@ -53,10 +53,20 @@ fn planner_available_skills_for_task_scoped(
     enabled
 }
 
+#[cfg(test)]
 fn build_skill_playbooks_bundle_scoped(
     state: &AppState,
     task: &ClaimedTask,
     skill_scope: Option<&BTreeSet<String>>,
+) -> SkillPlaybookBundle {
+    build_skill_playbooks_for_actions(state, task, skill_scope, None)
+}
+
+fn build_skill_playbooks_for_actions(
+    state: &AppState,
+    task: &ClaimedTask,
+    skill_scope: Option<&BTreeSet<String>>,
+    actions: Option<&BTreeMap<String, BTreeSet<String>>>,
 ) -> SkillPlaybookBundle {
     let enabled = planner_available_skills_for_task_scoped(state, task, skill_scope);
     let enabled_count = enabled.len();
@@ -91,13 +101,28 @@ fn build_skill_playbooks_bundle_scoped(
             skill, registry_prompt_rel_path
         );
 
-        let trimmed = prompt_body.trim();
+        let selected_actions = actions
+            .and_then(|map| map.get(skill))
+            .cloned()
+            .unwrap_or_default();
+        let action_body =
+            actions.and_then(|_| super::skill_action_docs::render(&prompt_body, &selected_actions));
+        let narrowed = action_body.is_some();
+        let trimmed = action_body.as_deref().unwrap_or(&prompt_body).trim();
         if trimmed.is_empty() {
             continue;
         }
         let metadata = state
             .skill_manifest(skill)
-            .map(|manifest| {
+            .map(|mut manifest| {
+                if narrowed {
+                    manifest.planner_capabilities.retain(|capability| {
+                        capability
+                            .action
+                            .as_ref()
+                            .is_none_or(|action| selected_actions.contains(action))
+                    });
+                }
                 let mut parts = vec![format!(
                     "planner_kind: {}",
                     manifest.planner_kind.as_token()
@@ -320,6 +345,41 @@ fn candidate_skill_scope_from_loop_state(
     selected.into_iter().collect()
 }
 
+fn structured_action_scope(
+    state: &AppState,
+    loop_state: &super::LoopState,
+) -> BTreeMap<String, BTreeSet<String>> {
+    let mut actions: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for round in &loop_state.round_traces {
+        let Some(plan) = &round.plan_result else {
+            continue;
+        };
+        for step in &plan.steps {
+            let Some(action) = step.to_agent_action() else {
+                continue;
+            };
+            let resolved =
+                crate::capability_resolver::resolve_agent_action_for_state(state, action);
+            let (skill, args) = match resolved {
+                crate::AgentAction::CallSkill { skill, args } => (skill, args),
+                crate::AgentAction::CallTool { tool, args } => (tool, args),
+                _ => continue,
+            };
+            if let Some(action) = args
+                .get("action")
+                .and_then(serde_json::Value::as_str)
+                .filter(|v| !v.is_empty())
+            {
+                actions
+                    .entry(state.resolve_canonical_skill_name(&skill))
+                    .or_default()
+                    .insert(action.to_string());
+            }
+        }
+    }
+    actions
+}
+
 pub(super) fn build_planner_skill_context(
     state: &AppState,
     task: &ClaimedTask,
@@ -331,10 +391,11 @@ pub(super) fn build_planner_skill_context(
     let quick_index = fitted.text;
     let quick_index_chars = quick_index.chars().count();
     let scope = candidate_skill_scope_from_loop_state(state, task, loop_state);
+    let action_scope = structured_action_scope(state, loop_state);
     let playbooks = if scope.is_empty() {
         SkillPlaybookBundle::default()
     } else {
-        build_skill_playbooks_bundle_scoped(state, task, Some(&scope))
+        build_skill_playbooks_for_actions(state, task, Some(&scope), Some(&action_scope))
     };
     let disclosure_mode = if playbooks.included_skills.is_empty() {
         fitted.mode

@@ -357,6 +357,25 @@ async fn get_checkpoint_status(
                 ][..],
             ),
             (
+                "capacity",
+                "runtime-backup-capacity.json",
+                &[
+                    "schema_version",
+                    "sampled_at_ts",
+                    "status",
+                    "estimated_snapshot_bytes",
+                    "reserve_bytes",
+                    "required_available_bytes",
+                    "destination_available_bytes",
+                    "destination_shortfall_bytes",
+                    "source_available_bytes",
+                    "source_shortfall_bytes",
+                    "current_source_revision",
+                    "verified_source_revision",
+                    "current_source_covered",
+                ][..],
+            ),
+            (
                 "vault",
                 "runtime-vault-status.json",
                 &[

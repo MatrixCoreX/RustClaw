@@ -75,3 +75,30 @@ fn canonical_contract_hash_is_object_order_invariant() {
         sha256_hex(canonical_json(&right).as_bytes())
     );
 }
+
+#[test]
+fn exact_expansion_returns_action_documentation_with_the_original_contract_digest() {
+    let state = AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = fixture_task();
+    let entry = catalog_entries_for_task(&state, &task)
+        .into_iter()
+        .find(|e| e.capability_id == "filesystem.read_text_range")
+        .unwrap();
+    let (value, _) = expand_catalog(&state, &task, &[entry.capability_ref]).unwrap();
+    let expanded = &value["contracts"][0];
+    assert_eq!(expanded["contract_sha256"], entry.contract_sha256);
+    let text = expanded["action_documentation"]["text"].as_str().unwrap();
+    assert!(text.contains("## Boundaries"));
+    assert!(!text.contains("<!--a1:"));
+    let parameters = text
+        .split("## Parameter Contract")
+        .nth(1)
+        .unwrap()
+        .split("## Boundaries")
+        .next()
+        .unwrap();
+    assert!(parameters.contains("| `read_text_range` |"));
+    assert!(!parameters.contains("| `write_text` |"));
+}

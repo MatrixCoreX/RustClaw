@@ -279,6 +279,11 @@ pub(crate) fn bind_artifacts_to_task(
     step_id: &str,
     retention_deadline_at: Option<i64>,
 ) {
+    for artifact in &mut envelope.artifacts {
+        if let Some(metadata) = artifact.metadata.as_object_mut() {
+            metadata.remove("host_file_integrity");
+        }
+    }
     let task_id = task_id.trim();
     if !is_machine_ref(task_id) {
         return;
@@ -309,7 +314,19 @@ pub(crate) fn bind_artifacts_to_task(
         }
         if let Some(path) = artifact.path.as_deref() {
             artifact.sha256 = file_sha256(path);
-            artifact.size_bytes = std::fs::metadata(path).ok().map(|metadata| metadata.len());
+            artifact.size_bytes = std::fs::metadata(path)
+                .ok()
+                .filter(|metadata| metadata.is_file())
+                .map(|metadata| metadata.len());
+            if artifact.sha256.is_some() && artifact.size_bytes.is_some() {
+                if !artifact.metadata.is_object() {
+                    artifact.metadata = json!({});
+                }
+                artifact.metadata["host_file_integrity"] = json!({
+                    "schema_version": 1, "status": "verified",
+                    "scope": "source_file_integrity", "grant_authority": "none",
+                });
+            }
         } else if artifact.sha256.is_none() {
             artifact.sha256 = Some(format!("{:x}", Sha256::digest(locator.as_bytes())));
         }
@@ -1062,3 +1079,7 @@ fn sanitized_reference(value: &str) -> String {
 #[cfg(test)]
 #[path = "capability_result_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "capability_result_file_integrity_tests.rs"]
+mod file_integrity_tests;

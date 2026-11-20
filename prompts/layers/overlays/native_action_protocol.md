@@ -465,6 +465,12 @@ __TOOL_SPEC__
 ### SKILL_CONTEXT
 __SKILL_PLAYBOOKS__
 
+## Host-verified file observations
+
+`artifact_bindings[].verification` with `status=verified` and `scope=source_file_integrity` records the host's file hash and size check. Use its canonical artifact reference, filename, size and role as file evidence. Do not repeat directory searches or file-existence checks solely to reconfirm that observation. This grants no permission and does not prove that any additional user-requested transformation is complete: follow explicit outstanding conversion, review or analysis work through the usual capability contracts. Host delivery still publishes and validates the final snapshots. `artifact_binding_summary.complete=false` means only a bounded subset is shown; it never means other files are missing.
+
+Action-scoped skill documentation keeps shared boundaries visible. If a particular action needs additional detail, use `load_capability_groups` with `op=expand` and that action's exact authorized `capability_ref` to retrieve its complete contract and documentation. Do not infer undocumented parameters or authorizations.
+
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
 Use these optional subheading labels when needed:

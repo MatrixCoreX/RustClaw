@@ -168,6 +168,7 @@ fn generic_capability_observation(
         "status": &result.status,
         "error": &result.error,
         "artifact_bindings": planner_artifact_bindings(result),
+        "artifact_binding_summary": planner_artifact_binding_summary(result),
         "machine_continuation": planner_machine_continuation(result),
         "data": data,
         "effect": &result.effect,
@@ -177,22 +178,52 @@ fn generic_capability_observation(
     let serialized = if serialized.chars().count() <= MAX_GENERIC_CAPABILITY_OBSERVATION_CHARS {
         serialized
     } else {
-        serde_json::json!({
-            "schema_version": 1,
-            "capability": &result.capability,
-            "action": &result.action,
-            "status": &result.status,
-            "data": {
-                "truncated": true,
-                "original_chars": serialized.chars().count(),
-                "preview": serialized
-                    .chars()
-                    .take(MAX_GENERIC_CAPABILITY_OBSERVATION_CHARS)
-                    .collect::<String>(),
-            },
+        // Preserve delivery identities and continuation bindings before raw
+        // provider previews. A large diagnostic body must not erase artifacts.
+        let mut reduced = serde_json::json!({
+            "schema_version": 1, "capability": &result.capability,
+            "action": &result.action, "status": &result.status,
+            "artifact_bindings": planner_artifact_bindings(result),
+            "artifact_binding_summary": planner_artifact_binding_summary(result),
+            "machine_continuation": planner_machine_continuation(result),
+            "data": {"truncated":true,"original_chars":serialized.chars().count(),"preview":""},
             "effect": &result.effect,
-        })
-        .to_string()
+        });
+        if reduced["machine_continuation"].to_string().chars().count() > 4096 {
+            reduced["machine_continuation"] = serde_json::Value::Null;
+            reduced["machine_continuation_truncated"] = serde_json::json!(true);
+        }
+        while reduced.to_string().chars().count() > MAX_GENERIC_CAPABILITY_OBSERVATION_CHARS {
+            if reduced["artifact_bindings"]
+                .as_array_mut()
+                .is_some_and(|items| items.pop().is_some())
+            {
+                reduced["artifact_binding_summary"]["complete"] = serde_json::json!(false);
+                reduced["artifact_binding_summary"]["returned_count"] =
+                    serde_json::json!(reduced["artifact_bindings"].as_array().map_or(0, Vec::len));
+            } else {
+                reduced["machine_continuation"] = serde_json::Value::Null;
+                reduced["machine_continuation_truncated"] = serde_json::json!(true);
+                break;
+            }
+        }
+        let available = MAX_GENERIC_CAPABILITY_OBSERVATION_CHARS
+            .saturating_sub(reduced.to_string().chars().count())
+            .saturating_sub(64);
+        let mut preview = serialized
+            .chars()
+            .take(available.min(8_000))
+            .collect::<String>();
+        loop {
+            reduced["data"]["preview"] = serde_json::json!(preview);
+            let value = reduced.to_string();
+            if value.chars().count() <= MAX_GENERIC_CAPABILITY_OBSERVATION_CHARS
+                || preview.is_empty()
+            {
+                break value;
+            }
+            preview = preview.chars().take(preview.chars().count() / 2).collect();
+        }
     };
     Some(format!("capability_result_observation={serialized}"))
 }
@@ -247,6 +278,8 @@ fn planner_artifact_bindings(
     result
         .artifacts
         .iter()
+        .filter(|artifact| artifact.artifact_ref.is_some())
+        .take(16)
         .filter_map(|artifact| {
             let artifact_ref = artifact.artifact_ref.as_deref()?;
             Some(serde_json::json!({
@@ -258,9 +291,21 @@ fn planner_artifact_bindings(
                 "sha256": artifact.sha256,
                 "visibility": artifact.visibility,
                 "owner_task_id": artifact.owner_task_id,
+                "verification": artifact.metadata.get("host_file_integrity"),
             }))
         })
         .collect()
+}
+
+fn planner_artifact_binding_summary(
+    result: &claw_core::capability_result::CapabilityResultEnvelope,
+) -> serde_json::Value {
+    let total = result
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.artifact_ref.is_some())
+        .count();
+    serde_json::json!({"total_count":total,"returned_count":total.min(16),"complete":total<=16})
 }
 
 fn planner_machine_continuation(

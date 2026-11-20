@@ -118,6 +118,12 @@ Plan-verifier informational notes remain visible without being reported as
 blocking failures or repair requests. Actual denial and pending confirmation
 retain their distinct machine evidence in teaching and audit views.
 
+Action-scoped skill documentation is opt-in and selected only from structured action IDs.
+The authorized capability index stays complete; exact expansion returns the requested action's
+parameters and shared rules with its original documentation digest. Verified source-file hashes,
+sizes and artifact references remain in bounded observations even when provider diagnostics are
+large. These facts avoid redundant filesystem probes without bypassing final publication checks.
+
 ### Request and Agent Loop Flow
 
 ```mermaid
@@ -684,6 +690,12 @@ shortage as a skill failure. Low-memory hosts may explicitly configure serialize
 is disabled by default and never allows concurrent heavy work to consume that allowance. See
 [runtime resource admission and recovery](docs/architecture/16-runtime-resource-recovery.md) for
 resource tiers, administrator overrides, observability, and validation evidence.
+
+Resource waits also expose bounded `task_lifecycle.resource_wait` diagnostics. The console explains
+which disk is short of space, available bytes and the recovery threshold, or identifies the
+memory/concurrency shortage. Unknown probes stay unknown, and resumed/terminal tasks discard stale
+waiting details. See the recovery guide for backup capacity preflight and an offline procedure
+that shares identical immutable delivery snapshots while retaining every original path.
 
 Disk exhaustion is a separate persistence failure: freeing space does not itself restart a stalled
 executor or replay a task. Check filesystem capacity, task progress and checkpoint state together;

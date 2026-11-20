@@ -907,6 +907,27 @@ fn append_lifecycle_product_contract_fields(
     result_json: &Value,
     state: &str,
 ) {
+    let current_reason = obj
+        .get("resume_reason")
+        .or_else(|| obj.get("reason_code"))
+        .and_then(Value::as_str);
+    let resource_waiting = lifecycle_state_token_is_paused(state)
+        && current_reason.map_or_else(
+            || {
+                obj.get("message_key").and_then(Value::as_str)
+                    == Some("clawd.task.resource_waiting")
+            },
+            |reason| reason == "resource_admission_wait",
+        );
+    if !resource_waiting {
+        obj.remove("resource_wait");
+    } else if let Some(diagnostics) = result_json
+        .pointer("/task_lifecycle/resource_wait")
+        .filter(|value| value.is_object())
+    {
+        obj.entry("resource_wait".to_string())
+            .or_insert_with(|| diagnostics.clone());
+    }
     if let Some(process_observation) = result_json
         .pointer("/task_lifecycle/resume_executor_result_projection/process_observation")
         .filter(|value| value.is_object())
@@ -1570,3 +1591,7 @@ impl AsyncJobRef {
 #[cfg(test)]
 #[path = "task_lifecycle_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "task_lifecycle_resource_wait_tests.rs"]
+mod resource_wait_tests;

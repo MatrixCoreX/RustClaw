@@ -223,6 +223,11 @@ def prompt_template(skill: str, interface_md: str, interface_path: Path) -> str:
     errors = errors or "- TODO: list error conventions."
     examples = examples or "- TODO: add request/response examples."
 
+    if "<!-- planner-action-docs: v1 -->" in interface_md:
+        from skill_action_doc_sections import mark_actions, mark_parameters
+        actions = mark_actions(actions)
+        params = mark_parameters(params)
+
     source_path = interface_path.relative_to(REPO_ROOT).as_posix()
     memory_section = ""
     if memory_entry_points:

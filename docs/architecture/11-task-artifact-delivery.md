@@ -264,3 +264,10 @@ cd UI && node --import tsx --test src/lib/task-artifacts.test.ts src/lib/chat-hi
 The checks cover containment, authentication, byte ranges, history restoration,
 trusted async terminal results, safe preview policy, the long-running proxy path,
 and unchanged channel delivery.
+
+Host-computed source-file integrity evidence (`host_file_integrity`, schema v1) accompanies artifact
+bindings in planner observations. URI locator hashes and producer assertions cannot create this
+evidence. It describes the observed source bytes only and grants no authority. Large diagnostics
+are shortened before artifact identities and explicit machine continuations; bounded artifact
+previews report total/returned counts and completeness. Final snapshot publication, ownership and
+integrity verification still run through their existing contracts.

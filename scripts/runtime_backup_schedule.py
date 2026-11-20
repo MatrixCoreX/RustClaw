@@ -16,8 +16,10 @@ import urllib.request
 import runtime_checkpoint as checkpoint
 from runtime_checkpoint_storage import write_json
 from runtime_backup_local import checked_local, publish_local_status, recover_published_checkpoint
+from runtime_backup_capacity import capacity_report, verified_source_revision
 
 BUSY={'checkpoint_foreground_not_idle','checkpoint_distributed_work_active','checkpoint_already_running'}
+CAPACITY={'checkpoint_capacity_unavailable','checkpoint_destination_low_space','checkpoint_source_storage_pressure'}
 PERMANENT={'vault_key_invalid','vault_key_not_private','vault_crypto_dependency_missing','vault_scope_invalid','vault_retention_invalid','vault_existing_object_corrupt','vault_attachments_exceed_capacity','checkpoint_cohort_mismatch','vault_receiver_not_committed'}
 
 
@@ -73,6 +75,16 @@ def run_cycle(settings,*,retry_only=False):
     digest=hashlib.sha256(json.dumps(policy,sort_keys=True,separators=(',',':')).encode()).hexdigest()
     if not state:state={'schema_version':1,'phase':'idle','attempt':0,'cycle_started_at_ts':now,'policy_digest':digest}
     changed=state.get('policy_digest') not in (None,digest)
+    capacity=capacity_report(root,settings['destination'],settings['reserve_bytes'])
+    try:current_revision=checkpoint.running_revision(root)
+    except Exception:current_revision=None;capacity['cohort_probe_error_code']='checkpoint_cohort_unavailable'
+    verified_revision=verified_source_revision(root,settings['destination'])
+    current_known=isinstance(current_revision,str) and len(current_revision)==40 and all(c in '0123456789abcdef' for c in current_revision)
+    capacity.update(current_source_revision=current_revision if current_known else None,
+                    verified_source_revision=verified_revision,
+                    current_source_covered=(current_revision==verified_revision) if current_known and verified_revision else None)
+    write_json(root/'data/runtime-backup-capacity.json',capacity)
+    changed=changed or (state.get('phase')=='complete' and capacity['current_source_covered'] is False)
     # A small hourly telemetry sample supports capacity estimates. Failure of a
     # console sample must never suppress a backup or trigger a model request.
     if now-state.get('last_inventory_at_ts',0)>=3600:
@@ -90,6 +102,11 @@ def run_cycle(settings,*,retry_only=False):
         return {'status':'attention_required','error_code':state['error_code']}
     phase=state.get('resume_phase',state['phase'])
     if phase not in ('local','remote'):raise RuntimeError('backup_run_phase_invalid')
+    if phase=='local' and capacity['status']!='ready':
+        code='checkpoint_capacity_unavailable' if capacity['status']=='unavailable' else ('checkpoint_destination_low_space' if capacity['destination_shortfall_bytes'] else 'checkpoint_source_storage_pressure')
+        state.update(phase='deferred',resume_phase='local',error_code=code,notice_key='backup.capacity_deferred',next_retry_at_ts=now+900)
+        write_json(path,state)
+        return {'status':'retry_scheduled','phase':'deferred','error_code':code,'attempt':state['attempt']}
     try:
         if phase=='remote':
             try:local=checked_local(settings,state)
@@ -115,8 +132,8 @@ def run_cycle(settings,*,retry_only=False):
         if isinstance(error,BlockingIOError):code='checkpoint_already_running'
         state.update(error_code=code,resume_phase=phase)
         if code=='vault_pinned_package_missing':state['resume_phase']='local'
-        if code in BUSY:
-            state.update(phase='deferred',notice_key='backup.busy',next_retry_at_ts=int(time.time())+900)
+        if code in BUSY or code in CAPACITY:
+            state.update(phase='deferred',notice_key='backup.capacity_deferred' if code in CAPACITY else 'backup.busy',next_retry_at_ts=int(time.time())+900)
         else:
             state['attempt']=state.get('attempt',0)+1
             if code in PERMANENT or state['attempt']>=settings['retry_limit']:

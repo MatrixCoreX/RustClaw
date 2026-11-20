@@ -124,4 +124,41 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual(schedule.run_cycle(self.settings,retry_only=True)['status'],'attention_required');self.assertTrue(path.exists())
 
 
+    def test_capacity_deferrals_keep_existing_backups_without_consuming_retry_budget(self):
+        blocked={'schema_version':1,'status':'insufficient','destination_shortfall_bytes':100,'source_shortfall_bytes':0}
+        with patch.object(schedule,'capacity_report',return_value=blocked),patch.object(schedule,'create_local') as create,patch.object(schedule,'send_remote') as send:
+            for _ in range(5):
+                result=schedule.run_cycle(self.settings,retry_only=self.state_path_exists())
+                self.assertEqual(result['phase'],'deferred');self.assertEqual(self.state()['attempt'],0)
+                self.assertEqual(self.state()['notice_key'],'backup.capacity_deferred');self.due()
+            create.assert_not_called();send.assert_not_called()
+        with patch.object(schedule,'create_local',side_effect=self.create),patch.object(schedule,'send_remote',return_value={'status':'verified'}):
+            self.assertEqual(schedule.run_cycle(self.settings,retry_only=True)['status'],'verified')
+
+    def test_new_running_cohort_requests_one_fresh_backup_after_success(self):
+        with patch.object(schedule,'create_local',side_effect=self.create),patch.object(schedule,'send_remote',return_value={'status':'verified'}):
+            self.assertEqual(schedule.run_cycle(self.settings)['status'],'verified')
+        self.now+=20
+        def replacement(settings):
+            result=self.create(settings);manifest=Path(result['checkpoint'])/'manifest.json'
+            value=json.loads(manifest.read_text());value['source_revision']='b'*40;write_json(manifest,value);return result
+        with patch.object(schedule.checkpoint,'running_revision',return_value='b'*40),patch.object(schedule,'create_local',side_effect=replacement) as create,patch.object(schedule,'send_remote',return_value={'status':'verified'}):
+            self.assertEqual(schedule.run_cycle(self.settings,retry_only=True)['status'],'verified')
+            self.assertEqual(schedule.run_cycle(self.settings,retry_only=True)['status'],'not_due')
+            self.assertEqual(create.call_count,1)
+
+    def test_observational_version_probe_failure_does_not_restart_a_complete_cycle(self):
+        with patch.object(schedule,'create_local',side_effect=self.create),patch.object(schedule,'send_remote',return_value={'status':'verified'}):schedule.run_cycle(self.settings)
+        with patch.object(schedule.checkpoint,'running_revision',side_effect=RuntimeError('fixture daemon offline')),patch.object(schedule,'create_local') as create:
+            self.assertEqual(schedule.run_cycle(self.settings,retry_only=True)['status'],'not_due');create.assert_not_called()
+
+    def test_capacity_race_at_snapshot_admission_does_not_consume_failure_budget(self):
+        with patch.object(schedule,'capacity_report',return_value={'status':'ready'}),patch.object(schedule,'create_local',side_effect=RuntimeError('checkpoint_destination_low_space')),patch.object(schedule,'send_remote') as send:
+            result=schedule.run_cycle(self.settings)
+            self.assertEqual(result['attempt'],0)
+            self.assertEqual(result['phase'],'deferred')
+            self.assertEqual(self.state()['notice_key'],'backup.capacity_deferred')
+            send.assert_not_called()
+
+
 if __name__=='__main__':unittest.main()

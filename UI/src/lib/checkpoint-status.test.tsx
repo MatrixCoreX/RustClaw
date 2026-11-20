@@ -56,3 +56,17 @@ test("backup notices refresh automatically and retired timers cannot use an expi
   await act(async()=>{view.unmount();});assert.equal(cleared,1);
   await act(async()=>{tick?.();});assert.equal(calls,2);
 });
+
+test("capacity explains the measured shortfall while preserving the existing verified backup", async () => {
+  const text = await show({ status: "verified_remote", backup_run: { phase: "deferred" }, capacity: { status: "insufficient", destination_available_bytes: 1024 ** 3, required_available_bytes: 3 * 1024 ** 3, destination_shortfall_bytes: 2 * 1024 ** 3, current_source_covered: false } });
+  assert.match(text, /backup workspace has/);
+  assert.match(text, /shortfall/);
+  assert.match(text, /existing copies are retained/);
+  assert.match(text, /program has been updated/);
+});
+
+test("unavailable capacity does not invent numeric availability", async () => {
+  const text = await show({ status: "verified_remote", capacity: { status: "unavailable" } });
+  assert.match(text, /Backup capacity is unavailable/);
+  assert.doesNotMatch(text, /has 0|needs 0/);
+});

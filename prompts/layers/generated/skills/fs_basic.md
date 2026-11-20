@@ -50,7 +50,10 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 ## Parameter Contract
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
+<!--a1:stat_paths-->
 | `stat_paths` | `paths` | yes | string/string[] | - | Explicit paths to inspect. |
+<!--/a1-->
+<!--a1:list_dir-->
 | `list_dir` | `path` | no | string(path) | `.` | Directory to list. |
 | `list_dir` | `files_only` / `dirs_only` | no | bool | `false` | Narrow inventory to files or directories. |
 | `list_dir` | `include_hidden` | no | bool | `false` | Include dot-prefixed entries. |
@@ -58,17 +61,25 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 | `list_dir` | `sort_by` | no | string | `name` | `name|name_desc|mtime_desc|mtime_asc|size_desc|size_asc`. |
 | `list_dir` | `ext_filter` | no | string/string[] | - | Extension filter for files. |
 | `list_dir` | `max_entries` | no | integer | impl default | Output cap. |
+<!--/a1-->
+<!--a1:count_entries-->
 | `count_entries` | `path` | no | string(path) | `.` | Directory whose direct entries should be counted. |
 | `count_entries` | `files_only` / `dirs_only` | no | bool | `false` | Count only files or only directories. |
 | `count_entries` | `include_hidden` | no | bool | `false` | Include dot-prefixed entries. |
 | `count_entries` | `ext_filter` | no | string/string[] | - | Count matching file extensions. |
+<!--/a1-->
+<!--a1:read_text_range-->
 | `read_text_range` | `path` | yes | string(path) | - | Text file to slice. |
 | `read_text_range` | `mode` | no | string | `head` | `head|tail|range|last_non_empty`; the final mode returns `line_number`, `line_text`, and `exists`. |
 | `read_text_range` | `n` / `start_line` / `end_line` | no | integer | action default | Bounded line controls. |
 | `read_text_range` | `field_selector` | no | string | - | Use machine token `title` when the requested scalar is the document/markdown heading; runtime returns `field_value` when observed. |
+<!--/a1-->
+<!--a1:read_artifact_range-->
 | `read_artifact_range` | `path` | yes | string(path) | - | Runtime-owned file below `.agent-runtime/artifacts`; regular workspace files are rejected. |
 | `read_artifact_range` | `start_byte` / `cursor` | no | integer | `0` | Exact byte offset returned by an artifact range handle or prior `page.next_cursor`. |
 | `read_artifact_range` | `max_bytes` | no | integer | `65536` | Bounded page size, clamped to `256..1048576`; binary pages return base64. |
+<!--/a1-->
+<!--a1:find_entries-->
 | `find_entries` | `root` | no | string(path) | workspace | Focused recursive search root; no implicit depth cap. |
 | `find_entries` | `pattern` | conditional | string/string[] | - | Name/basename pattern for name search. |
 | `find_entries` | `glob` / `globs` | conditional | string/string[] | - | Typed path glob(s), used when a path shape is known; parsed as data rather than shell syntax. |
@@ -76,10 +87,12 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 | `find_entries` | `target_kind` | no | string | `any` | `any|file|dir`. |
 | `find_entries` | `match_mode` / `case_mode` | no | enums | `contains` / `smart` | Name matching: `exact|prefix|suffix|contains|fuzzy|glob`; `fuzzy` is typo-tolerant and relevance-ranked. Case: `smart|sensitive|insensitive`. |
 | `find_entries` | `sort_by` | no | string | `name` | `name|name_desc|mtime_desc|mtime_asc|size_desc|size_asc`; ties use path order. |
+<!--/a1-->
 | `find_entries` / `grep_text` / `find_images` | `include_hidden` | no | boolean | `false` | Include hidden entries for an explicit request. |
 | `find_entries` / `grep_text` / `find_images` | `respect_ignore` | no | boolean | `true` | Respect repository ignore files by default. |
 | `find_entries` / `grep_text` / `find_images` | `max_depth` | no | integer | none | Explicit shallow-scope selector, never an implicit completeness limit. |
 | `find_entries` / `grep_text` / `find_images` | `max_results` / `cursor` | no | integer / opaque string | bounded / none | Bound the returned page and continue the same query/snapshot; they do not bound traversal. |
+<!--a1:grep_text-->
 | `grep_text` | `query` | yes | string | - | Text query. |
 | `grep_text` | `root` | no | string(path) | workspace | Search root or known file path. |
 | `grep_text` | `pattern` | no | string/string[] | - | Optional filename filter. |
@@ -88,24 +101,52 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 | `grep_text` | `multiline` | no | boolean | `false` | Permit a literal or regex selector to cross line boundaries within content byte ceilings. |
 | `grep_text` | `context_before` / `context_after` | no | integer | `0` | Structured surrounding lines, each capped at 20. |
 | `grep_text` | `max_file_bytes` / `max_scan_bytes` | no | integer | bounded defaults | Per-file and aggregate content-read budgets. |
+<!--/a1-->
+<!--a1:find_images-->
 | `find_images` | `root`, `exts`, `max_results`, `cursor`, `max_dirs` | no | bounded fields | workspace/defaults | Return paged image paths plus MIME, size, mtime, and dimensions where available. |
+<!--/a1-->
+<!--a1:compare_paths-->
 | `compare_paths` | `left_path`, `right_path` | yes | string(path) | - | Two explicit paths to compare. |
+<!--/a1-->
+<!--a1:write_text-->
 | `write_text` | `path`, `content` | yes | string(path), string | - | Replace/write exact UTF-8 content. Empty/whitespace content is valid; missing/null is invalid. Requires confirmation. |
 | `write_text` | `deliver_to_user` | no | boolean | false | Set true when a file attachment is requested; publishes a task-owned immutable snapshot. A path or FILE token alone does not publish. Complete overwrite only, not append. |
 | `write_text` | `replaces_artifact_refs` | no | string[] | [] | For a corrected deliverable, select the obsolete attachments' exact canonical refs from this same task. Requires deliver_to_user=true. Preserve unrelated successful files; never invent refs. |
+<!--/a1-->
+<!--a1:append_text-->
 | `append_text` | `path`, `content` | yes | string(path), string | - | Append text content to an existing or new file. A content string containing only a newline is valid. Include the requested newline in `content` when the user asks for a line append. Requires confirmation. |
+<!--/a1-->
+<!--a1:make_dir-->
 | `make_dir` | `path` | yes | string(path) | - | Create directory. Requires confirmation. |
 | `make_dir` | `parents` / `recursive` | no | bool | `true` | Create missing parent directories for mkdir-p style operations. |
+<!--/a1-->
+<!--a1:remove_path-->
 | `remove_path` | `path` | yes | string(path) | - | Remove one file. Directory removal requires `target_kind="directory"` and `recursive=true`. Requires confirmation. |
+<!--/a1-->
+<!--a1:preview_replace_text-->
 | `preview_replace_text` | `path` plus direct text pair or `edits` | yes | strings / object[] | - | Preview without writing. Direct mode uses `old_text`/`new_text`; batch mode uses 1–128 edit objects. Default matching is unique. Set `replace_all=true` to replace every match and optionally pin `expected_occurrences` to `1..10000`. Optional `expected_sha256` and `preserve_line_endings`. |
+<!--/a1-->
+<!--a1:replace_text-->
 | `replace_text` | `path` plus direct text pair or `edits` | yes | strings / object[] | - | Atomically apply either one direct edit or sequential `edits[]` to one UTF-8 file. Any failed edit leaves the whole file unchanged. Returns one checkpoint plus hash/diff evidence. Each edit may set `replace_all` and `expected_occurrences`; top-level and batch edit modes cannot be mixed. Requires confirmation. |
+<!--/a1-->
+<!--a1:apply_patch-->
 | `apply_patch` | `patch` | yes | string(unified diff) | - | Apply a bounded unified diff. Git worktrees prefer Git check/apply; non-Git workspaces use the pure-Rust fallback. Exact context must match; optional `precondition_hashes` maps paths to `sha256:<hex>` or `missing`. Requires confirmation. |
+<!--/a1-->
+<!--a1:diff-->
 | `diff` | `checkpoint_id` / `paths` | no | string / string[] | current workspace | Return a checkpoint patch or a bounded current Git diff as machine evidence. |
+<!--/a1-->
+<!--a1:rewind-->
 | `rewind` | `checkpoint_id` | yes | string | - | Restore a patch checkpoint only when target hashes still match the recorded post-patch state. Requires confirmation. |
+<!--/a1-->
+<!--a1:review_child_patch-->
 | `review_child_patch` | `child_task_id` | yes | string | - | Load a terminal child worktree patch after validating parent ownership, artifact hash, base commit, and preconditions. Optional `patch_ref` pins the expected artifact. |
+<!--/a1-->
+<!--a1:apply_child_patch-->
 | `apply_child_patch` | `child_task_id` | yes | string | - | Apply the validated child patch through the normal workspace checkpoint path, persist the parent disposition, and clean the isolated worktree. Optional `patch_ref` pins the expected artifact. Requires confirmation. |
+<!--/a1-->
+<!--a1:reject_child_patch-->
 | `reject_child_patch` | `child_task_id` | yes | string | - | Persist parent rejection and clean the isolated worktree without changing the primary workspace. Optional `patch_ref` pins the expected artifact. Requires confirmation. |
-
+<!--/a1-->
 ## Boundaries
 
 ### Edit action matrix

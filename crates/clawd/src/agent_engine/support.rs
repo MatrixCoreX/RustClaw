@@ -919,6 +919,18 @@ pub(super) fn build_agent_loop_checkpoint_progress_payload_with_budget(
         obj.insert("message_key".to_string(), json!(message_key));
     }
 
+    if resume_reason == "resource_admission_wait" {
+        if let Some(diagnostics) = loop_state
+            .executed_step_results
+            .iter()
+            .rev()
+            .filter_map(|step| step.error.as_deref())
+            .find_map(crate::resource_wait::from_error)
+        {
+            lifecycle["resource_wait"] = diagnostics;
+        }
+    }
+
     json!({
         "progress_messages": loop_state.progress_messages,
         "task_lifecycle": lifecycle,

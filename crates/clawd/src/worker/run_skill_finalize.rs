@@ -901,6 +901,7 @@ async fn finalize_run_skill_failure(
             "next_check_after": next_check_after,
             "retry_after_seconds": retry_after_seconds,
             "resource_wait_attempts": task.claim_attempt.max(1),
+            "resource_wait": crate::resource_wait::from_error(err_text),
             "resource_grant": resource_grant,
             "can_poll": true,
             "can_cancel": true,

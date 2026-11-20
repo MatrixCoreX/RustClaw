@@ -330,3 +330,10 @@ test("live tracking stops for user input but continues for background work", () 
     true,
   );
 });
+
+test("a due retry still explains its current storage blocker", () => {
+  const view = buildTaskLifecycleView({ state: "waiting", resume_due: true, resume_reason: "resource_admission_wait", resource_wait: { schema_version: 1, reason_code: "storage_pressure", volumes: [{ role: "system", state: "critical", available_bytes: 1024 ** 3, critical_reserve_bytes: 2 * 1024 ** 3, shortfall_bytes: 1024 ** 3 + 1 }] } }, "running", "en");
+  assert.match(view.detail, /System disk/);
+  assert.match(view.detail, /more than/);
+  assert.doesNotMatch(view.detail, /resume window is due/);
+});

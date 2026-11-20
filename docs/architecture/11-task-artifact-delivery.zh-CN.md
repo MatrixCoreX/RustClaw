@@ -212,3 +212,8 @@ cd UI && node --import tsx --test src/lib/task-artifacts.test.ts src/lib/chat-hi
 
 这些检查覆盖路径约束、鉴权、字节范围、历史恢复、可信异步终态结果、安全预览策略、
 长任务代理路径，以及通信端交付不受影响。
+
+宿主根据实际文件生成 `host_file_integrity`（schema v1），并与 artifact 绑定一起提供给规划器。
+URI 定位符摘要和技能自报信息不能生成这项证明；它只描述已观察到的源文件字节，不授予权限。
+诊断内容过大时，优先保留 artifact 身份与明确的后续动作，预览同时报告总数、返回数和完整性。
+最终快照发布、所有权与完整性验证仍按原合同执行。

@@ -98,8 +98,11 @@ def create(root, destination, *, mode, unit, retain=1, reserve=2*1024**3, offlin
     if not offline and root.stat().st_dev==destination.stat().st_dev:raise RuntimeError('checkpoint_requires_other_filesystem')
     existing=sorted(destination.glob('checkpoint-*'))
     recent=[p for p in existing if p.is_dir() and (p/'manifest.json').is_file()]
-    estimate=max([sum(f.stat().st_size for f in p.iterdir() if f.is_file()) for p in recent[-1:]] or [900*1024**2])
-    if shutil.disk_usage(destination).free < reserve+estimate:raise RuntimeError('checkpoint_destination_low_space')
+    from runtime_backup_capacity import capacity_report
+    capacity=capacity_report(root,destination,reserve)
+    if capacity['status']=='unavailable':raise RuntimeError('checkpoint_capacity_unavailable')
+    if capacity['destination_shortfall_bytes']:raise RuntimeError('checkpoint_destination_low_space')
+    if capacity['source_shortfall_bytes']:raise RuntimeError('checkpoint_source_storage_pressure')
     import fcntl
     with (destination/'.checkpoint.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)

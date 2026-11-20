@@ -1,3 +1,5 @@
+import { resourceWaitDetail, type ResourceWaitDiagnostics } from "./resource-wait";
+
 export type TaskLifecycleLang = "zh" | "en";
 
 export interface TaskLifecycleProjection {
@@ -16,6 +18,7 @@ export interface TaskLifecycleProjection {
   message_key?: string;
   resume_directive?: string;
   waiting_reason_code?: string;
+  resource_wait?: ResourceWaitDiagnostics | null;
   checkpoint_id?: string;
   pending_job_ref?: string;
   poll_ref?: string;
@@ -253,7 +256,10 @@ export function buildTaskLifecycleView(
 
   let detail = t(lang, "任务状态来自当前任务记录。", "Status comes from the current task record.");
   if (state === "waiting" || state === "background") {
-    if (processObservation?.process_alive === true) {
+    const resourceDetail = resourceWaitDetail(lifecycle?.resource_wait, lang);
+    if (resourceDetail) {
+      detail = resourceDetail;
+    } else if (processObservation?.process_alive === true) {
       detail = t(
         lang,
         "后台任务仍在运行。刷新页面不会中断它，系统会继续检查进度。",

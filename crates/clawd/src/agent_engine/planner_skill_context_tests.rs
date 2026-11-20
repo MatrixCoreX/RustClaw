@@ -693,3 +693,26 @@ fn native_action_protocol_scopes_output_constraints_semantically() {
     assert!(PROMPT.contains("Replacing the active deliverable"));
     assert!(PROMPT.contains("not a lifecycle stop"));
 }
+
+#[test]
+fn action_scoped_playbook_keeps_other_capabilities_discoverable() {
+    let state = state();
+    let loop_state = loop_state_with_plan(plan_with_step(
+        "call_capability",
+        "filesystem.read_text_range",
+        json!({"path":"README.md","start_line":1,"end_line":1}),
+    ));
+    let context = build_planner_skill_context(&state, &task(), &loop_state);
+    let parameters = context
+        .playbook_text
+        .split("## Parameter Contract")
+        .nth(1)
+        .unwrap()
+        .split("## Boundaries")
+        .next()
+        .unwrap();
+    assert!(parameters.contains("| `read_text_range` |"));
+    assert!(!parameters.contains("| `write_text` |"));
+    assert!(context.quick_index_text.contains("filesystem.write_file"));
+    assert!(context.playbook_text.contains("## Boundaries"));
+}

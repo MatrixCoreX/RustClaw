@@ -170,13 +170,37 @@ pub(super) fn expand_catalog(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
+    let mut contracts = Vec::with_capacity(selected.len());
+    for entry in &selected {
+        let mut value = serde_json::to_value(entry)
+            .map_err(|_| "capability_contract_encode_failed".to_string())?;
+        if let Some(artifact) = &entry.playbook_artifact {
+            if let Some(path) = artifact.get("logical_path").and_then(Value::as_str) {
+                let body = crate::load_prompt_template_for_state(state, path, "").0;
+                if artifact.get("sha256").and_then(Value::as_str)
+                    != Some(sha256_hex(body.as_bytes()).as_str())
+                {
+                    return Err("capability_documentation_generation_changed".to_string());
+                }
+                let actions = entry.action.iter().cloned().collect::<BTreeSet<_>>();
+                let rendered = if entry.action.is_some() {
+                    super::skill_action_docs::render(&body, &actions).unwrap_or(body)
+                } else {
+                    body
+                };
+                value["action_documentation"] = json!({"schema_version":1,
+                    "source_artifact":artifact,"selected_action":entry.action,"text":rendered});
+            }
+        }
+        contracts.push(value);
+    }
     Ok((
         json!({
             "schema_version": 1,
             "catalog_kind": "authorized_capability_expansion",
             "complete": true,
             "returned_count": selected.len(),
-            "contracts": selected,
+            "contracts": contracts,
         }),
         groups,
     ))

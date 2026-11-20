@@ -33,15 +33,15 @@ remain technician overrides. Linux/Pi browser discovery is unchanged.
 - A complete copied app-share message for any supported platform containing a supported URL -> pass the complete text as `share` and run `download` immediately.
 - A supported website share URL -> pass the complete URL as `share` and run `download`. Common website forms include Douyin `/video/<id>` or `/note/<id>`, Kuaishou `/short-video/<id>`, Xiaohongshu `/explore/<note-id>` or `/discovery/item/<note-id>`, TikTok `/@user/video/<id>`, YouTube `watch`, `shorts`, `live`, or `youtu.be` URLs, Bilibili `/video/BV...`, `/video/av...`, or `b23.tv` share links, WeChat Channels `https://weixin.qq.com/sph/<short-code>` URLs, Toutiao `/article/<id>`, `/video/<id>`, `/w/<id>`, `group/<id>`, mobile video-group, or micro-post thread shares, and Weibo `/<uid>/<shortcode>`, mobile `/status/<mid>`/`detail/<mid>`, or `/tv/show/<scope>:<mid>` links. Preserve the original query string.
 - Xiaohongshu App and website shares are distinct valid inputs: App copy text commonly carries an `xhslink.cn` or `xhslink.com` short link, while website sharing commonly carries a full `xiaohongshu.com` note URL. Do not ask the user to convert one form into the other.
-- Input is channel-neutral: identical App shares, short links, and website URLs select `download` on UI and every host channel.
+- Apply the same download semantics to App shares, short links, and website URLs on every host channel.
 - Host FIFO applies per user before runner creation. Completion, failure, timeout, cancellation or process loss releases the lane. Different users run in parallel within global concurrency. `capabilities` and skills without `dispatch_queue` keep their existing dispatch behavior.
 - `media_download.download` has no whole-operation deadline. A compatibility `operation_timeout_seconds` value is ignored for this action and is not exposed to the planner. Per-request network timeouts, explicit cancellation, durable background polling, and renewable retention remain active.
 - Profile collection uses the platform work ID as its stable item identity. After every completed or failed item it atomically advances a monotonic cursor and writes an immutable `partial` checkpoint snapshot in private skill storage. A safe retry restores verified completed artifacts by SHA-256 and processes only remaining IDs; it writes a distinct immutable `complete` snapshot only after every currently listed item and its artifact manifest verify successfully.
 - When the user wants the images/video themselves, prefer `media_download.download` over a general browser capability. Use a browser only when the requested output is page text, comments, navigation, or a page summary rather than the media files.
 - Planner semantics, not runtime phrase matching, select the newest concrete request/target.
-- Ordinary media download requests must stop after `media_download.download`. Video posts return original video media. Image-article posts from Douyin, Xiaohongshu, WeChat Channels, Toutiao, or Weibo attempt the original images and platform-provided body; Douyin background audio remains an independent component. Toutiao extraction is bound to the exact requested item ID in first-party `RENDER_DATA`, while Weibo browser extraction is scoped to the primary rendered article, so recommendation cards, avatars, and video posters are not mixed into the result. Toutiao video chooses the best available rendition and pairs a separate DASH audio stream when required; a text-only article remains a successful UTF-8 article artifact. A WeChat Channels video also preserves its platform description as `_article.txt` when available. Missing caption text must not drop an available media component. Deliver all successfully retrieved components even when another component is unavailable; fail only when no deliverable component remains. Up to nine images remain individual delivery artifacts; ten or more are preserved in one ZIP in source order. When available, the complete body remains inline and in `_article.txt`; a large image-set ZIP also contains it. The article body starts a new line after each comma and period; decimal numbers and URL-like tokens keep their internal ASCII periods. This media-download-only rule does not change delivery behavior for any other skill. The article is first-party post content, not OCR; never recognize text inside images or transcribe video/audio unless the current user explicitly asks for that conversion.
-- Default download delivery is `deliver_to_user=true`: send the downloaded media back to the originating communication channel and expose it in the UI.
-- After `download` / `ocr` / `image_vision.extract_text`, host delivery/synthesis presents files and text without another action. `article_delivery`, `recognition_delivery`, `synthesis_sources` and `source_label_requirement` are output metadata, not dispatches.
+- Ordinary media download requests must stop after `media_download.download`. Video posts return original video media. Image-article posts from Douyin, Xiaohongshu, WeChat Channels, Toutiao, or Weibo attempt the original images and platform-provided body; Douyin background audio remains an independent component. Toutiao extraction is bound to the exact requested item ID in first-party `RENDER_DATA`, while Weibo browser extraction is scoped to the primary rendered article, so recommendation cards, avatars, and video posters are not mixed into the result. Toutiao video chooses the best available rendition and pairs a separate DASH audio stream when required; a text-only article remains a successful UTF-8 article artifact. A WeChat Channels video also preserves its platform description as `_article.txt` when available. Missing caption text must not drop an available media component. Deliver all successfully retrieved components even when another component is unavailable; fail only when no deliverable component remains. Up to nine images remain individual delivery artifacts; ten or more are preserved in one ZIP in source order. When available, the complete body remains inline and in `_article.txt`; a large image-set ZIP also contains it. The article body starts a new line after each comma and period; decimal numbers and URL-like tokens keep their internal ASCII periods. This media-download-only rule does not change delivery behavior for any other skill. Article text is platform-provided, not OCR. Run image OCR or audio/video transcription only when explicitly requested.
+- Downloads default to `deliver_to_user=true` for the originating channel/UI.
+- After success, host delivery presents files and text. Delivery, recognition and synthesis metadata are evidence, not dispatch requests.
 - If the user explicitly says not to send the media back (for example, “不要发我”), set `deliver_to_user=false`. Do not remove that phrase from `share`; the downloader still extracts the URL from the complete text. Reply with the saved local path only and do not emit a delivery artifact.
 - “只解析这个分享链接的媒体直链，不要下载” -> `resolve`
 - A video link or copied share followed by an explicit speech-transcription request uses `text_conversion_scope=audio_only`. Download prepares a WAV with local FFmpeg; with normal delivery enabled, return the original video and extracted WAV as separate artifacts, while still using the exact `extra.processing_inputs.video_audio.path` for `audio.preview_transcribe` and the selected backend, never the MP4. Preview selects `audio.transcribe` for remote STT or `local_asr.transcribe` for local STT. Failure must not switch backends. Explain structured extraction/STT failures in the user's language and preserve successfully downloaded media. Only explicit visible/on-screen text or all-source requests use `images_only` or `images_and_audio`; label first-frame text and audio transcript separately, never imply the first frame covers the entire video. Never send a video to image OCR.
@@ -58,18 +58,25 @@ remain technician overrides. Linux/Pi browser discovery is unchanged.
 - No dedicated config entry points declared.
 
 ## Actions (from interface)
+<!--a1:capabilities-->
 ### `capabilities`
 
 Return supported actions, platforms, security defaults, and optional dependencies. No network or filesystem access is needed.
 
+<!--/a1-->
+<!--a1:account_status-->
 ### `account_status`
 
 Read public snapshots without opening a browser. Optional `platform`; omission/`auto` selects all platforms. Saved credentials do not prove server-side login validity. Changed or unbound credentials invalidate old names; unchanged credentials retain the original check time. Return only public `extra.accounts`, never post-author identities, credentials or private binding digests.
 
+<!--/a1-->
+<!--a1:account_logout-->
 ### `account_logout`
 
 After explicit user approval, require one `platform` and `confirm=true`. Clear only that platform's skill-owned login state; preserve files, history, configuration and other platforms. An active browser/profile lease returns `account_session_busy` without stopping it. The AiAPP exposes a one-click per-platform control using the same capability and normal policy checks.
 
+<!--/a1-->
+<!--a1:download-->
 ### `download`
 
 Extract the supported URL from `share` and download public media. `share` may be a URL by itself or complete copied App share text from any supported platform. App short links and full website share URLs are equally valid, and the complete input must be preserved across UI and communication-channel entry points. Xiaohongshu accepts both App share text containing `xhslink.cn`/`xhslink.com` and website share URLs under `xiaohongshu.com`. Preserve the short-link `note_id` and `xsec_token` and open the note page, not the login bounce. Video streams may appear under `video.media.stream.EF4`/`EF5` (or older `h264`) `masterUrl` keys. WeChat Channels accepts only validated HTTPS `weixin.qq.com/sph/<short-code>` links, obtains a short-lived preview grant from the skill-owned Yuanbao browser session, then reads the official Channels feed and downloads the returned media immediately. Toutiao accepts exact public article/video/micro-post routes plus first-party group, mobile video-group, and thread share routes; it normalizes them to the requested item ID and returns the first-party body together with every available image or video component. Weibo accepts public desktop, mobile-status, and first-party video routes; it normalizes desktop base62 and numeric mobile IDs to one identity, then returns the primary post body together with available original-size images or video while excluding avatars, posters, and recommendation articles. Do not require the user to clean the copied message or resend only the URL. When an authorized site needs login, use this skill's private browser profile; do not ask the user for a cookie. A Douyin or Xiaohongshu profile URL can download multiple recent works with `profile_limit`; use `"all"` only when the user explicitly requests every accessible item.
@@ -86,33 +93,49 @@ For an image-plus-audio bundle, `extra.content_bundle.kind` is `image_audio` or 
 
 After success, expose every generated user-facing delivery artifact through the task artifact contract when `deliver_to_user` is omitted or `true`. Extraction metadata JSON is internal diagnostic state: it must use `visibility=internal_processing`, remain outside `extra.artifacts`, and never be sent to a communication channel or rendered as a user download. Large image sets replace individual delivery artifacts with one ZIP, while the structured `content_bundle.image_count` and `processing_inputs.image_count` retain the complete logical count. Profile collection also emits `profile_downloads.json` with `artifact_role=profile_manifest`, stable IDs, high-water cursor, per-file sizes/SHA-256 values, and explicit `state=complete`; a partial run remains an error and cannot masquerade as successful completion. The originating communication adapter can send the file back, and the UI can render its preview/download URL. Host channel size limits still apply. When `deliver_to_user=false`, do not package the set: return every generated user-facing file under `extra.saved_files`, keep `extra.artifacts` empty, and report the saved path without sending the media.
 
+<!--/a1-->
+<!--a1:resolve-->
 ### `resolve`
 
 Resolve downloadable media URLs from `share` without saving the media. `extra.urls` contains the deduplicated direct URLs. When the provider exposes stream metadata, `extra.resolve_metadata` contains `platform`, `title`, `video_url_count`, `audio_url_count`, `url_count`, and `source`; callers should use those machine fields instead of fetching the page again or inferring stream kinds from URL text.
 
+<!--/a1-->
+<!--a1:ocr-->
 ### `ocr`
 
 Run Tesseract OCR for image-only `input_paths` only as a fallback after `image_vision.extract_text` fails or when the user explicitly asks for local Tesseract, then call the granted internal LLM gateway inside this skill to restore sentence boundaries, paragraph layout, punctuation, and highly certain recognition errors. The review merges visual soft wraps caused only by image width and preserves line breaks for real paragraphs, headings, lists, tables, code, verse, and other line-oriented structures. When `language` is omitted or `auto`, local OCR uses installed languages from a compact CJK/Latin recognition set when present, otherwise every installed recognition language, without script-specific candidate scoring or short-number deletion. Host-declared fallback calls set `fallback_from=image_vision.extract_text`; then `extra.recognition.notice_key=media_download.notice.vision_unavailable_ocr_fallback` and the user-visible reply must say, in the user's language, that the image-understanding model was unavailable so local OCR produced this text. The complete review is Unicode-safe and preserves source languages, facts, names, numeric tokens, ordering, and uncertainty; it never summarizes or invents content. If any chunk fails or violates the language-neutral integrity gate, the raw OCR result is retained and delivered instead of failing the action. A successful review keeps the unmodified source in a non-delivered `raw_artifact` for audit. Multiple inputs remain in source order without image labels. Video/audio inputs are rejected before dispatch. With normal delivery enabled, return the complete final text inline and retain `image_text_ocr.txt` as a delivery artifact regardless of text length.
 
+<!--/a1-->
+<!--a1:prepare_x-->
 ### `prepare_x`
 
 Check or transcode `input_path` for X compatibility. Directories are scanned recursively. Set `check_only=true` to avoid writing converted media.
+<!--/a1-->
 
 ## Parameter Contract (from interface)
 | Action | Parameter | Required | Type | Default | Description |
 |---|---|---:|---|---|---|
 | all | `action` | yes | string | - | One of `capabilities`, `download`, `resolve`, `ocr`, `prepare_x`. |
+<!--a1:download,resolve-->
 | `download`, `resolve` | `share` | yes | string | - | A public URL or an unmodified copied share message containing the URL. |
 | `download`, `resolve` | `platform` | no | string | `auto` | `auto`, `douyin`, `kuaishou`, `xiaohongshu`, `tiktok`, `youtube`, `bilibili`, `wechat_channels`, `toutiao`, or `weibo`. |
+<!--/a1-->
+<!--a1:download-->
 | `download` | `image_archive_threshold` | no | integer >=0 | `9` | ZIP above threshold; 0 always ZIP. |
 | `download` | `text_conversion_scope` | no | string | omitted/conditional | Use `images_only` for visible/image text, `audio_only` for spoken/audio content, and `images_and_audio` only for an explicit request to process both visual and audio sources. Omit when conversion was not requested; use `none` for an explicit no-conversion request. This protected modifier requires an exact current-request quote in the runtime-only evidence envelope. |
 | `download` | `deliver_to_user` | no | boolean | `true` | Send generated media to the originating channel/UI. Set `false` only when the user explicitly asks not to receive the file; then report its saved path. |
 | `download` | `output_name` | no | string | timestamp | Plain filename only; directories are rejected. |
+<!--/a1-->
+<!--a1:download,resolve-->
 | `download`, `resolve` | `profile_limit` | no | integer or `all` | `20` | Maximum profile items. Use `all` only after explicit user intent. |
 | `download`, `resolve` | `profile_interval_seconds` | no | number | `5` | Delay between profile requests, 0-60 seconds. |
 | `download`, `resolve` | `network_timeout_seconds` | no | number | `20` | Per-request timeout, 1-120 seconds. |
 | `download`, `resolve` | `browser_fallback` | no | boolean | `true` | Allow local Chromium fallback and interactive login. Douyin, Xiaohongshu, TikTok, YouTube, and WeChat Channels reuse only this skill's private browser profiles after user-controlled login. |
+<!--/a1-->
+<!--a1:download-->
 | `download` | `show_info` | no | boolean | `false` | Probe downloaded media information. |
+<!--/a1-->
+<!--a1:ocr-->
 | `ocr` | `language` | no | string | `auto` | Tesseract language list. The default uses installed recognition data. |
 | `ocr` | `input_paths` | yes | string[] | - | One or more existing local image paths with a supported image extension. No arbitrary image-count ceiling is applied; video/audio paths are invalid and speech recognition uses the separate configured STT capability. |
 | `ocr` | `output_name` | no | string | `image_text_ocr.txt` | Plain filename. An extensionless name is normalized by appending `.txt`; any other extension is rejected. The default name identifies local OCR output. |
@@ -121,12 +144,17 @@ Check or transcode `input_path` for X compatibility. Directories are scanned rec
 | `ocr` | `psm` | no | integer | `6` | Tesseract page segmentation mode, 0-13. Default mode also tries 4 and 11 on the winning candidate. |
 | `ocr` | `fallback_from` | no | string | omitted | Host-only machine token `image_vision.extract_text` when OCR is the declared fallback after vision failure. |
 | `ocr` | `min_line_confidence` | no | number | `10` | Drop OCR lines below this weighted confidence; set below 0 to keep every line. |
+<!--/a1-->
+<!--a1:prepare_x-->
 | `prepare_x` | `input_path` | yes | string | - | Existing video file or directory. |
 | `prepare_x` | `check_only` | no | boolean | `false` | Check compatibility without transcoding. |
 | `prepare_x` | `force` | no | boolean | `false` | Transcode even when already compatible. |
 | `prepare_x` | `crf` | no | integer | `23` | H.264 quality value, 16-35. |
+<!--/a1-->
 | mutating actions | `overwrite` | no | boolean | `false` | Replace an existing output in the task artifact directory. |
+<!--a1:resolve,ocr,prepare_x-->
 | `resolve`, `ocr`, `prepare_x` | `operation_timeout_seconds` | no | integer | none | Optional user-explicit wrapper subprocess deadline, 5-2592000 seconds. It is not available for `download`, which has no whole-operation deadline. Large explicit values are enforced through bounded wait slices so platform poll limits cannot overflow. |
+<!--/a1-->
 
 ## Error Contract (from interface)
 - Errors return `status=error`, non-empty `error_text`, and canonical `extra.{schema_version,source_skill,status,error_code,message_key,retryable}`.

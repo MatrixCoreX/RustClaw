@@ -2122,3 +2122,43 @@ fn skill_authoring_validate_progress_uses_profile_specific_key() {
         "telegram.progress.skill_authoring_validate"
     );
 }
+
+#[test]
+fn resource_wait_checkpoint_retains_numeric_diagnostics_from_the_failed_step() {
+    let task = support_test_task();
+    let mut loop_state = LoopState::new();
+    let error = crate::skills::structured_skill_error_from_parts(
+        "fixture_resource",
+        "resource_admission_unavailable",
+        "fixture",
+        None,
+        Some(
+            serde_json::json!({"retryable":true,"wait_reason":"storage_pressure","storage_pressure":{"volumes":[{"role":"system","state":"critical","available_bytes":100,"critical_reserve_bytes":200,"path":"PRIVATE_FIXTURE"}]}}),
+        ),
+    );
+    loop_state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: "step_capacity".into(),
+            skill: "fixture_resource".into(),
+            status: crate::executor::StepExecutionStatus::Error,
+            output: None,
+            error: Some(error),
+            started_at: 1,
+            finished_at: 2,
+        });
+    let payload = build_agent_loop_checkpoint_progress_payload(
+        &task,
+        &loop_state,
+        "resource_admission_wait",
+        10,
+        60,
+    );
+    assert_eq!(
+        payload["task_lifecycle"]["resource_wait"]["volumes"][0]["shortfall_bytes"],
+        101
+    );
+    assert!(!payload["task_lifecycle"]["resource_wait"]
+        .to_string()
+        .contains("PRIVATE_FIXTURE"));
+}
