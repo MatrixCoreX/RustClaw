@@ -1,4 +1,4 @@
-use crate::runtime::host_filesystem::HostFilesystemPolicy;
+use crate::runtime::host_filesystem::{HostFilesystemPolicy, HostOperationLock};
 use claw_core::config::ToolSandboxBackend;
 use std::path::{Path, PathBuf};
 
@@ -294,7 +294,7 @@ fn lock_transaction(
     path: &Path,
     transaction_id: &str,
     filesystem: &HostFilesystemPolicy,
-) -> Result<std::fs::File, String> {
+) -> Result<HostOperationLock, String> {
     filesystem
         .try_lock_operation_file(Some(root), &path.with_extension("lock"))
         .map_err(|error| {

@@ -15,7 +15,7 @@ fn workspace_operation_lock_excludes_fresh_descriptions_and_releases_only_on_dro
         unsafe { libc::fcntl(lock.as_raw_fd(), libc::F_GETFD) } & libc::FD_CLOEXEC,
         0
     );
-    assert_eq!(lock.metadata().unwrap().mode() & 0o7777, 0o600);
+    assert_eq!(lock.file.metadata().unwrap().mode() & 0o7777, 0o600);
     assert_eq!(
         filesystem
             .try_lock_operation_file(Some(&root), &path)
@@ -58,4 +58,68 @@ fn workspace_operation_lock_rejects_private_symlink_hardlink_and_public_mode_fil
     assert!(filesystem
         .try_lock_operation_file(Some(&root), &public)
         .is_err());
+}
+
+#[test]
+fn operation_guard_release_is_not_delayed_by_a_retained_duplicate_descriptor() {
+    let temporary = tempfile::tempdir().unwrap();
+    let root = temporary.path().canonicalize().unwrap();
+    let filesystem = HostFilesystemPolicy::without_private_authority();
+    let path = root.join("operation.lock");
+    let lock = filesystem
+        .try_lock_operation_file(Some(&root), &path)
+        .unwrap();
+    let inherited = lock.file.try_clone().unwrap();
+    assert_eq!(
+        filesystem
+            .try_lock_operation_file(Some(&root), &path)
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::WouldBlock
+    );
+    drop(lock);
+    let next = filesystem
+        .try_lock_operation_file(Some(&root), &path)
+        .unwrap();
+    drop(inherited);
+    assert_eq!(
+        filesystem
+            .try_lock_operation_file(Some(&root), &path)
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::WouldBlock
+    );
+    drop(next);
+    filesystem
+        .try_lock_operation_file(Some(&root), &path)
+        .unwrap();
+}
+
+#[test]
+fn operation_guard_unlocks_on_unwind_even_with_a_retained_duplicate_descriptor() {
+    let temporary = tempfile::tempdir().unwrap();
+    let root = temporary.path().canonicalize().unwrap();
+    let filesystem = HostFilesystemPolicy::without_private_authority();
+    let path = root.join("operation.lock");
+    let lock = filesystem
+        .try_lock_operation_file(Some(&root), &path)
+        .unwrap();
+    let inherited = lock.file.try_clone().unwrap();
+    let outcome = std::panic::catch_unwind(move || {
+        let _lock = lock;
+        panic!("fixture_guard_unwind");
+    });
+    assert!(outcome.is_err());
+    let next = filesystem
+        .try_lock_operation_file(Some(&root), &path)
+        .unwrap();
+    drop(inherited);
+    assert_eq!(
+        filesystem
+            .try_lock_operation_file(Some(&root), &path)
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::WouldBlock
+    );
+    drop(next);
 }

@@ -1,18 +1,43 @@
 use super::HostFilesystemPolicy;
 use std::fs::File;
 use std::io;
-use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
+// The synchronous operation owns exclusion. A transient fork/duplicate must not
+// keep it locked after that owner finishes, even before close-on-exec runs.
+#[derive(Debug)]
+pub(crate) struct HostOperationLock {
+    file: File,
+}
+
+impl AsRawFd for HostOperationLock {
+    fn as_raw_fd(&self) -> RawFd {
+        self.file.as_raw_fd()
+    }
+}
+
+impl Drop for HostOperationLock {
+    fn drop(&mut self) {
+        loop {
+            if unsafe { libc::flock(self.file.as_raw_fd(), libc::LOCK_UN) } == 0
+                || io::Error::last_os_error().kind() != io::ErrorKind::Interrupted
+            {
+                break;
+            }
+        }
+    }
+}
+
 impl HostFilesystemPolicy {
     // Cooperative operation exclusion, not host/permission admission. Callers
-    // retain the returned descriptor for the entire synchronous operation.
+    // retain the returned guard for the entire synchronous operation.
     pub(crate) fn try_lock_operation_file(
         &self,
         root: Option<&Path>,
         path: &Path,
-    ) -> io::Result<File> {
+    ) -> io::Result<HostOperationLock> {
         let (parent, name) = self.mutation_parent(root, path, false)?;
         self.check_directory(&parent)?;
         let descriptor = unsafe {
@@ -46,6 +71,7 @@ impl HostFilesystemPolicy {
         if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
             return Err(io::Error::last_os_error());
         }
+        let lock = HostOperationLock { file };
         self.check_directory(&parent)?;
         let current = rustix::fs::statat(
             &parent,
@@ -58,7 +84,7 @@ impl HostFilesystemPolicy {
                 "host_operation_lock_changed",
             ));
         }
-        Ok(file)
+        Ok(lock)
     }
 }
 

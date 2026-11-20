@@ -20,6 +20,7 @@ mod restore;
 pub(crate) use mutation::BoundedFileReadError;
 #[path = "host_operation_lock.rs"]
 mod operation_lock;
+pub(crate) use operation_lock::HostOperationLock;
 
 #[derive(Debug)]
 struct PrivateAccessDenied;
