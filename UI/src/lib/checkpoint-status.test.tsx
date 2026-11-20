@@ -29,3 +29,17 @@ test("compression timeout identifies the budget instead of claiming a storage fa
   assert(!text.includes("passed verification"));
   assert(!text.includes("Check destination space"));
 });
+test("deferred encrypted backups explain retries and disclose only included scopes", async () => {
+  const text=await show({status:"verified",schedule:{phase:"remote",next_retry_at_ts:2000},vault:{status:"verified_encrypted",encrypted:true,retained_versions:3,payload_scopes:["packages","models"]}});
+  assert(text.includes("automatic retry"));
+  assert(text.includes("3 versions retained"));
+  assert(text.includes("Installed skill packages included"));
+  assert(text.includes("Local models included"));
+  assert(!text.includes("Task attachments included"));
+});
+test("exhausted retry budgets remain actionable without presenting a failed copy as verified",async()=>{
+  const text=await show({status:"failed",schedule:{notice_key:"backup.attention_required"}});
+  assert(text.includes("Automatic retries did not complete"));
+  assert(text.includes("recovery key"));
+  assert(!text.includes("Incremental encrypted copy verified"));
+});

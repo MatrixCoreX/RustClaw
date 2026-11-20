@@ -3,6 +3,106 @@ use axum::body::{to_bytes, Body};
 use axum::http::{Method, Request};
 use tower::ServiceExt;
 #[test]
+fn operator_status_projection_hides_recovery_keys_paths_and_unselected_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("report.json");
+    fs::write(&path,json!({"phase":"remote","next_retry_at_ts":100,"key_file":"PRIVATE_KEY_PATH","recovery_key":"SECRET_SENTINEL"}).to_string()).unwrap();
+    let report = read_operator_status_projection(&path, &["phase", "next_retry_at_ts"]).unwrap();
+    assert_eq!(report, json!({"phase":"remote","next_retry_at_ts":100}));
+    fs::write(&path, vec![b' '; 65537]).unwrap();
+    assert!(read_operator_status_projection(&path, &["phase"]).is_none());
+}
+
+#[test]
+fn storage_history_decodes_old_samples_and_new_capacity_samples() {
+    let db = rusqlite::Connection::open_in_memory().unwrap();
+    db.execute_batch("CREATE TABLE runtime_storage_inventory_samples(sample_id INTEGER PRIMARY KEY,collected_at INTEGER NOT NULL,snapshot_json TEXT NOT NULL)").unwrap();
+    let category = json!({"id":"models","bytes":1,"files":1,"partial":false,"protected":true});
+    for (ts, value) in [
+        (1, json!([category.clone()])),
+        (
+            2,
+            json!({"schema_version":2,"categories":[category],"volumes":[{"role":"system","total_bytes":1000,"available_bytes":100}]}),
+        ),
+    ] {
+        db.execute("INSERT INTO runtime_storage_inventory_samples(collected_at,snapshot_json) VALUES(?1,?2)",rusqlite::params![ts,value.to_string()]).unwrap();
+    }
+    let history = storage_inventory_history(&db).unwrap();
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0]["volumes"][0]["role"], "system");
+    assert_eq!(history[1]["categories"][0]["id"], "models");
+    assert_eq!(history[1]["volumes"], json!([]));
+}
+#[test]
+fn growth_forecast_requires_complete_spaced_samples_and_preserves_decreases() {
+    let category = |bytes, partial| StorageCategory {
+        id: "models".into(),
+        bytes,
+        partial,
+        ..Default::default()
+    };
+    let sample = |ts, bytes, partial| json!({"collected_at_ts":ts,"categories":[{"id":"models","bytes":bytes,"partial":partial}]});
+    let current = [category(100, false)];
+    assert!(storage_growth_forecast(&current, &[sample(9999, 0, false)], 10000).is_empty());
+    assert!(storage_growth_forecast(&current, &[sample(0, 0, true)], 10000).is_empty());
+    assert!(
+        storage_growth_forecast(&[category(100, true)], &[sample(0, 0, false)], 10000).is_empty()
+    );
+    assert!(storage_growth_forecast(&current, &[sample(20000, 0, false)], 10000).is_empty());
+    assert!(storage_growth_forecast(&current, &[sample(0, 0, false)], 8 * 86400).is_empty());
+    let history = [sample(0, 200, false), sample(43200, 150, false)];
+    let result = storage_growth_forecast(&current, &history, 86400);
+    assert_eq!(result[0]["bytes_per_day"], json!(-100));
+    assert_eq!(result[0]["observation_seconds"], json!(86400));
+    let result =
+        storage_growth_forecast(&[category(u64::MAX, false)], &[sample(0, 0, false)], 3600);
+    assert_eq!(result[0]["bytes_per_day"], json!(i64::MAX));
+}
+
+#[test]
+fn capacity_forecast_rejects_replaced_volumes_and_short_intervals() {
+    let total = 100_u64 * 1024 * 1024 * 1024;
+    let volume = StorageVolume {
+        role: "system".into(),
+        total_bytes: total,
+        available_bytes: 10 * 1024 * 1024 * 1024,
+    };
+    let sample = |ts, size, free| json!({"collected_at_ts":ts,"volumes":[{"role":"system","total_bytes":size,"available_bytes":free}]});
+    assert!(storage_capacity_forecast(
+        &[volume],
+        &[sample(86399, total, 20_u64 * 1024 * 1024 * 1024)],
+        86400
+    )
+    .is_empty());
+    let volumes = [StorageVolume {
+        role: "system".into(),
+        total_bytes: total,
+        available_bytes: 10 * 1024 * 1024 * 1024,
+    }];
+    assert!(storage_capacity_forecast(
+        &volumes,
+        &[sample(0, total * 2, 20_u64 * 1024 * 1024 * 1024)],
+        86400
+    )
+    .is_empty());
+    let report = storage_capacity_forecast(
+        &volumes,
+        &[sample(0, total, 20_u64 * 1024 * 1024 * 1024)],
+        86400,
+    );
+    assert_eq!(
+        report[0]["bytes_per_day"],
+        json!(10_u64 * 1024 * 1024 * 1024)
+    );
+    assert!(report[0]["days_to_write_guard"].as_f64().unwrap() < 1.0);
+    let stable = storage_capacity_forecast(
+        &volumes,
+        &[sample(0, total, 10_u64 * 1024 * 1024 * 1024)],
+        86400,
+    );
+    assert!(stable[0]["days_to_write_guard"].is_null());
+}
+#[test]
 fn large_first_category_cannot_starve_later_categories() {
     let root = std::env::temp_dir().join(format!("storage-fairness-{}", uuid::Uuid::new_v4()));
     for name in ["large", "logs", "programs"] {

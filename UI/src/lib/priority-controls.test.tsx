@@ -48,3 +48,16 @@ test("changing server identity prevents a stale compaction from scanning the nex
   assert.doesNotMatch(JSON.stringify(renderer.toJSON()),/Compacted 2 historical/);
  } finally {await act(async()=>{renderer.unmount();});}
 });
+test("storage trends distinguish estimates and retain protected task files",async()=>{
+ globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+ const data={...inventory,categories:[{id:"models",bytes:4096,files:1,partial:false,protected:true}],growth:[{id:"models",bytes_per_day:-1024,observation_seconds:86400}],volumes:[{role:"system",available_bytes:4096}],capacity_forecast:[{role:"system",days_to_write_guard:0.5}]};
+ const calls:string[]=[];let renderer!:ReactTestRenderer;
+ const apiFetch=async(path:string)=>{calls.push(path);return new Response(JSON.stringify({ok:true,data}));};
+ await act(async()=>{renderer=create(<StorageGovernancePanel t={english} apiFetch={apiFetch} requestScope="trend-owner"/>);});
+ try {
+  await act(async()=>{renderer.root.findByType("button").props.onClick();});
+  const text=JSON.stringify(renderer.toJSON());
+  assert.match(text,/Recent change: about/);assert.match(text,/within one day/);assert.match(text,/Retained/);
+  assert.deepEqual(calls,["/v1/system/storage-scan"]);
+ }finally{await act(async()=>{renderer.unmount();});}
+});

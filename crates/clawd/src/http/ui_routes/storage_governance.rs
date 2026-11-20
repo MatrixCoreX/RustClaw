@@ -15,6 +15,35 @@ struct StorageInventory {
     categories: Vec<StorageCategory>,
     result_compaction: Value,
     history: Vec<Value>,
+    growth: Vec<Value>,
+    volumes: Vec<StorageVolume>,
+    capacity_forecast: Vec<Value>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StorageVolume {
+    role: String,
+    total_bytes: u64,
+    available_bytes: u64,
+}
+
+fn storage_volumes(root: &Path) -> Vec<StorageVolume> {
+    [
+        ("system", root.ancestors().last().unwrap_or(root)),
+        ("workspace", root),
+    ]
+    .into_iter()
+    .filter_map(|(role, path)| {
+        let (Some(total), Some(available)) = storage_capacity_bytes(path)? else {
+            return None;
+        };
+        Some(StorageVolume {
+            role: role.into(),
+            total_bytes: total,
+            available_bytes: available,
+        })
+    })
+    .collect()
 }
 
 fn scan_storage_category(
@@ -158,22 +187,69 @@ fn storage_inventory(state: &AppState, persist: bool) -> anyhow::Result<StorageI
     categories.push(database);
     let result_compaction = storage_compaction_stats(&db)?;
     let collected_at_ts = now_unix_seconds();
+    let volumes = storage_volumes(&root);
     if persist {
         db.execute_batch("CREATE TABLE IF NOT EXISTS runtime_storage_inventory_samples(sample_id INTEGER PRIMARY KEY,collected_at INTEGER NOT NULL,snapshot_json TEXT NOT NULL)")?;
         let tx = db.unchecked_transaction()?;
-        tx.execute("INSERT INTO runtime_storage_inventory_samples(collected_at,snapshot_json) VALUES(?1,?2)",rusqlite::params![collected_at_ts,serde_json::to_string(&categories)?])?;
+        tx.execute("INSERT INTO runtime_storage_inventory_samples(collected_at,snapshot_json) VALUES(?1,?2)",rusqlite::params![collected_at_ts,serde_json::to_string(&json!({"schema_version":2,"categories":categories,"volumes":volumes}))?])?;
         tx.execute("DELETE FROM runtime_storage_inventory_samples WHERE sample_id NOT IN (SELECT sample_id FROM runtime_storage_inventory_samples ORDER BY sample_id DESC LIMIT 24)",[])?;
         tx.commit()?;
     }
     let history = storage_inventory_history(&db)?;
+    let growth = storage_growth_forecast(&categories, &history, collected_at_ts);
+    let capacity_forecast = storage_capacity_forecast(&volumes, &history, collected_at_ts);
     Ok(StorageInventory {
         schema_version: 1,
         collected_at_ts,
         categories,
         result_compaction,
         history,
+        growth,
+        volumes,
+        capacity_forecast,
     })
 }
+
+// Partial scans and short observation periods are not growth evidence. Compare
+// complete samples only, and keep decreases visible instead of clamping to zero.
+fn storage_growth_forecast(
+    categories: &[StorageCategory],
+    history: &[Value],
+    now: i64,
+) -> Vec<Value> {
+    categories.iter().filter(|current| !current.partial).filter_map(|current| {
+        let prior = history.iter().filter_map(|sample| {
+            let ts = sample.get("collected_at_ts")?.as_i64()?;
+            let elapsed = now.checked_sub(ts)?;
+            if !(3600..=7 * 86400).contains(&elapsed) { return None; }
+            let previous = sample.get("categories")?.as_array()?.iter().find(|category| {
+                category.get("id").and_then(Value::as_str) == Some(current.id.as_str())
+                    && category.get("partial").and_then(Value::as_bool) == Some(false)
+            })?;
+            Some((ts, previous.get("bytes")?.as_u64()?))
+        }).min_by_key(|(ts, _)| *ts)?;
+        let elapsed = now - prior.0;
+        let delta = i128::from(current.bytes) - i128::from(prior.1);
+        let rate = (delta * 86400 / i128::from(elapsed)).clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64;
+        Some(json!({"id":current.id,"observation_seconds":elapsed,"bytes_per_day":rate,"basis":"complete_category_samples","retention":"preserve_user_data"}))
+    }).collect()
+}
+fn storage_capacity_forecast(volumes: &[StorageVolume], history: &[Value], now: i64) -> Vec<Value> {
+    volumes.iter().filter_map(|current| {
+        let previous=history.iter().filter_map(|sample| {
+            let ts=sample.get("collected_at_ts")?.as_i64()?;
+            if !(3600..=7*86400).contains(&now.checked_sub(ts)?) { return None; }
+            let volume=sample.get("volumes")?.as_array()?.iter().find(|v| v.get("role").and_then(Value::as_str)==Some(current.role.as_str()) && v.get("total_bytes").and_then(Value::as_u64)==Some(current.total_bytes))?;
+            Some((ts,volume.get("available_bytes")?.as_u64()?))
+        }).min_by_key(|(ts,_)|*ts)?;
+        let consumed=i128::from(previous.1)-i128::from(current.available_bytes);
+        let rate=(consumed*86400/i128::from(now-previous.0)).clamp(i128::from(i64::MIN),i128::from(i64::MAX)) as i64;
+        let guard=(512_u64*1024*1024).max(current.total_bytes/100);
+        let days=(rate>0).then(|| current.available_bytes.saturating_sub(guard) as f64/rate as f64);
+        Some(json!({"role":current.role,"bytes_per_day":rate,"days_to_write_guard":days,"write_guard_bytes":guard,"observation_seconds":now-previous.0,"estimate_only":true}))
+    }).collect()
+}
+
 fn storage_compaction_stats(db: &rusqlite::Connection) -> anyhow::Result<Value> {
     let exists: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='runtime_result_object_maintenance')",
@@ -217,9 +293,17 @@ fn storage_inventory_history(db: &rusqlite::Connection) -> anyhow::Result<Vec<Va
     Ok(rows
         .into_iter()
         .filter_map(|(ts, raw)| {
-            serde_json::from_str::<Vec<StorageCategory>>(&raw)
-                .ok()
-                .map(|categories| json!({"collected_at_ts":ts,"categories":categories}))
+            let value: Value = serde_json::from_str(&raw).ok()?;
+            let categories: Vec<StorageCategory> = serde_json::from_value(if value.is_array() {
+                value.clone()
+            } else {
+                value.get("categories")?.clone()
+            })
+            .ok()?;
+            let volumes: Vec<StorageVolume> =
+                serde_json::from_value(value.get("volumes").cloned().unwrap_or_else(|| json!([])))
+                    .ok()?;
+            Some(json!({"collected_at_ts":ts,"categories":categories,"volumes":volumes}))
         })
         .collect())
 }
@@ -230,20 +314,109 @@ async fn get_storage_inventory(
     run_storage_inventory(state, headers, false).await
 }
 
-async fn get_checkpoint_status(State(state): State<AppState>, headers: HeaderMap) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err(response)=require_ui_admin(&state,&headers) { return response; }
-    let path=state.skill_rt.workspace_root.join("data/runtime-checkpoint-status.json");
-    let value=tokio::task::spawn_blocking(move || -> Option<Value> {
-        let meta=fs::symlink_metadata(&path).ok()?;
-        if !meta.is_file() || meta.len()>65536 { return None; }
-        let report: Value=serde_json::from_slice(&fs::read(path).ok()?).ok()?;
-        let mut safe=serde_json::Map::new();
-        for key in ["schema_version","status","error_code","created_at_ts","attempted_at_ts","bytes","database_count"] {
-            if let Some(value)=report.get(key) { safe.insert(key.into(),value.clone()); }
+async fn get_checkpoint_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err(response) = require_ui_admin(&state, &headers) {
+        return response;
+    }
+    let data = state.skill_rt.workspace_root.join("data");
+    let path = data.join("runtime-checkpoint-status.json");
+    let value = tokio::task::spawn_blocking(move || -> Option<Value> {
+        let mut safe = read_operator_status_projection(
+            &path,
+            &[
+                "schema_version",
+                "status",
+                "error_code",
+                "created_at_ts",
+                "attempted_at_ts",
+                "bytes",
+                "database_count",
+            ],
+        )
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_else(|| {
+            serde_json::Map::from_iter([
+                ("schema_version".into(), json!(1)),
+                ("status".into(), json!("unavailable")),
+            ])
+        });
+        for (name, file, fields) in [
+            (
+                "schedule",
+                "runtime-backup-schedule.json",
+                &[
+                    "phase",
+                    "attempt",
+                    "next_retry_at_ts",
+                    "error_code",
+                    "notice_key",
+                    "cycle_started_at_ts",
+                ][..],
+            ),
+            (
+                "vault",
+                "runtime-vault-status.json",
+                &[
+                    "status",
+                    "encrypted",
+                    "retained_versions",
+                    "verified_at_ts",
+                    "payload_scopes",
+                    "uploaded_bytes",
+                    "reused_bytes",
+                    "file_count",
+                    "restore_verified_at_ts",
+                ][..],
+            ),
+        ] {
+            if let Some(report) = read_operator_status_projection(&data.join(file), fields) {
+                safe.insert(name.into(), report);
+            }
         }
         Some(Value::Object(safe))
-    }).await.ok().flatten().unwrap_or_else(||json!({"schema_version":1,"status":"unavailable"}));
+    })
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or_else(|| json!({"schema_version":1,"status":"unavailable"}));
     crate::api_ok(value)
+}
+
+fn read_operator_status_projection(path: &Path, fields: &[&str]) -> Option<Value> {
+    let meta = fs::symlink_metadata(path).ok()?;
+    if !meta.is_file() || meta.len() > 65536 {
+        return None;
+    }
+    let value: Value = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
+    let safe = fields
+        .iter()
+        .filter_map(|key| {
+            let value = value.get(*key)?;
+            let valid = match *key {
+                "phase" | "status" | "notice_key" | "error_code" => {
+                    value.as_str().is_some_and(|s| {
+                        s.len() <= 128
+                            && s.bytes().all(|c| {
+                                c.is_ascii_alphanumeric() || matches!(c, b'_' | b'.' | b'-')
+                            })
+                    })
+                }
+                "payload_scopes" => value.as_array().is_some_and(|items| {
+                    items.len() <= 3
+                        && items.iter().all(|item| {
+                            matches!(item.as_str(), Some("packages" | "models" | "attachments"))
+                        })
+                }),
+                "encrypted" => value.is_boolean(),
+                _ => value.as_u64().is_some(),
+            };
+            valid.then(|| ((*key).to_string(), value.clone()))
+        })
+        .collect::<serde_json::Map<_, _>>();
+    Some(Value::Object(safe))
 }
 async fn record_storage_inventory(
     State(state): State<AppState>,

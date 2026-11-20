@@ -28,6 +28,8 @@ mod context_length_recovery;
 use context_length_recovery::{compact_text_to_token_budget, context_length_recovery_request};
 #[path = "planning/native_capability_tools.rs"]
 mod native_capability_tools;
+#[path = "planning/native_context_index.rs"]
+mod native_context_index;
 use native_capability_tools::{
     native_capability_leaf_tool_name, native_capability_tool_definition,
     native_capability_tool_map, native_group_leaf_tool_name, native_group_tool_definitions,
@@ -187,13 +189,17 @@ impl<'a> PlannerToolLibrary<'a> {
     }
 
     fn tool_spec(&self, loop_state: &LoopState) -> Result<String, String> {
-        let capability_map = crate::capability_map::build_scoped_compact_capability_map_for_task(
-            self.state,
-            self.task,
-            &loop_state.loaded_capability_skills,
-            &loop_state.loaded_mcp_capabilities,
-        );
-        Ok(format!("runtime_capability_map_v2\n{capability_map}"))
+        let disclosed = self
+            .disclosed_native_capability_groups(loop_state)
+            .into_iter()
+            .map(|group| group.skill_name)
+            .collect::<BTreeSet<_>>();
+        let mcp = self.mcp_capability_argument_schemas(loop_state);
+        Ok(native_context_index::build_index(
+            self.all_native_capability_groups(),
+            &disclosed,
+            mcp.into_keys().collect(),
+        ))
     }
 
     fn callable_capability_names(&self, loop_state: &LoopState) -> Vec<String> {
