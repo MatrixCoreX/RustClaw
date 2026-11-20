@@ -302,3 +302,35 @@ async fn inventory_get_is_read_only_and_recorded_trend_is_bounded() {
     );
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn checkpoint_capacity_projection_preserves_revision_and_tristate_coverage_without_private_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("capacity.json");
+    let fields = [
+        "current_source_revision",
+        "verified_source_revision",
+        "current_source_covered",
+        "reserve_bytes",
+    ];
+    for coverage in [json!(true), json!(false), Value::Null] {
+        let input = json!({"current_source_revision":"a".repeat(40),"verified_source_revision":"b".repeat(40),"current_source_covered":coverage,"reserve_bytes":100,"key_file":"PRIVATE_KEY_PATH","remote_directory":"PRIVATE_BACKUP_PATH"});
+        fs::write(&path, input.to_string()).unwrap();
+        let output = read_operator_status_projection(&path, &fields).unwrap();
+        assert_eq!(output["current_source_revision"], "a".repeat(40));
+        assert_eq!(output["verified_source_revision"], "b".repeat(40));
+        assert_eq!(output["current_source_covered"], coverage);
+        assert_eq!(output["reserve_bytes"], 100);
+        assert!(!output.to_string().contains("PRIVATE_"));
+    }
+    fs::write(&path,json!({"current_source_revision":"PRIVATE_REVISION_PATH","verified_source_revision":"A".repeat(40),"current_source_covered":"PRIVATE_STATUS_TEXT","reserve_bytes":100}).to_string()).unwrap();
+    assert_eq!(
+        read_operator_status_projection(&path, &fields).unwrap(),
+        json!({"reserve_bytes":100})
+    );
+    fs::write(&path,json!({"current_source_revision":null,"verified_source_revision":null,"current_source_covered":null}).to_string()).unwrap();
+    assert_eq!(
+        read_operator_status_projection(&path, &fields).unwrap(),
+        json!({"current_source_revision":null,"verified_source_revision":null,"current_source_covered":null})
+    );
+}

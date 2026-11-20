@@ -430,6 +430,15 @@ fn read_operator_status_projection(path: &Path, fields: &[&str]) -> Option<Value
                         })
                 }),
                 "encrypted" => value.is_boolean(),
+                "current_source_covered" => value.is_boolean() || value.is_null(),
+                "current_source_revision" | "verified_source_revision" => {
+                    value.is_null()
+                        || value.as_str().is_some_and(|s| {
+                            s.len() == 40
+                                && s.bytes()
+                                    .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+                        })
+                }
                 _ => value.as_u64().is_some(),
             };
             valid.then(|| ((*key).to_string(), value.clone()))
