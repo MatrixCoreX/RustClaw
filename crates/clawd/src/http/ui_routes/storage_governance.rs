@@ -345,7 +345,7 @@ async fn get_checkpoint_status(
         });
         for (name, file, fields) in [
             (
-                "schedule",
+                "backup_run",
                 "runtime-backup-schedule.json",
                 &[
                     "phase",

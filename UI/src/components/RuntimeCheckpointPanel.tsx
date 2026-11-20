@@ -4,7 +4,7 @@ import { readJsonApiResponse } from "../lib/api-response";
 import { formatBytes } from "../lib/display-format";
 import { formatUnixDateTime } from "../lib/date-format";
 import type { ApiResponse } from "../types/api";
-type Report = { status: string; error_code?: string; created_at_ts?: number; bytes?: number; database_count?: number; schedule?:{phase?:string;next_retry_at_ts?:number;notice_key?:string};vault?:{status?:string;encrypted?:boolean;retained_versions?:number;payload_scopes?:string[];reused_bytes?:number} };
+type Report = { status: string; error_code?: string; created_at_ts?: number; bytes?: number; database_count?: number; backup_run?:{phase?:string;next_retry_at_ts?:number;notice_key?:string};vault?:{status?:string;encrypted?:boolean;retained_versions?:number;payload_scopes?:string[];reused_bytes?:number} };
 export function RuntimeCheckpointPanel({ t, apiFetch, requestScope }: { t: (zh: string, en: string) => string; apiFetch: (path: string, init?: RequestInit) => Promise<Response>; requestScope: string }) {
   const owns = useRequestOwner(requestScope);
   const empty = useMemo(() => ({ owner: owns, report: null as Report | null, busy: false }), [owns]);
@@ -39,8 +39,8 @@ export function RuntimeCheckpointPanel({ t, apiFetch, requestScope }: { t: (zh: 
     {view.report?.status === "verified_remote" && <p className="mt-2 text-xs opacity-65">{t("异机副本也已通过校验。", "The copy on another host also passed verification.")}</p>}
     {view.report?.status === "verified_local_remote_failed" && <p role="alert" className="mt-2 text-sm">{t("本地备份可用，异机复制尚未完成。请检查服务器连接。", "The local checkpoint is available, but the remote copy did not complete. Check the server connection.")}</p>}
     {ready && <p className="mt-2 text-xs opacity-65">{formatUnixDateTime(view.report?.created_at_ts, t("zh-CN", "en-US"))} · {formatBytes(view.report?.bytes ?? 0)}</p>}
-    {view.report?.schedule?.next_retry_at_ts && <p role="status" className="mt-2 text-sm">{t("备份已延后，将自动重试：","Backup deferred; automatic retry: ")}{formatUnixDateTime(view.report.schedule.next_retry_at_ts,t("zh-CN","en-US"))}</p>}
-    {view.report?.schedule?.notice_key==="backup.attention_required"&&<p role="alert" className="mt-2 text-sm">{t("自动重试未完成，请管理员检查备份空间、恢复密钥和服务器连接。已有副本会保留。","Automatic retries did not complete. Ask an administrator to check backup space, the recovery key and the server connection. Existing copies are retained.")}</p>}
+    {view.report?.backup_run?.next_retry_at_ts && <p role="status" className="mt-2 text-sm">{t("备份已延后，将自动重试：","Backup deferred; automatic retry: ")}{formatUnixDateTime(view.report.backup_run.next_retry_at_ts,t("zh-CN","en-US"))}</p>}
+    {view.report?.backup_run?.notice_key==="backup.attention_required"&&<p role="alert" className="mt-2 text-sm">{t("自动重试未完成，请管理员检查备份空间、恢复密钥和服务器连接。已有副本会保留。","Automatic retries did not complete. Ask an administrator to check backup space, the recovery key and the server connection. Existing copies are retained.")}</p>}
     {view.report?.vault?.status==="verified_encrypted"&&<p className="mt-2 text-xs opacity-65">{t(`增量加密副本已校验，保留 ${view.report.vault.retained_versions??1} 个版本。`,`Incremental encrypted copy verified; ${view.report.vault.retained_versions??1} versions retained.`)}{view.report.vault.payload_scopes?.includes("packages")&&t(" 包含已安装技能包。"," Installed skill packages included.")}{view.report.vault.payload_scopes?.includes("models")&&t(" 包含本地模型。"," Local models included.")}{view.report.vault.payload_scopes?.includes("attachments")&&t(" 包含任务附件。"," Task attachments included.")}</p>}
     <p className="mt-2 text-xs opacity-60">{t("基础备份保留数据库、配置、运行程序与技能授权。可选的增量加密副本还能保留技能包、模型和任务附件；未选择的内容需独立保留。恢复先写入新目录并验证。", "Base checkpoints retain databases, configuration, programs and skill authorization. Optional incremental encrypted copies can also retain skill packages, models and task attachments; keep unselected content separately. Restore writes to a new directory and verifies it first.")}</p>
   </section>;
