@@ -40,6 +40,60 @@ fn checkpoint_phases_are_versioned_machine_state_not_user_visible_prose() {
 }
 
 #[test]
+fn reviewed_summary_reuse_settles_zero_before_terminal_or_cancel_recovery() {
+    for cancel in [false, true] {
+        let fixture = committed();
+        {
+            let db = fixture.state().core.db.get().unwrap();
+            let tx = db.unchecked_transaction().unwrap();
+            tx.execute(
+                "UPDATE memory_jobs SET checkpoint_json=json_patch(checkpoint_json,
+                '{\"generation_review\":{\"summary_reused\":true}}')",
+                [],
+            )
+            .unwrap();
+            super::mark_committed(
+                &tx,
+                GenerationLease {
+                    job_id: "committed",
+                    worker_id: "capacity-worker",
+                    principal_id: &fixture.principal,
+                },
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            assert_eq!(scalar(&db,"SELECT COUNT(*) FROM memory_jobs WHERE background_cost_pending_microunits=0 AND background_cost_settled_at_ts IS NOT NULL"),1);
+            if cancel {
+                db.execute(
+                    "UPDATE memory_jobs SET cancel_requested=1,lease_expires_at_ts=1",
+                    [],
+                )
+                .unwrap();
+                super::finalize_cancelled(&db, crate::now_ts_u64() as i64).unwrap();
+            }
+        }
+        if !cancel {
+            super::complete(fixture.state(), "committed", "capacity-worker").unwrap();
+        }
+        let db = fixture.state().core.db.get().unwrap();
+        assert_eq!(
+            scalar(
+                &db,
+                "SELECT used_background_cost_microunits FROM memory_principal_quotas"
+            ),
+            0
+        );
+        assert_eq!(
+            scalar(
+                &db,
+                "SELECT SUM(background_cost_pending_microunits) FROM memory_jobs"
+            ),
+            0
+        );
+    }
+}
+
+#[test]
 fn upgrade_is_transactional_idempotent_and_never_rebills_historical_terminal_jobs() {
     let db = Connection::open_in_memory().unwrap();
     db.execute_batch(

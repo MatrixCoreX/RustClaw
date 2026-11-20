@@ -100,7 +100,11 @@ pub(super) fn mark_committed(db: &Connection, lease: GenerationLease<'_>) -> any
         background_cost_pending_microunits = CASE
             WHEN background_cost_settled_at_ts IS NOT NULL THEN 0
             WHEN json_extract(checkpoint_json,'$.generation_review.summary_reused')=1 THEN 0
-            ELSE ?3 END
+            ELSE ?3 END,
+        background_cost_settled_at_ts = CASE
+            WHEN json_extract(checkpoint_json,'$.generation_review.summary_reused')=1
+            THEN COALESCE(background_cost_settled_at_ts,?2)
+            ELSE background_cost_settled_at_ts END
         WHERE job_id = ?4 AND principal_id = ?5 AND status = 'running'
           AND lease_owner = ?6 AND cancel_requested = 0",
         params![
