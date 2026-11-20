@@ -114,8 +114,8 @@ def validate_kb_discovery_contract(
 ) -> None:
     if entry.get("group") != "memory" and capabilities_key == "planner_capabilities":
         findings.append(f"kb_registry_group_drift:{source}")
-    if capabilities_key == "planner_capabilities" and entry.get("planner_eager_load") is not True:
-        findings.append(f"kb_registry_eager_discovery_disabled:{source}")
+    if capabilities_key == "planner_capabilities" and entry.get("planner_eager_load") is not False:
+        findings.append(f"kb_registry_deferred_discovery_disabled:{source}")
     if capabilities_key == "planner_capabilities":
         queue = entry.get("dispatch_queue", {})
         required_actions = {
@@ -516,7 +516,7 @@ def write_fixture(root: Path) -> None:
     registry = (
         '[[skills]]\nname = "kb"\n'
         'group = "memory"\n'
-        'planner_eager_load = true\n'
+        'planner_eager_load = false\n'
         'dispatch_queue = { scope = "user", actions = ["search", "ingest", "reindex", "resume_ingest", "start_vector_reindex", "resume_vector_reindex"] }\n'
         'storage = { kind = "sqlite", schema_version = 7, migration_owner = "kb" }\n'
         'planner_capabilities = [{ name = "kb.search", description = "fixture", semantic_tags = ["knowledge_base_search", "namespace_retrieval", "logical_namespace", "not_filesystem_path"] }]\n'
@@ -672,6 +672,13 @@ def self_test() -> int:
         if findings:
             print(f"RAG_CONTRACT_SELF_TEST positive_failed={findings}")
             return 1
+        registry = root / "configs/skills_registry.toml"
+        original = registry.read_text()
+        registry.write_text(original.replace("planner_eager_load = false", "planner_eager_load = true"))
+        if not any(item.startswith("kb_registry_deferred_discovery_disabled:") for item in evaluate(root)):
+            print("RAG_CONTRACT_SELF_TEST deferred_discovery_negative_failed")
+            return 1
+        registry.write_text(original)
         retrieval = root / "crates/skills/kb/src/storage/retrieval.rs"
         retrieval.write_text(
             retrieval.read_text(encoding="utf-8").replace(

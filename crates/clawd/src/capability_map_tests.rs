@@ -600,6 +600,49 @@ fn disclosed_native_groups_keep_core_eager_and_domain_groups_loadable() {
 }
 
 #[test]
+fn deferred_knowledge_base_loading_preserves_all_authorized_contracts() {
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "deferred-kb-contracts".into(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".into(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".into(),
+        payload_json: "{}".into(),
+    };
+    let full = planner_native_capability_groups_for_task(&state, &task);
+    let expected = full.iter().find(|g| g.skill_name == "kb").unwrap();
+    let first =
+        planner_disclosed_native_capability_groups_for_task(&state, &task, &BTreeSet::new());
+    assert!(first.iter().all(|g| g.skill_name != "kb"));
+    assert!(
+        planner_loadable_capability_group_names_for_task(&state, &task, &BTreeSet::new())
+            .contains(&"kb".to_string())
+    );
+    let loaded = planner_disclosed_native_capability_groups_for_task(
+        &state,
+        &task,
+        &BTreeSet::from(["kb".to_string()]),
+    );
+    let actual = loaded.iter().find(|g| g.skill_name == "kb").unwrap();
+    assert_eq!(actual.capability_names, expected.capability_names);
+    assert_eq!(
+        actual.capability_argument_schemas,
+        expected.capability_argument_schemas
+    );
+    assert_eq!(
+        actual.capability_descriptions,
+        expected.capability_descriptions
+    );
+}
+
+#[test]
 fn scoped_text_catalog_discloses_only_active_groups_and_loader_tokens() {
     let state = crate::AppState::test_default_with_fixture_provider()
         .with_prompt_layers_installed()
