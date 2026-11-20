@@ -118,7 +118,10 @@ fn native_action_protocol_requires_capability_owned_structured_observations() {
     assert!(prompt.contains("current repository"));
     assert!(prompt.contains("facts. Direct creative drafting"));
     assert!(prompt.contains("Use `shape=free_text` for prose, compound answers"));
-    assert!(prompt.contains("Use `shape=list` only for an exact payload-only list"));
+    assert!(normalized.contains("`shape=list` renders ordinal numbers before each entry"));
+    assert!(normalized.contains("only when numbered presentation is allowed"));
+    assert!(normalized
+        .contains("payload-only output without presentation markers, use `shape=free_text`"));
     assert!(prompt.contains("never mix payloads from different shapes"));
     assert!(prompt.contains("preserve each"));
     assert!(prompt.contains("scalar, object, or array shape"));
