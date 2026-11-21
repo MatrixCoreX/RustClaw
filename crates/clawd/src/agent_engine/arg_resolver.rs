@@ -752,6 +752,10 @@ pub(super) fn rewrite_args_with_auto_locator_path(
 }
 
 fn replace_double_brace_placeholders(input: &str, loop_state: &LoopState) -> String {
+    // These are machine template delimiters. Literal arguments need no regex compilation.
+    if !input.contains("{{") || !input.contains("}}") {
+        return input.to_string();
+    }
     static PLACEHOLDER_RE: OnceLock<Regex> = OnceLock::new();
     let re = PLACEHOLDER_RE.get_or_init(|| {
         Regex::new(r"\{\{\s*([^{}]+?)\s*\}\}").expect("double brace placeholder regex")

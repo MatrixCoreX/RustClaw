@@ -33,6 +33,31 @@ fn test_policy(registry_idempotency_guard_enabled: bool) -> super::AgentLoopGuar
 }
 
 #[test]
+fn sequential_execution_future_leaves_stack_space_for_cold_library_initialization() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = task_fixture("future-stack-budget");
+    let mut loop_state = super::LoopState::new();
+    let policy = test_policy(true);
+    let actions = Vec::new();
+    let future = super::execute_actions_once(
+        &state,
+        &task,
+        "",
+        "",
+        &actions,
+        &mut loop_state,
+        &policy,
+        None,
+    );
+    // Polling and nested cold library initialization also need space in a 4 MiB worker.
+    assert!(
+        std::mem::size_of_val(&future) <= 256 * 1024,
+        "sequential action future occupies {} bytes on its caller",
+        std::mem::size_of_val(&future),
+    );
+}
+
+#[test]
 fn action_count_is_an_explicit_replan_boundary_not_a_terminal_drop() {
     let observation = action_observation_boundary(12, 8, 8).expect("soft boundary");
     assert_eq!(observation["state"], "continue");

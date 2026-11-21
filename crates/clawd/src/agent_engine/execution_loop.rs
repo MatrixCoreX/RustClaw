@@ -1059,7 +1059,8 @@ pub(super) async fn execute_actions_once(
             step_in_round,
             global_step,
         );
-        let decision = dispatch_round_action(
+        // Keep the large action future off the worker stack, as the parallel path does.
+        let decision = Box::pin(dispatch_round_action(
             state,
             task,
             goal,
@@ -1076,7 +1077,7 @@ pub(super) async fn execute_actions_once(
             &mut executed_actions,
             &mut ended_with_user_visible_output,
             agent_run_context,
-        )
+        ))
         .await?;
         crate::task_event_transport::publish_loop_state_snapshot(
             state, task, user_text, loop_state,
