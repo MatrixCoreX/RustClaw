@@ -464,6 +464,12 @@ async fn format_retry_scenario(invalid_calls: usize, invalid_audit: bool) {
     assert_eq!(journal.step_results.len(), 2);
     let mut checkpoint: crate::task_lifecycle::TaskCheckpoint =
         serde_json::from_value(journal.task_checkpoint.unwrap()).unwrap();
+    // The seeded loop really executes the terminal respond action. Preserve
+    // its receipt along with the earlier write across every verifier retry.
+    assert_eq!(
+        checkpoint.completed_side_effect_refs,
+        vec!["completed-write", "respond:candidate"]
+    );
     for attempt in 0..2 {
         let reply = run_agent_with_tools_seeded(
             &state,
@@ -527,7 +533,7 @@ async fn format_retry_scenario(invalid_calls: usize, invalid_audit: bool) {
         );
         assert_eq!(
             checkpoint.completed_side_effect_refs,
-            vec!["completed-write"]
+            vec!["completed-write", "respond:candidate"]
         );
         assert!(checkpoint.pending_action.is_none());
         if expected_count == 3 {
