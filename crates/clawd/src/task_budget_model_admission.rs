@@ -5,7 +5,7 @@ use crate::{AppState, ClaimedTask};
 use rusqlite::{params, TransactionBehavior};
 use serde_json::json;
 use std::{sync::Arc, time::Instant};
-const ERROR: &str = "task_budget_token_admission_exhausted";
+const ERROR: &str = "administrator_token_budget_exhausted";
 
 pub(crate) struct ModelAdmission {
     state: AppState,
@@ -63,11 +63,12 @@ pub(crate) fn prepare(
         .map_err(|_| "task_budget_ledger_unavailable")?;
     db.execute("INSERT OR IGNORE INTO task_model_budget_baselines(task_id,historical_tokens,token_ceiling) VALUES(?1,?2,?3)",params![task.task_id,cost.input_tokens.saturating_add(cost.output_tokens),ceiling])
         .map_err(|_| "task_budget_ledger_unavailable")?;
-    admission
-        .remaining(&db, cost.input_tokens.saturating_add(cost.output_tokens))?
+    let available =
+        admission.remaining(&db, cost.input_tokens.saturating_add(cost.output_tokens))?;
+    available
         .checked_sub(input_bound)
         .filter(|n| *n >= 256)
-        .ok_or(ERROR)?;
+        .ok_or_else(|| admission.denied(available))?;
     hints.max_tokens = Some(output_cap);
     if label == "verifier" && hints.reasoning_effort.is_none() {
         hints.reasoning_effort = Some("low".into());
@@ -75,6 +76,13 @@ pub(crate) fn prepare(
     Ok(admission)
 }
 impl ModelAdmission {
+    fn denied(&self, available: u64) -> String {
+        json!({"schema_version":1,"owner_layer":"task_budget","status":"failed","error_code":ERROR,
+            "message_key":"clawd.task.budget_exhausted","reason_code":"pre_call_token_reservation_unavailable",
+            "retryable":false,"provider_called":false,"remaining_tokens":available,
+            "required_token_bound":self.input_bound.saturating_add(256),"input_bound_is_conservative":true}).to_string()
+    }
+
     fn remaining(&self, db: &rusqlite::Connection, known_tokens: u64) -> Result<u64, String> {
         let held: u64 = db.query_row("SELECT COALESCE(SUM(reserved_tokens),0) FROM task_model_token_reservations WHERE task_id=?1",[&self.task.task_id],|r|r.get(0)).map_err(|_| "task_budget_ledger_unavailable")?;
         let (baseline,pinned):(u64,u64)=db.query_row("SELECT historical_tokens,token_ceiling FROM task_model_budget_baselines WHERE task_id=?1",[&self.task.task_id],|r|Ok((r.get(0)?,r.get(1)?))).map_err(|_|"task_budget_ledger_unavailable")?;
@@ -106,7 +114,7 @@ impl ModelAdmission {
         let output = remaining
             .checked_sub(self.input_bound)
             .filter(|n| *n >= 256)
-            .ok_or(ERROR)?
+            .ok_or_else(|| self.denied(remaining))?
             .min(self.output_cap);
         hints.max_tokens = Some(output);
         let id = uuid::Uuid::new_v4().to_string();

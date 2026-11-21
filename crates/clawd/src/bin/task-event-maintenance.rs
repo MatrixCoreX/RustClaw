@@ -60,6 +60,10 @@ fn run() -> anyhow::Result<()> {
                 std::io::stdout().flush()?;
             }
             checkpoint(&db)?;
+            println!(
+                "{}",
+                json!({"ok":true,"action":action,"total_rows":total,"complete":true})
+            );
         }
         "pack" => {
             task_event_storage_maintenance::ensure_schema(&db)?;

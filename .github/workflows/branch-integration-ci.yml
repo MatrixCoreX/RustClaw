@@ -132,12 +132,14 @@ jobs:
           EVENT_MAINTENANCE_BIN="$PWD/target/debug/task-event-maintenance" python3 -m unittest discover -s scripts/tests -p test_event_storage_maintenance.py -v
           python3 -m unittest discover -s scripts/tests -p test_large_db_memory_probe.py -v
       - name: Verify unchanged runtime builds reuse their compiled artifacts
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
           cargo build --locked -p clawd --bins --message-format=json > "$RUNNER_TEMP/runtime-warm-build.jsonl"
           python3 -c 'import json,sys; rows=[r for line in open(sys.argv[1]) if (r:=json.loads(line)).get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="clawd"]; assert rows and all(r.get("fresh") is True for r in rows), "runtime_warm_build_not_fresh"' "$RUNNER_TEMP/runtime-warm-build.jsonl"
       - name: Verify priority regression boundaries before the full suite
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -146,11 +148,18 @@ jobs:
           target/debug/skillctl init rust offline_scaffold_cache "$fixture_root/package"
           cargo fetch --locked --manifest-path "$fixture_root/package/Cargo.toml"
           cargo test --locked -p extension-manager-skill -- --test-threads=1 --nocapture
+          result=0
           for prefix in llm_gateway::cancellation_tests:: http::task_attachment_upload::tests:: http::task_query::tests:: task_read_id::tests:: llm_gateway::interrupt::tests:: ui_attachments::upload::tests:: http::task_artifacts::media_guard::tests:: event_json_chunks::tests:: task_budget_contract::model_admission::tests:: http::task_artifacts::tests:: agent_engine::skill_execution::skill_execution_subagent::recovery_tests:: repo::tasks::tests::child_terminal_projection_uses_machine_contract_not_visible_text repo::tasks::tests::parent_child_merge_continues_from_structured_findings_only repo::child_tasks::tests::legacy_success_without_machine_data_cannot_fabricate_a_structured_result_reference finalize::loop_reply::tests::child_machine_fields_keep_their_declared_shape_without_changing_ordinary_json_delivery agent_engine::planning::child_result_handoff_tests:: repo::child_tasks::result_contract::tests:: worker::runtime_support::dispatch_result_tests:: agent_engine::planning::native_capability_tools::argument_value_tests:: finalize::task::task_payload_helpers::rejection_status_tests:: agent_engine::skill_execution::child_task_execution_policy::capability_budget::tests:: agent_engine::subagent_runtime::tests:: finalize::task::tests:: capability_map::tests:: agent_engine::planning::native_tests:: repo::child_tasks::budget_accounting_tests:: runtime::host_filesystem::operation_lock::tests:: skills::builtin::builtin_workspace_patch::transaction::attempt::tests:: resource_wait::tests:: task_lifecycle::resource_wait_tests:: capability_result::file_integrity_tests:: agent_engine::skill_action_docs::tests:: agent_engine::capability_catalog::tests:: agent_engine::support::tests:: agent_engine::planning::native_artifact_tests:: agent_engine::planning_prompt::tests:: memory::generation_review::tests:: memory::ux::retrieval::generation_tests:: agent_engine::planner_skill_context::tests:: http::ui_routes::skill_store_tests:: http::ui_routes::storage_governance_tests:: task_result_objects::tests:: repo::tasks::tests::task_resume_execution_tests::terminal_result_projection::result_object_tests:: skills::builtin::builtin_pty_session::tests::; do
-            cargo test --locked -p clawd --bin clawd "$prefix" -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py --prefix "$prefix"
-            cargo test --locked -p clawd --bin clawd "$prefix" -- --test-threads=1 --nocapture
+            if cargo test --locked -p clawd --bin clawd "$prefix" -- --list --color never | python3 scripts/tests/assert_rust_test_selection.py --prefix "$prefix" &&
+               cargo test --locked -p clawd --bin clawd "$prefix" -- --test-threads=1 --nocapture; then
+              :
+            else
+              result=1
+            fi
           done
+          exit "$result"
       - name: Verify shared SDK consumers and native runtime
+        if: ${{ !cancelled() && steps.native_build.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
