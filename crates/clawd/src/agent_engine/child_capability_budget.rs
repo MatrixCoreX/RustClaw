@@ -72,19 +72,17 @@ pub(super) fn capability_budget_error(
     let limit = limits
         .as_array()?
         .iter()
-        .find(|item| {
-            item.get("capability")
-                .and_then(Value::as_str)
-                .is_some_and(|name| {
-                    registry
-                        .as_ref()
-                        .and_then(|registry| registry.canonical_planner_capability_name(name))
-                        .unwrap_or(name)
-                        == capability
-                })
-        })?
-        .get("max_calls")?
-        .as_u64()?;
+        .filter_map(|item| {
+            let name = item.get("capability")?.as_str()?;
+            let canonical = registry
+                .as_ref()
+                .and_then(|registry| registry.canonical_planner_capability_name(name))
+                .unwrap_or(name);
+            (canonical == capability)
+                .then(|| item.get("max_calls").and_then(Value::as_u64))
+                .flatten()
+        })
+        .min()?;
     // Capability results survive checkpoint/resume and include failed calls.
     // Count attempts rather than model prose, replies, or successful reads only.
     let used = loop_state
@@ -101,6 +99,29 @@ pub(super) fn capability_budget_error(
             limit,
         )
     })
+}
+
+pub(in crate::agent_engine) fn planner_budget_context(
+    state: &crate::AppState,
+    task: &ClaimedTask,
+    loop_state: &LoopState,
+) -> Option<Value> {
+    let limits = limits(&task.payload_json)?;
+    let payload: Value = serde_json::from_str(&task.payload_json).ok()?;
+    let registry = state.get_skills_registry();
+    let remaining=limits.as_array()?.iter().map(|item| {
+        let name=item.get("capability").and_then(Value::as_str).unwrap_or_default();
+        let canonical=registry.as_ref().and_then(|registry| registry.canonical_planner_capability_name(name)).unwrap_or(name);
+        let used=loop_state.capability_results.iter().filter(|r| r.capability==canonical).count() as u64;
+        let max_calls=item.get("max_calls").and_then(Value::as_u64).unwrap_or(0);
+        json!({"capability":canonical,"max_calls":max_calls,"used_calls":used,"remaining_calls":max_calls.saturating_sub(used)})
+    }).collect::<Vec<_>>();
+    (!remaining.is_empty()).then(|| json!({
+        "schema_version":1,"owner_layer":"child_task_execution_policy",
+        "child_task_id":payload.get("child_task_id"),"parent_task_id":payload.get("parent_task_id"),
+        "counter_scope":"child_task_across_checkpoint_resume_and_retries",
+        "capability_call_limits":remaining,
+    }))
 }
 
 fn budget_error(skill: &str, capability: &str, code: &str, used: u64, limit: u64) -> String {

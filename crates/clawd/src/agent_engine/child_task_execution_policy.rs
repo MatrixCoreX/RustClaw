@@ -9,7 +9,7 @@ const MAX_CHILD_ALLOWED_CAPABILITIES: usize = 32;
 #[path = "child_capability_budget.rs"]
 mod capability_budget;
 pub(in crate::agent_engine) use capability_budget::{
-    has_scoped_capability_budget, valid_capability_call_limits,
+    has_scoped_capability_budget, planner_budget_context, valid_capability_call_limits,
 };
 
 pub(super) fn child_capability_budget_error(

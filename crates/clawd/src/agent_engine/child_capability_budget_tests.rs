@@ -91,6 +91,9 @@ fn third_call_is_blocked_even_with_larger_total_budget_after_checkpoint_resume()
     assert_eq!(extra["max_calls"], 2);
     assert_eq!(extra["side_effect_applied"], false);
     assert!(has_scoped_capability_budget(&task));
+    let context = planner_budget_context(&state, &task, &resumed).unwrap();
+    assert_eq!(context["child_task_id"], "budget-child");
+    assert_eq!(context["capability_call_limits"][0]["remaining_calls"], 0);
 }
 
 #[test]

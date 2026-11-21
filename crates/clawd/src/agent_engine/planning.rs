@@ -453,6 +453,16 @@ pub(super) async fn plan_round_actions(
         &native_capability_groups,
         &loadable_capability_group_names,
     );
+    if let Some(budget) =
+        super::skill_execution::child_task_execution_policy::planner_budget_context(
+            state, task, loop_state,
+        )
+    {
+        native_request.messages.push(ModelMessage::text(
+            ModelRole::System,
+            format!("child_capability_budget_v1={budget}"),
+        ));
+    }
     if loop_state.conversation_input_revision > 0 {
         let insert_at = native_request
             .tools
