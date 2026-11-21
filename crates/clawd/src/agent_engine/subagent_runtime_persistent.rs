@@ -194,6 +194,22 @@ fn schedule_child_task_specs(
         );
         return Err(super::SUBAGENT_STOP_SIGNAL_CAPABILITY_POLICY_REJECTED);
     }
+    // Refresh after the current planner call, before granting any child reservation.
+    // A previous-round snapshot must not omit this round's input/cache/attempt charge.
+    let own_charge = crate::task_budget_contract::model_admission::current_own_charge(state, task)
+        .map_err(|error| {
+            record_persistent_schedule_error(
+                loop_state,
+                global_step,
+                step_in_round,
+                "task_budget_ledger_unavailable",
+                Some(error),
+            );
+            SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED
+        })?;
+    if let Some(slice) = loop_state.task_budget_slice.as_mut() {
+        slice.cumulative_budget_tokens = slice.cumulative_budget_tokens.max(own_charge);
+    }
     let allocation_ids = allocate_persistent_child_budgets(loop_state, &mut specs)?;
     let write_enabled = specs
         .iter()

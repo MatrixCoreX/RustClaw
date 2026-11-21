@@ -603,6 +603,6 @@ async fn ui_base64_attachment_is_materialized_without_persisting_inline_data() {
         .workspace_root
         .join(&attachments[0].workspace_rel_path);
     std::fs::remove_file(&absolute_path).expect("remove attachment");
-    std::fs::remove_dir(absolute_path.parent().expect("attachment parent"))
+    std::fs::remove_dir_all(absolute_path.parent().expect("attachment parent"))
         .expect("remove attachment parent");
 }

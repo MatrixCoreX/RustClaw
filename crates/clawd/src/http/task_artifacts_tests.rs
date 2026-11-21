@@ -96,7 +96,13 @@ async fn video_poster_rejects_non_video_artifacts_before_running_ffmpeg() {
         download_url: "/v1/tasks/task-1/artifacts/artifact-1/content".to_string(),
         preview_url: None,
     };
-    let response = serve_video_poster(std::path::Path::new("/not-used"), &manifest, true).await;
+    let response = serve_video_poster(
+        &AppState::test_default_with_fixture_provider(),
+        std::path::Path::new("/not-used"),
+        &manifest,
+        true,
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
 }
 
@@ -114,8 +120,13 @@ async fn browser_video_rejects_non_video_artifacts_before_running_ffmpeg() {
         download_url: "/v1/tasks/task-1/artifacts/artifact-1/content".to_string(),
         preview_url: None,
     };
-    let response =
-        serve_browser_video_preview(std::path::Path::new("/not-used"), &manifest, true).await;
+    let response = serve_browser_video_preview(
+        &AppState::test_default_with_fixture_provider(),
+        std::path::Path::new("/not-used"),
+        &manifest,
+        true,
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
 }
 

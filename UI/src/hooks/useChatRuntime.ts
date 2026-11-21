@@ -1499,7 +1499,8 @@ export function useChatRuntime({
       }
       try {
         return await submit();
-      } catch {
+      } catch (retryError) {
+        if (retryError instanceof ApiHttpError && retryError.definitiveRejection) throw retryError;
         throw submitError;
       }
     }

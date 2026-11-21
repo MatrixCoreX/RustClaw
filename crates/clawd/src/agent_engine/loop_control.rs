@@ -1397,6 +1397,10 @@ fn observe_task_budget(
         cumulative_tool_calls: loop_state.tool_calls_total as u64,
         cumulative_input_tokens: cost.input_tokens,
         cumulative_output_tokens: cost.output_tokens,
+        cumulative_budget_tokens: crate::task_budget_contract::model_admission::current_own_charge(
+            state, task,
+        )
+        .unwrap_or(cost.input_tokens.saturating_add(cost.output_tokens)),
         cumulative_cost_usd_nanos: cost.estimated_cost_usd_nanos,
         cumulative_elapsed_ms,
         progress,

@@ -597,6 +597,10 @@ async fn run_with_provider_resource(
         );
 
         let provider_started_at = std::time::Instant::now();
+        let attempts_before = hints
+            .host_admission
+            .as_ref()
+            .map_or(0, |guard| guard.attempts_started());
         let provider_call =
             crate::call_provider_with_retry_with_hints(provider.clone(), prompt, &hints);
         let provider_result = tokio::select! {
@@ -622,21 +626,25 @@ async fn run_with_provider_resource(
                         "usage_status": "unknown",
                     }),
                 );
-                record_llm_cost(
-                    state,
-                    task,
-                    crate::providers::build_cost_record(
-                        logical_call_index,
-                        prompt_label,
-                        &provider.config.name,
-                        &provider.config.model,
-                        interrupted.cost_status(),
-                        1,
-                        None,
-                        provider.pricing.as_ref(),
-                    ),
-                    prompt_source,
-                );
+                let interrupted_attempts = hints.host_admission.as_ref()
+                    .map_or(0, |guard| guard.attempts_started()).saturating_sub(attempts_before);
+                if interrupted_attempts > 0 {
+                    record_llm_cost(
+                        state,
+                        task,
+                        crate::providers::build_cost_record(
+                            logical_call_index,
+                            prompt_label,
+                            &provider.config.name,
+                            &provider.config.model,
+                            interrupted.cost_status(),
+                            interrupted_attempts as usize,
+                            None,
+                            provider.pricing.as_ref(),
+                        ),
+                        prompt_source,
+                    );
+                }
                 state.note_task_llm_elapsed_with_label(
                     &task.task_id,
                     prompt_label,

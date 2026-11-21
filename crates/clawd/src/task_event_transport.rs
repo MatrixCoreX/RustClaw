@@ -625,10 +625,10 @@ fn persisted_journal_public_event_kind(kind: &str) -> &str {
 }
 
 pub(crate) fn publish_persisted_task_events(state: &AppState, task_id: &str) {
-    let Ok(uuid) = uuid::Uuid::parse_str(task_id) else {
+    let Ok(id) = crate::task_read_id::TaskReadId::try_from(task_id.to_string()) else {
         return;
     };
-    let Ok(Some((task, _, _))) = crate::repo::get_task_query_record(state, uuid) else {
+    let Ok(Some((task, _, _))) = crate::repo::get_task_query_record(state, &id) else {
         return;
     };
     let Some(events) = task
@@ -657,10 +657,10 @@ pub(crate) fn publish_persisted_task_events(state: &AppState, task_id: &str) {
 }
 
 pub(crate) fn publish_task_status_projection(state: &AppState, task_id: &str) {
-    let Ok(uuid) = uuid::Uuid::parse_str(task_id) else {
+    let Ok(id) = crate::task_read_id::TaskReadId::try_from(task_id.to_string()) else {
         return;
     };
-    let Ok(Some((task, _, _))) = crate::repo::get_task_query_record(state, uuid) else {
+    let Ok(Some((task, _, _))) = crate::repo::get_task_query_record(state, &id) else {
         return;
     };
     let status = serde_json::to_value(&task.status).unwrap_or(Value::Null);

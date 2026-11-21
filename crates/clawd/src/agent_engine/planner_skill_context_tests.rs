@@ -545,7 +545,7 @@ fn small_provider_window_uses_searchable_catalog_reference_without_data_loss() {
 }
 
 #[test]
-fn large_provider_window_keeps_the_complete_capability_catalog() {
+fn large_provider_window_uses_bounded_navigation_and_preserves_complete_expansion() {
     let mut state = state_with_all_bundled_skills_enabled();
     let provider = std::sync::Arc::make_mut(
         state
@@ -562,11 +562,32 @@ fn large_provider_window_keeps_the_complete_capability_catalog() {
     };
     let context = build_planner_skill_context(&state, &task(), &loop_state);
 
-    assert_eq!(context.disclosure_mode, "compact_index");
-    assert!(context.quick_index_text.contains("complete=true"));
+    assert_eq!(context.disclosure_mode, "provider_fitted_catalog");
+    assert!(context.quick_index_text.contains("canonical_complete=true"));
     assert!(context
         .quick_index_text
-        .contains("media_download.download(action=download"));
+        .contains("recovery=load_capability_groups(op=search|expand)"));
+    assert!(context
+        .quick_index_text
+        .contains("provider_catalog_budget_tokens=2048"));
+    let canonical = build_skill_quick_index_text_scoped(&state, &task(), None);
+    assert!(canonical.contains("complete=true"));
+    assert!(canonical.contains("media_download.download(action=download"));
+    let entries = super::super::capability_catalog::catalog_entries_for_task(&state, &task());
+    let entry = entries
+        .iter()
+        .find(|entry| entry.capability_id == "media_download.download")
+        .expect("canonical media capability");
+    let (expanded, _) = super::super::capability_catalog::expand_catalog(
+        &state,
+        &task(),
+        std::slice::from_ref(&entry.capability_ref),
+    )
+    .unwrap();
+    assert_eq!(
+        expanded["contracts"][0]["contract_sha256"],
+        entry.contract_sha256
+    );
 }
 
 #[test]

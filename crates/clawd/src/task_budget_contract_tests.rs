@@ -524,3 +524,29 @@ fn cost_boundary_needs_user_and_never_self_raises() {
     assert_eq!(decision, BudgetDecision::NeedsUser);
     assert_eq!(slice.hard_ceilings.cost_usd_nanos, configured_cost);
 }
+
+#[test]
+fn conservative_charge_bounds_child_grants_without_rewriting_observed_usage() {
+    let mut parent = slice();
+    parent.observe(BudgetObservation {
+        cumulative_input_tokens: 100,
+        cumulative_budget_tokens: 90000,
+        ..Default::default()
+    });
+    let grant = parent
+        .allocate(
+            "child-new",
+            "child-new",
+            BudgetAllocationKind::ChildTask,
+            BudgetUnits {
+                tokens: 20000,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(grant.granted.tokens, 10000);
+    assert_eq!(parent.cumulative_input_tokens, 100);
+    let restored = TaskBudgetSlice::from_machine_json(&parent.to_machine_json()).unwrap();
+    assert_eq!(restored.cumulative_budget_tokens, 90000);
+    assert_eq!(restored.remaining_units().tokens, 0);
+}

@@ -351,6 +351,13 @@ async fn conversation_input_interrupts_a_non_native_model_call_before_delivery()
     .expect_err("pre-cancelled model turn must not deliver a stale response");
 
     assert_eq!(error, super::CONVERSATION_INPUT_INTERRUPTED_ERR);
+    assert_eq!(
+        state
+            .task_llm_cost_summary(&task.task_id)
+            .provider_record_count,
+        0,
+        "a preempted call that never reached a provider has no provider attempt record"
+    );
     let events = crate::task_event_transport::replay_events_after(&state, &task.task_id, 0)
         .expect("replay model events")
         .events;

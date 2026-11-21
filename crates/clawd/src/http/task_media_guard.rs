@@ -20,7 +20,16 @@ pub(super) fn key_lock(path: &Path) -> Option<Arc<AsyncMutex<()>>> {
     flights.insert(path.into(), Arc::downgrade(&lock));
     Some(lock)
 }
-pub(super) fn admit(path: &Path, reserved_bytes: u64) -> Result<SemaphorePermit<'static>, ()> {
+pub(super) struct PreviewLease {
+    _gate: SemaphorePermit<'static>,
+    _host: crate::resource_scheduler::ResourceLease,
+}
+pub(super) fn admit(
+    state: &crate::AppState,
+    path: &Path,
+    reserved_bytes: u64,
+    memory_mb: u64,
+) -> Result<PreviewLease, ()> {
     static GATE: OnceLock<Semaphore> = OnceLock::new();
     let permit = GATE
         .get_or_init(|| Semaphore::new(1))
@@ -49,7 +58,26 @@ pub(super) fn admit(path: &Path, reserved_bytes: u64) -> Result<SemaphorePermit<
             }
         }
     }
-    Ok(permit)
+    let request = claw_core::skill_registry::SkillResourceRequest {
+        class: claw_core::skill_registry::SkillResourceClass::Cpu,
+        cpu_cores: 1,
+        memory_mb,
+        disk_io_weight: 1,
+        ..Default::default()
+    };
+    let resource = state
+        .skill_rt
+        .skill_concurrency_gates
+        .resource_broker()
+        .try_acquire(
+            Some(&request),
+            state.skill_rt.skill_global_max_concurrency.max(1),
+        )
+        .map_err(|_| ())?;
+    Ok(PreviewLease {
+        _gate: permit,
+        _host: resource,
+    })
 }
 pub(super) struct TempFile(pub PathBuf);
 impl Drop for TempFile {
@@ -60,3 +88,18 @@ impl Drop for TempFile {
 #[cfg(test)]
 #[path = "task_media_guard_tests.rs"]
 mod tests;
+
+pub(super) async fn read_bounded_cache(path: &Path, limit: usize) -> Option<Vec<u8>> {
+    use tokio::io::AsyncReadExt;
+    let metadata = tokio::fs::symlink_metadata(path).await.ok()?;
+    if !metadata.is_file() || metadata.len() > limit as u64 {
+        return None;
+    }
+    let file = tokio::fs::File::open(path).await.ok()?;
+    let mut bytes = Vec::new();
+    file.take(limit as u64 + 1)
+        .read_to_end(&mut bytes)
+        .await
+        .ok()?;
+    (bytes.len() <= limit).then_some(bytes)
+}

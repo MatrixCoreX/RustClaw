@@ -358,6 +358,9 @@ pub(crate) struct TaskBudgetSlice {
     pub(crate) cumulative_tool_calls: u64,
     pub(crate) cumulative_input_tokens: u64,
     pub(crate) cumulative_output_tokens: u64,
+    /// Own model-budget charge, including cache inputs and conservative unknown reservations.
+    #[serde(default)]
+    pub(crate) cumulative_budget_tokens: u64,
     pub(crate) cumulative_cost_usd_nanos: u64,
     pub(crate) cumulative_elapsed_ms: u64,
     pub(crate) progress: BudgetProgress,
@@ -417,6 +420,7 @@ impl TaskBudgetSlice {
             cumulative_tool_calls: 0,
             cumulative_input_tokens: 0,
             cumulative_output_tokens: 0,
+            cumulative_budget_tokens: 0,
             cumulative_cost_usd_nanos: 0,
             cumulative_elapsed_ms: 0,
             progress: BudgetProgress::default(),
@@ -480,7 +484,8 @@ impl TaskBudgetSlice {
         let reserved = self.active_reserved_units();
         let consumed_tokens = self
             .cumulative_input_tokens
-            .saturating_add(self.cumulative_output_tokens);
+            .saturating_add(self.cumulative_output_tokens)
+            .max(self.cumulative_budget_tokens);
         let progressful_orchestration_units = self.limit_policy
             == TaskBudgetLimitPolicy::UnboundedProgressful
             && self.progress.observed_progress();
@@ -602,6 +607,9 @@ impl TaskBudgetSlice {
         self.cumulative_tool_calls = observation.cumulative_tool_calls;
         self.cumulative_input_tokens = observation.cumulative_input_tokens;
         self.cumulative_output_tokens = observation.cumulative_output_tokens;
+        self.cumulative_budget_tokens = self
+            .cumulative_budget_tokens
+            .max(observation.cumulative_budget_tokens);
         self.cumulative_cost_usd_nanos = observation.cumulative_cost_usd_nanos;
         self.cumulative_elapsed_ms = observation.cumulative_elapsed_ms;
         self.progress = observation.progress;
@@ -646,6 +654,7 @@ pub(crate) struct BudgetObservation {
     pub(crate) cumulative_tool_calls: u64,
     pub(crate) cumulative_input_tokens: u64,
     pub(crate) cumulative_output_tokens: u64,
+    pub(crate) cumulative_budget_tokens: u64,
     pub(crate) cumulative_cost_usd_nanos: u64,
     pub(crate) cumulative_elapsed_ms: u64,
     pub(crate) progress: BudgetProgress,
@@ -742,6 +751,8 @@ fn administrator_limit_hit(
         let total_tokens = observation
             .cumulative_input_tokens
             .saturating_add(observation.cumulative_output_tokens)
+            .max(observation.cumulative_budget_tokens)
+            .max(slice.cumulative_budget_tokens)
             .saturating_add(slice.delegated_consumed.tokens);
         if total_tokens >= slice.hard_ceilings.total_tokens {
             (

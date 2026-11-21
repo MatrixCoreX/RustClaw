@@ -127,14 +127,14 @@ async fn serve_task_artifact(
         .as_deref()
         .is_some_and(|value| value.eq_ignore_ascii_case("poster"))
     {
-        return serve_video_poster(&path, &manifest, include_body).await;
+        return serve_video_poster(&state, &path, &manifest, include_body).await;
     }
     if query
         .preview
         .as_deref()
         .is_some_and(|value| value.eq_ignore_ascii_case("browser"))
     {
-        return serve_browser_video_preview(&path, &manifest, include_body).await;
+        return serve_browser_video_preview(&state, &path, &manifest, include_body).await;
     }
     let mut file = match tokio::fs::File::open(&path).await {
         Ok(file) => file,
@@ -208,6 +208,7 @@ async fn serve_task_artifact(
 }
 
 async fn serve_browser_video_preview(
+    state: &AppState,
     path: &FsPath,
     manifest: &TaskArtifactManifest,
     include_body: bool,
@@ -226,7 +227,7 @@ async fn serve_browser_video_preview(
     {
         return api_error(StatusCode::CONFLICT, "task_artifact_preview_not_ready");
     }
-    let preview_path = match load_or_generate_browser_video(path, manifest).await {
+    let preview_path = match load_or_generate_browser_video(state, path, manifest).await {
         Ok(path) => path,
         Err(BrowserVideoError::Busy) => {
             return api_error(
@@ -316,6 +317,7 @@ enum BrowserVideoError {
 }
 
 async fn load_or_generate_browser_video(
+    state: &AppState,
     path: &FsPath,
     manifest: &TaskArtifactManifest,
 ) -> Result<PathBuf, BrowserVideoError> {
@@ -327,7 +329,7 @@ async fn load_or_generate_browser_video(
         return Ok(cache_path);
     }
 
-    let _permit = media_guard::admit(path, MAX_VIDEO_BROWSER_PREVIEW_BYTES)
+    let _permit = media_guard::admit(state, path, MAX_VIDEO_BROWSER_PREVIEW_BYTES, 512)
         .map_err(|_| BrowserVideoError::Busy)?;
     let temp_path = cache_path.with_extension(format!("{}.tmp", Uuid::new_v4()));
     let _cleanup = media_guard::TempFile(temp_path.clone());
@@ -440,7 +442,7 @@ fn browser_video_cache_path(path: &FsPath, sha256: &str) -> Option<PathBuf> {
 }
 
 async fn valid_browser_video_file(path: &FsPath) -> bool {
-    let Ok(metadata) = tokio::fs::metadata(path).await else {
+    let Ok(metadata) = tokio::fs::symlink_metadata(path).await else {
         return false;
     };
     if !metadata.is_file()
@@ -457,6 +459,7 @@ async fn valid_browser_video_file(path: &FsPath) -> bool {
 }
 
 async fn serve_video_poster(
+    state: &AppState,
     path: &FsPath,
     manifest: &TaskArtifactManifest,
     include_body: bool,
@@ -467,17 +470,25 @@ async fn serve_video_poster(
             "task_artifact_video_poster_unsupported",
         );
     }
-    if !include_body
-        && !match video_poster_cache_path(path, &manifest.sha256) {
-            Some(cache) => tokio::fs::read(cache)
+    let cached_head = if !include_body {
+        let cached = match video_poster_cache_path(path, &manifest.sha256) {
+            Some(cache) => media_guard::read_bounded_cache(&cache, MAX_VIDEO_POSTER_BYTES)
                 .await
-                .is_ok_and(|bytes| valid_video_poster(&bytes)),
-            None => false,
+                .filter(|bytes| valid_video_poster(bytes)),
+            None => None,
+        };
+        match cached {
+            Some(bytes) => Some(bytes),
+            None => return api_error(StatusCode::CONFLICT, "task_artifact_preview_not_ready"),
         }
-    {
-        return api_error(StatusCode::CONFLICT, "task_artifact_preview_not_ready");
-    }
-    let poster = match load_or_generate_video_poster(path, manifest).await {
+    } else {
+        None
+    };
+    let poster_result = match cached_head {
+        Some(bytes) => Ok(bytes),
+        None => load_or_generate_video_poster(state, path, manifest).await,
+    };
+    let poster = match poster_result {
         Ok(poster) => poster,
         Err(VideoPosterError::Busy) => {
             return api_error(
@@ -544,6 +555,7 @@ enum VideoPosterError {
 }
 
 async fn load_or_generate_video_poster(
+    state: &AppState,
     path: &FsPath,
     manifest: &TaskArtifactManifest,
 ) -> Result<Vec<u8>, VideoPosterError> {
@@ -551,21 +563,18 @@ async fn load_or_generate_video_poster(
         video_poster_cache_path(path, &manifest.sha256).ok_or(VideoPosterError::InvalidOutput)?;
     let key = media_guard::key_lock(&cache_path).ok_or(VideoPosterError::Busy)?;
     let _singleflight = key.lock().await;
-    let cached_is_bounded = tokio::fs::metadata(&cache_path)
+    if let Some(cached) = media_guard::read_bounded_cache(&cache_path, MAX_VIDEO_POSTER_BYTES)
         .await
-        .is_ok_and(|metadata| metadata.len() <= MAX_VIDEO_POSTER_BYTES as u64);
-    if cached_is_bounded {
-        if let Ok(cached) = tokio::fs::read(&cache_path).await {
-            if valid_video_poster(&cached) {
-                return Ok(cached);
-            }
-        }
+        .filter(|bytes| valid_video_poster(bytes))
+    {
+        return Ok(cached);
     }
 
-    let _permit = media_guard::admit(path, MAX_VIDEO_POSTER_BYTES as u64)
+    let _permit = media_guard::admit(state, path, MAX_VIDEO_POSTER_BYTES as u64, 256)
         .map_err(|_| VideoPosterError::Busy)?;
     let poster = generate_video_poster(path).await?;
     let temp_path = cache_path.with_extension(format!("{}.tmp", Uuid::new_v4()));
+    let _cleanup = media_guard::TempFile(temp_path.clone());
     if tokio::fs::write(&temp_path, &poster).await.is_ok() {
         if let Err(error) = tokio::fs::rename(&temp_path, &cache_path).await {
             tracing::warn!(

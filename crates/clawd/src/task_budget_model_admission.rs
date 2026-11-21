@@ -14,6 +14,7 @@ pub(crate) struct ModelAdmission {
     input_bound: u64,
     output_cap: u64,
     label: String,
+    attempts_started: std::sync::atomic::AtomicU64,
 }
 impl std::fmt::Debug for ModelAdmission {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -50,14 +51,9 @@ pub(crate) fn prepare(
         input_bound,
         output_cap,
         label: label.into(),
+        attempts_started: std::sync::atomic::AtomicU64::new(0),
     });
-    let cost = state.task_llm_cost_summary(&task.task_id);
-    let historical_tokens = state
-        .task_llm_cost_records(&task.task_id)
-        .iter()
-        .filter_map(|record| record.usage.as_ref().and_then(usage_charge))
-        .fold(0u64, u64::saturating_add)
-        .max(cost.input_tokens.saturating_add(cost.output_tokens));
+    let historical_tokens = observed_own_charge(state, task);
     let db = state
         .core
         .db
@@ -69,8 +65,7 @@ pub(crate) fn prepare(
         .map_err(|_| "task_budget_ledger_unavailable")?;
     db.execute("INSERT OR IGNORE INTO task_model_budget_baselines(task_id,historical_tokens,token_ceiling) VALUES(?1,?2,?3)",params![task.task_id,historical_tokens,ceiling])
         .map_err(|_| "task_budget_ledger_unavailable")?;
-    let available =
-        admission.remaining(&db, cost.input_tokens.saturating_add(cost.output_tokens))?;
+    let available = admission.remaining(&db, historical_tokens)?;
     available
         .checked_sub(input_bound)
         .filter(|n| *n >= 256)
@@ -82,6 +77,10 @@ pub(crate) fn prepare(
     Ok(admission)
 }
 impl ModelAdmission {
+    pub(crate) fn attempts_started(&self) -> u64 {
+        self.attempts_started
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
     fn denied(&self, available: u64) -> String {
         json!({"schema_version":1,"owner_layer":"task_budget","status":"failed","error_code":ERROR,
             "message_key":"clawd.task.budget_exhausted","reason_code":"pre_call_token_reservation_unavailable",
@@ -127,6 +126,8 @@ impl ModelAdmission {
         tx.execute("INSERT INTO task_model_token_reservations(attempt_id,task_id,reserved_tokens,status) VALUES(?1,?2,?3,'in_flight')",params![id,self.task.task_id,self.input_bound.saturating_add(output)]).map_err(|_| "task_budget_ledger_unavailable")?;
         tx.commit().map_err(|_| "task_budget_ledger_unavailable")?;
         drop(db);
+        self.attempts_started
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let attempt = Attempt {
             owner: self.clone(),
             id,
@@ -268,7 +269,7 @@ fn usage_charge(usage: &LlmUsageSnapshot) -> Option<u64> {
 }
 
 /// Conservative charges are budget accounting, separate from provider usage/cost observations.
-pub(crate) fn charged_tokens(
+pub(crate) fn own_charged_tokens(
     db: &rusqlite::Connection,
     task_id: &str,
 ) -> anyhow::Result<Option<u64>> {
@@ -278,6 +279,36 @@ pub(crate) fn charged_tokens(
         return Ok(None);
     }
     let own:Option<u64>=db.query_row("SELECT historical_tokens+(SELECT COALESCE(SUM(reserved_tokens),0) FROM task_model_token_reservations WHERE task_id=?1) FROM task_model_budget_baselines WHERE task_id=?1",[task_id],|r|r.get(0)).optional()?;
+    Ok(own)
+}
+
+pub(crate) fn charged_tokens(
+    db: &rusqlite::Connection,
+    task_id: &str,
+) -> anyhow::Result<Option<u64>> {
+    let own = own_charged_tokens(db, task_id)?;
     let delegated = delegated_tokens(db, task_id).map_err(anyhow::Error::msg)?;
     Ok(own.map(|tokens| tokens.saturating_add(delegated)))
+}
+/// Current own-model charge for the single task-budget slice; raw provider usage stays separate.
+pub(crate) fn current_own_charge(state: &AppState, task: &ClaimedTask) -> Result<u64, String> {
+    let known = observed_own_charge(state, task);
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|_| "task_budget_ledger_unavailable")?;
+    own_charged_tokens(&db, &task.task_id)
+        .map_err(|_| "task_budget_ledger_unavailable".to_string())
+        .map(|charge| charge.unwrap_or(0).max(known))
+}
+
+fn observed_own_charge(state: &AppState, task: &ClaimedTask) -> u64 {
+    let cost = state.task_llm_cost_summary(&task.task_id);
+    state
+        .task_llm_cost_records(&task.task_id)
+        .iter()
+        .filter_map(|record| record.usage.as_ref().and_then(usage_charge))
+        .fold(0u64, u64::saturating_add)
+        .max(cost.input_tokens.saturating_add(cost.output_tokens))
 }

@@ -19,3 +19,17 @@ fn temporary_output_is_removed_on_drop() {
     }
     assert!(!path.exists());
 }
+
+#[tokio::test]
+async fn oversized_cache_is_rejected_before_reading_and_valid_cache_stays_bounded() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("cache");
+    let file = std::fs::File::create(&path).unwrap();
+    file.set_len(9 * 1024 * 1024).unwrap();
+    assert!(read_bounded_cache(&path, 8 * 1024 * 1024).await.is_none());
+    std::fs::write(&path, b"cached").unwrap();
+    assert_eq!(
+        read_bounded_cache(&path, 8 * 1024 * 1024).await.unwrap(),
+        b"cached"
+    );
+}
