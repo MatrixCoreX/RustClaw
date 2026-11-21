@@ -99,6 +99,57 @@ pub(super) fn answer_verifier_should_force_task_failure(
     enforce_required && answer_verifier_forces_task_failure(semantic_clarify, journal)
 }
 
+pub(crate) fn enforce_terminal_ask_reply_status(
+    enforce_required: bool,
+    payload_json: &str,
+    reply: &mut crate::AskReply,
+) {
+    let Some(journal) = reply.task_journal.as_ref() else {
+        return;
+    };
+    if reply.should_fail_task
+        || crate::task_lifecycle::has_matching_nonterminal_checkpoint(
+            journal.task_lifecycle.as_ref(),
+            journal.task_checkpoint.as_ref(),
+        )
+    {
+        return;
+    }
+    let semantic_clarify =
+        journal.final_status == Some(crate::task_journal::TaskJournalFinalStatus::Clarify);
+    let payload: Value = serde_json::from_str(payload_json).unwrap_or(Value::Null);
+    let failure = child_clarification_failure_payload(&payload, semantic_clarify)
+        .map(|value| value.to_string())
+        .or_else(|| {
+            answer_verifier_should_force_task_failure(enforce_required, semantic_clarify, journal)
+                .then(|| {
+                    journal
+                        .answer_verifier_summary
+                        .as_ref()
+                        .map(|summary| summary.required_evidence_failure_payload_text())
+                        .unwrap_or_else(|| {
+                            json!({
+                                "schema_version": 1,
+                                "message_key": "answer_verifier_required_evidence_block",
+                                "reason_code": "answer_verifier_required_evidence_block",
+                                "status_code": "answer_verifier_required_evidence_block",
+                                "failure_attribution": "answer_verifier_gap",
+                                "retryable": false,
+                            })
+                            .to_string()
+                        })
+                })
+        });
+    if let Some(failure) = failure {
+        reply.should_fail_task = true;
+        reply.error_text = Some(failure.clone());
+        if let Some(journal) = reply.task_journal.as_mut() {
+            journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
+            journal.record_final_failure_attribution_from_error(&failure);
+        }
+    }
+}
+
 pub(super) fn normalize_existing_file_delivery_token_answer(
     state: &AppState,
     answer_text: &str,

@@ -61,14 +61,8 @@ fn frozen_limits_and_terminal_graph_refresh_do_not_need_new_delegation() {
                 serde_json::json!({"child_task_result":{"schema_version":2,"child_task_id":id,"parent_task_id":task.task_id,
                     "status":terminal,"role":"review","required":true,"evidence_refs":[],"finding_refs":[],
                     "structured_result":{"findings":[],"evidence":[]}}}).to_string()]).unwrap();
-            crate::repo::child_task_graph::record_child_graph_terminal(
-                &db,
-                &task.task_id,
-                &id,
-                terminal,
-                "2099-01-01T00:00:00Z",
-            )
-            .unwrap();
+            // Intentionally omit the terminal graph callback: resume must
+            // recover the durable completed task without new delegation.
         }
         assert_eq!(
             resume_child_graph_before_planner(&state, &task, &mut loop_state).unwrap(),

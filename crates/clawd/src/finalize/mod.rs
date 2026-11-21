@@ -34,9 +34,8 @@ pub(crate) use helpers::*;
 // === TASK 层（已物理位于 finalize/task.rs，Stage 2.2）===
 // 任务级编排：DB write / memory / 通知 / journal merge
 pub(crate) use task::{
-    assistant_memory_source_text,
-    answer_verifier_retry_answer_has_required_machine_evidence,
-    finalize_ask_direct_success, finalize_ask_result,
+    answer_verifier_retry_answer_has_required_machine_evidence, assistant_memory_source_text,
+    enforce_terminal_ask_reply_status, finalize_ask_direct_success, finalize_ask_result,
     preserve_verified_delivery_tokens_after_retry, retry_answer_after_verifier,
     run_direct_classifier_reply,
 };

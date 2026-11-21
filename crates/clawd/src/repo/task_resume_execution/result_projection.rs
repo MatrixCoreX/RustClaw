@@ -1026,6 +1026,11 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
         return Ok(false);
     }
     tx.commit()?;
+    drop(db);
+    drop(_result_write_guard);
+    // Resumed execution bypasses the foreground worker's completion callback.
+    // Publish the same durable child result and settle its parent graph here.
+    let _ = crate::repo::child_tasks::refresh_stored_child_terminal_projection(state, task_id)?;
     if changed > 0
         && claw_core::provider_failure_policy::is_terminal_quota_lifecycle(
             &terminal_result["task_lifecycle"],

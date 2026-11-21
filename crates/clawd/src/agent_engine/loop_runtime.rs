@@ -500,6 +500,11 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                         skip_planner_rounds = false;
                         continue;
                     }
+                    crate::finalize::enforce_terminal_ask_reply_status(
+                        policy.answer_verifier_required_evidence_enabled(),
+                        &task.payload_json,
+                        &mut reply,
+                    );
                     return Ok(reply);
                 }
             }
@@ -545,6 +550,11 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             skip_planner_rounds = false;
             continue;
         }
+        crate::finalize::enforce_terminal_ask_reply_status(
+            policy.answer_verifier_required_evidence_enabled(),
+            &task.payload_json,
+            &mut reply,
+        );
         return Ok(reply);
     }
 }

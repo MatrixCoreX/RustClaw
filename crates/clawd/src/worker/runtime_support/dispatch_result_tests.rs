@@ -189,6 +189,87 @@ fn finalize_claimed_dispatch(
 }
 
 #[test]
+fn resumed_rejected_answer_without_retry_permission_projects_failure_for_main_and_child() {
+    let claimed = seeded_claimed_dispatch();
+    for payload in [
+        json!({"text":"inspect"}),
+        json!({"task_role":"subagent_child","child_task_contract":{"scope":{}}}),
+    ] {
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-seeded-terminal", "ask", "inspect");
+        journal.record_final_answer("candidate");
+        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+        journal.record_answer_verification(
+            crate::answer_verifier::AnswerVerificationOutcome::Failed(
+                crate::answer_verifier::AnswerVerifierOut {
+                    pass: false,
+                    should_retry: false,
+                    confidence: 0.99,
+                    ..Default::default()
+                },
+            ),
+            "candidate",
+        );
+        let mut reply = crate::AskReply::non_llm("candidate".into()).with_task_journal(journal);
+        crate::finalize::enforce_terminal_ask_reply_status(true, &payload.to_string(), &mut reply);
+        assert!(reply.should_fail_task);
+        let result = super::dispatch_result::seeded_agent_loop_terminal_dispatch_result_payload(
+            &claimed,
+            Ok(reply),
+        )
+        .unwrap();
+        assert_eq!(result["executor_result_status"], "seeded_loop_failed");
+        assert_eq!(result["failure_result_json"]["text"], "candidate");
+        assert_eq!(
+            result["failure_result_json"]["task_journal"]["summary"]["final_status"],
+            "failure"
+        );
+        assert_eq!(
+            result["failure_result_json"]["task_journal"]["summary"]["answer_verification"]
+                ["status"],
+            "failed"
+        );
+    }
+}
+
+#[test]
+fn resumed_child_clarification_is_unfinished_while_main_clarification_can_complete() {
+    let claimed = seeded_claimed_dispatch();
+    for child in [false, true] {
+        let payload = if child {
+            json!({"task_role":"subagent_child","child_task_contract":{"scope":{}}})
+        } else {
+            json!({"text":"inspect"})
+        };
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-seeded-terminal", "ask", "inspect");
+        journal.record_final_answer("need input");
+        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Clarify);
+        let mut reply = crate::AskReply::non_llm("need input".into()).with_task_journal(journal);
+        crate::finalize::enforce_terminal_ask_reply_status(true, &payload.to_string(), &mut reply);
+        assert_eq!(reply.should_fail_task, child);
+        if child {
+            let error: serde_json::Value =
+                serde_json::from_str(reply.error_text.as_ref().unwrap()).unwrap();
+            assert_eq!(error["error_code"], "child_task_needs_parent_input");
+        }
+        let result = super::dispatch_result::seeded_agent_loop_terminal_dispatch_result_payload(
+            &claimed,
+            Ok(reply),
+        )
+        .unwrap();
+        assert_eq!(
+            result["executor_result_status"],
+            if child {
+                "seeded_loop_failed"
+            } else {
+                "seeded_loop_completed"
+            }
+        );
+    }
+}
+
+#[test]
 fn seeded_agent_loop_terminal_payload_is_machine_only_for_success_and_failure() {
     let claimed = seeded_claimed_dispatch();
     let mut journal =

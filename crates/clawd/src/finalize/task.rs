@@ -59,6 +59,7 @@ pub(crate) use task_memory::assistant_memory_source_text;
 use task_memory::{insert_ask_memory_pair, insert_unfinished_goal_memory};
 #[cfg(test)]
 use task_payload_helpers::answer_verifier_forces_task_failure;
+pub(crate) use task_payload_helpers::enforce_terminal_ask_reply_status;
 use task_payload_helpers::{
     answer_verifier_should_force_task_failure, ask_result_payload,
     child_clarification_failure_payload, non_failure_final_status,

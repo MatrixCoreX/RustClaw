@@ -87,6 +87,37 @@ fn reuse_parent_child_graph(
     let Some(graph) = graph else {
         return Ok(None);
     };
+    // Rebuild a missing completion projection after a process stopped between
+    // the terminal task write and its child-graph callback. This is idempotent
+    // and uses persisted task status, without asking a model to poll again.
+    let mut repaired = false;
+    for node in graph
+        .get("nodes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if terminal_execution_state(node) {
+            continue;
+        }
+        if let Some(id) = node.get("child_task_id").and_then(Value::as_str) {
+            repaired |=
+                crate::repo::child_tasks::refresh_stored_child_terminal_projection(state, id)
+                    .map_err(|_| super::SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED)?;
+        }
+    }
+    let graph = if repaired {
+        let db = state
+            .core
+            .db
+            .get()
+            .map_err(|_| super::SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED)?;
+        crate::repo::child_task_graph::graph_snapshot(&db, &task.task_id)
+            .map_err(|_| super::SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED)?
+            .unwrap_or(graph)
+    } else {
+        graph
+    };
     let nodes = graph
         .get("nodes")
         .and_then(Value::as_array)
