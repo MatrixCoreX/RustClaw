@@ -118,3 +118,40 @@ fn declared_evidence_rejects_empty_and_dangling_refs_and_accepts_real_successful
         &journal
     ));
 }
+
+#[test]
+fn invalid_schema_diagnostics_preserve_strict_types_and_version_location() {
+    let invalid = json!({"output_format":"machine_json","result_schema":{
+        "schema_version":"1","type":"object","properties":{"line":{"type":"integer","minimum":"1"}}}});
+    let original = invalid.clone();
+    assert!(!child_result_contract_supported(&invalid));
+    let issues = child_result_contract_validation_issues(&invalid);
+    for path in [
+        "/schema_version",
+        "/result_schema/schema_version",
+        "/result_schema/properties/line/minimum",
+    ] {
+        assert!(
+            issues.iter().any(|issue| issue["path"] == path),
+            "missing issue {path}"
+        );
+    }
+    assert_eq!(invalid, original, "diagnostics must not coerce input");
+    let valid = json!({"output_format":"machine_json","schema_version":1,
+        "result_schema":{"type":"object","properties":{"line":{"type":"integer","minimum":1}}}});
+    assert!(child_result_contract_supported(&valid));
+    assert!(child_result_contract_validation_issues(&valid).is_empty());
+    for value in [Value::Null, json!([]), json!("contract")] {
+        assert!(!child_result_contract_supported(&value));
+    }
+}
+
+#[test]
+fn invalid_schema_diagnostics_have_a_bounded_issue_count() {
+    let properties = (0..100)
+        .map(|n| (format!("field_{n}"), json!({"minimum":"1"})))
+        .collect::<serde_json::Map<_, _>>();
+    let contract = json!({"schema_version":1,"result_schema":{"properties":properties}});
+    assert!(!child_result_contract_supported(&contract));
+    assert_eq!(child_result_contract_validation_issues(&contract).len(), 16);
+}

@@ -3,6 +3,9 @@ use serde_json::{json, Value};
 mod result_schema;
 
 pub(crate) fn child_result_contract_supported(contract: &Value) -> bool {
+    if !contract.is_object() {
+        return false;
+    }
     if contract
         .get("schema_version")
         .is_some_and(|v| v.as_u64() != Some(1))
@@ -21,6 +24,39 @@ pub(crate) fn child_result_contract_supported(contract: &Value) -> bool {
             .as_str()
             .is_some_and(|s| !s.is_empty() && s.len() <= 128)
     })
+}
+
+/// Advisory field diagnostics; the strict admission predicate above remains authoritative.
+pub(crate) fn child_result_contract_validation_issues(contract: &Value) -> Vec<Value> {
+    if child_result_contract_supported(contract) {
+        return Vec::new();
+    }
+    let mut issues = Vec::new();
+    if !contract.is_object() {
+        return vec![json!({"path":"", "reason":"expected_object"})];
+    }
+    if (contract.get("result_schema").is_some() || contract.get("schema_version").is_some())
+        && contract.get("schema_version").and_then(Value::as_u64) != Some(1)
+    {
+        issues.push(
+            json!({"path":"/schema_version", "reason":"expected_integer_version", "expected":1}),
+        );
+    }
+    if let Some(schema) = contract.get("result_schema") {
+        result_schema::diagnose(schema, "/result_schema", 0, &mut issues);
+    }
+    if contract.get("evidence_field").is_some_and(|field| {
+        !field
+            .as_str()
+            .is_some_and(|s| !s.is_empty() && s.len() <= 128)
+    }) {
+        issues.push(json!({"path":"/evidence_field", "reason":"expected_nonempty_string"}));
+    }
+    if issues.is_empty() {
+        issues.push(json!({"path":"/result_schema", "reason":"unsupported_schema_shape_or_bound"}));
+    }
+    issues.truncate(16);
+    issues
 }
 
 pub(crate) fn child_evidence_contract_valid(

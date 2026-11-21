@@ -91,6 +91,64 @@ pub(super) fn supported(schema: &Value, depth: usize) -> bool {
     }
     true
 }
+
+/// Bounded machine-only repair hints. This never coerces or admits an invalid schema.
+pub(super) fn diagnose(schema: &Value, path: &str, depth: usize, issues: &mut Vec<Value>) {
+    if issues.len() >= 16 || depth > 8 || path.len() > 1024 {
+        return;
+    }
+    let Some(map) = schema.as_object() else {
+        issues.push(serde_json::json!({"path":path,"reason":"expected_object"}));
+        return;
+    };
+    for key in map.keys().take(32) {
+        if issues.len() >= 16 {
+            return;
+        }
+        if !KEYS.contains(&key.as_str()) {
+            let key: String = key.chars().take(128).collect();
+            issues.push(serde_json::json!({"path":format!("{path}/{}",key.replace('~',"~0").replace('/',"~1")),"reason":"unsupported_keyword"}));
+        }
+    }
+    for key in [
+        "minimum",
+        "maximum",
+        "minLength",
+        "maxLength",
+        "minItems",
+        "maxItems",
+    ] {
+        if issues.len() >= 16 {
+            return;
+        }
+        if let Some(value) = map.get(key) {
+            let integer = !matches!(key, "minimum" | "maximum");
+            if (integer && value.as_u64().is_none()) || (!integer && value.as_f64().is_none()) {
+                issues.push(serde_json::json!({"path":format!("{path}/{key}"),"reason":"expected_numeric_keyword","expected_type":if integer {"unsigned_integer"} else {"number"}}));
+            }
+        }
+    }
+    if let Some(properties) = map.get("properties").and_then(Value::as_object) {
+        for (key, value) in properties.iter().take(32) {
+            if issues.len() >= 16 {
+                return;
+            }
+            let key: String = key.chars().take(128).collect();
+            diagnose(
+                value,
+                &format!(
+                    "{path}/properties/{}",
+                    key.replace('~', "~0").replace('/', "~1")
+                ),
+                depth + 1,
+                issues,
+            );
+        }
+    }
+    if let Some(items) = map.get("items") {
+        diagnose(items, &format!("{path}/items"), depth + 1, issues);
+    }
+}
 pub(super) fn matches(schema: &Value, value: &Value) -> bool {
     if let Some(types) = schema.get("type") {
         let valid = types.as_str().is_some_and(|t| kind(value, t))

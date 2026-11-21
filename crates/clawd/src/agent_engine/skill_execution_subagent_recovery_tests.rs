@@ -92,6 +92,8 @@ fn policy_rejection_replans_without_retrying_scheduler_or_completed_child_failur
     for signal in [
         "subagent_child_task_schedule_failed",
         SUBAGENT_STOP_SIGNAL_REQUIRED_CHILD_FAILED,
+        "subagent_runtime_disabled",
+        "unknown_rejection",
     ] {
         assert_eq!(
             normalize_subagent_stop_signal(Some(signal.into())),
@@ -99,6 +101,54 @@ fn policy_rejection_replans_without_retrying_scheduler_or_completed_child_failur
         );
     }
     assert_eq!(normalize_subagent_stop_signal(None), (None, false));
+}
+
+#[test]
+fn invalid_pre_dispatch_contract_and_context_arguments_replan_within_existing_recovery() {
+    for signal in [
+        crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_INVALID_RESULT_CONTRACT,
+        crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_UNSUPPORTED_CONTEXT_BUDGET,
+    ] {
+        assert_eq!(
+            normalize_subagent_stop_signal(Some(signal.into())),
+            (Some("recoverable_failure_continue_round".into()), true)
+        );
+        let task = super::super::tests::test_task();
+        let mut state = LoopState::new();
+        state
+            .task_observations
+            .push(json!({"schema_version":1,"owner_layer":"subagent_runtime",
+            "status":"rejected","error_code":signal,"message_key":"subagent.admission_rejected",
+            "source_skill":"subagent","retryable":true,"side_effect_applied":false,
+            "field_issues":[{"path":"/result_contract/schema_version","expected":1}],
+            "global_step":1,"step_in_round":1}));
+        record_subagent_step_execution(
+            &task,
+            &mut state,
+            1,
+            1,
+            &json!({"children":[]}),
+            "call_capability",
+            Some(signal),
+            "invalid-schema",
+        )
+        .unwrap();
+        assert!(state.has_recoverable_failure_context);
+        assert_eq!(state.attempt_ledger_entries.len(), 1);
+        assert!(state.successful_action_fingerprints.is_empty());
+        let error: Value =
+            serde_json::from_str(state.executed_step_results[0].error.as_deref().unwrap()).unwrap();
+        assert_eq!(error["error_code"], signal);
+        assert_eq!(error["status"], "error");
+        assert_eq!(error["field_issues"][0]["expected"], 1);
+        assert!(
+            state.capability_results[0]
+                .error
+                .as_ref()
+                .unwrap()
+                .retryable
+        );
+    }
 }
 
 #[test]

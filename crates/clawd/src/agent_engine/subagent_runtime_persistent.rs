@@ -3,7 +3,8 @@ use sha2::{Digest, Sha256};
 
 use super::{
     subagent_action_parts_from_args, LoopState, SubagentRuntimeConfig,
-    SUBAGENT_STOP_SIGNAL_INVALID_ROLE,
+    SUBAGENT_STOP_SIGNAL_INVALID_RESULT_CONTRACT, SUBAGENT_STOP_SIGNAL_INVALID_ROLE,
+    SUBAGENT_STOP_SIGNAL_UNSUPPORTED_CONTEXT_BUDGET,
 };
 use crate::agent_runtime_contract::SubagentRoleDefinition;
 use crate::child_task_contract::{
@@ -165,10 +166,54 @@ fn schedule_child_task_specs(
         }
         Err(signal) => {
             record_persistent_schedule_error(loop_state, global_step, step_in_round, signal, None);
+            let recoverable = matches!(
+                signal,
+                SUBAGENT_STOP_SIGNAL_INVALID_RESULT_CONTRACT
+                    | SUBAGENT_STOP_SIGNAL_UNSUPPORTED_CONTEXT_BUDGET
+            );
+            let mut field_issues = Vec::new();
+            if signal == SUBAGENT_STOP_SIGNAL_INVALID_RESULT_CONTRACT {
+                let contracts = std::iter::once((String::new(), args)).chain(
+                    args.get("children")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .take(16)
+                        .enumerate()
+                        .map(|(index, child)| (format!("/children/{index}"), child)),
+                );
+                for (prefix, child) in contracts {
+                    if let Some(contract) = child.get("result_contract") {
+                        for mut issue in
+                            crate::repo::child_tasks::child_result_contract_validation_issues(
+                                contract,
+                            )
+                        {
+                            if field_issues.len() >= 16 {
+                                break;
+                            }
+                            let path = issue
+                                .get("path")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default();
+                            let path = format!("{prefix}/result_contract{path}");
+                            issue["path"] = json!(path);
+                            field_issues.push(issue);
+                        }
+                    }
+                }
+            } else if signal == SUBAGENT_STOP_SIGNAL_UNSUPPORTED_CONTEXT_BUDGET {
+                field_issues.push(json!({"path":"budget.max_context_chars","reason":"unsupported_for_durable_child"}));
+            }
             loop_state.task_observations.push(
                 json!({"schema_version":1,"owner_layer":"subagent_runtime",
                 "status":"rejected","error_code":signal,"requested_budget":args.get("budget"),
-                "effective_budget":null,"side_effect_applied":false,"retryable":false}),
+                "message_key":"subagent.admission_rejected",
+                "effective_budget":null,"side_effect_applied":false,"retryable":recoverable,
+                "recovery_action":if recoverable {"replan_arguments"} else {"stop"},
+                "repeat_identical_request":false,"field_issues":field_issues,
+                "failure_phase":"pre_dispatch","provider_called":false,
+                "global_step":global_step,"step_in_round":step_in_round,"round_no":loop_state.round_no}),
             );
             return Err(signal);
         }
@@ -388,7 +433,7 @@ fn persistent_child_spec(
             .and_then(|value| value.pointer("/budget/max_context_chars"))
             .is_some()
     {
-        return Err("subagent_durable_max_context_chars_unsupported");
+        return Err(SUBAGENT_STOP_SIGNAL_UNSUPPORTED_CONTEXT_BUDGET);
     }
     let (role, objective, context_refs, options) = subagent_action_parts_from_args(args);
     let role_kind = config
@@ -416,7 +461,7 @@ fn persistent_child_spec(
         .or_else(|| top_level_args.and_then(|value| value.get("result_contract").cloned()))
         .unwrap_or_else(|| json!({"output_format": "machine_json"}));
     if !crate::repo::child_tasks::child_result_contract_supported(&result_contract) {
-        return Err("subagent_result_schema_unsupported");
+        return Err(SUBAGENT_STOP_SIGNAL_INVALID_RESULT_CONTRACT);
     }
     let node_id = persistent_node_id(args, index)?;
     let dependencies =

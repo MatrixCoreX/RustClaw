@@ -17,6 +17,8 @@ pub(super) fn normalize_subagent_stop_signal(
         Some(
             crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_INVALID_ROLE
                 | crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_CAPABILITY_POLICY_REJECTED
+                | crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_INVALID_RESULT_CONTRACT
+                | crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_UNSUPPORTED_CONTEXT_BUDGET
         )
     );
     if recoverable {
@@ -255,12 +257,25 @@ pub(in crate::agent_engine) fn record_subagent_step_execution(
         }
     }
     let now = crate::now_ts_u64();
+    let step_error = stop_signal.map(|signal| {
+        if matches!(signal,
+            crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_INVALID_RESULT_CONTRACT
+            | crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_UNSUPPORTED_CONTEXT_BUDGET
+        ) {
+            // Preserve host-produced field diagnostics in the standard error envelope too.
+            if let Ok(mut error) = serde_json::from_str::<Value>(&output) {
+                error["status"] = json!("error");
+                return error.to_string();
+            }
+        }
+        signal.to_string()
+    });
     let step_execution = crate::executor::StepExecutionResult {
         step_id: step_id.clone(),
         skill: SUBAGENT_SKILL.to_string(),
         status,
         output: Some(output),
-        error: stop_signal.map(str::to_string),
+        error: step_error,
         started_at: previous_step.as_ref().map_or(now, |step| step.started_at),
         finished_at: now,
     };
