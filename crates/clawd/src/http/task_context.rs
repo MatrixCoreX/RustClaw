@@ -37,7 +37,7 @@ pub(crate) fn context_ref(task_id: &str) -> String {
 pub(crate) async fn recall(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(current_id): Path<Uuid>,
+    Path(current_id): Path<crate::task_read_id::TaskReadId>,
     Json(request): Json<RecallRequest>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
     let result = tokio::task::spawn_blocking(move || -> Result<Value, &'static str> {
@@ -48,23 +48,23 @@ pub(crate) async fn recall(
         let source_id = request
             .context_ref
             .strip_prefix("task-context:v1:")
-            .and_then(|value| Uuid::parse_str(value).ok())
+            .and_then(|value| crate::task_read_id::TaskReadId::try_from(value.to_string()).ok())
             .ok_or("context_reference_invalid")?;
         if source_id == current_id {
             return Err("context_reference_invalid");
         }
-        let load = |id: Uuid| {
+        let load = |id: &crate::task_read_id::TaskReadId| {
             crate::repo::get_task_delivery_record(&state, &id.to_string())
                 .map_err(|_| "context_lookup_failed")?
                 .ok_or("context_reference_unavailable")
         };
-        let current = load(current_id)?;
+        let current = load(&current_id)?;
         if current.task.user_key.as_deref() != Some(identity.user_key.as_str())
             || current.owner_principal_id.as_deref() != Some(identity.principal_id.as_str())
         {
             return Err("context_reference_unauthorized");
         }
-        let source = load(source_id)?;
+        let source = load(&source_id)?;
         if !same_scope(&current, &source)
             || state.task_agent_id(&current.task) != state.task_agent_id(&source.task)
         {

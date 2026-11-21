@@ -60,6 +60,7 @@ pub(super) fn response_error(
         }
         _ => ProviderError::non_retryable_with_response(message, request.clone(), raw, usage),
     };
+    error.http_status = Some(status.as_u16());
     error.kind = found.kind;
     error.retry_after_seconds = retry_after(headers, &value, chrono::Utc::now());
     Some(error)

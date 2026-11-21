@@ -26,6 +26,7 @@ pub(crate) fn ensure_schema(db: &Connection) -> rusqlite::Result<()> {
         }
         db.execute_batch(&format!("CREATE INDEX IF NOT EXISTS idx_{table}_unpacked ON {table}(storage_version) WHERE storage_version=0"))?;
     }
+    crate::event_json_chunks::ensure_schema(db)?;
     Ok(())
 }
 
@@ -91,7 +92,7 @@ pub(crate) fn prune_hot_batch(
              JOIN task_event_archive a ON a.task_id=s.task_id AND a.seq=s.seq AND a.event_hash=s.event_hash WHERE s.rowid=?1", [id],
             |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
         let hot: Value = serde_json::from_str(&hot)?;
-        let archive = event_json_storage::read(&archive, version, blob.as_deref())?;
+        let archive = crate::event_json_chunks::read(&tx, &archive, version, blob.as_deref())?;
         let object = hot
             .as_object()
             .ok_or_else(|| anyhow::anyhow!("event_hot_json_invalid"))?;

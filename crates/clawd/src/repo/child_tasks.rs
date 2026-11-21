@@ -4,8 +4,8 @@
 mod result_contract;
 use result_contract::validated_child_structured_result;
 pub(crate) use result_contract::{
-    child_machine_result_valid_for_task, child_result_contract_failure,
-    child_result_contract_for_task,
+    child_evidence_contract_valid, child_machine_result_valid_for_task,
+    child_result_contract_failure, child_result_contract_for_task, child_result_contract_supported,
 };
 
 use rusqlite::{params, OptionalExtension};

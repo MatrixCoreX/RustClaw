@@ -39,6 +39,9 @@ pub(crate) struct TaskArtifactContentQuery {
     preview: Option<String>,
 }
 
+#[path = "task_media_guard.rs"]
+mod media_guard;
+
 const VIDEO_POSTER_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_VIDEO_POSTER_BYTES: usize = 8 * 1024 * 1024;
 const VIDEO_BROWSER_PREVIEW_TIMEOUT: Duration = Duration::from_secs(180);
@@ -55,9 +58,9 @@ fn mime_has_top_level(mime_type: &str, expected: &str) -> bool {
 pub(crate) async fn list_task_artifacts(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(task_id): Path<Uuid>,
+    Path(task_id): Path<crate::task_read_id::TaskReadId>,
 ) -> Response {
-    let artifacts = match visible_task_artifacts(&state, &headers, task_id) {
+    let artifacts = match visible_task_artifacts(&state, &headers, &task_id) {
         Ok(artifacts) => artifacts,
         Err(response) => return response,
     };
@@ -79,7 +82,7 @@ pub(crate) async fn list_task_artifacts(
 pub(crate) async fn get_task_artifact_content(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((task_id, artifact_id)): Path<(Uuid, String)>,
+    Path((task_id, artifact_id)): Path<(crate::task_read_id::TaskReadId, String)>,
     Query(query): Query<TaskArtifactContentQuery>,
 ) -> Response {
     serve_task_artifact(state, headers, task_id, artifact_id, query, true).await
@@ -88,7 +91,7 @@ pub(crate) async fn get_task_artifact_content(
 pub(crate) async fn head_task_artifact_content(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((task_id, artifact_id)): Path<(Uuid, String)>,
+    Path((task_id, artifact_id)): Path<(crate::task_read_id::TaskReadId, String)>,
     Query(query): Query<TaskArtifactContentQuery>,
 ) -> Response {
     serve_task_artifact(state, headers, task_id, artifact_id, query, false).await
@@ -97,12 +100,12 @@ pub(crate) async fn head_task_artifact_content(
 async fn serve_task_artifact(
     state: AppState,
     headers: HeaderMap,
-    task_id: Uuid,
+    task_id: crate::task_read_id::TaskReadId,
     artifact_id: String,
     query: TaskArtifactContentQuery,
     include_body: bool,
 ) -> Response {
-    let artifacts = match visible_task_artifacts(&state, &headers, task_id) {
+    let artifacts = match visible_task_artifacts(&state, &headers, &task_id) {
         Ok(artifacts) => artifacts,
         Err(response) => return response,
     };
@@ -215,8 +218,22 @@ async fn serve_browser_video_preview(
             "task_artifact_browser_video_unsupported",
         );
     }
+    if !include_body
+        && !match browser_video_cache_path(path, &manifest.sha256) {
+            Some(cache) => valid_browser_video_file(&cache).await,
+            None => false,
+        }
+    {
+        return api_error(StatusCode::CONFLICT, "task_artifact_preview_not_ready");
+    }
     let preview_path = match load_or_generate_browser_video(path, manifest).await {
         Ok(path) => path,
+        Err(BrowserVideoError::Busy) => {
+            return api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "task_artifact_preview_resource_busy",
+            )
+        }
         Err(BrowserVideoError::ToolUnavailable) => {
             return api_error(
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -292,6 +309,7 @@ async fn serve_browser_video_preview(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BrowserVideoError {
     ToolUnavailable,
+    Busy,
     Timeout,
     TranscodeFailed,
     InvalidOutput,
@@ -303,11 +321,16 @@ async fn load_or_generate_browser_video(
 ) -> Result<PathBuf, BrowserVideoError> {
     let cache_path =
         browser_video_cache_path(path, &manifest.sha256).ok_or(BrowserVideoError::InvalidOutput)?;
+    let key = media_guard::key_lock(&cache_path).ok_or(BrowserVideoError::Busy)?;
+    let _singleflight = key.lock().await;
     if valid_browser_video_file(&cache_path).await {
         return Ok(cache_path);
     }
 
+    let _permit = media_guard::admit(path, MAX_VIDEO_BROWSER_PREVIEW_BYTES)
+        .map_err(|_| BrowserVideoError::Busy)?;
     let temp_path = cache_path.with_extension(format!("{}.tmp", Uuid::new_v4()));
+    let _cleanup = media_guard::TempFile(temp_path.clone());
     let result = generate_browser_video(path, &temp_path).await;
     if let Err(error) = result {
         let _ = tokio::fs::remove_file(&temp_path).await;
@@ -364,6 +387,8 @@ async fn generate_browser_video(
             "aac",
             "-b:a",
             "128k",
+            "-fs",
+            "268435456",
             "-movflags",
             "+faststart",
             "-f",
@@ -371,26 +396,41 @@ async fn generate_browser_video(
             "-y",
         ])
         .arg(output_path);
-    let output = match tokio::time::timeout(VIDEO_BROWSER_PREVIEW_TIMEOUT, command.output()).await {
-        Ok(Ok(output)) => output,
-        Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Err(BrowserVideoError::ToolUnavailable)
+    command.stderr(Stdio::null());
+    let mut child = command.spawn().map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            BrowserVideoError::ToolUnavailable
+        } else {
+            BrowserVideoError::TranscodeFailed
         }
-        Ok(Err(error)) => {
-            tracing::warn!("task artifact browser preview ffmpeg start failed: {error}");
-            return Err(BrowserVideoError::TranscodeFailed);
+    })?;
+    let result = tokio::time::timeout(VIDEO_BROWSER_PREVIEW_TIMEOUT, async {
+        loop {
+            if let Some(status) = child
+                .try_wait()
+                .map_err(|_| BrowserVideoError::TranscodeFailed)?
+            {
+                return if status.success() {
+                    Ok(())
+                } else {
+                    Err(BrowserVideoError::TranscodeFailed)
+                };
+            }
+            if tokio::fs::metadata(output_path)
+                .await
+                .is_ok_and(|m| m.len() > MAX_VIDEO_BROWSER_PREVIEW_BYTES)
+            {
+                return Err(BrowserVideoError::InvalidOutput);
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        Err(_) => return Err(BrowserVideoError::Timeout),
-    };
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        tracing::warn!(
-            "task artifact browser preview ffmpeg failed status={} error={}",
-            output.status,
-            stderr.chars().take(300).collect::<String>()
-        );
-        return Err(BrowserVideoError::TranscodeFailed);
+    })
+    .await
+    .unwrap_or(Err(BrowserVideoError::Timeout));
+    if result.is_err() {
+        let _ = child.kill().await;
     }
+    result?;
     Ok(())
 }
 
@@ -427,8 +467,24 @@ async fn serve_video_poster(
             "task_artifact_video_poster_unsupported",
         );
     }
+    if !include_body
+        && !match video_poster_cache_path(path, &manifest.sha256) {
+            Some(cache) => tokio::fs::read(cache)
+                .await
+                .is_ok_and(|bytes| valid_video_poster(&bytes)),
+            None => false,
+        }
+    {
+        return api_error(StatusCode::CONFLICT, "task_artifact_preview_not_ready");
+    }
     let poster = match load_or_generate_video_poster(path, manifest).await {
         Ok(poster) => poster,
+        Err(VideoPosterError::Busy) => {
+            return api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "task_artifact_preview_resource_busy",
+            )
+        }
         Err(VideoPosterError::ToolUnavailable) => {
             return api_error(
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -481,6 +537,7 @@ async fn serve_video_poster(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VideoPosterError {
     ToolUnavailable,
+    Busy,
     Timeout,
     DecodeFailed,
     InvalidOutput,
@@ -492,6 +549,8 @@ async fn load_or_generate_video_poster(
 ) -> Result<Vec<u8>, VideoPosterError> {
     let cache_path =
         video_poster_cache_path(path, &manifest.sha256).ok_or(VideoPosterError::InvalidOutput)?;
+    let key = media_guard::key_lock(&cache_path).ok_or(VideoPosterError::Busy)?;
+    let _singleflight = key.lock().await;
     let cached_is_bounded = tokio::fs::metadata(&cache_path)
         .await
         .is_ok_and(|metadata| metadata.len() <= MAX_VIDEO_POSTER_BYTES as u64);
@@ -503,6 +562,8 @@ async fn load_or_generate_video_poster(
         }
     }
 
+    let _permit = media_guard::admit(path, MAX_VIDEO_POSTER_BYTES as u64)
+        .map_err(|_| VideoPosterError::Busy)?;
     let poster = generate_video_poster(path).await?;
     let temp_path = cache_path.with_extension(format!("{}.tmp", Uuid::new_v4()));
     if tokio::fs::write(&temp_path, &poster).await.is_ok() {
@@ -552,30 +613,41 @@ async fn generate_video_poster(path: &FsPath) -> Result<Vec<u8>, VideoPosterErro
             "mjpeg",
             "pipe:1",
         ]);
-    let output = match tokio::time::timeout(VIDEO_POSTER_TIMEOUT, command.output()).await {
-        Ok(Ok(output)) => output,
-        Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Err(VideoPosterError::ToolUnavailable)
+    command.stdout(Stdio::piped()).stderr(Stdio::null());
+    let mut child = command.spawn().map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            VideoPosterError::ToolUnavailable
+        } else {
+            VideoPosterError::DecodeFailed
         }
-        Ok(Err(error)) => {
-            tracing::warn!("task artifact poster ffmpeg start failed: {error}");
+    })?;
+    let mut stdout = child.stdout.take().ok_or(VideoPosterError::DecodeFailed)?;
+    let result = tokio::time::timeout(VIDEO_POSTER_TIMEOUT, async {
+        let mut bytes = Vec::new();
+        (&mut stdout)
+            .take(MAX_VIDEO_POSTER_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(|_| VideoPosterError::DecodeFailed)?;
+        if !valid_video_poster(&bytes) {
+            return Err(VideoPosterError::InvalidOutput);
+        }
+        if !child
+            .wait()
+            .await
+            .map_err(|_| VideoPosterError::DecodeFailed)?
+            .success()
+        {
             return Err(VideoPosterError::DecodeFailed);
         }
-        Err(_) => return Err(VideoPosterError::Timeout),
-    };
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        tracing::warn!(
-            "task artifact poster ffmpeg failed status={} error={}",
-            output.status,
-            stderr.chars().take(300).collect::<String>()
-        );
-        return Err(VideoPosterError::DecodeFailed);
+        Ok(bytes)
+    })
+    .await
+    .unwrap_or(Err(VideoPosterError::Timeout));
+    if result.is_err() {
+        let _ = child.kill().await;
     }
-    if !valid_video_poster(&output.stdout) {
-        return Err(VideoPosterError::InvalidOutput);
-    }
-    Ok(output.stdout)
+    result
 }
 
 fn video_poster_cache_path(path: &FsPath, sha256: &str) -> Option<PathBuf> {
@@ -593,7 +665,7 @@ fn valid_video_poster(bytes: &[u8]) -> bool {
 fn visible_task_artifacts(
     state: &AppState,
     headers: &HeaderMap,
-    task_id: Uuid,
+    task_id: &crate::task_read_id::TaskReadId,
 ) -> Result<Vec<TaskArtifactManifest>, Response> {
     let Some((result_projection, task_user_key, channel)) =
         (match get_task_artifact_result_projection(state, task_id) {

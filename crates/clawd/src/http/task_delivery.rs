@@ -21,7 +21,7 @@ use crate::AppState;
 pub(crate) async fn deliver_task_result(
     State(state): State<AppState>,
     headers: HeaderMap,
-    AxumPath(task_id): AxumPath<Uuid>,
+    AxumPath(task_id): AxumPath<crate::task_read_id::TaskReadId>,
     Json(request): Json<ChannelTaskDeliveryRequest>,
 ) -> (StatusCode, Json<ApiResponse<ChannelTaskDeliveryResponse>>) {
     if request.validate().is_err() {

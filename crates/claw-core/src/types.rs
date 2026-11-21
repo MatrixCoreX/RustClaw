@@ -267,7 +267,7 @@ pub enum TaskExecutionState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskQueryResponse {
-    pub task_id: Uuid,
+    pub task_id: String,
     pub status: TaskStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_state: Option<TaskExecutionState>,

@@ -467,7 +467,7 @@ fn fit_catalog_to_provider_window(
     let catalog_budget = prompt_capacity
         .saturating_mul(CATALOG_PROMPT_SHARE_PERCENT)
         .saturating_div(100)
-        .max(1);
+        .clamp(1, 2048);
     let estimate = crate::token_estimator::estimate_generic_tokens(canonical).provider_tokens;
     if estimate <= catalog_budget {
         return ProviderFittedCatalog {

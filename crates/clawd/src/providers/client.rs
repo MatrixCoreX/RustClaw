@@ -78,6 +78,7 @@ pub(crate) type ModelTurnEventSink = Arc<dyn Fn(ModelTurnEvent) + Send + Sync>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ProviderError {
+    pub(crate) http_status: Option<u16>,
     /// Server not-before hint; yielded to the existing background checkpoint path.
     pub(super) retry_after_seconds: Option<u64>,
     pub(crate) retryable: bool,
@@ -130,6 +131,7 @@ impl ProviderError {
             attempts: 1,
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Failure,
+            http_status: None,
             retry_after_seconds: None,
         }
     }
@@ -145,6 +147,7 @@ impl ProviderError {
             attempts: 1,
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Failure,
+            http_status: None,
             retry_after_seconds: None,
         }
     }
@@ -165,6 +168,7 @@ impl ProviderError {
             attempts: 1,
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Failure,
+            http_status: None,
             retry_after_seconds: None,
         }
     }
@@ -186,6 +190,7 @@ impl ProviderError {
             retryable_error_count: 0,
             // The provider answered successfully; only this model turn was malformed.
             breaker_impact: BreakerImpact::Healthy,
+            http_status: None,
             retry_after_seconds: None,
         }
     }
@@ -201,6 +206,7 @@ impl ProviderError {
             attempts: 1,
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Neutral,
+            http_status: None,
             retry_after_seconds: None,
         }
     }
@@ -221,6 +227,7 @@ impl ProviderError {
             attempts: 1,
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Healthy,
+            http_status: None,
             retry_after_seconds: None,
         }
     }
@@ -241,6 +248,7 @@ impl ProviderError {
             attempts: 1,
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Healthy,
+            http_status: None,
             retry_after_seconds: None,
         }
     }
@@ -261,6 +269,7 @@ impl ProviderError {
             attempts: 1,
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Healthy,
+            http_status: None,
             retry_after_seconds: None,
         }
     }
@@ -281,6 +290,7 @@ impl ProviderError {
             attempts: 1,
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Healthy,
+            http_status: None,
             retry_after_seconds: None,
         }
     }
@@ -354,6 +364,8 @@ pub(crate) enum LlmRoutingPreference {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ChatRequestHints {
+    pub(crate) host_admission:
+        Option<Arc<crate::task_budget_contract::model_admission::ModelAdmission>>,
     pub(crate) temperature: Option<f64>,
     pub(crate) max_tokens: Option<u64>,
     pub(crate) reasoning_effort: Option<String>,
@@ -367,6 +379,7 @@ pub(crate) struct ChatRequestHints {
 impl Default for ChatRequestHints {
     fn default() -> Self {
         Self {
+            host_admission: None,
             temperature: None,
             max_tokens: None,
             reasoning_effort: None,
@@ -397,7 +410,33 @@ pub(crate) async fn call_provider_with_retry_with_hints(
 
     loop {
         attempts += 1;
-        match call_provider(provider.clone(), prompt, hints).await {
+        let mut attempt_hints = hints.clone();
+        let attempt = hints
+            .host_admission
+            .as_ref()
+            .map(|guard| {
+                guard.start(
+                    &mut attempt_hints,
+                    &provider.config.name,
+                    &provider.config.model,
+                )
+            })
+            .transpose()
+            .map_err(|code| ProviderError::non_retryable(code, Value::Null))?;
+        let result = call_provider(provider.clone(), prompt, &attempt_hints).await;
+        if let Some(attempt) = attempt {
+            let delay = result
+                .as_ref()
+                .err()
+                .filter(|e| e.retryable && attempts <= retry_limit_for_provider_error(e))
+                .map(|e| retry_delay_for_provider_error(e, attempts).as_millis() as u64)
+                .unwrap_or(0);
+            match &result {
+                Ok(response) => attempt.finish(response.usage.as_ref(), None, 0),
+                Err(error) => attempt.finish(error.usage.as_ref(), Some(error), delay),
+            }
+        }
+        match result {
             Ok(output) => {
                 return Ok(output.with_retry_metadata(
                     attempts,
@@ -435,7 +474,39 @@ pub(crate) async fn call_model_turn_with_retry(
         if let Some(sink) = event_sink.as_ref() {
             sink(ModelTurnEvent::Started { attempt: attempts });
         }
-        match call_model_turn(provider.clone(), request, hints, event_sink.clone()).await {
+        let mut attempt_hints = hints.clone();
+        let attempt = hints
+            .host_admission
+            .as_ref()
+            .map(|guard| {
+                guard.start(
+                    &mut attempt_hints,
+                    &provider.config.name,
+                    &provider.config.model,
+                )
+            })
+            .transpose()
+            .map_err(|code| ProviderError::non_retryable(code, Value::Null))?;
+        let result = call_model_turn(
+            provider.clone(),
+            request,
+            &attempt_hints,
+            event_sink.clone(),
+        )
+        .await;
+        if let Some(attempt) = attempt {
+            let delay = result
+                .as_ref()
+                .err()
+                .filter(|e| e.retryable && attempts <= retry_limit_for_provider_error(e))
+                .map(|e| retry_delay_for_provider_error(e, attempts).as_millis() as u64)
+                .unwrap_or(0);
+            match &result {
+                Ok(response) => attempt.finish(response.turn.usage.as_ref(), None, 0),
+                Err(error) => attempt.finish(error.usage.as_ref(), Some(error), delay),
+            }
+        }
+        match result {
             Ok(output) => {
                 return Ok(output.with_retry_metadata(
                     attempts,

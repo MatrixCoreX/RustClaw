@@ -10,12 +10,12 @@ mod memory_import_http_tests;
 #[cfg(test)]
 mod memory_capacity_read_race_tests;
 #[cfg(test)]
-#[path = "memory_capacity_read_race_test_fixtures.rs"]
-mod memory_read_race_fixtures;
+mod memory_project_read_tests;
 #[cfg(test)]
 mod memory_read_boundary_tests;
 #[cfg(test)]
-mod memory_project_read_tests;
+#[path = "memory_capacity_read_race_test_fixtures.rs"]
+mod memory_read_race_fixtures;
 pub(crate) mod task_artifacts;
 pub(crate) mod task_context;
 pub(crate) mod task_delivery;
@@ -24,3 +24,5 @@ pub(crate) mod task_events;
 pub(crate) mod task_query;
 pub(crate) mod ui_attachment_constraints;
 pub(crate) mod ui_routes;
+
+pub(crate) mod task_attachment_upload;

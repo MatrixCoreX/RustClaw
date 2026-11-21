@@ -61,6 +61,22 @@ pub(crate) async fn accept_client_task(
         Err(response) => return response,
     };
     request.task.user_key = Some(identity.user_key.clone());
+    if !matches!(request.task.kind, TaskKind::Ask)
+        || request.task.channel != Some(channel)
+        || request.task.external_chat_id.as_deref()
+            != Some(request.input.scope.conversation_id.as_str())
+        || request
+            .task
+            .payload
+            .get("text")
+            .and_then(serde_json::Value::as_str)
+            != Some(input_text.as_str())
+    {
+        return crate::api_err(
+            StatusCode::BAD_REQUEST,
+            "conversation_input_task_template_mismatch",
+        );
+    }
     if channel == ChannelKind::Ui {
         if let Err(code) = prepare_ui_task_ingress(&state, &identity, &mut request) {
             return crate::api_err(StatusCode::BAD_REQUEST, code);
@@ -281,9 +297,6 @@ fn prepare_ui_task_ingress(
     identity: &AuthIdentity,
     request: &mut ConversationInputClientTaskRequest,
 ) -> Result<(), String> {
-    if request.task.ingress.is_some() {
-        return Ok(());
-    }
     crate::ui_attachments::materialize_ui_task_attachments(
         state,
         &mut request.task.payload,
@@ -291,6 +304,16 @@ fn prepare_ui_task_ingress(
         identity.chat_id,
         &request.input.client_message_id,
     )?;
+    crate::ui_attachments::validate_upload_references(
+        &state.skill_rt.workspace_root,
+        identity.user_id,
+        identity.chat_id,
+        &request.input.client_message_id,
+        &request.task.payload,
+    )?;
+    if request.task.ingress.is_some() {
+        return Ok(());
+    }
     let attachments = request
         .task
         .payload

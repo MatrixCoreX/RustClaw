@@ -165,7 +165,7 @@ async fn context_api_rechecks_current_auth_and_denies_cross_conversation_and_rev
     let (status, Json(reply)) = recall(
         State(state.clone()),
         headers.clone(),
-        Path(current_id),
+        Path(current_id.to_string().try_into().expect("valid task id")),
         Json(request()),
     )
     .await;
@@ -188,7 +188,7 @@ async fn context_api_rechecks_current_auth_and_denies_cross_conversation_and_rev
     let (_, Json(reply)) = recall(
         State(state.clone()),
         headers.clone(),
-        Path(current_id),
+        Path(current_id.to_string().try_into().expect("valid task id")),
         Json(request()),
     )
     .await;
@@ -207,7 +207,13 @@ async fn context_api_rechecks_current_auth_and_denies_cross_conversation_and_rev
             [],
         )
         .unwrap();
-    let (_, Json(reply)) = recall(State(state), headers, Path(current_id), Json(request())).await;
+    let (_, Json(reply)) = recall(
+        State(state),
+        headers,
+        Path(current_id.to_string().try_into().expect("valid task id")),
+        Json(request()),
+    )
+    .await;
     assert!(!reply.ok);
     assert_eq!(reply.error.as_deref(), Some("auth_key_invalid"));
 }

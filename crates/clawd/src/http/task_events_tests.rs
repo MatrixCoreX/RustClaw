@@ -146,7 +146,7 @@ async fn snapshot_mode_drains_more_than_one_archive_page() {
     let response = stream_task_events(
         State(state),
         headers,
-        Path(task_id),
+        Path(task_id.to_string().try_into().expect("valid task id")),
         Query(TaskEventQuery {
             cursor: Some(0),
             follow: Some(false),

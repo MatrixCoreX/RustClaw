@@ -3,9 +3,9 @@ use crate::*;
 pub(crate) async fn get_task(
     State(state): State<AppState>,
     headers: HeaderMap,
-    AxumPath(task_id): AxumPath<Uuid>,
+    AxumPath(task_id): AxumPath<crate::task_read_id::TaskReadId>,
 ) -> (StatusCode, Json<ApiResponse<TaskQueryResponse>>) {
-    let read_result = get_task_query_record(&state, task_id);
+    let read_result = get_task_query_record(&state, &task_id);
 
     match read_result {
         Ok(Some((mut task, task_user_key, channel))) => {

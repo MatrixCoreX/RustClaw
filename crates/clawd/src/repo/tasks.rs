@@ -878,8 +878,9 @@ fn publish_parent_graph_terminal_event(
 
 pub(crate) fn get_task_query_record(
     state: &AppState,
-    task_id: Uuid,
+    task_id: impl ToString,
 ) -> anyhow::Result<Option<(TaskQueryResponse, Option<String>, String)>> {
+    let task_id = task_id.to_string();
     let db = state
         .core
         .db
@@ -936,7 +937,7 @@ pub(crate) fn get_task_query_record(
             let execution_state =
                 crate::task_lifecycle::task_execution_state_from_lifecycle(&lifecycle);
             let goal = crate::repo::task_goal::task_goal_projection(
-                task_id,
+                &task_id,
                 &payload_json,
                 result_json.as_ref(),
                 &lifecycle,
@@ -944,7 +945,7 @@ pub(crate) fn get_task_query_record(
 
             Ok((
                 TaskQueryResponse {
-                    task_id,
+                    task_id: task_id.clone(),
                     status,
                     execution_state: Some(execution_state),
                     goal,
@@ -981,8 +982,9 @@ pub(crate) fn get_task_query_record(
 
 pub(crate) fn get_task_artifact_result_projection(
     state: &AppState,
-    task_id: Uuid,
+    task_id: impl ToString,
 ) -> anyhow::Result<Option<(Option<Value>, Option<String>, String)>> {
+    let task_id = task_id.to_string();
     let db = state
         .core
         .db

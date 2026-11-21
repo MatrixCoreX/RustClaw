@@ -70,3 +70,26 @@ fn complete_child_result_rejects_null_required_values_without_rejecting_valid_em
         .remove("allow_partial");
     assert!(child_result_contract_failure(&payload, &missing_value.to_string()).is_none());
 }
+
+#[test]
+fn versioned_schema_checks_ranges_types_nullability_and_preserves_result_field() {
+    let mut payload = json!({"task_role":"subagent_child","child_task_contract":{"result_contract":{
+        "output_format":"machine_json","schema_version":1,"result_schema":{"type":"object","required":["result","count"],
+        "properties":{"result":{"type":"object"},"count":{"type":"integer","minimum":1,"maximum":3},"optional":{"type":["null","string"]}},"additionalProperties":false}}}});
+    let answer = json!({"result":{"key":"value"},"count":2,"optional":null});
+    assert_eq!(
+        validated_child_structured_result(&payload, &json!({"text":answer.to_string()})),
+        Some(answer)
+    );
+    for count in [json!("2"), json!(0), json!(4)] {
+        assert!(child_result_contract_failure(
+            &payload,
+            &json!({"result":{},"count":count}).to_string()
+        )
+        .is_some());
+    }
+    payload["child_task_contract"]["result_contract"]["result_schema"]["$ref"] = json!("remote");
+    assert!(!child_result_contract_supported(
+        &payload["child_task_contract"]["result_contract"]
+    ));
+}

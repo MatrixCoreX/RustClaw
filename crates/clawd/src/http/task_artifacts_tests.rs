@@ -128,7 +128,11 @@ async fn endpoint_enforces_task_ownership_and_streams_requested_range() {
     std::fs::create_dir_all(&root).unwrap();
     let mut state = AppState::test_default_with_fixture_provider();
     state.skill_rt.workspace_root = root.clone();
-    let task_id = uuid::Uuid::new_v4();
+    let task_id = format!(
+        "{}:child:review:{}",
+        uuid::Uuid::new_v4(),
+        uuid::Uuid::new_v4().simple()
+    );
     let manifest = TaskArtifactManifest {
         schema_version: 1,
         id: "artifact-1".to_string(),
@@ -197,7 +201,12 @@ async fn endpoint_enforces_task_ownership_and_streams_requested_range() {
 
     let mut wrong_headers = HeaderMap::new();
     wrong_headers.insert("x-agent-key", HeaderValue::from_static("wrong-key"));
-    let denied = list_task_artifacts(State(state.clone()), wrong_headers, Path(task_id)).await;
+    let denied = list_task_artifacts(
+        State(state.clone()),
+        wrong_headers,
+        Path(task_id.to_string().try_into().expect("valid task id")),
+    )
+    .await;
     assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
 
     let mut headers = HeaderMap::new();
@@ -206,7 +215,10 @@ async fn endpoint_enforces_task_ownership_and_streams_requested_range() {
     let response = get_task_artifact_content(
         State(state),
         headers,
-        Path((task_id, "artifact-1".to_string())),
+        Path((
+            task_id.to_string().try_into().expect("valid task id"),
+            "artifact-1".to_string(),
+        )),
         Query(TaskArtifactContentQuery::default()),
     )
     .await;

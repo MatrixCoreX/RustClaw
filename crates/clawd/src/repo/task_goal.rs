@@ -129,7 +129,7 @@ pub(crate) fn update_task_goal_payload(
 }
 
 pub(crate) fn task_goal_projection(
-    task_id: Uuid,
+    task_id: impl std::fmt::Display,
     payload_json: &str,
     result_json: Option<&Value>,
     lifecycle: &Value,

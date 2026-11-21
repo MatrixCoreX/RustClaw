@@ -1,3 +1,4 @@
+import { uploadTaskAttachments } from "../lib/task-attachment-upload";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { useUiDialog } from "../components/UiDialogProvider";
@@ -30,6 +31,7 @@ import {
   CLIENT_ORIGIN_HEADER,
 } from "../lib/product-identity";
 import { extractTaskText } from "../lib/task-result";
+import { ApiHttpError, readTaskSubmissionResponse } from "../lib/api-response";
 import { formatUiError } from "../lib/ui-error";
 import { newRequestUuid } from "../lib/request-id";
 import {
@@ -1288,13 +1290,7 @@ export function useChatRuntime({
         ...(activeTaskId ? { expected_task_id: activeTaskId } : {}),
         source: { received_at_ts: Math.floor(submittedAt / 1000) },
       };
-      const attachmentPayload = attached.map((attachment) => ({
-        name: attachment.name,
-        mime_type: attachment.mimeType,
-        size: attachment.size,
-        kind: attachment.kind,
-        base64: attachment.dataUrl,
-      }));
+      const attachmentPayload = await uploadTaskAttachments(apiFetch, clientMessageId, attached, undefined);
       const task = {
         channel: "ui",
         kind: "ask",
@@ -1311,22 +1307,8 @@ export function useChatRuntime({
           ...(attached.length > 0
             ? {
                 attachments: attachmentPayload,
-                images: attachedImages.map((image) => ({
-                  name: image.name,
-                  mime_type: image.mimeType,
-                  size: image.size,
-                  base64: image.dataUrl,
-                })),
-                ...(primaryAudio
-                  ? {
-                      audio: {
-                        name: primaryAudio.name,
-                        mime_type: primaryAudio.mimeType,
-                        size: primaryAudio.size,
-                        base64: primaryAudio.dataUrl,
-                      },
-                    }
-                  : {}),
+                images: attachmentPayload.filter((item) => item.kind === "image"),
+                ...(primaryAudio ? { audio: attachmentPayload.filter((item) => item.kind === "audio").at(-1) } : {}),
                 response_language: lang === "zh" ? "zh-CN" : "en",
               }
             : {}),
@@ -1494,7 +1476,7 @@ export function useChatRuntime({
         },
         body: JSON.stringify({ input: submission, task }),
       });
-      const body = (await response.json()) as ApiResponse<ConversationInputClientTaskReceipt>;
+      const body = await readTaskSubmissionResponse<ApiResponse<ConversationInputClientTaskReceipt>>(response);
       if (!isCurrent()) throw new Error("chat_scope_obsolete");
       if (!response.ok || !body.ok || !body.data) {
         throw new Error(body.error || `conversation_input_submit_http_${response.status}`);
@@ -1504,7 +1486,7 @@ export function useChatRuntime({
     try {
       return await submit();
     } catch (submitError) {
-      if (signal?.aborted || !isCurrent()) throw submitError;
+      if (signal?.aborted || !isCurrent() || submitError instanceof ApiHttpError) throw submitError;
       try {
         const recovered = await recoverConversationInputReceipt(
           submission.scope,
@@ -1603,13 +1585,7 @@ export function useChatRuntime({
     let ownsTaskFollower = false;
     try {
       const adapterName = interactionAdapter.trim();
-      const attachmentPayload = attached.map((attachment) => ({
-        name: attachment.name,
-        mime_type: attachment.mimeType,
-        size: attachment.size,
-        kind: attachment.kind,
-        base64: attachment.dataUrl,
-      }));
+      const attachmentPayload = await uploadTaskAttachments(apiFetch, conversationInputClientMessageId, attached, signal);
       const submitBody: Record<string, unknown> = {
         channel: "ui",
         kind: "ask",
@@ -1627,22 +1603,8 @@ export function useChatRuntime({
           ...(attached.length > 0
             ? {
                 attachments: attachmentPayload,
-                images: attachedImages.map((image) => ({
-                  name: image.name,
-                  mime_type: image.mimeType,
-                  size: image.size,
-                  base64: image.dataUrl,
-                })),
-                ...(primaryAudio
-                  ? {
-                      audio: {
-                        name: primaryAudio.name,
-                        mime_type: primaryAudio.mimeType,
-                        size: primaryAudio.size,
-                        base64: primaryAudio.dataUrl,
-                      },
-                    }
-                  : {}),
+                images: attachmentPayload.filter((item) => item.kind === "image"),
+                ...(primaryAudio ? { audio: attachmentPayload.filter((item) => item.kind === "audio").at(-1) } : {}),
                 response_language: lang === "zh" ? "zh-CN" : "en",
               }
             : {}),

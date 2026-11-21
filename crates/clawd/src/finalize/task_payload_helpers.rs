@@ -118,8 +118,18 @@ pub(crate) fn enforce_terminal_ask_reply_status(
     let semantic_clarify =
         journal.final_status == Some(crate::task_journal::TaskJournalFinalStatus::Clarify);
     let payload: Value = serde_json::from_str(payload_json).unwrap_or(Value::Null);
-    let failure = child_clarification_failure_payload(&payload, semantic_clarify)
-        .map(|value| value.to_string())
+    let evidence_failure =
+        !crate::repo::child_tasks::child_evidence_contract_valid(&payload, &reply.text, journal);
+    let failure = evidence_failure
+        .then(|| {
+            json!({"schema_version":1,"error_code":"child_result_evidence_invalid",
+        "message_key":"child_task.result_evidence_invalid","retryable":false})
+            .to_string()
+        })
+        .or_else(|| {
+            child_clarification_failure_payload(&payload, semantic_clarify)
+                .map(|value| value.to_string())
+        })
         .or_else(|| {
             crate::repo::child_tasks::child_result_contract_failure(&payload, &reply.text)
                 .map(|value| value.to_string())

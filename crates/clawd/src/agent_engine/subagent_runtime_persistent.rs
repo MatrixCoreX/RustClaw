@@ -359,6 +359,13 @@ fn persistent_child_spec(
     config: &SubagentRuntimeConfig,
     force_readonly: bool,
 ) -> Result<ChildTaskSpec, &'static str> {
+    if args.pointer("/budget/max_context_chars").is_some()
+        || top_level_args
+            .and_then(|value| value.pointer("/budget/max_context_chars"))
+            .is_some()
+    {
+        return Err("subagent_durable_max_context_chars_unsupported");
+    }
     let (role, objective, context_refs, options) = subagent_action_parts_from_args(args);
     let role_kind = config
         .resolve_role(role.trim())
@@ -384,6 +391,9 @@ fn persistent_child_spec(
         .clone()
         .or_else(|| top_level_args.and_then(|value| value.get("result_contract").cloned()))
         .unwrap_or_else(|| json!({"output_format": "machine_json"}));
+    if !crate::repo::child_tasks::child_result_contract_supported(&result_contract) {
+        return Err("subagent_result_schema_unsupported");
+    }
     let node_id = persistent_node_id(args, index)?;
     let dependencies =
         persistent_scope_value(args, top_level_args, "depends_on").unwrap_or_else(|| json!([]));

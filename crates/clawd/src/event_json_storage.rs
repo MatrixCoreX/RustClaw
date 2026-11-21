@@ -13,7 +13,7 @@ pub(crate) struct StoredJson {
     pub blob: Option<Vec<u8>>,
 }
 
-fn projection(raw: &str, event_indexes: bool) -> anyhow::Result<Value> {
+pub(crate) fn projection(raw: &str, event_indexes: bool) -> anyhow::Result<Value> {
     if !event_indexes {
         return Ok(json!({}));
     }

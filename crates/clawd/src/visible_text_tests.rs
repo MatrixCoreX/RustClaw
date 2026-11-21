@@ -100,7 +100,7 @@ fn sanitizes_structured_skill_error_payloads() {
 #[test]
 fn task_query_delivery_exposes_readable_error_without_internal_envelope() {
     let task = TaskQueryResponse {
-        task_id: Uuid::new_v4(),
+        task_id: Uuid::new_v4().to_string(),
         status: TaskStatus::Failed,
         execution_state: None,
         goal: None,
@@ -125,7 +125,7 @@ fn task_query_delivery_exposes_readable_error_without_internal_envelope() {
 #[test]
 fn task_query_delivery_prefers_protocol_failure_reason_over_machine_error_code() {
     let task = TaskQueryResponse {
-        task_id: Uuid::new_v4(),
+        task_id: Uuid::new_v4().to_string(),
         status: TaskStatus::Failed,
         execution_state: None,
         goal: None,
@@ -160,7 +160,7 @@ fn task_query_delivery_prefers_protocol_failure_reason_over_machine_error_code()
 #[test]
 fn task_query_delivery_does_not_promote_uncontracted_result_error_text() {
     let task = TaskQueryResponse {
-        task_id: Uuid::new_v4(),
+        task_id: Uuid::new_v4().to_string(),
         status: TaskStatus::Failed,
         execution_state: None,
         goal: None,

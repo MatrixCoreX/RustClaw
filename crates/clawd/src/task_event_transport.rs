@@ -26,8 +26,7 @@ CREATE TABLE IF NOT EXISTS task_event_stream (
     PRIMARY KEY (task_id, seq),
     UNIQUE (task_id, event_hash)
 );
-CREATE INDEX IF NOT EXISTS idx_task_event_stream_task_seq
-    ON task_event_stream(task_id, seq);
+DROP INDEX IF EXISTS idx_task_event_stream_task_seq;
 CREATE INDEX IF NOT EXISTS idx_task_event_stream_skill_activity
     ON task_event_stream(
         json_extract(event_json, '$.payload.skill'),
@@ -47,8 +46,7 @@ CREATE TABLE IF NOT EXISTS task_event_archive (
     PRIMARY KEY (task_id, seq),
     UNIQUE (task_id, event_hash)
 );
-CREATE INDEX IF NOT EXISTS idx_task_event_archive_task_seq
-    ON task_event_archive(task_id, seq);
+DROP INDEX IF EXISTS idx_task_event_archive_task_seq;
 CREATE INDEX IF NOT EXISTS idx_task_event_archive_skill_activity
     ON task_event_archive(
         json_extract(event_json, '$.payload.skill'),
@@ -68,8 +66,7 @@ CREATE TABLE IF NOT EXISTS task_event_snapshots (
     created_at_ms      INTEGER NOT NULL,
     PRIMARY KEY (task_id, snapshot_seq)
 );
-CREATE INDEX IF NOT EXISTS idx_task_event_snapshots_task_seq
-    ON task_event_snapshots(task_id, snapshot_seq);
+DROP INDEX IF EXISTS idx_task_event_snapshots_task_seq;
 CREATE TABLE IF NOT EXISTS task_event_artifacts (
     task_id       TEXT NOT NULL,
     artifact_id   TEXT NOT NULL,
@@ -288,7 +285,8 @@ fn publish_event_internal(
             {
                 tx.commit()?;
                 return Ok((
-                    Some(crate::event_json_storage::read(
+                    Some(crate::event_json_chunks::read(
+                        &db,
                         &existing.0,
                         existing.1,
                         existing.2.as_deref(),
@@ -484,7 +482,7 @@ pub(crate) fn latest_skill_progress_event(
     })?;
     for row in rows {
         let (raw, version, blob) = row?;
-        let event = crate::event_json_storage::read(&raw, version, blob.as_deref())?;
+        let event = crate::event_json_chunks::read(&db, &raw, version, blob.as_deref())?;
         if event.get("event_type").and_then(Value::as_str) != Some("skill_progress") {
             continue;
         }
@@ -534,7 +532,9 @@ pub(crate) fn read_event_artifact(
         )
         .optional()?;
     payload
-        .map(|(raw, version, blob)| crate::event_json_storage::read(&raw, version, blob.as_deref()))
+        .map(|(raw, version, blob)| {
+            crate::event_json_chunks::read(&db, &raw, version, blob.as_deref())
+        })
         .transpose()
 }
 

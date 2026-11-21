@@ -964,3 +964,6 @@ fn value_at<'a>(root: &'a TomlValue, path: &[&str]) -> Option<&'a TomlValue> {
 #[cfg(test)]
 #[path = "task_budget_contract_tests.rs"]
 mod tests;
+
+#[path = "task_budget_model_admission.rs"]
+pub(crate) mod model_admission;

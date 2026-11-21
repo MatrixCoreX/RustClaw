@@ -50,11 +50,12 @@ struct UiAttachmentInput {
     data_url: String,
 }
 
-#[derive(Debug, Clone)]
-struct MaterializedAttachment {
+#[derive(Debug, Clone, serde::Deserialize, Serialize)]
+pub(crate) struct MaterializedAttachment {
     name: String,
     mime_type: String,
     kind: String,
+    #[serde(rename = "path")]
     rel_path: String,
     size: usize,
 }
@@ -74,53 +75,36 @@ pub(crate) fn materialize_ui_task_attachments(
         return Err("ui_attachments_too_many".to_string());
     }
 
-    let mut total_bytes = 0usize;
-    let mut materialized = Vec::new();
-    for (index, input) in inputs.into_iter().enumerate() {
-        let (bytes, data_mime_type) = decode_data_url(&input.data_url)?;
-        if bytes.len() > MAX_UI_ATTACHMENT_BYTES {
-            return Err("ui_attachment_too_large".to_string());
-        }
-        total_bytes = total_bytes.saturating_add(bytes.len());
-        if total_bytes > MAX_UI_TOTAL_ATTACHMENT_BYTES {
-            return Err("ui_attachments_total_too_large".to_string());
-        }
-        let mime_type = if input.mime_type.trim().is_empty() {
-            data_mime_type.unwrap_or_else(|| default_mime_for_kind(&input.kind).to_string())
-        } else {
-            input.mime_type
-        };
-        let safe_name = safe_upload_filename(&input.name, &input.kind, &mime_type);
-        let rel_path = format!(
-            "data/ui/{}/{}/{}/{:02}-{}",
-            effective_user_id,
-            effective_chat_id,
-            safe_path_token(call_id),
-            index,
-            safe_name
-        );
-        let abs_path = state.skill_rt.workspace_root.join(&rel_path);
-        if !path_is_under_root(&state.skill_rt.workspace_root, &abs_path) {
-            return Err("ui_attachment_path_outside_workspace".to_string());
-        }
-        if let Some(parent) = abs_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|err| format!("ui_attachment_create_dir_failed: {err}"))?;
-        }
-        std::fs::write(&abs_path, &bytes)
-            .map_err(|err| format!("ui_attachment_write_failed: {err}"))?;
-        materialized.push(MaterializedAttachment {
-            name: safe_name,
-            mime_type,
-            kind: normalize_kind(&input.kind, ""),
-            rel_path,
-            size: bytes.len(),
-        });
-    }
-
+    let decoded = inputs
+        .into_iter()
+        .map(|input| {
+            let (bytes, data_mime_type) = decode_data_url(&input.data_url)?;
+            Ok(UploadInput {
+                name: input.name,
+                kind: input.kind,
+                mime_type: if input.mime_type.trim().is_empty() {
+                    data_mime_type.unwrap_or_else(|| "application/octet-stream".into())
+                } else {
+                    input.mime_type
+                },
+                bytes,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let materialized = commit_upload_batch(
+        &state.skill_rt.workspace_root,
+        effective_user_id,
+        effective_chat_id,
+        call_id,
+        decoded,
+    )?;
     rewrite_payload_attachments(payload, &materialized);
     Ok(())
 }
+
+#[path = "ui_attachment_upload.rs"]
+mod upload;
+pub(crate) use upload::{commit_upload_batch, validate_upload_references, UploadInput};
 
 pub(crate) fn validate_channel_ingress_attachments(
     workspace_root: &Path,

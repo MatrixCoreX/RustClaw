@@ -68,8 +68,6 @@ pub(crate) async fn run_native_model_turn_with_fallback(
         return Err(TASK_LLM_COST_POLICY_BLOCKED_ERR.to_string());
     }
     let prompt_label = super::classify_prompt_source(prompt_source);
-    state.note_task_llm_call_with_label_and_prompt_size(&task.task_id, prompt_label, prompt.len());
-    let logical_call_index = state.task_llm_call_count(&task.task_id);
     let mut hints = crate::ChatRequestHints {
         requires_native_tools: true,
         timeout_seconds: request
@@ -79,6 +77,17 @@ pub(crate) async fn run_native_model_turn_with_fallback(
         ..crate::ChatRequestHints::default()
     };
     crate::task_model_selection::apply_task_model_policy_hints(task, &mut hints);
+    let serialized_input =
+        serde_json::to_string(request).map_err(|_| "model_request_serialization_failed")?;
+    hints.host_admission = Some(crate::task_budget_contract::model_admission::prepare(
+        state,
+        task,
+        &serialized_input,
+        prompt_label,
+        &mut hints,
+    )?);
+    state.note_task_llm_call_with_label_and_prompt_size(&task.task_id, prompt_label, prompt.len());
+    let logical_call_index = state.task_llm_call_count(&task.task_id);
     let routing_plan = crate::providers::route_providers(task_providers, prompt, &hints);
     state.note_task_provider_routing_plan_with_label(
         &task.task_id,
@@ -185,13 +194,13 @@ pub(crate) async fn run_native_model_turn_with_fallback(
         );
         let provider_result = tokio::select! {
             biased;
-            _ = conversation_interrupt.cancelled() => {
+            interrupted = super::interrupt::wait(state.worker.task_cancellation_token(&task.task_id), &conversation_interrupt) => {
                 stop_llm_task_lease_heartbeat(&mut heartbeat_stop);
                 crate::assistant_presentation::abort_active_answer(
                     state,
                     task,
-                    super::CONVERSATION_INPUT_INTERRUPTED_ERR,
-                    "assistant.output.interrupted_by_new_input",
+                    interrupted.reason(),
+                    interrupted.message_key(),
                     true,
                 );
                 let _ = crate::task_event_transport::publish_claimed_event(
@@ -200,7 +209,7 @@ pub(crate) async fn run_native_model_turn_with_fallback(
                     "model_turn_interrupted",
                     json!({
                         "schema_version": 1,
-                        "reason_code": super::CONVERSATION_INPUT_INTERRUPTED_ERR,
+                        "reason_code": interrupted.reason(),
                         "logical_call_index": logical_call_index,
                         "provider": provider_name,
                         "usage_status": "unknown",
@@ -214,7 +223,7 @@ pub(crate) async fn run_native_model_turn_with_fallback(
                         prompt_label,
                         &provider.config.name,
                         &provider.config.model,
-                        "interrupted",
+                        interrupted.cost_status(),
                         1,
                         None,
                         provider.pricing.as_ref(),
@@ -226,7 +235,7 @@ pub(crate) async fn run_native_model_turn_with_fallback(
                     prompt_label,
                     call_started_at.elapsed().as_millis() as u64,
                 );
-                return Err(super::CONVERSATION_INPUT_INTERRUPTED_ERR.to_string());
+                return Err(interrupted.reason().to_string());
             }
             result = provider_turn => result,
         };

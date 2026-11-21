@@ -12,6 +12,9 @@ use crate::{AppState, ClaimedTask, LlmProviderRuntime};
 pub(crate) use claw_core::provider_failure_policy::PROVIDER_QUOTA_TERMINATED;
 use claw_core::skill_registry::{SkillResourceClass, SkillResourceRequest};
 
+#[path = "llm_gateway_interrupt.rs"]
+mod interrupt;
+
 #[path = "llm_gateway_model_turn.rs"]
 mod model_turn;
 pub(crate) use model_turn::run_native_model_turn_with_fallback;
@@ -402,7 +405,7 @@ async fn run_with_provider_resource(
     task: &ClaimedTask,
     prompt: &str,
     prompt_source: &str,
-    hints: crate::ChatRequestHints,
+    mut hints: crate::ChatRequestHints,
     providers: Vec<Arc<LlmProviderRuntime>>,
     admitted: Option<crate::resource_scheduler::ResourceLease>,
 ) -> Result<String, String> {
@@ -432,6 +435,13 @@ async fn run_with_provider_resource(
     // 现在移到 gateway 入口，保证预算统计始终可靠。
     // Phase 1.5: 同时按 prompt label 分桶累计，task journal 里 by_prompt 维度可观测。
     let prompt_label = classify_prompt_source(prompt_source);
+    hints.host_admission = Some(crate::task_budget_contract::model_admission::prepare(
+        state,
+        task,
+        prompt,
+        prompt_label,
+        &mut hints,
+    )?);
     state.note_task_llm_call_with_label_and_prompt_size(&task.task_id, prompt_label, prompt.len());
     let logical_call_index = state.task_llm_call_count(&task.task_id);
     state.note_task_prompt_size_with_label(&task.task_id, prompt_label, prompt.len());
@@ -591,13 +601,13 @@ async fn run_with_provider_resource(
             crate::call_provider_with_retry_with_hints(provider.clone(), prompt, &hints);
         let provider_result = tokio::select! {
             biased;
-            _ = conversation_interrupt.cancelled() => {
+            interrupted = interrupt::wait(state.worker.task_cancellation_token(&task.task_id), &conversation_interrupt) => {
                 stop_llm_task_lease_heartbeat(&mut heartbeat_stop);
                 crate::assistant_presentation::abort_active_answer(
                     state,
                     task,
-                    CONVERSATION_INPUT_INTERRUPTED_ERR,
-                    "assistant.output.interrupted_by_new_input",
+                    interrupted.reason(),
+                    interrupted.message_key(),
                     true,
                 );
                 let _ = crate::task_event_transport::publish_claimed_event(
@@ -606,7 +616,7 @@ async fn run_with_provider_resource(
                     "model_turn_interrupted",
                     serde_json::json!({
                         "schema_version": 1,
-                        "reason_code": CONVERSATION_INPUT_INTERRUPTED_ERR,
+                        "reason_code": interrupted.reason(),
                         "logical_call_index": logical_call_index,
                         "provider": provider_name,
                         "usage_status": "unknown",
@@ -620,7 +630,7 @@ async fn run_with_provider_resource(
                         prompt_label,
                         &provider.config.name,
                         &provider.config.model,
-                        "interrupted",
+                        interrupted.cost_status(),
                         1,
                         None,
                         provider.pricing.as_ref(),
@@ -632,7 +642,7 @@ async fn run_with_provider_resource(
                     prompt_label,
                     call_started_at.elapsed().as_millis() as u64,
                 );
-                return Err(CONVERSATION_INPUT_INTERRUPTED_ERR.to_string());
+                return Err(interrupted.reason().to_string());
             }
             result = provider_call => result,
         };

@@ -25,8 +25,13 @@ async fn only_current_channel_owner_can_request_reconciliation() {
             );
         }
         let decision=serde_json::from_value(json!({"operation":"retry_unknown","snapshot_digest":"0".repeat(64),"decision_id":Uuid::new_v4(),"confirmed_duplicate_risk":true})).unwrap();
-        let (status, Json(reply)) =
-            reconcile(State(state.clone()), headers, Path(id), Json(decision)).await;
+        let (status, Json(reply)) = reconcile(
+            State(state.clone()),
+            headers,
+            Path(id.to_string().try_into().expect("valid task id")),
+            Json(decision),
+        )
+        .await;
         assert_eq!(
             status,
             if key == Some("owner") {
@@ -58,9 +63,14 @@ async fn only_current_channel_owner_can_request_reconciliation() {
     );
     let decision=serde_json::from_value(json!({"operation":"retry_failed","snapshot_digest":"0".repeat(64),"decision_id":Uuid::new_v4()})).unwrap();
     assert_eq!(
-        reconcile(State(state), headers, Path(id), Json(decision))
-            .await
-            .0,
+        reconcile(
+            State(state),
+            headers,
+            Path(id.to_string().try_into().expect("valid task id")),
+            Json(decision)
+        )
+        .await
+        .0,
         StatusCode::UNAUTHORIZED
     );
 }

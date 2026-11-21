@@ -431,7 +431,7 @@ async fn every_page_rechecks_agent_owner_recipient_and_key_authorization() {
     let (status, Json(reply)) = recall(
         State(state.clone()),
         headers.clone(),
-        Path(current_id),
+        Path(current_id.to_string().try_into().expect("valid task id")),
         Json(first()),
     )
     .await;
@@ -447,7 +447,7 @@ async fn every_page_rechecks_agent_owner_recipient_and_key_authorization() {
     let (status, Json(reply)) = recall(
         State(state.clone()),
         headers.clone(),
-        Path(current_id),
+        Path(current_id.to_string().try_into().expect("valid task id")),
         Json(next()),
     )
     .await;
@@ -490,7 +490,7 @@ async fn every_page_rechecks_agent_owner_recipient_and_key_authorization() {
         let (status, _) = recall(
             State(state.clone()),
             headers.clone(),
-            Path(current_id),
+            Path(current_id.to_string().try_into().expect("valid task id")),
             Json(next()),
         )
         .await;
@@ -515,7 +515,7 @@ async fn every_page_rechecks_agent_owner_recipient_and_key_authorization() {
         recall(
             State(state.clone()),
             foreign,
-            Path(current_id),
+            Path(current_id.to_string().try_into().expect("valid task id")),
             Json(next())
         )
         .await
@@ -526,7 +526,7 @@ async fn every_page_rechecks_agent_owner_recipient_and_key_authorization() {
         recall(
             State(state.clone()),
             HeaderMap::new(),
-            Path(current_id),
+            Path(current_id.to_string().try_into().expect("valid task id")),
             Json(next())
         )
         .await
@@ -547,7 +547,7 @@ async fn every_page_rechecks_agent_owner_recipient_and_key_authorization() {
         recall(
             State(state.clone()),
             headers.clone(),
-            Path(current_id),
+            Path(current_id.to_string().try_into().expect("valid task id")),
             Json(next())
         )
         .await
@@ -572,9 +572,14 @@ async fn every_page_rechecks_agent_owner_recipient_and_key_authorization() {
         .execute("DELETE FROM tasks WHERE task_id=?1", [&source.task.task_id])
         .unwrap();
     assert_eq!(
-        recall(State(state), headers, Path(current_id), Json(next()))
-            .await
-            .0,
+        recall(
+            State(state),
+            headers,
+            Path(current_id.to_string().try_into().expect("valid task id")),
+            Json(next())
+        )
+        .await
+        .0,
         StatusCode::NOT_FOUND
     );
 }

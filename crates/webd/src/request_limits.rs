@@ -416,7 +416,8 @@ fn is_upload_path(path: &str) -> bool {
     matches!(
         path,
         "/v1/skills/import/upload" | "/v1/memory/import/preview"
-    ) || is_memory_import_action(path, "/chunks")
+    ) || path.starts_with("/v1/task-attachments/")
+        || is_memory_import_action(path, "/chunks")
 }
 
 fn is_memory_import_action(path: &str, action: &str) -> bool {

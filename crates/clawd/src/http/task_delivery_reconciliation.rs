@@ -67,7 +67,7 @@ mod tests;
 pub(crate) async fn reconcile(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(task_id): Path<Uuid>,
+    Path(task_id): Path<crate::task_read_id::TaskReadId>,
     Json(decision): Json<Decision>,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
     let record = match crate::repo::get_task_delivery_record(&state, &task_id.to_string()) {

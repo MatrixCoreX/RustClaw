@@ -39,10 +39,10 @@ struct EventStreamState {
 pub(crate) async fn stream_task_events(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(task_id): Path<Uuid>,
+    Path(task_id): Path<crate::task_read_id::TaskReadId>,
     Query(query): Query<TaskEventQuery>,
 ) -> Response {
-    let read_result = get_task_query_record(&state, task_id);
+    let read_result = get_task_query_record(&state, &task_id);
     let Some((_task, task_user_key, channel)) = (match read_result {
         Ok(record) => record,
         Err(error) => {
@@ -145,9 +145,9 @@ pub(crate) async fn stream_task_events(
 pub(crate) async fn get_task_event_artifact(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((task_id, artifact_id)): Path<(Uuid, String)>,
+    Path((task_id, artifact_id)): Path<(crate::task_read_id::TaskReadId, String)>,
 ) -> Response {
-    let read_result = get_task_query_record(&state, task_id);
+    let read_result = get_task_query_record(&state, &task_id);
     let Some((_task, task_user_key, channel)) = (match read_result {
         Ok(record) => record,
         Err(error) => {

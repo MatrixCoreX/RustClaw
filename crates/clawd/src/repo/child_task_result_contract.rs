@@ -1,4 +1,59 @@
 use serde_json::{json, Value};
+#[path = "child_result_schema.rs"]
+mod result_schema;
+
+pub(crate) fn child_result_contract_supported(contract: &Value) -> bool {
+    if contract
+        .get("schema_version")
+        .is_some_and(|v| v.as_u64() != Some(1))
+    {
+        return false;
+    }
+    if let Some(schema) = contract.get("result_schema") {
+        if contract.get("schema_version").and_then(Value::as_u64) != Some(1)
+            || !result_schema::supported(schema, 0)
+        {
+            return false;
+        }
+    }
+    contract.get("evidence_field").is_none_or(|field| {
+        field
+            .as_str()
+            .is_some_and(|s| !s.is_empty() && s.len() <= 128)
+    })
+}
+
+pub(crate) fn child_evidence_contract_valid(
+    payload: &Value,
+    answer: &str,
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    let Some(contract) = child_machine_result_contract(payload) else {
+        return true;
+    };
+    let Some(field) = contract.get("evidence_field").and_then(Value::as_str) else {
+        return true;
+    };
+    let Some(result) = validated_child_structured_result(payload, &json!({"text":answer})) else {
+        return false;
+    };
+    let Some(refs) = result.get(field).and_then(Value::as_array) else {
+        return false;
+    };
+    !refs.is_empty()
+        && refs.len() <= 128
+        && refs.iter().all(|reference| {
+            reference
+                .as_str()
+                .and_then(|s| s.strip_prefix("step:"))
+                .is_some_and(|id| {
+                    journal.step_results.iter().any(|step| {
+                        step.step_id == id
+                            && step.status == crate::executor::StepExecutionStatus::Ok
+                    })
+                })
+        })
+}
 
 pub(crate) fn child_result_contract_for_task(task: &crate::ClaimedTask) -> Option<Value> {
     let payload: Value = serde_json::from_str(&task.payload_json).ok()?;
@@ -52,6 +107,9 @@ pub(crate) fn validated_child_structured_result(
     if result_contract.get("output_format").and_then(Value::as_str) != Some("machine_json") {
         return None;
     }
+    if !child_result_contract_supported(result_contract) {
+        return None;
+    }
     let required_keys = match result_contract.get("required_keys") {
         None => Vec::new(),
         Some(keys) => keys
@@ -98,11 +156,16 @@ pub(crate) fn validated_child_structured_result(
                 }),
         )
         .find_map(|candidate| {
-            let source = candidate
-                .get("result")
-                .filter(|value| value.is_object())
-                .unwrap_or(&candidate)
-                .as_object()?;
+            if candidate.to_string().len() > MAX_STRUCTURED_RESULT_BYTES {
+                return None;
+            }
+            let source = candidate.as_object()?;
+            if result_contract
+                .get("result_schema")
+                .is_some_and(|schema| !result_schema::matches(schema, &candidate))
+            {
+                return None;
+            }
             let projected = if required_keys.is_empty() {
                 source.clone()
             } else {

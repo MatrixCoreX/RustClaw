@@ -5,6 +5,8 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{io::Write, path::PathBuf, time::Duration};
 
+#[path = "../event_json_chunks.rs"]
+mod event_json_chunks;
 #[path = "../event_json_storage.rs"]
 mod event_json_storage;
 #[path = "../task_event_storage_maintenance.rs"]
@@ -42,6 +44,22 @@ fn run() -> anyhow::Result<()> {
         "prepare" => {
             task_event_storage_maintenance::ensure_schema(&db)?;
             println!("{}", json!({"ok":true,"action":action}));
+        }
+        "pack-chunks" => {
+            task_event_storage_maintenance::ensure_schema(&db)?;
+            db.pragma_update(None, "synchronous", "FULL")?;
+            db.pragma_update(None, "wal_autocheckpoint", 256)?;
+            let mut total = 0usize;
+            loop {
+                let rows = event_json_chunks::compact_batch(&mut db, batch)?;
+                if rows == 0 {
+                    break;
+                }
+                total += rows;
+                println!("{}", json!({"ok":true,"action":action,"total_rows":total}));
+                std::io::stdout().flush()?;
+            }
+            checkpoint(&db)?;
         }
         "pack" => {
             task_event_storage_maintenance::ensure_schema(&db)?;
@@ -166,7 +184,8 @@ fn fingerprint(db: &Connection, table: &str) -> anyhow::Result<Value> {
         for n in 0..columns.len() {
             let decoded;
             let value = if Some(n) == payload {
-                decoded = event_json_storage::decode(
+                decoded = event_json_chunks::decode(
+                    db,
                     row.get_ref(n)?.as_str()?,
                     row.get(columns.len())?,
                     row.get::<_, Option<Vec<u8>>>(columns.len() + 1)?.as_deref(),
