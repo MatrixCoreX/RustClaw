@@ -124,6 +124,13 @@ jobs:
         run: |
           set -euo pipefail
           cargo build --locked -p clawd --bins -p skill-runner --bin skill-runner -p agent-skill-sdk --bin skillctl
+      - name: Verify resumable cold chunks and physical SQLite compaction
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p clawd --bin task-event-maintenance -- --test-threads=3
+          EVENT_MAINTENANCE_BIN="$PWD/target/debug/task-event-maintenance" python3 -m unittest discover -s scripts/tests -p test_event_storage_maintenance.py -v
+          python3 -m unittest discover -s scripts/tests -p test_large_db_memory_probe.py -v
       - name: Verify unchanged runtime builds reuse their compiled artifacts
         shell: bash
         run: |
@@ -203,7 +210,7 @@ jobs:
           npm run build --prefix UI
           artifact_root="$RUNNER_TEMP/runtime-operations-artifact"
           mkdir -p "$artifact_root/runtime"
-          install -m 755 target/debug/clawd "$artifact_root/runtime/clawd"
+          install -m 755 target/debug/clawd target/debug/task-event-maintenance "$artifact_root/runtime/"
           install -m 755 target/debug/skill-runner target/debug/skillctl target/debug/webd "$artifact_root/runtime/"
           mkdir -p "$artifact_root/runtime/UI"
           cp -R UI/dist "$artifact_root/runtime/UI/dist"

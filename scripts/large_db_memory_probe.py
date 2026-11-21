@@ -87,7 +87,34 @@ def busiest_event_task(connection: sqlite3.Connection) -> tuple[str | None, int]
     return (str(row[0]), int(row[1])) if row else (None, 0)
 
 
-def decode_stored_event(raw: str, version: int, blob: bytes | None) -> Any:
+def decode_stored_event(raw: str, version: int, blob: bytes | None, connection=None, cache=None) -> Any:
+    if version == 3:
+        if connection is None or blob is None or len(blob) != 68:
+            raise ValueError("event_chunk_reference_invalid")
+        row = connection.execute("SELECT payload_json,storage_version,storage_blob FROM task_event_chunks WHERE chunk_id=?", (blob[:32],)).fetchone()
+        if row is None or row[1] not in (1, 2):
+            raise ValueError("event_chunk_missing")
+        key = hashlib.sha256(blob[:32] + row[0].encode() + (row[2] or b"")).digest()
+        entries = cache.get(key) if cache is not None else None
+        if entries is None:
+            entries = decode_stored_event(*row)
+            digest = hashlib.sha256(row[0].encode()).digest() if row[1] == 1 else row[2][13:45]
+            if digest != blob[:32] or not isinstance(entries, list) or len(entries) > 128:
+                raise ValueError("event_chunk_digest_mismatch")
+            if cache is not None:
+                if len(cache) >= 2: cache.pop(next(iter(cache)))
+                cache[key] = entries
+        index = struct.unpack("<I", blob[32:36])[0]
+        if index >= len(entries) or not isinstance(entries[index], str):
+            raise ValueError("event_chunk_index_invalid")
+        decoded = entries[index].encode()
+        if hashlib.sha256(decoded).digest() != blob[36:]:
+            raise ValueError("event_chunk_event_digest_mismatch")
+        event = json.loads(decoded)
+        projection = {"payload": {k: event.get("payload", {})[k] for k in ("skill", "requested_action_ref") if k in event.get("payload", {})}}
+        if "event_kind" in event: projection["event_kind"] = event["event_kind"]
+        if json.loads(raw) != projection: raise ValueError("event_chunk_projection_mismatch")
+        return event
     if version in (0, 1):
         return json.loads(raw)
     if version != 2 or blob is None or not 45 <= len(blob) <= 16 * 1024 * 1024 + 45:
@@ -126,7 +153,8 @@ def event_page(connection: sqlite3.Connection, task_id: str | None) -> list[Any]
            LIMIT 1024""",
         (task_id,),
     ).fetchall()
-    return [decode_stored_event(*row) for row in rows]
+    cache = {}
+    return [decode_stored_event(*row, connection=connection, cache=cache) for row in rows]
 
 
 def artifact_page(connection: sqlite3.Connection) -> list[tuple[Any, ...]]:

@@ -58,6 +58,15 @@ class EventStorageMaintenance(unittest.TestCase):
             process.communicate(timeout=30)
         self.assertEqual(self.run_tool("pack")["pending_rows"], 0)
         self.assertEqual(self.run_tool("verify"), before)
+        process = subprocess.Popen([self.binary, "pack-chunks", "--database", str(self.db), "--batch-size", "1"], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            self.assertTrue(json.loads(process.stdout.readline())["ok"])
+            process.kill()
+        finally:
+            process.communicate(timeout=30)
+        self.run_tool("pack-chunks")
+        self.assertEqual(self.run_tool("pack-chunks")["total_rows"], 0)
+        self.assertEqual(self.run_tool("verify"), before)
         with sqlite3.connect(self.db) as db:
             self.assertEqual(probe.event_page(db, "finished"), expected_events)
         self.assertEqual(self.run_tool("pack")["total_rows"], 0)
