@@ -7,6 +7,26 @@ fn input(bytes: &[u8]) -> UploadInput {
         bytes: bytes.into(),
     }
 }
+
+#[test]
+fn verified_references_rebuild_media_aliases_and_reject_unbound_locators() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let items = commit_upload_batch(root, 1, 2, "message", vec![input(b"original")]).unwrap();
+    let mut payload = json!({"attachments":items, "audio":{"path":"private/other.wav"}, "images":[{"path":"private/other.png"}]});
+    validate_upload_references(root, 1, 2, "message", &mut payload).unwrap();
+    assert!(payload.get("audio").is_none());
+    assert!(payload.get("images").is_none());
+    assert_eq!(
+        payload["files"][0]["path"],
+        payload["attachments"][0]["path"]
+    );
+    let mut unbound = json!({"audio":{"path":"private/other.wav"}});
+    assert_eq!(
+        validate_upload_references(root, 1, 2, "message", &mut unbound).unwrap_err(),
+        "ui_attachment_reference_missing"
+    );
+}
 #[test]
 fn batch_replay_is_immutable_and_invalid_later_file_writes_nothing() {
     let directory = tempfile::tempdir().unwrap();

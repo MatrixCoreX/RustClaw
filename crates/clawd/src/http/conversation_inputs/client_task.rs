@@ -312,7 +312,7 @@ fn prepare_ui_task_ingress(
         identity.user_id,
         identity.chat_id,
         &request.input.client_message_id,
-        &request.task.payload,
+        &mut request.task.payload,
     )?;
     if request.task.ingress.is_some() {
         return Ok(());

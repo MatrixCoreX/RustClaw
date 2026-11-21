@@ -39,3 +39,48 @@ fn chunks_preserve_original_json_and_detect_tampering_and_missing_references() {
     db.execute("DELETE FROM task_event_chunks", []).unwrap();
     assert!(decode(&db, &raw, version, Some(&rows[0].2)).is_err());
 }
+
+#[test]
+fn retention_reclaims_only_unreferenced_chunks_and_keeps_codec_enabled() {
+    let mut db = Connection::open_in_memory().unwrap();
+    db.execute_batch("CREATE TABLE task_event_archive(event_json TEXT,storage_version INTEGER,storage_blob BLOB);").unwrap();
+    ensure_schema(&db).unwrap();
+    for seq in 0..2 {
+        let raw = serde_json::json!({"event_kind":"test", "seq":seq}).to_string();
+        db.execute("INSERT INTO task_event_archive VALUES(?1,1,NULL)", [raw])
+            .unwrap();
+    }
+    assert_eq!(compact_batch(&mut db, 128).unwrap(), 2);
+    let count = |db: &Connection| {
+        db.query_row("SELECT COUNT(*) FROM task_event_chunks", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap()
+    };
+    db.execute("DELETE FROM task_event_archive WHERE rowid=1", [])
+        .unwrap();
+    assert_eq!(compact_batch(&mut db, 128).unwrap(), 0);
+    assert_eq!(count(&db), 1);
+    let (raw, version, blob): (String, i64, Vec<u8>) = db
+        .query_row(
+            "SELECT event_json,storage_version,storage_blob FROM task_event_archive",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert!(decode(&db, &raw, version, Some(&blob))
+        .unwrap()
+        .contains("test"));
+    db.execute("DELETE FROM task_event_archive", []).unwrap();
+    assert_eq!(compact_batch(&mut db, 128).unwrap(), 0);
+    assert_eq!(count(&db), 0);
+    ensure_schema(&db).unwrap();
+    assert!(maintenance_enabled(&db).unwrap());
+    db.execute(
+        "INSERT INTO task_event_archive VALUES(?1,1,NULL)",
+        [serde_json::json!({"event_kind":"later"}).to_string()],
+    )
+    .unwrap();
+    assert_eq!(compact_batch(&mut db, 128).unwrap(), 1);
+    assert_eq!(count(&db), 1);
+}

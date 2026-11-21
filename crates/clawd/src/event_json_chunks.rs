@@ -10,7 +10,8 @@ const MAX_CHUNK_ROWS: usize = 128;
 thread_local! { static CACHE: RefCell<Vec<(Vec<u8>, Vec<String>)>> = const { RefCell::new(Vec::new()) }; }
 pub(crate) fn ensure_schema(db: &Connection) -> rusqlite::Result<()> {
     db.execute_batch("CREATE TABLE IF NOT EXISTS task_event_chunks (chunk_id BLOB PRIMARY KEY, payload_json TEXT NOT NULL, storage_version INTEGER NOT NULL, storage_blob BLOB);
-        CREATE INDEX IF NOT EXISTS idx_task_event_archive_cold_pending ON task_event_archive(storage_version) WHERE storage_version<3;")
+        CREATE INDEX IF NOT EXISTS idx_task_event_archive_cold_pending ON task_event_archive(storage_version) WHERE storage_version<3;")?;
+    lifecycle::ensure_schema(db)
 }
 pub(crate) fn decode(
     db: &Connection,
@@ -85,12 +86,12 @@ pub(crate) fn read(
 /// Committing the first operator-verified chunk enables bounded ongoing maintenance.
 /// Merely booting the new reader leaves the old encoding unchanged for rollback safety.
 pub(crate) fn maintenance_enabled(db: &Connection) -> rusqlite::Result<bool> {
-    let installed:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_event_chunks')",[],|row|row.get(0))?;
+    let installed:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_event_chunk_state')",[],|row|row.get(0))?;
     if !installed {
         return Ok(false);
     }
     db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM task_event_chunks)",
+        "SELECT EXISTS(SELECT 1 FROM task_event_chunk_state WHERE key='codec_v3_enabled')",
         [],
         |row| row.get(0),
     )
@@ -102,6 +103,7 @@ pub(crate) fn compact_batch(db: &mut Connection, batch: usize) -> anyhow::Result
         .query_map([batch.clamp(1,MAX_CHUNK_ROWS) as i64], |row| Ok((row.get::<_,i64>(0)?,row.get::<_,String>(1)?,row.get::<_,i64>(2)?,row.get::<_,Option<Vec<u8>>>(3)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     if rows.is_empty() {
+        lifecycle::collect_unreferenced(&tx, batch)?;
         tx.commit()?;
         return Ok(0);
     }
@@ -148,10 +150,18 @@ pub(crate) fn compact_batch(db: &mut Connection, batch: usize) -> anyhow::Result
             );
             tx.execute("UPDATE task_event_archive SET event_json=?2,storage_version=3,storage_blob=?3 WHERE rowid=?1 AND storage_version<3", params![id,projection,reference])?;
         }
+        tx.execute(
+            "INSERT OR IGNORE INTO task_event_chunk_state(key) VALUES('codec_v3_enabled')",
+            [],
+        )?;
     }
+    lifecycle::collect_unreferenced(&tx, batch)?;
     tx.commit()?;
     Ok(ids.len())
 }
+
+#[path = "event_json_chunk_lifecycle.rs"]
+mod lifecycle;
 
 #[cfg(test)]
 #[path = "event_json_chunks_tests.rs"]

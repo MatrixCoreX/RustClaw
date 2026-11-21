@@ -292,6 +292,9 @@ fn rewrite_payload_attachments(payload: &mut Value, attachments: &[MaterializedA
     let Some(obj) = payload.as_object_mut() else {
         return;
     };
+    for key in ["images", "audio", "audios", "video", "videos", "files"] {
+        obj.remove(key);
+    }
     let mut all = Vec::new();
     let mut images = Vec::new();
     let mut audios = Vec::new();

@@ -134,13 +134,20 @@ pub(crate) fn validate_upload_references(
     user_id: i64,
     chat_id: i64,
     call_id: &str,
-    payload: &Value,
+    payload: &mut Value,
 ) -> Result<(), String> {
     let Some(items) = payload
         .get("attachments")
         .and_then(Value::as_array)
         .filter(|v| !v.is_empty())
     else {
+        if ["images", "audio", "audios", "video", "videos", "files"]
+            .iter()
+            .filter_map(|key| payload.get(*key))
+            .any(|value| !value.is_null() && value.as_array().is_none_or(|items| !items.is_empty()))
+        {
+            return Err("ui_attachment_reference_missing".into());
+        }
         return Ok(());
     };
     let expected = format!(
@@ -178,5 +185,7 @@ pub(crate) fn validate_upload_references(
             return Err("ui_attachment_reference_mismatch".into());
         }
     }
+    // Media aliases are projections of the verified manifest, never independent locators.
+    rewrite_payload_attachments(payload, &manifest);
     Ok(())
 }
