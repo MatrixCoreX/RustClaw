@@ -319,7 +319,7 @@ pub(super) async fn plan_round_actions(
         String::new()
     };
     let native_last_output = planner_last_observation(loop_state);
-    let native_user_prompt = crate::render_prompt_template(
+    let mut native_user_prompt = crate::render_prompt_template(
         &native_turn_context.template,
         &[
             ("__USER_REQUEST__", &user_request_for_prompt),
@@ -333,6 +333,13 @@ pub(super) async fn plan_round_actions(
             ("__RECENT_ASSISTANT_REPLIES__", &recent_assistant_replies),
         ],
     );
+    if let Some(budget) =
+        super::skill_execution::child_task_execution_policy::planner_budget_context(
+            state, task, loop_state,
+        )
+    {
+        native_user_prompt.push_str(&format!("\n\nchild_capability_budget_v1={budget}"));
+    }
     crate::log_prompt_render_with_version(
         state,
         &task.task_id,
@@ -453,16 +460,6 @@ pub(super) async fn plan_round_actions(
         &native_capability_groups,
         &loadable_capability_group_names,
     );
-    if let Some(budget) =
-        super::skill_execution::child_task_execution_policy::planner_budget_context(
-            state, task, loop_state,
-        )
-    {
-        native_request.messages.push(ModelMessage::text(
-            ModelRole::System,
-            format!("child_capability_budget_v1={budget}"),
-        ));
-    }
     if loop_state.conversation_input_revision > 0 {
         let insert_at = native_request
             .tools

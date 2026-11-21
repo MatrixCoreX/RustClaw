@@ -39,6 +39,13 @@ fn frozen_limits_and_terminal_graph_refresh_do_not_need_new_delegation() {
             .as_str()
             .unwrap()
             .to_string();
+        // Resume begins after the worker has persisted the parent's checkpoint.
+        {
+            let db = state.core.db.get().unwrap();
+            db.execute("UPDATE tasks SET result_json=?2 WHERE task_id=?1",rusqlite::params![
+                task.task_id,serde_json::json!({"child_task_ids":[id],"task_checkpoint":loop_state.task_checkpoint}).to_string()
+            ]).unwrap();
+        }
         let (_, payload) = child_task_row(&state, &id);
         assert_eq!(
             payload["child_task_contract"]["scope"]["capability_call_limits"][0]["max_calls"],
