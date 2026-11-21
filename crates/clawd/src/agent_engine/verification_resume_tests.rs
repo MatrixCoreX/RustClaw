@@ -351,10 +351,10 @@ async fn format_retry_scenario(invalid_calls: usize, invalid_audit: bool) {
                 verdict["operation_checks"] = json!([{
                     "requested_operation":"Observe the expected nonzero child probe",
                     "required_dispatches":[{"action_type":"call_capability","action_ref":"system.run_command"}],
-                    "evidence_step_ids":["step_1"],"method_observed":call>=invalid_calls,
-                    "result_observed":true,"blocked":call<invalid_calls,
+                    "evidence_step_ids":["step_1"],"method_observed":call>invalid_calls,
+                    "result_observed":true,"blocked":call<=invalid_calls,
                 }]);
-            } else if call < invalid_calls {
+            } else if call <= invalid_calls {
                 verdict["unexpected_field"] = json!(true);
             }
             axum::Json(json!({"choices":[{"message":{"role":"assistant","content":verdict.to_string()},
@@ -423,24 +423,45 @@ async fn format_retry_scenario(invalid_calls: usize, invalid_audit: bool) {
             "dispatch_executed":true,
         }));
     }
-    let mut journal = crate::finalize::build_from_loop_state(
+    let seed = verification_checkpoint_payload(&task, &prior)["task_checkpoint"].clone();
+    let seed = serde_json::from_value(seed).unwrap();
+    let plan = crate::PlanResult {
+        goal: "fixture".into(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        output_contract: None,
+        steps: vec![crate::PlanStep {
+            step_id: "reply".into(),
+            action_type: "respond".into(),
+            skill: "respond".into(),
+            args: json!({"content":"candidate"}),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Single,
+        raw_plan_text: String::new(),
+    };
+    // Exercise late verification in the actual seeded loop. Its reply goes
+    // straight to resume projection, without the outer ask finalizer.
+    let handoff = super::super::loop_control::run_agent_with_loop_seeded_direct_plan(
+        &state,
         &task,
         "fixture",
-        &prior,
+        "fixture",
         None,
-        None,
-        true,
-        "candidate",
-        TaskJournalFinalStatus::Success,
-    );
-    journal.record_answer_verification(
-        AnswerVerificationOutcome::Unavailable {
-            error_code: "answer_verifier_response_invalid",
-            retryable: true,
-        },
-        "candidate",
-    );
-    crate::answer_verifier::checkpoint_unavailable_verification(&state, &task, &mut journal);
+        &seed,
+        &plan,
+        &[],
+    )
+    .await
+    .unwrap();
+    assert!(handoff.text.is_empty());
+    let journal = handoff.task_journal.unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert!(journal.answer_verification_checkpoint_prepared);
+    assert_eq!(journal.task_lifecycle.as_ref().unwrap()["state"], "waiting");
+    assert_eq!(journal.step_results.len(), 2);
     let mut checkpoint: crate::task_lifecycle::TaskCheckpoint =
         serde_json::from_value(journal.task_checkpoint.unwrap()).unwrap();
     for attempt in 0..2 {
@@ -456,7 +477,7 @@ async fn format_retry_scenario(invalid_calls: usize, invalid_audit: bool) {
         .await
         .unwrap();
         let journal = reply.task_journal.as_ref().unwrap();
-        assert_eq!(journal.step_results.len(), 1);
+        assert_eq!(journal.step_results.len(), 2);
         if attempt >= invalid_calls {
             assert_eq!(reply.text, "candidate");
             assert_eq!(
@@ -557,7 +578,7 @@ async fn format_retry_scenario(invalid_calls: usize, invalid_audit: bool) {
             checkpoint = claimed.task_checkpoint;
         }
     }
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
 }
 
 #[tokio::test]

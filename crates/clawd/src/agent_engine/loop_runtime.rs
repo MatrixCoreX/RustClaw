@@ -547,6 +547,23 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             skip_planner_rounds = false;
             continue;
         }
+        // Seeded resumes project this reply directly, bypassing the outer ask
+        // finalizer. Bind unavailable verification here as well, before a
+        // terminal claim can turn an unverified candidate into success.
+        if reply.task_journal.as_ref().is_some_and(|journal| {
+            journal.answer_verification.as_ref().is_some_and(|record| {
+                record.status == crate::answer_verifier::AnswerVerificationStatus::Unavailable
+            })
+        }) {
+            return Ok(checkpoint_handoff_reply_with_verification(
+                state,
+                task,
+                &effective_user_text,
+                &pre_finalize_loop_state,
+                agent_run_context,
+                &reply,
+            ));
+        }
         if !claim_conversation_terminal_boundary(state, task, &pre_finalize_loop_state)? {
             loop_state = pre_finalize_loop_state;
             loop_state.last_stop_signal =
