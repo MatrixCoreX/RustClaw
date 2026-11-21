@@ -112,3 +112,28 @@ fn parent_calls_respect_persisted_child_reservations() {
     )
     .is_err());
 }
+
+#[test]
+fn budget_usage_counts_protocol_aliases_cache_inputs_and_reported_total_without_double_counting() {
+    let openai = LlmUsageSnapshot {
+        prompt_tokens: Some(1000),
+        completion_tokens: Some(200),
+        total_tokens: Some(1200),
+        reasoning_tokens: Some(50),
+        cached_tokens: Some(800),
+        ..Default::default()
+    };
+    assert_eq!(usage_charge(&openai), Some(1200));
+    let anthropic = LlmUsageSnapshot {
+        input_tokens: Some(100),
+        output_tokens: Some(200),
+        total_tokens: Some(300),
+        cache_read_input_tokens: Some(800),
+        cache_creation_input_tokens: Some(100),
+        ..Default::default()
+    };
+    assert_eq!(usage_charge(&anthropic), Some(1200));
+    let gemini=crate::providers::gemini_usage_snapshot(&json!({"usageMetadata":{"promptTokenCount":1000,"candidatesTokenCount":200,"thoughtsTokenCount":50,"toolUsePromptTokenCount":10,"cachedContentTokenCount":800}})).unwrap();
+    assert_eq!(usage_charge(&gemini), Some(1260));
+    assert_eq!(usage_charge(&LlmUsageSnapshot::default()), None);
+}

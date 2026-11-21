@@ -18,8 +18,9 @@ export async function readJsonApiResponse<T>(response: Response): Promise<T> {
   }
 }
 
-/** A received HTTP rejection is a known outcome; receipt recovery is for transport ambiguity. */
+/** Client rejections are definitive; gateway failures may hide a successful handoff. */
 export class ApiHttpError extends Error {
+  get definitiveRejection(): boolean { return this.status >= 400 && this.status < 500; }
   constructor(readonly status: number, readonly errorCode: string) {
     super(errorCode);
     this.name = "ApiHttpError";
@@ -31,11 +32,31 @@ export async function readTaskSubmissionResponse<T>(response: Response): Promise
     let code = `task_submit_http_${response.status}`;
     if (response.headers.get("content-type")?.toLowerCase().includes("application/json")) {
       try {
-        const body: unknown = JSON.parse(await response.text());
+        const body: unknown = JSON.parse(await boundedErrorBody(response));
         if (body && typeof body === "object" && "error" in body && typeof body.error === "string") code = body.error;
       } catch { /* Keep the status when a proxy supplies a malformed body. */ }
+    } else {
+      try { void response.body?.cancel().catch(() => undefined); } catch { /* Cleanup must preserve the HTTP failure. */ }
     }
     throw new ApiHttpError(response.status, code);
   }
   return readJsonApiResponse<T>(response);
+}
+
+async function boundedErrorBody(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = []; let size = 0;
+  const timer = setTimeout(() => { void reader.cancel().catch(() => undefined); }, 3000);
+  try {
+    for (;;) {
+      const {done,value} = await reader.read(); if (done) break;
+      size += value.byteLength;
+      if (size > 16384) { void reader.cancel().catch(() => undefined); return ""; }
+      chunks.push(value);
+    }
+  } finally { clearTimeout(timer); reader.releaseLock(); }
+  const bytes = new Uint8Array(size); let offset=0;
+  for (const chunk of chunks) {bytes.set(chunk,offset);offset+=chunk.byteLength;}
+  return new TextDecoder().decode(bytes);
 }

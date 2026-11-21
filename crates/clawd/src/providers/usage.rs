@@ -61,9 +61,16 @@ pub(crate) fn gemini_usage_snapshot(value: &Value) -> Option<LlmUsageSnapshot> {
     let usage = value.get("usageMetadata")?;
     let prompt_tokens = value_as_u64(usage.get("promptTokenCount"));
     let completion_tokens = value_as_u64(usage.get("candidatesTokenCount"));
-    let total_tokens = value_as_u64(usage.get("totalTokenCount"))
-        .or_else(|| sum_u64(&[prompt_tokens, completion_tokens]));
     let reasoning_tokens = value_as_u64(usage.get("thoughtsTokenCount"));
+    let tool_prompt_tokens = value_as_u64(usage.get("toolUsePromptTokenCount"));
+    let total_tokens = value_as_u64(usage.get("totalTokenCount")).or_else(|| {
+        sum_u64(&[
+            prompt_tokens,
+            completion_tokens,
+            reasoning_tokens,
+            tool_prompt_tokens,
+        ])
+    });
     let cached_tokens = value_as_u64(usage.get("cachedContentTokenCount"));
     if prompt_tokens.is_none()
         && completion_tokens.is_none()

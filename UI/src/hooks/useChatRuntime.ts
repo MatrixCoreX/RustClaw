@@ -1486,7 +1486,7 @@ export function useChatRuntime({
     try {
       return await submit();
     } catch (submitError) {
-      if (signal?.aborted || !isCurrent() || submitError instanceof ApiHttpError) throw submitError;
+      if (signal?.aborted || !isCurrent() || (submitError instanceof ApiHttpError && submitError.definitiveRejection)) throw submitError;
       try {
         const recovered = await recoverConversationInputReceipt(
           submission.scope,

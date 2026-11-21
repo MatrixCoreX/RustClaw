@@ -872,6 +872,13 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
         Ok(_) => {}
         Err(error) => warn!(%error, "event_storage_compaction_failed"),
     }
+    if crate::event_json_chunks::maintenance_enabled(&db)? {
+        match crate::event_json_chunks::compact_batch(&mut db, 128) {
+            Ok(rows) if rows > 0 => info!(rows, "event_cold_chunks_compacted"),
+            Ok(_) => {}
+            Err(error) => warn!(%error,"event_cold_chunk_compaction_failed"),
+        }
+    }
     match crate::task_event_storage_maintenance::prune_hot_batch(
         &mut db,
         now.saturating_sub(86_400).saturating_mul(1000),

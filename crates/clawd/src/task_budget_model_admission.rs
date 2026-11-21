@@ -52,6 +52,12 @@ pub(crate) fn prepare(
         label: label.into(),
     });
     let cost = state.task_llm_cost_summary(&task.task_id);
+    let historical_tokens = state
+        .task_llm_cost_records(&task.task_id)
+        .iter()
+        .filter_map(|record| record.usage.as_ref().and_then(usage_charge))
+        .fold(0u64, u64::saturating_add)
+        .max(cost.input_tokens.saturating_add(cost.output_tokens));
     let db = state
         .core
         .db
@@ -61,7 +67,7 @@ pub(crate) fn prepare(
         CREATE INDEX IF NOT EXISTS idx_task_model_token_reservations_task ON task_model_token_reservations(task_id);
         CREATE TABLE IF NOT EXISTS task_model_budget_baselines (task_id TEXT PRIMARY KEY, historical_tokens INTEGER NOT NULL, token_ceiling INTEGER NOT NULL);")
         .map_err(|_| "task_budget_ledger_unavailable")?;
-    db.execute("INSERT OR IGNORE INTO task_model_budget_baselines(task_id,historical_tokens,token_ceiling) VALUES(?1,?2,?3)",params![task.task_id,cost.input_tokens.saturating_add(cost.output_tokens),ceiling])
+    db.execute("INSERT OR IGNORE INTO task_model_budget_baselines(task_id,historical_tokens,token_ceiling) VALUES(?1,?2,?3)",params![task.task_id,historical_tokens,ceiling])
         .map_err(|_| "task_budget_ledger_unavailable")?;
     let available =
         admission.remaining(&db, cost.input_tokens.saturating_add(cost.output_tokens))?;
@@ -164,13 +170,7 @@ impl Attempt {
         // Successful and failed calls with known usage are accounted by the existing cost ledger.
         // A missing usage record keeps its reservation, including when the request is cancelled.
         if let Ok(db) = self.owner.state.core.db.get() {
-            if let Some(usage) =
-                usage.filter(|u| u.input_tokens.is_some() && u.output_tokens.is_some())
-            {
-                let charge = usage
-                    .input_tokens
-                    .unwrap_or(0)
-                    .saturating_add(usage.output_tokens.unwrap_or(0));
+            if let Some(charge) = usage.and_then(usage_charge) {
                 let _ = db.execute("UPDATE task_model_token_reservations SET status='usage_known',reserved_tokens=?2 WHERE attempt_id=?1",params![self.id,charge]);
             } else {
                 let _ = db.execute("UPDATE task_model_token_reservations SET status='usage_unknown' WHERE attempt_id=?1",[&self.id]);
@@ -249,6 +249,24 @@ fn delegated_tokens(db: &rusqlite::Connection, task_id: &str) -> Result<u64, Str
             sum.saturating_add(a.granted.tokens)
         }))
 }
+// Preserve raw usage; only normalize the task-budget charge. Cached OpenAI/Gemini input
+// is already in prompt_tokens; Anthropic cache read/write fields are additional inputs.
+fn usage_charge(usage: &LlmUsageSnapshot) -> Option<u64> {
+    let components = usage
+        .input_tokens
+        .or(usage.prompt_tokens)
+        .zip(usage.output_tokens.or(usage.completion_tokens))
+        .map(|(input, output)| {
+            input
+                .saturating_add(output)
+                .saturating_add(usage.cache_creation_input_tokens.unwrap_or(0))
+                .saturating_add(usage.cache_read_input_tokens.unwrap_or(0))
+        });
+    components
+        .or(usage.total_tokens)
+        .map(|sum| sum.max(usage.total_tokens.unwrap_or(0)))
+}
+
 /// Conservative charges are budget accounting, separate from provider usage/cost observations.
 pub(crate) fn charged_tokens(
     db: &rusqlite::Connection,

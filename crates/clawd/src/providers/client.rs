@@ -511,9 +511,6 @@ pub(crate) async fn call_model_turn_with_retry(
 
     loop {
         attempts += 1;
-        if let Some(sink) = event_sink.as_ref() {
-            sink(ModelTurnEvent::Started { attempt: attempts });
-        }
         let mut attempt_hints = hints.clone();
         attempt_hints.observed_http_status = Arc::new(std::sync::atomic::AtomicU16::new(0));
         let attempt = hints
@@ -534,6 +531,9 @@ pub(crate) async fn call_model_turn_with_retry(
                     retryable_error_count,
                 )
             })?;
+        if let Some(sink) = event_sink.as_ref() {
+            sink(ModelTurnEvent::Started { attempt: attempts });
+        }
         let result = call_model_turn(
             provider.clone(),
             request,

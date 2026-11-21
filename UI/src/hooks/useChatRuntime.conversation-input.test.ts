@@ -56,6 +56,7 @@ test("projects model-authored nonterminal replies without treating machine statu
 
 async function setup(options: {
   loseFirstConversationInputResponse?: boolean;
+  gatewayFailureAfterAccept?: boolean;
   terminalRaceOnExpectedTarget?: boolean;
   holdConversationInputResponses?: boolean;
   holdHistoryResponse?: boolean;
@@ -220,6 +221,10 @@ async function setup(options: {
           delivery_mode: input.delivery_mode ?? "auto",
           source: { received_at_ts: 1 },
         });
+        if (options.gatewayFailureAfterAccept && !lostConversationInputResponse) {
+          lostConversationInputResponse=true;
+          return new Response("<html>gateway failure</html>",{status:502,headers:{"content-type":"text/html"}});
+        }
         if (options.loseFirstConversationInputResponse && !lostConversationInputResponse) {
           lostConversationInputResponse = true;
           throw new TypeError("simulated response loss");
@@ -646,4 +651,13 @@ test("deferred messages remain durable without starting work and can later run o
   } finally {
     await app.unmount();
   }
+});
+
+test("an HTML gateway failure after acceptance recovers the existing receipt without duplication",async()=>{
+  const app=await setup({gatewayFailureAfterAccept:true});
+  try {
+    await app.send("recover the accepted handoff after a gateway failure");
+    assert.equal(app.conversationInputs.length,1);assert.equal(app.conversationInputRecoveryQueries(),1);
+    assert.equal(app.runtime().chatTeachingRuns[0].taskId,"task-1");await app.complete("task-1");
+  } finally {await app.unmount();}
 });

@@ -554,7 +554,7 @@ pub(crate) fn record_child_task_terminal_projection(
             .unwrap_or(0);
         child_result["budget_consumed"]["tokens"] = json!(observed.max(charged));
         child_result["token_budget_accounting"] = json!({"schema_version":1,"charged_tokens":charged,
-            "observed_usage_tokens":observed,"includes_conservative_unknown_reservations":charged>observed});
+            "observed_usage_tokens":observed,"additional_budget_charge_tokens":charged.saturating_sub(observed)});
     }
     let lifecycle = child_terminal_lifecycle_projection(&status, payload, &result_json);
     let Some(obj) = result_json.as_object_mut() else {

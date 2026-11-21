@@ -62,9 +62,12 @@ pub(crate) async fn accept_client_task(
     };
     request.task.user_key = Some(identity.user_key.clone());
     if !matches!(request.task.kind, TaskKind::Ask)
-        || request.task.channel != Some(channel)
-        || request.task.external_chat_id.as_deref()
-            != Some(request.input.scope.conversation_id.as_str())
+        || request.task.channel.is_some_and(|value| value != channel)
+        || request
+            .task
+            .external_chat_id
+            .as_deref()
+            .is_some_and(|value| value != request.input.scope.conversation_id.as_str())
         || request
             .task
             .payload

@@ -82,6 +82,20 @@ pub(crate) fn read(
 ) -> anyhow::Result<serde_json::Value> {
     Ok(serde_json::from_str(&decode(db, raw, version, blob)?)?)
 }
+/// Committing the first operator-verified chunk enables bounded ongoing maintenance.
+/// Merely booting the new reader leaves the old encoding unchanged for rollback safety.
+pub(crate) fn maintenance_enabled(db: &Connection) -> rusqlite::Result<bool> {
+    let installed:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_event_chunks')",[],|row|row.get(0))?;
+    if !installed {
+        return Ok(false);
+    }
+    db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM task_event_chunks)",
+        [],
+        |row| row.get(0),
+    )
+}
+
 pub(crate) fn compact_batch(db: &mut Connection, batch: usize) -> anyhow::Result<usize> {
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let rows = tx.prepare("SELECT rowid,event_json,storage_version,storage_blob FROM task_event_archive WHERE storage_version<3 ORDER BY storage_version,rowid LIMIT ?1")?

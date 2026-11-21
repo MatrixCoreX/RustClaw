@@ -16,6 +16,7 @@ export function formatUiError(
     if (cause.status === 507) return t("服务器存储空间不足，请管理员清理空间后重试。", "The server has insufficient storage. Ask an administrator to free space, then retry.");
     if (cause.status === 408) return t("上传超时，请检查网络后重试。", "The upload timed out. Check your connection and retry.");
     if (cause.status === 429) return t("请求较多，请稍后重试。", "Too many requests. Please try again shortly.");
+    if (cause.status >= 500) return t("服务器暂时不可用，请稍后重试。已接收的任务会显示在最近任务中。", "The server is temporarily unavailable. Try again shortly; accepted tasks will appear in recent tasks.");
     return t(`服务器拒绝了请求（${cause.status}），请检查内容后重试。`, `The server rejected the request (${cause.status}). Check the content and retry.`);
   }
   const message = cause instanceof Error
