@@ -28,3 +28,5 @@ Use these optional subheading labels when needed:
 - ...
 Keep only language-specific nuances here; keep general rules in the main body.
 -->
+
+A child that needs clarification returns an unfinished `child_task_needs_parent_input` result to its parent; asking a question does not complete the delegated objective. The parent resolves the missing input or asks the user through the ordinary parent conversation.

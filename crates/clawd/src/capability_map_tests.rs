@@ -909,6 +909,10 @@ fn scoped_single_leaf_uses_capability_identity_and_direct_argument_schema() {
     assert_eq!(groups[0].tool_name, "call_filesystem_read_text_range");
     let schema = &groups[0].capability_argument_schemas["filesystem.read_text_range"];
     assert!(schema["properties"]["path"].is_object());
+    assert_eq!(
+        schema["properties"]["mode"]["enum"],
+        serde_json::json!(["head", "tail", "range", "last_non_empty"])
+    );
     assert!(schema["properties"].get("action").is_none());
     assert_eq!(
         planner_callable_capability_names_for_task(&state, &task),

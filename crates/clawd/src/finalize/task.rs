@@ -60,7 +60,8 @@ use task_memory::{insert_ask_memory_pair, insert_unfinished_goal_memory};
 #[cfg(test)]
 use task_payload_helpers::answer_verifier_forces_task_failure;
 use task_payload_helpers::{
-    answer_verifier_should_force_task_failure, ask_result_payload, non_failure_final_status,
+    answer_verifier_should_force_task_failure, ask_result_payload,
+    child_clarification_failure_payload, non_failure_final_status,
     normalize_existing_file_delivery_token_answer,
 };
 use task_provider_outcome::record_provider_wait_checkpoint;
@@ -809,8 +810,13 @@ pub(crate) async fn finalize_ask_result(
                 .await?;
                 return Ok(());
             }
-            if failure_reply {
-                let err_text = answer.error_text.unwrap_or_else(|| answer_text.clone());
+            let child_input_failure =
+                child_clarification_failure_payload(payload, semantic_clarify);
+            if failure_reply || child_input_failure.is_some() {
+                let err_text = child_input_failure
+                    .map(|failure| failure.to_string())
+                    .or(answer.error_text)
+                    .unwrap_or_else(|| answer_text.clone());
                 if let Some(resume_payload) = answer.resume_context {
                     journal.record_final_status(
                         crate::task_journal::TaskJournalFinalStatus::ResumeFailure,

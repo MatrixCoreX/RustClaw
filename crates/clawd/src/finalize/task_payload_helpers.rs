@@ -48,6 +48,29 @@ pub(super) fn non_failure_final_status(
     }
 }
 
+pub(super) fn child_clarification_failure_payload(
+    payload: &Value,
+    semantic_clarify: bool,
+) -> Option<Value> {
+    // A child cannot complete its delegated result by asking the end user a
+    // question. Return the need for input to its parent as an unfinished result;
+    // ordinary user-facing clarification retains its existing success semantics.
+    (semantic_clarify && crate::repo::child_tasks::is_child_subagent_payload(payload)).then(|| {
+        json!({
+            "schema_version": 1,
+            "owner_layer": "child_task_result_contract",
+            "status": "needs_parent_input",
+            "error_code": "child_task_needs_parent_input",
+            "message_key": "child_task.needs_parent_input",
+            "reason_code": "child_task_needs_parent_input",
+            "status_code": "child_task_needs_parent_input",
+            "retryable": false,
+            "side_effect_applied": false,
+            "recovery_action": "parent_resolve_child_input",
+        })
+    })
+}
+
 pub(super) fn answer_verifier_forces_task_failure(
     semantic_clarify: bool,
     journal: &crate::task_journal::TaskJournal,

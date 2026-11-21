@@ -1,4 +1,5 @@
 use super::*;
+use serde_json::json;
 
 #[test]
 fn terminal_verifier_rejection_is_failure_without_retry_permission() {
@@ -46,4 +47,23 @@ fn matching_failed_candidate_cannot_succeed_but_stale_rejection_does_not_block_n
     assert!(!answer_verifier_should_force_task_failure(
         true, false, &journal
     ));
+}
+
+#[test]
+fn child_clarification_returns_unfinished_result_to_parent_without_changing_ordinary_clarification()
+{
+    let child = json!({"task_role":"subagent_child","child_task_contract":{"scope":{}}});
+    let failure = child_clarification_failure_payload(&child, true).unwrap();
+    assert_eq!(failure["error_code"], "child_task_needs_parent_input");
+    assert_eq!(failure["status"], "needs_parent_input");
+    assert_eq!(failure["retryable"], false);
+    assert!(child_clarification_failure_payload(&child, false).is_none());
+    assert!(child_clarification_failure_payload(&json!({"text":"inspect"}), true).is_none());
+    assert!(
+        child_clarification_failure_payload(&json!({"task_role":"subagent_child"}), true).is_none()
+    );
+    assert_eq!(
+        non_failure_final_status(true),
+        crate::task_journal::TaskJournalFinalStatus::Clarify
+    );
 }

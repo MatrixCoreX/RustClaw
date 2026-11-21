@@ -123,3 +123,5 @@ explicit application.
 ```json
 {"action":"persistent_child_task","max_parallel":2,"children":[{"node_id":"writer","role":"writer","objective":"implement the scoped change","context_refs":["plan/current.md"],"allowed_capabilities":["filesystem.read_text_range","filesystem.replace_text"],"owned_paths":["crates/example"]},{"node_id":"reviewer","role":"reviewer","objective":"review the isolated patch","context_refs":["plan/current.md"],"allowed_capabilities":["filesystem.read_text_range"],"depends_on":[{"node_id":"writer","required":true}]}]}
 ```
+
+Child clarification is an unfinished result (`child_task_needs_parent_input`), not a successful delegated output. The parent owns user interaction and may resolve missing input or ask the user before scheduling a refined child. Ordinary main-agent clarification keeps its existing lifecycle.
