@@ -15,7 +15,7 @@ use axum::Json;
 use claw_core::types::ApiResponse;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
@@ -574,15 +574,19 @@ async fn load_or_generate_video_poster(
         .map_err(|_| VideoPosterError::Busy)?;
     let poster = generate_video_poster(path).await?;
     let temp_path = cache_path.with_extension(format!("{}.tmp", Uuid::new_v4()));
-    let _cleanup = media_guard::TempFile(temp_path.clone());
-    if tokio::fs::write(&temp_path, &poster).await.is_ok() {
-        if let Err(error) = tokio::fs::rename(&temp_path, &cache_path).await {
-            tracing::warn!(
-                "task artifact poster cache publish failed path={} error={}",
-                cache_path.display(),
-                error
-            );
-            let _ = tokio::fs::remove_file(temp_path).await;
+    // Open synchronously before the first await: cancelled blocking I/O keeps an open
+    // descriptor to an unlinked file, and cannot later recreate the temporary path.
+    if let Ok(file) = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp_path)
+    {
+        let _cleanup = media_guard::TempFile(temp_path.clone());
+        let mut file = tokio::fs::File::from_std(file);
+        if file.write_all(&poster).await.is_ok() && file.flush().await.is_ok() {
+            if let Err(error) = tokio::fs::rename(&temp_path, &cache_path).await {
+                tracing::warn!(%error,"task_artifact_poster_cache_publish_failed");
+            }
         }
     }
     Ok(poster)
