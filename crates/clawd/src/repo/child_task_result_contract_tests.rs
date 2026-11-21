@@ -93,3 +93,28 @@ fn versioned_schema_checks_ranges_types_nullability_and_preserves_result_field()
         &payload["child_task_contract"]["result_contract"]
     ));
 }
+
+#[test]
+fn declared_evidence_rejects_empty_and_dangling_refs_and_accepts_real_successful_steps() {
+    let payload = json!({"task_role":"subagent_child","child_task_contract":{"result_contract":{"output_format":"machine_json","schema_version":1,"evidence_field":"evidence"}}});
+    let mut journal = crate::task_journal::TaskJournal::new("fixture");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "read-1",
+            "fixture.read",
+            "observed",
+        ));
+    for refs in [json!([]), json!(["step:missing"]), json!(["read-1"])] {
+        assert!(!child_evidence_contract_valid(
+            &payload,
+            &json!({"evidence":refs}).to_string(),
+            &journal
+        ));
+    }
+    assert!(child_evidence_contract_valid(
+        &payload,
+        &json!({"evidence":["step:read-1"]}).to_string(),
+        &journal
+    ));
+}

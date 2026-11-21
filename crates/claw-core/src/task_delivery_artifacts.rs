@@ -456,7 +456,7 @@ fn task_artifact_manifests(
     task_id: &str,
     result_json: Option<&Value>,
 ) -> Vec<TaskDeliveryArtifactManifest> {
-    if machine_component(task_id).is_none() {
+    if task_identifier(task_id).is_none() {
         return Vec::new();
     }
     result_json
@@ -490,7 +490,7 @@ fn valid_manifest(task_id: &str, manifest: &TaskDeliveryArtifactManifest) -> boo
 
 /// Canonical, channel-neutral address for an immutable task artifact.
 pub fn canonical_task_artifact_ref(task_id: &str, artifact_id: &str) -> Option<String> {
-    let task_id = machine_component(task_id)?;
+    let task_id = task_identifier(task_id)?;
     let artifact_id = machine_component(artifact_id)?;
     Some(format!("artifact:task/{task_id}/{artifact_id}"))
 }
@@ -523,7 +523,7 @@ fn validated_task_artifact_path(
     manifest: &TaskDeliveryArtifactManifest,
 ) -> Option<PathBuf> {
     let workspace = workspace_root.canonicalize().ok()?;
-    let task_component = machine_component(task_id)?;
+    let task_component = task_path_component(task_id)?;
     let artifact_component = machine_component(&manifest.id)?;
     crate::workspace_state::known_workspace_state_roots(&workspace)
         .into_iter()
@@ -558,6 +558,26 @@ fn artifact_delivery_token(manifest: &TaskDeliveryArtifactManifest, path: &Path)
         "FILE:"
     };
     format!("{prefix}{}", path.display())
+}
+
+fn task_identifier(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()
+        && value.len() <= 1024
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_.:-".contains(&b)))
+    .then(|| value.into())
+}
+/// Preserve historical short paths; long nested host IDs use the runtime's stable digest mapping.
+pub fn task_path_component(task_id: &str) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let id = task_identifier(task_id)?;
+    if id.len() <= 128 {
+        return Some(id);
+    }
+    let digest = Sha256::digest(format!("task\0{id}").as_bytes());
+    Some(format!("artifact-{}", &format!("{digest:x}")[..24]))
 }
 
 fn machine_component(value: &str) -> Option<String> {

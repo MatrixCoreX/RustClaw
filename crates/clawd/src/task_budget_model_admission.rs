@@ -42,7 +42,7 @@ pub(crate) fn prepare(
     // This is admission evidence, never fabricated provider usage.
     let input_bound = (serialized_input.len() as u64).saturating_add(8192);
     let stage_cap = if label == "verifier" { 4096 } else { 8192 };
-    let output_cap = hints.max_tokens.unwrap_or(stage_cap).min(stage_cap).max(1);
+    let output_cap = hints.max_tokens.unwrap_or(stage_cap).max(1);
     let admission = Arc::new(ModelAdmission {
         state: state.clone(),
         task: task.clone(),
@@ -116,6 +116,7 @@ impl ModelAdmission {
         let id = uuid::Uuid::new_v4().to_string();
         tx.execute("INSERT INTO task_model_token_reservations(attempt_id,task_id,reserved_tokens,status) VALUES(?1,?2,?3,'in_flight')",params![id,self.task.task_id,self.input_bound.saturating_add(output)]).map_err(|_| "task_budget_ledger_unavailable")?;
         tx.commit().map_err(|_| "task_budget_ledger_unavailable")?;
+        drop(db);
         let attempt = Attempt {
             owner: self.clone(),
             id,

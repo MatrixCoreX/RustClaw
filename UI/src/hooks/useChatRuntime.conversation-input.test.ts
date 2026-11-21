@@ -61,10 +61,10 @@ async function setup(options: {
   holdHistoryResponse?: boolean;
 } = {}) {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-  const requests: Array<{ payload: { text: string; conversation_id: string; agent_id: string; attachments?: Array<{ name: string; base64: string }> }; idempotency_key: string }> = [];
+  const requests: Array<{ payload: { text: string; conversation_id: string; agent_id: string; attachments?: Array<{ name: string; base64?: string; path?: string }> }; idempotency_key: string }> = [];
   const clientTasks: Array<{
     input: Record<string, unknown>;
-    task: { payload: { attachments?: Array<{ name: string; base64: string }> } };
+    task: { payload: { attachments?: Array<{ name: string; base64?: string; path?: string }> } };
   }> = [];
   const conversationInputs: Array<{
     client_message_id: string;
@@ -97,6 +97,16 @@ async function setup(options: {
         return response({ schema_version: 1, status: "ok", turns: [], truncated: false, content_sha256: createHash("sha256").update("[]").digest("hex") });
       }
       if (path === "/v1/ui/attachment-constraints") return response(DEFAULT_CHAT_ATTACHMENT_CONSTRAINTS);
+      if (path.startsWith("/v1/task-attachments/") && init?.method === "POST") {
+        assert.ok(init.body instanceof FormData);
+        const uploads = [];
+        for (const [kind,value] of init.body.entries()) {
+          assert.ok(value instanceof File);
+          uploads.push({name:value.name,mime_type:value.type,kind,size:value.size,path:`data/ui/fixture/${value.name}`});
+        }
+        return response(uploads);
+      }
+
       if (path === "/v1/conversation-inputs/cancel-current" && init?.method === "POST") {
         const request = JSON.parse(String(init.body)) as Record<string, unknown>;
         cancelRequests.push(request);
@@ -424,7 +434,8 @@ test("a follow-up sent across a terminal boundary starts and observes a new task
     );
     assert.ok(successfulFollowup);
     assert.equal(app.runtime().chatTeachingRuns[0].taskId, "task-2");
-    assert.equal(app.runtime().chatTeachingRuns[0].conversationInputId, "input-4");
+    assert.equal(app.conversationInputs.length, 3); // One conflict and one explicit handoff retry.
+    assert.equal(app.runtime().chatTeachingRuns[0].conversationInputId, "input-3");
     await app.complete("task-2");
     assert.deepEqual(
       app.runtime().chatMessages.filter(item => item.role !== "system").map(item => item.text),
@@ -555,10 +566,8 @@ test("active-task attachments submit immediately and do not erase the next draft
     assert.equal(app.requests.length, 0);
     assert.equal(app.conversationInputs.length, 2);
     assert.equal(app.clientTasks[1].task.payload.attachments?.[0].name, "old.txt");
-    assert.equal(
-      app.clientTasks[1].task.payload.attachments?.[0].base64,
-      "data:text/plain;base64,b2xk",
-    );
+    assert.equal(app.clientTasks[1].task.payload.attachments?.[0].path,"data/ui/fixture/old.txt");
+    assert.equal(app.clientTasks[1].task.payload.attachments?.[0].base64,undefined);
     assert.equal(app.runtime().chatAttachments[0].name, "new.txt");
     await app.complete("task-1");
   } finally {

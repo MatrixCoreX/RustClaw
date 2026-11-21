@@ -31,6 +31,7 @@ pub(crate) fn decode(
     )?;
     ensure!(matches!(version, 1 | 2), "event_chunk_codec_invalid");
     let mut key = Sha256::new();
+    key.update(&reference[..32]);
     key.update(raw.as_bytes());
     key.update(version.to_le_bytes());
     key.update(packed.as_deref().unwrap_or_default());

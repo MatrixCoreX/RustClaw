@@ -129,7 +129,7 @@ async fn endpoint_enforces_task_ownership_and_streams_requested_range() {
     let mut state = AppState::test_default_with_fixture_provider();
     state.skill_rt.workspace_root = root.clone();
     let task_id = format!(
-        "{}:child:review:{}",
+        "{}:child:review:0123456789abcdef0123456789abcdef:child:nested:{}",
         uuid::Uuid::new_v4(),
         uuid::Uuid::new_v4().simple()
     );

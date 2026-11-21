@@ -108,7 +108,11 @@ fn event_query_defaults_to_follow_and_accepts_snapshot_mode() {
 async fn snapshot_mode_drains_more_than_one_archive_page() {
     const EVENT_COUNT: u64 = 1_026;
     let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
-    let task_id = uuid::Uuid::new_v4();
+    let task_id = format!(
+        "{}:child:events:{}",
+        uuid::Uuid::new_v4(),
+        uuid::Uuid::new_v4().simple()
+    );
     let user_key = "task-event-archive-test-key";
     {
         let db = state.core.db.get().expect("get db");

@@ -64,3 +64,7 @@ pub(crate) async fn get_task(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "task_query_tests.rs"]
+mod tests;

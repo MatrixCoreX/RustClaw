@@ -216,8 +216,7 @@ CREATE TABLE IF NOT EXISTS task_event_stream (
     PRIMARY KEY (task_id, seq),
     UNIQUE (task_id, event_hash)
 );
-CREATE INDEX IF NOT EXISTS idx_task_event_stream_task_seq
-    ON task_event_stream(task_id, seq);
+
 
 CREATE TABLE IF NOT EXISTS task_event_archive (
     task_id                TEXT NOT NULL,
@@ -231,8 +230,7 @@ CREATE TABLE IF NOT EXISTS task_event_archive (
     PRIMARY KEY (task_id, seq),
     UNIQUE (task_id, event_hash)
 );
-CREATE INDEX IF NOT EXISTS idx_task_event_archive_task_seq
-    ON task_event_archive(task_id, seq);
+
 
 CREATE TABLE IF NOT EXISTS task_event_snapshots (
     task_id            TEXT NOT NULL,
@@ -246,8 +244,7 @@ CREATE TABLE IF NOT EXISTS task_event_snapshots (
     created_at_ms      INTEGER NOT NULL,
     PRIMARY KEY (task_id, snapshot_seq)
 );
-CREATE INDEX IF NOT EXISTS idx_task_event_snapshots_task_seq
-    ON task_event_snapshots(task_id, snapshot_seq);
+
 
 CREATE TABLE IF NOT EXISTS task_event_artifacts (
     task_id       TEXT NOT NULL,

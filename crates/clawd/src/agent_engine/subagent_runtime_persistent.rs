@@ -466,7 +466,7 @@ fn persistent_node_id(args: &Value, index: usize) -> Result<String, &'static str
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| format!("node_{index}"));
-    if machine_capability_token(&candidate) {
+    if machine_capability_token(&candidate) && !candidate.contains('/') {
         Ok(candidate)
     } else {
         Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED)
@@ -882,3 +882,7 @@ fn record_invalid_role_error(
 fn bounded_error(value: &str) -> String {
     value.chars().take(MAX_SCHEDULE_ERROR_CHARS).collect()
 }
+
+#[cfg(test)]
+#[path = "subagent_runtime_persistent_context_tests.rs"]
+mod context_tests;

@@ -349,6 +349,13 @@ pub(crate) fn cleanup_orphaned_delivery_artifacts(
     workspace_root: &Path,
     db: &Connection,
 ) -> anyhow::Result<usize> {
+    let live_components = db
+        .prepare("SELECT task_id FROM tasks")?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .into_iter()
+        .map(|id| machine_path_component(&id, "task"))
+        .collect::<std::collections::HashSet<_>>();
     let mut removed = 0;
     for state_root in claw_core::workspace_state::known_workspace_state_roots(workspace_root) {
         let root = state_root.join("artifacts").join("delivery");
@@ -365,11 +372,7 @@ pub(crate) fn cleanup_orphaned_delivery_artifacts(
             let Some(task_id) = entry.file_name().to_str().and_then(machine_id) else {
                 continue;
             };
-            let exists = db.query_row(
-                "SELECT EXISTS(SELECT 1 FROM tasks WHERE task_id = ?1)",
-                [task_id],
-                |row| row.get::<_, i64>(0),
-            )? != 0;
+            let exists = live_components.contains(&task_id);
             if !exists {
                 fs::remove_dir_all(path)?;
                 removed += 1;
@@ -985,8 +988,9 @@ fn valid_manifest(manifest: &TaskArtifactManifest) -> bool {
 fn manifest_task_id(manifest: &TaskArtifactManifest) -> Option<&str> {
     let path = manifest.download_url.strip_prefix("/v1/tasks/")?;
     let (task_id, suffix) = path.split_once("/artifacts/")?;
-    (suffix == format!("{}/content", manifest.id) && machine_id(task_id).is_some())
-        .then_some(task_id)
+    (suffix == format!("{}/content", manifest.id)
+        && claw_core::task_delivery_artifacts::task_path_component(task_id).is_some())
+    .then_some(task_id)
 }
 
 fn max_artifact_bytes() -> u64 {
@@ -1008,6 +1012,10 @@ fn machine_id(value: &str) -> Option<String> {
 }
 
 fn machine_path_component(value: &str, fallback: &str) -> String {
+    if fallback == "task" {
+        return claw_core::task_delivery_artifacts::task_path_component(value)
+            .unwrap_or_else(|| derived_artifact_id(fallback, value));
+    }
     machine_id(value).unwrap_or_else(|| derived_artifact_id(fallback, value))
 }
 
