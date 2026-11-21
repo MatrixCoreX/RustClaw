@@ -27,7 +27,7 @@ pub(in crate::agent_engine) fn resume_child_graph_before_planner(
     loop_state: &mut LoopState,
 ) -> Result<Option<&'static str>, String> {
     let config = super::load_subagent_runtime_config(state);
-    let step = loop_state.total_steps_executed + 1;
+    let step = super::super::skill_execution::resumed_subagent_step_number(loop_state);
     let Some(outcome) =
         resume::reuse_checkpoint_child_graph(state, task, loop_state, step, 1, &config)
             .map_err(str::to_string)?
@@ -48,7 +48,7 @@ pub(in crate::agent_engine) fn resume_child_graph_before_planner(
         blocked.then_some(super::SUBAGENT_STOP_SIGNAL_REQUIRED_CHILD_FAILED),
         "checkpoint_child_graph_refresh",
     )?;
-    loop_state.total_steps_executed = step;
+    loop_state.total_steps_executed = loop_state.total_steps_executed.max(step);
     loop_state.last_stop_signal =
         blocked.then(|| super::SUBAGENT_STOP_SIGNAL_REQUIRED_CHILD_FAILED.to_string());
     Ok(Some(if blocked { "blocked" } else { "ready" }))

@@ -215,7 +215,7 @@
     "business_skill_coupling|crates/clawd/src/agent_engine/skill_execution_preflight.rs|run_cmd": 7,
     "business_skill_coupling|crates/clawd/src/agent_engine/skill_execution_preflight.rs|video_generate": 1,
     "business_skill_coupling|crates/clawd/src/agent_engine/skill_execution_preflight.rs|x": 2,
-    "business_skill_coupling|crates/clawd/src/agent_engine/skill_execution_subagent.rs|subagent": 4,
+    "business_skill_coupling|crates/clawd/src/agent_engine/skill_execution_subagent.rs|subagent": 1,
     "business_skill_coupling|crates/clawd/src/agent_engine/subagent_runtime.rs|subagent": 1,
     "business_skill_coupling|crates/clawd/src/agent_engine/subagent_runtime_batch.rs|subagent": 1,
     "business_skill_coupling|crates/clawd/src/agent_engine/support.rs|task_control": 2,

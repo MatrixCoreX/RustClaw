@@ -4,6 +4,84 @@ use crate::agent_engine::subagent_runtime::{
 };
 
 #[test]
+fn resumed_graph_settles_the_original_invocation_without_double_charging_or_losing_provenance() {
+    let task = super::super::tests::test_task();
+    let mut state = LoopState::new();
+    state.round_no = 1;
+    state.total_steps_executed = 2;
+    state.tool_calls_total = 1;
+    let args = json!({"action":"bounded_parallel_readonly","children":[{"node_id":"child-one"}]});
+    state.task_observations.push(json!({"schema_version":2,"owner_layer":"subagent_runtime",
+        "action":"subagent_child_task_enqueue","status":"waiting","child_task_ids":["child-one"],"global_step":3,"step_in_round":1}));
+    record_subagent_step_execution(
+        &task,
+        &mut state,
+        3,
+        1,
+        &args,
+        "call_capability",
+        None,
+        "original",
+    )
+    .unwrap();
+    state.executed_step_results[0].started_at = 17;
+    state.capability_results[0].provenance["registry_generation"] = json!("generation-pinned");
+    assert_eq!(resumed_subagent_step_number(&state), 3);
+    state.task_observations.push(json!({"schema_version":2,"owner_layer":"subagent_runtime",
+        "action":"subagent_child_task_merge_reused","status":"ready","child_task_ids":["child-one"],"global_step":3,"step_in_round":1}));
+    for _ in 0..2 {
+        record_subagent_step_execution(
+            &task,
+            &mut state,
+            3,
+            1,
+            &json!({"action":"bounded_parallel_readonly"}),
+            "checkpoint_child_graph_refresh",
+            None,
+            "refresh",
+        )
+        .unwrap();
+        assert_eq!(state.executed_step_results.len(), 1);
+        assert_eq!(state.capability_results.len(), 1);
+        assert_eq!(state.subtask_results.len(), 1);
+        assert_eq!(state.tool_calls_total, 1);
+        assert_eq!(state.executed_step_results[0].started_at, 17);
+        assert_eq!(
+            state.capability_results[0].provenance["registry_generation"],
+            "generation-pinned"
+        );
+        assert_eq!(
+            state.capability_results[0].provenance["continuation_args"],
+            args
+        );
+        assert_eq!(
+            state.capability_results[0].data["output"]["status"],
+            "ready"
+        );
+    }
+    state.executed_step_results.clear();
+    assert_eq!(resumed_subagent_step_number(&state), 3);
+}
+
+#[test]
+fn resumed_graph_fallback_does_not_reuse_an_unrelated_step_id() {
+    let mut state = LoopState::new();
+    state.total_steps_executed = 2;
+    state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: "step_8".to_string(),
+            skill: "fixture_reader".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: None,
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+    assert_eq!(resumed_subagent_step_number(&state), 9);
+}
+
+#[test]
 fn policy_rejection_replans_without_retrying_scheduler_or_completed_child_failures() {
     assert_eq!(
         normalize_subagent_stop_signal(Some(

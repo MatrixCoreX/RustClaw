@@ -78,6 +78,9 @@ explicit application.
 - A parent task owns one durable child graph. Repeated planner calls after a
   wait, wake-up, or reconnect reuse that graph and its child IDs; additional
   work uses the original batch/DAG, steering, or the typed retry control.
+- A checkpoint join settles the original invocation and preserves its step ID,
+  request provenance and start time. A child-completion callback is not another
+  capability invocation and must not consume the delegation budget again.
 - A child response is accepted only when it contains schema version 1,
   `owner_layer=subagent_model_child`, `output_format=machine_json`, an allowed
   status, role, object findings, string evidence references, and confidence in

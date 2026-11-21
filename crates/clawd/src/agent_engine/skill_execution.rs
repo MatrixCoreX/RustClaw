@@ -59,6 +59,7 @@ use skill_execution_preflight::{
     unresolved_runtime_template_argument_error,
 };
 pub(super) use skill_execution_subagent::record_subagent_step_execution as record_resumed_subagent_step;
+pub(super) use skill_execution_subagent::resumed_subagent_step_number;
 use skill_execution_subagent::{
     normalize_subagent_stop_signal, record_subagent_hook_stage, record_subagent_step_execution,
 };
