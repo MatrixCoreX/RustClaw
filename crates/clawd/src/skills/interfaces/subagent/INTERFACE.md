@@ -59,6 +59,18 @@ explicit application.
   terminal child graph, change its contract, or reset a spent allowance.
 - Read each needed range once, use its returned line evidence, and avoid
   requesting the same content again for formatting repairs.
+- `budget.max_tokens` is a total input-plus-output allowance across planning,
+  retries, finalization and verification, not an output length. Omit it to use
+  the host allocation unless a deliberate total cap is required. Admission
+  reserves a conservative input bound and the provider output ceiling before
+  each attempt; a prompt that cannot fit is rejected before a provider call.
+  Checkpoint/resume does not reset the allowance. Missing provider usage keeps
+  a conservative reservation rather than fabricating an exact bill.
+- `budget.max_context_chars` limits only the inline evidence builder's slice,
+  not the full prompt. Durable admission rejects this field, including single
+  read-only and batch children, with
+  `subagent_durable_max_context_chars_unsupported`; use explicit `context_refs`
+  and capability call limits. Requested and effective bounds remain distinct.
 - Parent summaries must preserve each runtime-projected child ID and status;
   one required child failing does not change a successful sibling's status.
 
@@ -99,6 +111,21 @@ explicit application.
 - The default `machine_json` contract also returns a bounded JSON object when no
   `required_keys` list is supplied; all object fields are retained as passive
   findings. Explicit key lists still project only the requested fields.
+- Optional `result_contract.schema_version=1` enables `result_schema` and
+  `evidence_field`. The schema is an object limited to 16 KiB and depth 8;
+  supported keywords are `type`, `properties`, `required`,
+  `additionalProperties` (boolean), `items`, `enum`, `minimum`, `maximum`,
+  `minLength`, `maxLength`, `minItems`, `maxItems`, and `description`.
+  Types may include an explicit nullable union. Numeric keywords must contain
+  JSON numbers, not numeric strings; unsupported keywords are rejected.
+- `result_contract.schema_version` belongs beside `result_schema`, not inside
+  it. Invalid input returns bounded field-path diagnostics before any child
+  is created. Existing bounded planner recovery may correct the parameters;
+  it cannot coerce the schema, reset budgets or hide completed child failures.
+- `evidence_field` names a nonempty array of `step:<successful child step id>`
+  references checked against the actual child journal. The complete machine
+  result is limited to 32 KiB. A business field named `result` stays nested;
+  it is never implicitly unwrapped.
 - Parents receive `subagent_structured_results` with exact child IDs, canonical
   statuses, validated result fields and evidence references. Consume this handoff
   before querying completed children; evidence refs are not paths or task-context
@@ -106,6 +133,11 @@ explicit application.
 
 ## Error Contract
 
+- `subagent_result_contract_invalid`: the admission request has an unsupported
+  or malformed result contract; typed field issues permit bounded repair
+  before scheduling, without creating children or executing their tools.
+- `subagent_durable_max_context_chars_unsupported`: a durable child request
+  supplied the inline-only context budget field.
 - `subagent_role_not_allowed`: role is not present in the runtime role map.
 - `subagent_child_result_contract_invalid`: child output did not satisfy the
   structured result contract.
@@ -140,6 +172,12 @@ explicit application.
 
 ```json
 {"action":"persistent_child_task","max_parallel":2,"children":[{"node_id":"writer","role":"writer","objective":"implement the scoped change","context_refs":["plan/current.md"],"allowed_capabilities":["filesystem.read_text_range","filesystem.replace_text"],"owned_paths":["crates/example"]},{"node_id":"reviewer","role":"reviewer","objective":"review the isolated patch","context_refs":["plan/current.md"],"allowed_capabilities":["filesystem.read_text_range"],"depends_on":[{"node_id":"writer","required":true}]}]}
+```
+
+### Typed result with checked evidence
+
+```json
+{"action":"inline_readonly","role":"explorer","objective":"inspect the declared source range","context_refs":["src/example.rs"],"allowed_capabilities":["filesystem.read_text_range"],"budget":{"capability_call_limits":[{"capability":"filesystem.read_text_range","max_calls":1}]},"result_contract":{"schema_version":1,"output_format":"machine_json","required_keys":["name","line","evidence_refs"],"allow_partial":false,"evidence_field":"evidence_refs","result_schema":{"type":"object","required":["name","line","evidence_refs"],"additionalProperties":false,"properties":{"name":{"type":"string","minLength":1},"line":{"type":"integer","minimum":1},"evidence_refs":{"type":"array","minItems":1,"items":{"type":"string"}}}}}}
 ```
 
 Child clarification is an unfinished result (`child_task_needs_parent_input`), not a successful delegated output. The parent owns user interaction and may resolve missing input or ask the user before scheduling a refined child. Ordinary main-agent clarification keeps its existing lifecycle.
