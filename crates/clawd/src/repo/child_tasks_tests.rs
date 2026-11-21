@@ -8,6 +8,29 @@ use serde_json::{json, Value};
 use super::*;
 
 #[test]
+fn legacy_success_without_machine_data_cannot_fabricate_a_structured_result_reference() {
+    let payload = json!({"task_role":"subagent_child","child_task_contract":{
+        "parent_task_id":"parent","child_task_id":"child","role":"explorer","required":true,
+        "result_contract":{"output_format":"machine_json","required_keys":["value"]}
+    }});
+    let missing =
+        child_task_result_projection("succeeded", &payload, &json!({"text":"visible prose only"}));
+    assert_eq!(missing["status"], "succeeded");
+    assert_eq!(missing["finding_refs"], json!([]));
+    assert!(missing.get("structured_result").is_none());
+    let actual = child_task_result_projection(
+        "succeeded",
+        &payload,
+        &json!({"structured_result":{"value":"observed"}}),
+    );
+    assert_eq!(
+        actual["finding_refs"][0],
+        "child_task:child:structured_result"
+    );
+    assert_eq!(actual["structured_result"]["value"], "observed");
+}
+
+#[test]
 fn interactive_approval_availability_is_stamped_from_trusted_parent_metadata() {
     assert!(!parent_interactive_approval_available(
         &json!({"schedule_triggered": true}).to_string()

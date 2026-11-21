@@ -669,7 +669,8 @@ fn enqueue_child_specs_creates_independent_child_tasks_and_parent_cancel_fanout(
 #[test]
 fn child_terminal_projection_uses_machine_contract_not_visible_text() {
     let state = state_with_tasks_table();
-    let spec = sample_repo_child_spec("task-parent-projection", "task-child-projection", true);
+    let mut spec = sample_repo_child_spec("task-parent-projection", "task-child-projection", true);
+    spec.result_contract["output_format"] = json!("machine_json");
     let payload = json!({
         "text": "visible child objective",
         "task_role": "subagent_child",
@@ -689,6 +690,10 @@ fn child_terminal_projection_uses_machine_contract_not_visible_text() {
             payload.to_string(),
             json!({
                 "text": "visible prose must not become merge data",
+                "structured_result": {
+                    "finding_refs": ["finding:observed-projection"],
+                    "evidence_refs": ["evidence:observed-projection"]
+                },
                 "task_journal": {
                     "summary": {
                         "final_status": "success"
@@ -709,6 +714,10 @@ fn child_terminal_projection_uses_machine_contract_not_visible_text() {
     let result = stored_result_json(&state, "task-child-projection");
     assert_eq!(result["child_task_result"]["status"], "succeeded");
     assert_eq!(result["child_task_result"]["required"], true);
+    assert_eq!(
+        result["child_task_result"]["structured_result"]["finding_refs"][0],
+        "finding:observed-projection"
+    );
     assert!(result["child_task_result"].get("text").is_none());
     assert!(result["child_task_result"].get("error_text").is_none());
     assert_eq!(
@@ -742,7 +751,8 @@ fn parent_child_merge_continues_from_structured_findings_only() {
         ("task-child-merge-required", true, "succeeded"),
         ("task-child-merge-optional", false, "failed"),
     ] {
-        let spec = sample_repo_child_spec("task-parent-merge", child_task_id, required);
+        let mut spec = sample_repo_child_spec("task-parent-merge", child_task_id, required);
+        spec.result_contract["output_format"] = json!("machine_json");
         let payload = json!({
             "text": "visible child objective",
             "task_role": "subagent_child",
@@ -763,7 +773,11 @@ fn parent_child_merge_continues_from_structured_findings_only() {
                 status,
                 json!({
                     "text": "visible child prose must not become parent merge data",
-                    "error_text": "visible child error must not become parent merge data"
+                    "error_text": "visible child error must not become parent merge data",
+                    "structured_result": {
+                        "finding_refs": [format!("finding:{child_task_id}")],
+                        "evidence_refs": [format!("evidence:{child_task_id}")]
+                    }
                 })
                 .to_string()
             ],
