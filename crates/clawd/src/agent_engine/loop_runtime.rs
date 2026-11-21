@@ -72,7 +72,7 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
     restore_applied_task_steering(state, task, &mut effective_user_text);
     restore_applied_conversation_inputs(state, task, &mut effective_user_text, &mut loop_state);
     if let Some(checkpoint) = resume_checkpoint {
-        if let Some(reply) = super::verification_resume::try_resume(
+        if let Some(mut reply) = super::verification_resume::try_resume(
             state,
             task,
             &effective_user_text,
@@ -82,6 +82,11 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
         )
         .await?
         {
+            crate::finalize::enforce_terminal_ask_reply_status(
+                policy.answer_verifier_required_evidence_enabled(),
+                &task.payload_json,
+                &mut reply,
+            );
             return Ok(reply);
         }
     }

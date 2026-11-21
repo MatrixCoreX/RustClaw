@@ -73,7 +73,15 @@ fn json_value_contains_machine_projection_marker(value: &serde_json::Value, mark
     }
 }
 
-pub(super) fn visible_machine_payload_should_remain_structured(text: &str) -> bool {
+pub(super) fn visible_machine_payload_should_remain_structured(
+    text: &str,
+    task: Option<&ClaimedTask>,
+) -> bool {
+    if task.is_some_and(|task| {
+        crate::repo::child_tasks::child_machine_result_valid_for_task(task, text)
+    }) {
+        return true;
+    }
     let Ok(serde_json::Value::Object(object)) =
         serde_json::from_str::<serde_json::Value>(text.trim())
     else {
@@ -130,7 +138,9 @@ pub(super) async fn render_machine_payload_delivery_if_needed(
     if !route_allows_machine_payload_visible_render(agent_run_context, is_observed_projection) {
         return;
     }
-    if !is_observed_projection && visible_machine_payload_should_remain_structured(&current) {
+    if !is_observed_projection
+        && visible_machine_payload_should_remain_structured(&current, Some(task))
+    {
         log_deterministic_delivery_record(
             &task.task_id,
             "render_machine_payload_delivery",

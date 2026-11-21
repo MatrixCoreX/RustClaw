@@ -160,7 +160,34 @@ fn priority_last_respond_keeps_explicit_respond_step_priority() {
 #[test]
 fn subagent_runtime_machine_payload_remains_structured_for_final_delivery() {
     assert!(visible_machine_payload_should_remain_structured(
-        r#"{"output_format":"machine_json","owner_layer":"subagent_runtime","execution_mode":"bounded_parallel_readonly_child_runs","aggregation":{"finding_refs":[]}}"#
+        r#"{"output_format":"machine_json","owner_layer":"subagent_runtime","execution_mode":"bounded_parallel_readonly_child_runs","aggregation":{"finding_refs":[]}}"#,
+        None
+    ));
+}
+
+#[test]
+fn child_machine_fields_keep_their_declared_shape_without_changing_ordinary_json_delivery() {
+    let mut child = claimed_task("child-machine-delivery");
+    child.payload_json = serde_json::json!({"task_role":"subagent_child","child_task_contract":{
+        "result_contract":{"output_format":"machine_json","required_keys":["risks","candidates"]}
+    }})
+    .to_string();
+    let result = r#"{"risks":[],"candidates":["observed_entry"]}"#;
+    assert!(visible_answer_is_machine_payload(result));
+    assert!(visible_machine_payload_should_remain_structured(
+        result,
+        Some(&child)
+    ));
+    assert!(!visible_machine_payload_should_remain_structured(
+        r#"{"risks":[]}"#,
+        Some(&child)
+    ));
+    assert!(!visible_machine_payload_should_remain_structured(
+        result,
+        Some(&claimed_task("main"))
+    ));
+    assert!(!visible_machine_payload_should_remain_structured(
+        result, None
     ));
 }
 

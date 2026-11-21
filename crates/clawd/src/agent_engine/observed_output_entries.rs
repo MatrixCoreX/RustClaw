@@ -451,7 +451,7 @@ pub(in crate::agent_engine) fn latest_child_result_handoff(
     explicit_model_observation_body(&observation.to_string())
 }
 
-pub(super) fn observed_output_entries(loop_state: &LoopState) -> Vec<String> {
+pub(in crate::agent_engine) fn observed_output_entries(loop_state: &LoopState) -> Vec<String> {
     let latest_listing_idx = loop_state
         .executed_step_results
         .iter()
