@@ -6,8 +6,13 @@ use crate::child_task_contract::{ChildTaskPermissionProfile, ChildTaskSpec};
 
 const MAX_CHILD_ALLOWED_CAPABILITIES: usize = 32;
 
+#[path = "child_argument_constraints.rs"]
+mod argument_constraints;
 #[path = "child_capability_budget.rs"]
 mod capability_budget;
+pub(in crate::agent_engine) use argument_constraints::{
+    planner_argument_context, valid_capability_argument_constraints,
+};
 pub(in crate::agent_engine) use capability_budget::{
     has_scoped_capability_budget, planner_budget_context, valid_capability_call_limits,
 };
@@ -75,6 +80,17 @@ pub(super) fn child_task_execution_policy_error(
         Some(_) => {}
     }
 
+    if let Some(capability) = selected.as_ref() {
+        argument_constraints::append_violations(
+            state,
+            contract,
+            &allowed_capabilities,
+            &capability.name,
+            args,
+            &mut violations,
+        );
+    }
+
     match (permission_profile, selected.as_ref()) {
         ("read_only", Some(capability)) => {
             append_read_only_violations(capability, &mut violations);
@@ -135,6 +151,9 @@ pub(super) fn child_task_execution_policy_error(
             "invalid_allowed_capability_count": invalid_capability_count,
             "violations": violations,
             "capability_policy": capability_policy,
+            "side_effect_applied": false,
+            "execution_dispatched": false,
+            "capability_argument_constraints": contract.pointer("/scope/capability_argument_constraints"),
         })),
     ))
 }

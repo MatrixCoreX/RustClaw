@@ -2,6 +2,15 @@ use serde_json::{json, Value};
 #[path = "child_result_schema.rs"]
 mod result_schema;
 
+pub(crate) fn bounded_argument_schema_supported(schema: &Value) -> bool {
+    schema.get("type").and_then(Value::as_str) == Some("object")
+        && result_schema::supported(schema, 0)
+}
+
+pub(crate) fn bounded_argument_schema_matches(schema: &Value, args: &Value) -> bool {
+    bounded_argument_schema_supported(schema) && result_schema::matches(schema, args)
+}
+
 pub(crate) fn child_result_contract_supported(contract: &Value) -> bool {
     if !contract.is_object() {
         return false;

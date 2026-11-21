@@ -35,6 +35,7 @@ explicit application.
 | `inline_readonly` | `objective` | yes | string | Scoped semantic objective for the child loop. |
 | `inline_readonly` | `context_refs` | yes | string[] | Existing evidence/path references, maximum 16. |
 | `inline_readonly` | `allowed_capabilities` | yes | machine token[] | Read-only child capability allowlist, maximum 32. |
+| `inline_readonly` | `capability_argument_constraints` | no | object[] | Frozen narrowing-only argument schemas, maximum 32 capabilities and 8 alternative schemas per capability; also supported per batch child. |
 | `inline_readonly` | `budget` | no | object | Resource bounds for rounds, tool calls, tokens, and context. |
 | `inline_readonly` | `wait_policy.join_wait_ms` | no | integer | Parent wait window; expiry never cancels the child. |
 | `inline_readonly` | `result_contract` | no | object | Closed machine-JSON result requirements. |
@@ -44,6 +45,27 @@ explicit application.
 | `persistent_child_task` | `node_id` | no | machine token | Stable node reference used by DAG dependencies. |
 | `persistent_child_task` | `depends_on` | no | object[] | `{node_id, required?}` dependency references. |
 | `persistent_child_task` | `owned_paths` | writer | string[] | Workspace-relative ownership boundaries for isolated writers. |
+
+## Enforced Argument Scope
+
+- Translate explicit path, target and inclusive line/byte bounds into
+  `capability_argument_constraints` on each child. Context references and an
+  objective describe the task; they do not enforce argument boundaries.
+- Example: `[{"capability":"filesystem.read_text_range","allowed_args":[{"type":"object","required":["path","mode","start_line","end_line"],"properties":{"path":{"enum":["src/example.rs"]},"mode":{"enum":["range"]},"start_line":{"type":"integer","minimum":10,"maximum":20},"end_line":{"type":"integer","minimum":10,"maximum":20}}}]}]`.
+  Use the exact path spelling the child will call. A union of allowed slices
+  uses separate schemas in `allowed_args`; never widen their enclosing range.
+- The host freezes these constraints before enqueueing. Every resolved tool,
+  skill and capability call is checked before dispatch, also after resume.
+  This can only narrow existing capability and host permission grants.
+  Unsupported schemas or unallowed capability names fail admission.
+- In `child_argument_constraints_v1`, satisfy one complete schema for the
+  selected capability. Missing fields, other paths, wider bounds or head/tail
+  modes outside the declared schema are denied without reading the file.
+  Use existing evidence after a denied request; do not retry a wider read.
+- File `has_more`/`truncated` describes content outside the returned excerpt.
+  It does not imply that the requested interval was incomplete and never
+  expands a grant. `line_safety.excerpt_truncated=false` with all requested
+  lines returned means that interval is complete.
 
 ## Enforced Call Budgets
 

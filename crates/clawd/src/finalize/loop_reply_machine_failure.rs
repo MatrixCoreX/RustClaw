@@ -113,6 +113,10 @@ fn child_task_status_projection(payload: &serde_json::Value) -> Option<serde_jso
                 "error_code": node.pointer("/runtime/child_task_result/error_code"),
                 "evidence_refs": node.pointer("/runtime/child_task_result/evidence_refs"),
                 "finding_refs": node.pointer("/runtime/child_task_result/finding_refs"),
+                "structured_result": node.pointer("/runtime/child_task_result/structured_result")
+                    .filter(|result| result.to_string().len() <= 4096),
+                "structured_result_projection_limited": node.pointer("/runtime/child_task_result/structured_result")
+                    .is_some_and(|result| result.to_string().len() > 4096),
             })
         })
         .collect::<Vec<_>>();

@@ -32,6 +32,23 @@ A child that needs clarification returns an unfinished `child_task_needs_parent_
 
 Budget provenance: `budget_request` records the caller input separately from the host `effective_budget`; a default token allocation is not an explicitly requested `max_tokens`. Report only observed results and required limits; do not turn host defaults into claims about what the caller filled in.
 
+## Enforced argument boundaries
+
+For explicit path/target/range limits, populate each child's
+`capability_argument_constraints` before enqueueing. A context ref and objective
+alone do not enforce argument bounds. Example:
+`[{"capability":"filesystem.read_text_range","allowed_args":[{"type":"object","required":["path","mode","start_line","end_line"],"properties":{"path":{"enum":["src/example.rs"]},"mode":{"enum":["range"]},"start_line":{"type":"integer","minimum":10,"maximum":20},"end_line":{"type":"integer","minimum":10,"maximum":20}}}]}]`.
+Use the exact path the child will call. Disjoint slices require separate
+schemas in `allowed_args`; do not widen them into one enclosing interval.
+The host freezes this narrowing-only grant and checks actual arguments before
+any execution, including after resume. It does not grant new capabilities.
+A child receiving `child_argument_constraints_v1` must satisfy an allowed
+schema, including required bound fields. After a denied wider request,
+synthesize from existing evidence or report what is missing.
+`has_more` and `truncated` can describe the rest of the file. A fully returned
+requested slice with `line_safety.excerpt_truncated=false` is complete; file
+metadata never asks for or authorizes another read.
+
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
 Use these optional subheading labels when needed:

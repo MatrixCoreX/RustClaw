@@ -494,6 +494,14 @@ fn persistent_child_spec(
         capability_call_limits.clone(),
     );
     let session_ref = child_session_ref(task);
+    let capability_argument_constraints =
+        persistent_scope_value(args, top_level_args, "capability_argument_constraints")
+            .unwrap_or_else(|| json!([]));
+    if !super::super::skill_execution::child_task_execution_policy::valid_capability_argument_constraints(
+        &capability_argument_constraints, &allowed_capabilities,
+    ) {
+        return Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED);
+    }
     let scope = json!({
         "node_id": node_id.clone(),
         "objective": objective,
@@ -505,6 +513,7 @@ fn persistent_child_spec(
         "model_policy": model_policy,
         "tool_policy": tool_policy,
         "capability_call_limits": capability_call_limits,
+        "capability_argument_constraints": capability_argument_constraints,
         "budget_request": requested_child_budget_evidence(args, top_level_args),
         "recursion_depth": child_recursion_depth_from_payload(&task.payload_json),
         "session_ref": session_ref,

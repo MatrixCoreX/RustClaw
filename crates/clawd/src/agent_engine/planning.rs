@@ -357,6 +357,11 @@ pub(super) async fn plan_round_actions(
     if let Some(contract) = crate::repo::child_tasks::child_result_contract_for_task(task) {
         native_user_prompt.push_str(&format!("\n\nchild_result_contract_v1={contract}"));
     }
+    if let Some(constraints) =
+        super::skill_execution::child_task_execution_policy::planner_argument_context(task)
+    {
+        native_user_prompt.push_str(&format!("\n\nchild_argument_constraints_v1={constraints}"));
+    }
     if let Some(handoff) = super::observed_output::latest_child_result_handoff(loop_state) {
         native_user_prompt.push_str(&format!("\n\nchild_result_handoff_v1={handoff}"));
     }

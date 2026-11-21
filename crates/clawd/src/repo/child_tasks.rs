@@ -4,6 +4,7 @@
 mod result_contract;
 use result_contract::validated_child_structured_result;
 pub(crate) use result_contract::{
+    bounded_argument_schema_matches, bounded_argument_schema_supported,
     child_evidence_contract_valid, child_machine_result_valid_for_task,
     child_result_contract_failure, child_result_contract_for_task, child_result_contract_supported,
     child_result_contract_validation_issues,
@@ -1005,6 +1006,7 @@ fn child_task_result_projection(status: &str, payload: &Value, result_json: &Val
         "budget_request": contract.pointer("/scope/budget_request"),
         "effective_budget": contract.get("budget"),
         "effective_capability_call_limits": contract.pointer("/scope/capability_call_limits"),
+        "effective_capability_argument_constraints": contract.pointer("/scope/capability_argument_constraints"),
         "finding_refs": if structured_result.is_some() {
             json!([format!("child_task:{child_task_id}:structured_result")])
         } else {

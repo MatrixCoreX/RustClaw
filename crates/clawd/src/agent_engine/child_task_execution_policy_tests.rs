@@ -51,6 +51,85 @@ planner_capabilities = [
 }
 
 #[test]
+fn frozen_argument_scope_denies_widening_missing_bounds_and_alias_bypasses() {
+    let state = test_state();
+    install_filesystem_registry(&state);
+    let mut task = child_task(
+        "read_only",
+        serde_json::json!(["filesystem.read_text_range"]),
+    );
+    let rule = serde_json::json!([{"capability":"filesystem.read_file","allowed_args":[{
+        "type":"object","required":["path","mode","start_line","end_line"],
+        "properties":{"path":{"enum":["README.md"]},"mode":{"enum":["range"]},
+            "start_line":{"type":"integer","minimum":10,"maximum":20},
+            "end_line":{"type":"integer","minimum":10,"maximum":20}}
+    }]}]);
+    let mut payload: serde_json::Value = serde_json::from_str(&task.payload_json).unwrap();
+    payload["child_task_contract"]["scope"]["capability_argument_constraints"] = rule;
+    task.payload_json = payload.to_string();
+    let valid = serde_json::json!({"action":"read_text_range","path":"README.md","mode":"range","start_line":10,"end_line":20});
+    assert!(child_task_execution_policy_error(&state, &task, "fs_basic", &valid).is_none());
+    for (field, value) in [
+        ("start_line", serde_json::json!(1)),
+        ("end_line", serde_json::json!(21)),
+        ("path", serde_json::json!("OTHER.md")),
+        ("mode", serde_json::json!("head")),
+    ] {
+        let mut args = valid.clone();
+        args[field] = value;
+        let err = child_task_execution_policy_error(&state, &task, "fs_basic", &args).unwrap();
+        let extra = crate::skills::parse_structured_skill_error(&err)
+            .unwrap()
+            .extra
+            .unwrap();
+        assert_eq!(extra["execution_dispatched"], false);
+        assert_eq!(extra["side_effect_applied"], false);
+        assert!(extra["violations"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("capability_arguments_out_of_scope")));
+    }
+    let mut args = valid;
+    args.as_object_mut().unwrap().remove("end_line");
+    assert!(child_task_execution_policy_error(&state, &task, "fs_basic", &args).is_some());
+}
+
+#[test]
+fn argument_scope_admission_is_bounded_and_can_allow_disjoint_slices() {
+    use super::child_task_execution_policy::valid_capability_argument_constraints as valid;
+    let allowed = vec!["filesystem.read_text_range".to_string()];
+    let schema = serde_json::json!({"type":"object","required":["start_line"],"properties":{"start_line":{"type":"integer","minimum":10,"maximum":20}}});
+    let good = serde_json::json!([{"capability":allowed[0],"allowed_args":[schema,{
+        "type":"object","required":["start_line"],"properties":{"start_line":{"enum":[50]}}
+    }]}]);
+    assert!(valid(&good, &allowed));
+    let mut invalid = good.clone();
+    invalid[0]["allowed_args"][0]["$ref"] = serde_json::json!("https://invalid.example/schema");
+    assert!(!valid(&invalid, &allowed));
+    let mut invalid = good.clone();
+    invalid[0]["capability"] = serde_json::json!("filesystem.write_text");
+    assert!(!valid(&invalid, &allowed));
+    let mut invalid = good.clone();
+    invalid[0]["allowed_args"] = serde_json::json!([]);
+    assert!(!valid(&invalid, &allowed));
+    let schemas = good[0]["allowed_args"].as_array().unwrap();
+    for line in [10, 15, 20, 50] {
+        assert!(schemas.iter().any(
+            |s| crate::repo::child_tasks::bounded_argument_schema_matches(
+                s,
+                &serde_json::json!({"start_line":line})
+            )
+        ));
+    }
+    assert!(!schemas.iter().any(
+        |s| crate::repo::child_tasks::bounded_argument_schema_matches(
+            s,
+            &serde_json::json!({"start_line":30})
+        )
+    ));
+}
+
+#[test]
 fn non_child_task_bypasses_child_execution_policy() {
     let state = test_state();
     install_filesystem_registry(&state);

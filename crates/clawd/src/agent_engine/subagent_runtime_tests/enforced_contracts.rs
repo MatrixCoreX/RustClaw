@@ -22,6 +22,10 @@ fn frozen_limits_and_terminal_graph_refresh_do_not_need_new_delegation() {
         let args = serde_json::json!({"action":"inline_readonly","role":"review",
         "objective":"inspect selected scope","context_refs":["README.md"],
         "allowed_capabilities":["filesystem.read_text_range"],
+        "capability_argument_constraints":[{"capability":"filesystem.read_text_range","allowed_args":[{
+            "type":"object","required":["path","start_line","end_line"],"properties":{
+                "path":{"enum":["README.md"]},"start_line":{"type":"integer","minimum":10,"maximum":20},
+                "end_line":{"type":"integer","minimum":10,"maximum":20}}}]}],
         "budget":{"max_rounds":6,"max_tool_calls":6,"capability_call_limits":[
             {"capability":"filesystem.read_text_range","max_calls":2}
         ]}});
@@ -55,6 +59,10 @@ fn frozen_limits_and_terminal_graph_refresh_do_not_need_new_delegation() {
         assert_eq!(
             payload["child_task_contract"]["scope"]["capability_call_limits"][0]["max_calls"],
             2
+        );
+        assert_eq!(
+            payload["child_task_contract"]["scope"]["capability_argument_constraints"],
+            args["capability_argument_constraints"]
         );
         assert_eq!(
             resume_child_graph_before_planner(&state, &task, &mut loop_state).unwrap(),
