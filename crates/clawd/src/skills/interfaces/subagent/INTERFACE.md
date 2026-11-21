@@ -184,3 +184,5 @@ explicit application.
 ```
 
 Child clarification is an unfinished result (`child_task_needs_parent_input`), not a successful delegated output. The parent owns user interaction and may resolve missing input or ask the user before scheduling a refined child. Ordinary main-agent clarification keeps its existing lifecycle.
+
+Budget provenance: `budget_request` records the caller input separately from the host `effective_budget`; a default token allocation is not an explicitly requested `max_tokens`. Report only observed results and required limits; do not turn host defaults into claims about what the caller filled in.

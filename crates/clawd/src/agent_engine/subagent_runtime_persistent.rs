@@ -505,6 +505,7 @@ fn persistent_child_spec(
         "model_policy": model_policy,
         "tool_policy": tool_policy,
         "capability_call_limits": capability_call_limits,
+        "budget_request": requested_child_budget_evidence(args, top_level_args),
         "recursion_depth": child_recursion_depth_from_payload(&task.payload_json),
         "session_ref": session_ref,
         "session_open_capacity": config.max_concurrent_threads_per_session,
@@ -524,6 +525,31 @@ fn persistent_child_spec(
         budget: persistent_child_budget(task, args, top_level_args),
         result_contract,
         merge_policy: ChildTaskMergePolicy::StructuredFindings,
+    })
+}
+
+fn requested_child_budget_evidence(args: &Value, inherited: Option<&Value>) -> Value {
+    let budget = args
+        .get("budget")
+        .or_else(|| inherited.and_then(|value| value.get("budget")));
+    let mut values = serde_json::Map::new();
+    for field in [
+        "max_rounds",
+        "max_tool_calls",
+        "max_tokens",
+        "runtime_deadline_ms",
+    ] {
+        if let Some(value) = budget
+            .and_then(|value| value.get(field))
+            .and_then(Value::as_u64)
+        {
+            values.insert(field.into(), json!(value));
+        }
+    }
+    json!({
+        "schema_version":1,"origin":"caller","supplied":budget.is_some(),
+        "max_tokens_explicitly_requested":budget.is_some_and(|value|value.get("max_tokens").is_some()),
+        "values":values,
     })
 }
 

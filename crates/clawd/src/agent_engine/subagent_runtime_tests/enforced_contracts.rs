@@ -48,6 +48,11 @@ fn frozen_limits_and_terminal_graph_refresh_do_not_need_new_delegation() {
         }
         let (_, payload) = child_task_row(&state, &id);
         assert_eq!(
+            payload["child_task_contract"]["scope"]["budget_request"]
+                ["max_tokens_explicitly_requested"],
+            false
+        );
+        assert_eq!(
             payload["child_task_contract"]["scope"]["capability_call_limits"][0]["max_calls"],
             2
         );
@@ -71,6 +76,11 @@ fn frozen_limits_and_terminal_graph_refresh_do_not_need_new_delegation() {
             } else {
                 "blocked"
             })
+        );
+        assert_eq!(
+            loop_state.task_observations.last().unwrap()["model_observation"]["results"][0]
+                ["budget_request"]["max_tokens_explicitly_requested"],
+            false
         );
         assert!(loop_state.task_checkpoint.is_none());
         assert_eq!(

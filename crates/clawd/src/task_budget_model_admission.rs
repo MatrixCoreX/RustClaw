@@ -71,7 +71,9 @@ pub(crate) fn prepare(
         .filter(|n| *n >= 256)
         .ok_or_else(|| admission.denied(available))?;
     hints.max_tokens = Some(output_cap);
+    hints.structured_verification = false;
     if label == "verifier" && hints.reasoning_effort.is_none() {
+        hints.structured_verification = true;
         hints.reasoning_effort = Some("low".into());
     }
     Ok(admission)

@@ -80,19 +80,22 @@ pub(super) async fn call_anthropic_claude(
         if let Some(tp) = effective_top_p {
             map.insert("top_p".to_string(), json!(tp));
         }
-        if let Some(effort) = hints.reasoning_effort.as_deref() {
-            let requested = match effort {
-                "low" => 1024,
-                "medium" => 4096,
-                "high" => 8192,
-                _ => 0,
-            };
-            if requested > 0 && max_tokens > 1 {
-                map.remove("temperature");
-                map.insert(
-                    "thinking".to_string(),
-                    json!({"type":"enabled","budget_tokens":requested.min(max_tokens - 1)}),
-                );
+        if !super::reasoning_control::apply_anthropic_reasoning(map, &provider.config.model, hints)
+        {
+            if let Some(effort) = hints.reasoning_effort.as_deref() {
+                let requested = match effort {
+                    "low" => 1024,
+                    "medium" => 4096,
+                    "high" => 8192,
+                    _ => 0,
+                };
+                if requested > 0 && max_tokens > 1 {
+                    map.remove("temperature");
+                    map.insert(
+                        "thinking".to_string(),
+                        json!({"type":"enabled","budget_tokens":requested.min(max_tokens - 1)}),
+                    );
+                }
             }
         }
     }

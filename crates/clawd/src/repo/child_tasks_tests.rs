@@ -694,3 +694,26 @@ fn inline_child_starts_with_independent_running_claim_and_graph_node() {
         .expect("read child graph node");
     assert_eq!(readiness, "running");
 }
+
+#[test]
+fn child_result_budget_origin_comes_from_frozen_contract_not_the_child_answer() {
+    let request = json!({"schema_version":1,"origin":"caller","supplied":true,
+        "max_tokens_explicitly_requested":false,"values":{"max_tool_calls":2}});
+    let payload = json!({"child_task_contract":{"parent_task_id":"parent","child_task_id":"child",
+        "budget":{"max_tokens":1000000,"max_tool_calls":2},
+        "scope":{"budget_request":request,"capability_call_limits":[{"capability":"filesystem.read_text_range","max_calls":2}]}}});
+    let result = child_task_result_projection(
+        "failed",
+        &payload,
+        &json!({
+        "budget_request":{"max_tokens_explicitly_requested":true},"effective_budget":{"max_tokens":9999999}}),
+    );
+    assert_eq!(result["budget_request"], request);
+    assert_eq!(result["effective_budget"]["max_tokens"], 1000000);
+    assert_eq!(
+        result["effective_capability_call_limits"][0]["max_calls"],
+        2
+    );
+    let legacy = child_task_result_projection("failed", &json!({}), &json!({}));
+    assert!(legacy["budget_request"].is_null());
+}

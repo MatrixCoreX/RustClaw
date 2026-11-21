@@ -123,8 +123,10 @@ fn literal_tool_arguments_survive_json_and_fragmented_stream_decoding() {
 
 #[test]
 fn reasoning_effort_is_forwarded_as_machine_provider_parameter() {
+    let mut provider = provider();
+    provider.config.model = "fixture-effort-model".into();
     let body = build_openai_request(
-        &provider(),
+        &provider,
         &native_request(),
         &ChatRequestHints {
             reasoning_effort: Some("high".to_string()),
@@ -682,4 +684,23 @@ fn bounded_raw_log_preserves_late_public_tools_terminal_and_usage() {
         header["terminal"]["choices"][0]["finish_reason"],
         "tool_calls"
     );
+}
+
+#[test]
+fn m3_structured_verification_request_uses_the_same_protocol_control_as_text_calls() {
+    let body = build_openai_request(
+        &provider(),
+        &native_request(),
+        &ChatRequestHints {
+            structured_verification: true,
+            reasoning_effort: Some("low".into()),
+            max_tokens: Some(4096),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(body["thinking"], json!({"type":"disabled"}));
+    assert!(body.get("reasoning_effort").is_none());
+    assert_eq!(body["model"], "MiniMax-M3");
+    assert_eq!(body["max_tokens"], 4096);
 }

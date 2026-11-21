@@ -59,9 +59,7 @@ pub(super) async fn call_openai_compat(
         if let Some(mt) = effective_max_tokens {
             map.insert("max_tokens".to_string(), json!(mt));
         }
-        if let Some(effort) = hints.reasoning_effort.as_deref() {
-            map.insert("reasoning_effort".to_string(), json!(effort));
-        }
+        super::reasoning_control::apply_openai_reasoning(map, &provider.config.model, hints);
         if let Some(tp) = effective_top_p {
             map.insert("top_p".to_string(), json!(tp));
         }

@@ -1002,6 +1002,9 @@ fn child_task_result_projection(status: &str, payload: &Value, result_json: &Val
         "verification_artifact": verification_artifact,
         "budget_allocation_id": budget_allocation_id,
         "budget_consumed": child_budget_consumed(result_json),
+        "budget_request": contract.pointer("/scope/budget_request"),
+        "effective_budget": contract.get("budget"),
+        "effective_capability_call_limits": contract.pointer("/scope/capability_call_limits"),
         "finding_refs": if structured_result.is_some() {
             json!([format!("child_task:{child_task_id}:structured_result")])
         } else {

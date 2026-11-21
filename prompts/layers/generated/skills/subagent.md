@@ -30,6 +30,8 @@ Delegate a clearly bounded task to an isolated child agent while the parent rema
 
 A child that needs clarification returns an unfinished `child_task_needs_parent_input` result to its parent; asking a question does not complete the delegated objective. The parent resolves the missing input or asks the user through the ordinary parent conversation.
 
+Budget provenance: `budget_request` records the caller input separately from the host `effective_budget`; a default token allocation is not an explicitly requested `max_tokens`. Report only observed results and required limits; do not turn host defaults into claims about what the caller filled in.
+
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
 Use these optional subheading labels when needed:

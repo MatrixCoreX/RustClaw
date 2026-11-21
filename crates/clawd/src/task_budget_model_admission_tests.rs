@@ -137,3 +137,22 @@ fn budget_usage_counts_protocol_aliases_cache_inputs_and_reported_total_without_
     assert_eq!(usage_charge(&gemini), Some(1260));
     assert_eq!(usage_charge(&LlmUsageSnapshot::default()), None);
 }
+
+#[test]
+fn direct_verification_hint_is_stage_scoped_and_preserves_explicit_reasoning_preferences() {
+    let state = AppState::test_default_with_fixture_provider();
+    for (label, explicit, direct, effort, cap) in [
+        ("verifier", None, true, Some("low"), 4096),
+        ("plan", None, false, None, 8192),
+        ("verifier", Some("high"), false, Some("high"), 4096),
+    ] {
+        let mut hints = ChatRequestHints {
+            reasoning_effort: explicit.map(str::to_owned),
+            ..Default::default()
+        };
+        prepare(&state, &task(100000), "fixture", label, &mut hints).unwrap();
+        assert_eq!(hints.structured_verification, direct);
+        assert_eq!(hints.reasoning_effort.as_deref(), effort);
+        assert_eq!(hints.max_tokens, Some(cap));
+    }
+}

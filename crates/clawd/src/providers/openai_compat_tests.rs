@@ -128,7 +128,10 @@ async fn configured_stream_reads_fragmented_text_and_terminal_usage() {
     let f = fixture(true, 200, "text/event-stream", body).await;
     let response = call(&f).await.expect("configured stream must decode SSE");
     assert_eq!(response.text, "hello world");
-    assert_eq!(f.requests.lock().unwrap()[0]["stream_options"], json!({"include_usage": true}));
+    assert_eq!(
+        f.requests.lock().unwrap()[0]["stream_options"],
+        json!({"include_usage": true})
+    );
     assert_eq!(response.usage.unwrap().total_tokens, Some(18));
     assert_eq!(response.request_payload["stream"], true);
     assert!(response.request_payload.get("tools").is_none());
@@ -301,4 +304,32 @@ async fn stream_length_termination_preserves_the_existing_text_contract() {
     let response = call(&f).await.unwrap();
     assert_eq!(response.text, "truncated");
     assert!(response.usage.is_none());
+}
+
+#[tokio::test]
+async fn m3_verdict_control_reaches_the_actual_http_request_without_changing_its_token_limit() {
+    let body =
+        json!({"choices":[{"message":{"content":"{\"pass\":false}"},"finish_reason":"stop"}]})
+            .to_string();
+    let mut f = fixture(false, 200, "application/json", body).await;
+    Arc::get_mut(&mut f.provider).unwrap().config.model = "MiniMax-M3".into();
+    let response = call_openai_compat(
+        f.provider.clone(),
+        "fixture verification evidence",
+        &ChatRequestHints {
+            structured_verification: true,
+            reasoning_effort: Some("low".into()),
+            max_tokens: Some(4096),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let captured = f.requests.lock().unwrap();
+    assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0]["thinking"], json!({"type":"disabled"}));
+    assert!(captured[0].get("reasoning_effort").is_none());
+    assert_eq!(captured[0]["max_tokens"], 4096);
+    assert_eq!(captured[0]["model"], "MiniMax-M3");
+    assert_eq!(response.text, "{\"pass\":false}");
 }

@@ -141,20 +141,26 @@ pub(super) fn build_anthropic_request(
     if let Some(value) = params.top_p {
         body.insert("top_p".to_string(), json!(value));
     }
-    if let Some(effort) = hints.reasoning_effort.as_deref() {
-        let requested = match effort {
-            "low" => 1024,
-            "medium" => 4096,
-            "high" => 8192,
-            _ => 0,
-        };
-        let max_tokens = body.get("max_tokens").and_then(Value::as_u64).unwrap_or(0);
-        if requested > 0 && max_tokens > 1024 {
-            body.remove("temperature");
-            body.insert(
-                "thinking".to_string(),
-                json!({"type":"enabled","budget_tokens":requested.min(max_tokens - 1)}),
-            );
+    if !super::reasoning_control::apply_anthropic_reasoning(
+        &mut body,
+        &provider.config.model,
+        hints,
+    ) {
+        if let Some(effort) = hints.reasoning_effort.as_deref() {
+            let requested = match effort {
+                "low" => 1024,
+                "medium" => 4096,
+                "high" => 8192,
+                _ => 0,
+            };
+            let max_tokens = body.get("max_tokens").and_then(Value::as_u64).unwrap_or(0);
+            if requested > 0 && max_tokens > 1024 {
+                body.remove("temperature");
+                body.insert(
+                    "thinking".to_string(),
+                    json!({"type":"enabled","budget_tokens":requested.min(max_tokens - 1)}),
+                );
+            }
         }
     }
     if !request.tools.is_empty() {

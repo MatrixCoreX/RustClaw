@@ -10,6 +10,7 @@ pub(crate) mod fixture_replay;
 pub(crate) mod gemini_model_turn;
 pub(crate) mod google_gemini;
 pub(crate) mod model_log_payload;
+mod reasoning_control;
 pub(crate) mod openai_compat;
 pub(crate) mod openai_model_turn;
 pub(crate) mod output;

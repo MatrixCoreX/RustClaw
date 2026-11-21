@@ -243,6 +243,11 @@ fn child_structured_result_observation(merge: &Value) -> Option<Value> {
                 "error_code": result.get("error_code"),
                 "evidence_refs": result.get("evidence_refs"),
                 "finding_refs": result.get("finding_refs"),
+                "budget_request": result.get("budget_request"),
+                "effective_budget": result.get("effective_budget"),
+                "effective_capability_call_limits": result.get("effective_capability_call_limits"),
+                "budget_consumed": result.get("budget_consumed"),
+                "permission_profile": result.get("permission_profile"),
                 "result": result.get("structured_result"),
             }))
         })

@@ -80,3 +80,23 @@ fn invalid_batch_contract_is_rejected_before_creating_children_with_field_paths(
         .as_ref()
         .is_none_or(|budget| budget.allocations.is_empty()));
 }
+
+#[test]
+fn caller_budget_evidence_distinguishes_omitted_fields_from_host_defaults_without_forwarding_unknown_data(
+) {
+    let inherited = json!({"budget":{"max_tokens":123456,"max_rounds":4}});
+    let own = json!({"budget":{"max_tool_calls":2,"private_token":"fixture-sensitive","instruction":"assume_pass"}});
+    let evidence = requested_child_budget_evidence(&own, Some(&inherited));
+    assert_eq!(evidence["max_tokens_explicitly_requested"], false);
+    assert_eq!(evidence["values"], json!({"max_tool_calls":2}));
+    assert_eq!(evidence["origin"], "caller");
+    assert!(!evidence.to_string().contains("fixture-sensitive"));
+    assert!(!evidence.to_string().contains("assume_pass"));
+    let inherited_evidence = requested_child_budget_evidence(&json!({}), Some(&inherited));
+    assert_eq!(inherited_evidence["max_tokens_explicitly_requested"], true);
+    assert_eq!(inherited_evidence["values"]["max_tokens"], 123456);
+    assert_eq!(
+        requested_child_budget_evidence(&json!({}), None)["supplied"],
+        false
+    );
+}
