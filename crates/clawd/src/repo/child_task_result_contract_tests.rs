@@ -46,3 +46,27 @@ fn declared_child_result_requires_every_field_without_parsing_prose() {
     .unwrap();
     assert_eq!(projection, json!({"name":"Panel","line":9}));
 }
+
+#[test]
+fn complete_child_result_rejects_null_required_values_without_rejecting_valid_empty_values() {
+    let mut payload = json!({"task_role":"subagent_child","child_task_contract":{
+        "result_contract":{"output_format":"machine_json","allow_partial":false,
+            "required_keys":["first_line","evidence"]}
+    }});
+    let missing_value = json!({"first_line":null,"evidence":{"error_code":"not_found"}});
+    assert_eq!(
+        child_result_contract_failure(&payload, &missing_value.to_string()).unwrap()["error_code"],
+        "child_task_result_contract_invalid"
+    );
+    for value in [json!(""), json!(false), json!(0), json!([]), json!({})] {
+        let answer = json!({"first_line":value,"evidence":[],"optional":null});
+        assert!(child_result_contract_failure(&payload, &answer.to_string()).is_none());
+    }
+    payload["child_task_contract"]["result_contract"]["allow_partial"] = json!(true);
+    assert!(child_result_contract_failure(&payload, &missing_value.to_string()).is_none());
+    payload["child_task_contract"]["result_contract"]
+        .as_object_mut()
+        .unwrap()
+        .remove("allow_partial");
+    assert!(child_result_contract_failure(&payload, &missing_value.to_string()).is_none());
+}

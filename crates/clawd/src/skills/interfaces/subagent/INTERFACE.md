@@ -93,6 +93,9 @@ explicit application.
 - A durable child with `result_contract.output_format=machine_json` and required
   keys must persist those fields as JSON. A prose answer or missing required
   field cannot complete the child, even when semantic answer verification passes.
+- With explicit `allow_partial=false`, required fields must also be non-null.
+  An error observation does not fill an unavailable required value. Optional
+  fields and contracts permitting partial results may still contain null.
 - The default `machine_json` contract also returns a bounded JSON object when no
   `required_keys` list is supplied; all object fields are retained as passive
   findings. Explicit key lists still project only the requested fields.

@@ -60,6 +60,10 @@ pub(crate) fn validated_child_structured_result(
             .map(|key| key.as_str().map(str::trim).filter(|key| !key.is_empty()))
             .collect::<Option<Vec<_>>>()?,
     };
+    let complete_fields_required = result_contract
+        .get("allow_partial")
+        .and_then(Value::as_bool)
+        == Some(false);
 
     let candidate_strings = [
         result_json.get("text").and_then(Value::as_str),
@@ -107,6 +111,7 @@ pub(crate) fn validated_child_structured_result(
                     .map(|key| {
                         source
                             .get(*key)
+                            .filter(|value| !complete_fields_required || !value.is_null())
                             .cloned()
                             .map(|value| ((*key).to_string(), value))
                     })
