@@ -1137,11 +1137,10 @@ pub(super) fn handle_preflight_argument_failure(
         finished_at: now,
     };
     loop_state.capability_results.push(
-        crate::capability_result::envelope_for_step_execution(
+        crate::capability_result::envelope_for_preflight_rejection(
             normalized_skill,
             classification_args,
             &step_execution,
-            None,
         )
         .map_err(|error| error.to_string())?,
     );

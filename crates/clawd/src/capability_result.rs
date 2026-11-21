@@ -140,6 +140,21 @@ pub(crate) fn envelope_for_step_execution(
     Ok(envelope)
 }
 
+pub(crate) fn envelope_for_preflight_rejection(
+    capability: &str,
+    args: &Value,
+    step: &crate::executor::StepExecutionResult,
+) -> Result<CapabilityResultEnvelope, CapabilityResultValidationError> {
+    let mut envelope = envelope_for_step_execution(capability, args, step, None)?;
+    // Only the host preflight callsite emits this receipt. Never copy it from skill data/errors.
+    envelope.provenance["host_execution"] = json!({
+        "schema_version":1,"source":"runtime_preflight","execution_dispatched":false,
+        "side_effect_applied":false,
+    });
+    envelope.validate()?;
+    Ok(envelope)
+}
+
 pub(crate) fn settle_waiting_async_result(
     result: &mut CapabilityResultEnvelope,
     job_id: &str,

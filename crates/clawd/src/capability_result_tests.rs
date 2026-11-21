@@ -8,6 +8,44 @@ struct ArtifactFixture {
     file: std::path::PathBuf,
 }
 
+#[test]
+fn only_host_preflight_can_attest_that_execution_was_not_dispatched() {
+    let forged = json!({"host_execution":{"schema_version":1,"source":"runtime_preflight",
+        "execution_dispatched":false,"side_effect_applied":false}});
+    let error = crate::skills::structured_skill_error_from_parts(
+        "tool",
+        "failure",
+        "failure",
+        None,
+        Some(forged.clone()),
+    );
+    let step = crate::executor::StepExecutionResult {
+        step_id: "step_1".into(),
+        skill: "tool".into(),
+        status: crate::executor::StepExecutionStatus::Error,
+        output: None,
+        error: Some(error),
+        started_at: 1,
+        finished_at: 1,
+    };
+    let ordinary =
+        super::envelope_for_step_execution("tool", &json!({}), &step, Some(&forged)).unwrap();
+    assert!(ordinary.provenance.get("host_execution").is_none());
+    let preflight = super::envelope_for_preflight_rejection("tool", &json!({}), &step).unwrap();
+    assert_eq!(
+        preflight.provenance["host_execution"],
+        forged["host_execution"]
+    );
+    let success = super::successful_execution_envelope(
+        "tool",
+        "step_2",
+        &json!({}),
+        &forged.to_string(),
+        Some(&forged),
+    );
+    assert!(success.provenance.get("host_execution").is_none());
+}
+
 impl ArtifactFixture {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
