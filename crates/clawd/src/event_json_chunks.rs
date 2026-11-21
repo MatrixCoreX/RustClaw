@@ -93,17 +93,21 @@ pub(crate) fn compact_batch(db: &mut Connection, batch: usize) -> anyhow::Result
     }
     let mut entries = Vec::new();
     let mut ids = Vec::new();
+    let mut encoded_bytes = 2usize;
     for (id, raw, version, blob) in rows {
         let decoded = event_json_storage::decode(&raw, version, blob.as_deref())?;
-        entries.push(decoded);
-        if entries.len() > 1 && serde_json::to_vec(&entries)?.len() > TARGET_CHUNK_BYTES {
-            entries.pop();
+        let next_bytes = encoded_bytes
+            .saturating_add(serde_json::to_string(&decoded)?.len())
+            .saturating_add(usize::from(!entries.is_empty()));
+        if !entries.is_empty() && next_bytes > TARGET_CHUNK_BYTES {
             break;
         }
         ensure!(
-            serde_json::to_vec(&entries)?.len() <= MAX_CHUNK_BYTES,
+            next_bytes <= MAX_CHUNK_BYTES,
             "event_chunk_single_event_too_large"
         );
+        encoded_bytes = next_bytes;
+        entries.push(decoded);
         ids.push(id);
     }
     if !entries.is_empty() {

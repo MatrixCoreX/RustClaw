@@ -25,6 +25,7 @@ pub(super) fn catalog_entries_for_task(
     task: &ClaimedTask,
 ) -> Vec<CapabilityCatalogEntry> {
     let mut entries = Vec::new();
+    let allowed = crate::capability_map::child_allowed_capabilities(state, task);
     let mut skills = state.planner_available_skills_for_task(task);
     skills.sort();
     for skill in skills {
@@ -34,7 +35,11 @@ pub(super) fn catalog_entries_for_task(
         let playbook_artifact = playbook_artifact(state, &skill);
         for capability in &manifest.planner_capabilities {
             let capability_id = capability.name.trim();
-            if capability_id.is_empty() {
+            if capability_id.is_empty()
+                || allowed
+                    .as_ref()
+                    .is_some_and(|names| !names.contains(capability_id))
+            {
                 continue;
             }
             let argument_schema = claw_core::skill_registry::planner_capability_argument_schema(

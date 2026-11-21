@@ -47,6 +47,16 @@ fn planner_available_skills_for_task_scoped(
     skill_scope: Option<&BTreeSet<String>>,
 ) -> Vec<String> {
     let mut enabled = state.planner_available_skills_for_task(task);
+    if let Some(allowed) = crate::capability_map::child_allowed_capabilities(state, task) {
+        enabled.retain(|skill| {
+            state.skill_manifest(skill).is_some_and(|manifest| {
+                manifest
+                    .planner_capabilities
+                    .iter()
+                    .any(|capability| allowed.contains(&capability.name))
+            })
+        });
+    }
     if let Some(skill_scope) = skill_scope {
         enabled.retain(|skill| skill_scope.contains(skill));
     }

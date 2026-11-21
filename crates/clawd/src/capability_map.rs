@@ -612,7 +612,10 @@ fn native_capability_group_tool_name(
     base
 }
 
-fn child_allowed_capabilities(state: &AppState, task: &ClaimedTask) -> Option<BTreeSet<String>> {
+pub(crate) fn child_allowed_capabilities(
+    state: &AppState,
+    task: &ClaimedTask,
+) -> Option<BTreeSet<String>> {
     let payload = serde_json::from_str::<serde_json::Value>(&task.payload_json).ok()?;
     if !crate::repo::child_tasks::is_child_subagent_payload(&payload) {
         return None;

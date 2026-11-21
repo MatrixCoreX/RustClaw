@@ -381,6 +381,7 @@ pub(crate) enum LlmRoutingPreference {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ChatRequestHints {
+    pub(crate) observed_http_status: Arc<std::sync::atomic::AtomicU16>,
     pub(crate) host_admission:
         Option<Arc<crate::task_budget_contract::model_admission::ModelAdmission>>,
     pub(crate) temperature: Option<f64>,

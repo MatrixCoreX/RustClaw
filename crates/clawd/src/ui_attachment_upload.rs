@@ -98,6 +98,9 @@ pub(crate) fn commit_upload_batch(
             }
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if fs2::available_space(root).unwrap_or(0) < 2 * 1024 * 1024 * 1024 + total as u64 {
+                return Err("ui_attachment_storage_pressure".into());
+            }
             let mut rollback = Rollback {
                 root,
                 created: Vec::new(),

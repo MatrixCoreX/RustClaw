@@ -93,8 +93,8 @@ fn parent_calls_respect_persisted_child_reservations() {
     );
     slice
         .allocate(
-            "child:1".into(),
-            "child:1".into(),
+            "child:1",
+            "child:1",
             BudgetAllocationKind::ChildTask,
             BudgetUnits {
                 tokens: 95000,

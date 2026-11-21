@@ -102,3 +102,20 @@ fn exact_expansion_returns_action_documentation_with_the_original_contract_diges
     assert!(parameters.contains("| `read_text_range` |"));
     assert!(!parameters.contains("| `write_text` |"));
 }
+
+#[test]
+fn child_catalog_and_expansion_share_the_same_allowed_capability_scope_as_native_tools() {
+    let state = AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
+    let mut task = fixture_task();
+    let entries = catalog_entries_for_task(&state, &task);
+    assert!(entries.len() > 1);
+    let allowed = entries[0].capability_id.clone();
+    let forbidden = entries[1].capability_ref.clone();
+    task.payload_json=json!({"task_role":"subagent_child","child_task_contract":{"scope":{"allowed_capabilities":[allowed]}}}).to_string();
+    let scoped = catalog_entries_for_task(&state, &task);
+    assert_eq!(scoped.len(), 1);
+    assert_eq!(scoped[0].capability_id, allowed);
+    assert!(expand_catalog(&state, &task, &[forbidden]).is_err());
+}
