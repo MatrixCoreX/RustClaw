@@ -16,6 +16,14 @@ fn packed_replay_progress_dedup_and_append_survive_terminal_cache_pruning() {
         )
         .unwrap();
     assert_eq!(versions, 2);
+    assert_eq!(
+        crate::event_json_chunks::compact_batch(&mut db, 128).unwrap(),
+        2
+    );
+    assert_eq!(
+        crate::event_json_chunks::compact_batch(&mut db, 128).unwrap(),
+        0
+    );
     db.execute(
         "UPDATE tasks SET status='succeeded' WHERE task_id=?1",
         [task_id],

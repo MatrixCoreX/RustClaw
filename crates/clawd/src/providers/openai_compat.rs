@@ -107,6 +107,9 @@ pub(super) async fn call_openai_compat(
     }
 
     let status = resp.status();
+    hints
+        .observed_http_status
+        .store(status.as_u16(), std::sync::atomic::Ordering::Relaxed);
     let headers = resp.headers().clone();
     if status.is_success() && effective_stream {
         let output =

@@ -1,5 +1,6 @@
 use rusqlite::OptionalExtension;
 use serde_json::{json, Map, Value};
+#[cfg(test)]
 use uuid::Uuid;
 
 use crate::{now_ts, AppState};

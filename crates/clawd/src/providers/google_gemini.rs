@@ -86,6 +86,9 @@ pub(super) async fn call_google_gemini(
         })?;
 
     let status = resp.status();
+    hints
+        .observed_http_status
+        .store(status.as_u16(), std::sync::atomic::Ordering::Relaxed);
     let headers = resp.headers().clone();
     let body_text = resp.text().await.map_err(|err| {
         ProviderError::retryable(format!("read response failed: {err}"), req_body.clone())

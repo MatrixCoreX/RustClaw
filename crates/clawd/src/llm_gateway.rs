@@ -768,6 +768,10 @@ async fn run_with_provider_resource(
                 return Ok(cleaned_text);
             }
             Err(err) => {
+                if err.host_admission_blocked {
+                    stop_llm_task_lease_heartbeat(&mut heartbeat_stop);
+                    return Err(err.message);
+                }
                 crate::runtime::provider_diagnostics::record(err.kind, err.retryable);
                 if err.kind == ProviderErrorKind::QuotaExhausted {
                     quota_error_count = quota_error_count.saturating_add(1);
@@ -995,3 +999,7 @@ pub(crate) fn selected_llm_connection(
 #[cfg(test)]
 #[path = "llm_gateway_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "llm_gateway_cancellation_tests.rs"]
+mod cancellation_tests;

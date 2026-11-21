@@ -79,6 +79,7 @@ pub(crate) type ModelTurnEventSink = Arc<dyn Fn(ModelTurnEvent) + Send + Sync>;
 #[derive(Debug, Clone)]
 pub(crate) struct ProviderError {
     pub(crate) http_status: Option<u16>,
+    pub(crate) host_admission_blocked: bool,
     /// Server not-before hint; yielded to the existing background checkpoint path.
     pub(super) retry_after_seconds: Option<u64>,
     pub(crate) retryable: bool,
@@ -110,6 +111,13 @@ impl std::fmt::Display for ProviderError {
 }
 
 impl ProviderError {
+    fn admission_blocked(message: String, attempts: usize, retryable_error_count: usize) -> Self {
+        let mut error = Self::non_retryable(message, Value::Null);
+        error.host_admission_blocked = true;
+        error.attempts = attempts;
+        error.retryable_error_count = retryable_error_count;
+        error
+    }
     pub(crate) fn is_rate_limited(&self) -> bool {
         self.kind == ProviderErrorKind::RateLimited
     }
@@ -132,6 +140,7 @@ impl ProviderError {
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Failure,
             http_status: None,
+            host_admission_blocked: false,
             retry_after_seconds: None,
         }
     }
@@ -148,6 +157,7 @@ impl ProviderError {
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Failure,
             http_status: None,
+            host_admission_blocked: false,
             retry_after_seconds: None,
         }
     }
@@ -169,6 +179,7 @@ impl ProviderError {
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Failure,
             http_status: None,
+            host_admission_blocked: false,
             retry_after_seconds: None,
         }
     }
@@ -191,6 +202,7 @@ impl ProviderError {
             // The provider answered successfully; only this model turn was malformed.
             breaker_impact: BreakerImpact::Healthy,
             http_status: None,
+            host_admission_blocked: false,
             retry_after_seconds: None,
         }
     }
@@ -207,6 +219,7 @@ impl ProviderError {
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Neutral,
             http_status: None,
+            host_admission_blocked: false,
             retry_after_seconds: None,
         }
     }
@@ -228,6 +241,7 @@ impl ProviderError {
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Healthy,
             http_status: None,
+            host_admission_blocked: false,
             retry_after_seconds: None,
         }
     }
@@ -249,6 +263,7 @@ impl ProviderError {
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Healthy,
             http_status: None,
+            host_admission_blocked: false,
             retry_after_seconds: None,
         }
     }
@@ -270,6 +285,7 @@ impl ProviderError {
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Healthy,
             http_status: None,
+            host_admission_blocked: false,
             retry_after_seconds: None,
         }
     }
@@ -291,6 +307,7 @@ impl ProviderError {
             retryable_error_count: 0,
             breaker_impact: BreakerImpact::Healthy,
             http_status: None,
+            host_admission_blocked: false,
             retry_after_seconds: None,
         }
     }
@@ -379,6 +396,7 @@ pub(crate) struct ChatRequestHints {
 impl Default for ChatRequestHints {
     fn default() -> Self {
         Self {
+            observed_http_status: Arc::new(std::sync::atomic::AtomicU16::new(0)),
             host_admission: None,
             temperature: None,
             max_tokens: None,
@@ -411,6 +429,7 @@ pub(crate) async fn call_provider_with_retry_with_hints(
     loop {
         attempts += 1;
         let mut attempt_hints = hints.clone();
+        attempt_hints.observed_http_status = Arc::new(std::sync::atomic::AtomicU16::new(0));
         let attempt = hints
             .host_admission
             .as_ref()
@@ -422,7 +441,13 @@ pub(crate) async fn call_provider_with_retry_with_hints(
                 )
             })
             .transpose()
-            .map_err(|code| ProviderError::non_retryable(code, Value::Null))?;
+            .map_err(|code| {
+                ProviderError::admission_blocked(
+                    code,
+                    attempts.saturating_sub(1),
+                    retryable_error_count,
+                )
+            })?;
         let result = call_provider(provider.clone(), prompt, &attempt_hints).await;
         if let Some(attempt) = attempt {
             let delay = result
@@ -432,8 +457,22 @@ pub(crate) async fn call_provider_with_retry_with_hints(
                 .map(|e| retry_delay_for_provider_error(e, attempts).as_millis() as u64)
                 .unwrap_or(0);
             match &result {
-                Ok(response) => attempt.finish(response.usage.as_ref(), None, 0),
-                Err(error) => attempt.finish(error.usage.as_ref(), Some(error), delay),
+                Ok(response) => attempt.finish(
+                    response.usage.as_ref(),
+                    None,
+                    0,
+                    attempt_hints
+                        .observed_http_status
+                        .load(std::sync::atomic::Ordering::Relaxed),
+                ),
+                Err(error) => attempt.finish(
+                    error.usage.as_ref(),
+                    Some(error),
+                    delay,
+                    attempt_hints
+                        .observed_http_status
+                        .load(std::sync::atomic::Ordering::Relaxed),
+                ),
             }
         }
         match result {
@@ -475,6 +514,7 @@ pub(crate) async fn call_model_turn_with_retry(
             sink(ModelTurnEvent::Started { attempt: attempts });
         }
         let mut attempt_hints = hints.clone();
+        attempt_hints.observed_http_status = Arc::new(std::sync::atomic::AtomicU16::new(0));
         let attempt = hints
             .host_admission
             .as_ref()
@@ -486,7 +526,13 @@ pub(crate) async fn call_model_turn_with_retry(
                 )
             })
             .transpose()
-            .map_err(|code| ProviderError::non_retryable(code, Value::Null))?;
+            .map_err(|code| {
+                ProviderError::admission_blocked(
+                    code,
+                    attempts.saturating_sub(1),
+                    retryable_error_count,
+                )
+            })?;
         let result = call_model_turn(
             provider.clone(),
             request,
@@ -502,8 +548,22 @@ pub(crate) async fn call_model_turn_with_retry(
                 .map(|e| retry_delay_for_provider_error(e, attempts).as_millis() as u64)
                 .unwrap_or(0);
             match &result {
-                Ok(response) => attempt.finish(response.turn.usage.as_ref(), None, 0),
-                Err(error) => attempt.finish(error.usage.as_ref(), Some(error), delay),
+                Ok(response) => attempt.finish(
+                    response.turn.usage.as_ref(),
+                    None,
+                    0,
+                    attempt_hints
+                        .observed_http_status
+                        .load(std::sync::atomic::Ordering::Relaxed),
+                ),
+                Err(error) => attempt.finish(
+                    error.usage.as_ref(),
+                    Some(error),
+                    delay,
+                    attempt_hints
+                        .observed_http_status
+                        .load(std::sync::atomic::Ordering::Relaxed),
+                ),
             }
         }
         match result {

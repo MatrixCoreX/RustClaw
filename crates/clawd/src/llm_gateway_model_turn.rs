@@ -309,6 +309,10 @@ pub(crate) async fn run_native_model_turn_with_fallback(
                 return Ok(Some(output.turn));
             }
             Err(err) => {
+                if err.host_admission_blocked {
+                    stop_llm_task_lease_heartbeat(&mut heartbeat_stop);
+                    return Err(err.message);
+                }
                 if err.kind == ProviderErrorKind::QuotaExhausted {
                     quota_error_count = quota_error_count.saturating_add(1);
                     quota_provider = Some(provider.config.name.clone());

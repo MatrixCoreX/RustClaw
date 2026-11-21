@@ -346,7 +346,7 @@ fn queued_retry_lifecycle(
 fn machine_task_id(value: &str) -> Option<&str> {
     let value = value.trim();
     if value.is_empty()
-        || value.len() > 160
+        || value.len() > 1024
         || !value
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | ':' | '.' | '/'))

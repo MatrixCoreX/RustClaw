@@ -284,7 +284,7 @@ fn persist_snapshot(
         range_hasher.update(event_hash.as_bytes());
         range_hasher.update(b"\n");
         {
-            let event = crate::event_json_chunks::read(db, event_json, *version, blob.as_deref())?;
+            let event = crate::event_json_chunks::read(tx, event_json, *version, blob.as_deref())?;
             if let Some(kind) = event
                 .get("event_kind")
                 .or_else(|| event.get("event_type"))

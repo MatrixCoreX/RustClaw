@@ -544,7 +544,18 @@ pub(crate) fn record_child_task_terminal_projection(
             "observed_result_json": result_json,
         });
     }
-    let child_result = child_task_result_projection(&status, payload, &result_json);
+    let mut child_result = child_task_result_projection(&status, payload, &result_json);
+    if let Some(charged) =
+        crate::task_budget_contract::model_admission::charged_tokens(&db, task_id)?
+    {
+        let observed = child_result
+            .pointer("/budget_consumed/tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        child_result["budget_consumed"]["tokens"] = json!(observed.max(charged));
+        child_result["token_budget_accounting"] = json!({"schema_version":1,"charged_tokens":charged,
+            "observed_usage_tokens":observed,"includes_conservative_unknown_reservations":charged>observed});
+    }
     let lifecycle = child_terminal_lifecycle_projection(&status, payload, &result_json);
     let Some(obj) = result_json.as_object_mut() else {
         return Ok(false);
@@ -876,7 +887,7 @@ fn append_child_task_id_array(value: Option<&Value>, output: &mut Vec<String>) {
 
 fn machine_task_id(value: &str) -> Option<String> {
     let trimmed = value.trim();
-    if trimmed.is_empty() || trimmed.len() > 160 {
+    if trimmed.is_empty() || trimmed.len() > 1024 {
         return None;
     }
     if !trimmed

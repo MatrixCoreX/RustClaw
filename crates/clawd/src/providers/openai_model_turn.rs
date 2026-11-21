@@ -70,6 +70,9 @@ pub(super) async fn call_openai_model_turn(
             })?;
     }
     let status = response.status();
+    hints
+        .observed_http_status
+        .store(status.as_u16(), std::sync::atomic::Ordering::Relaxed);
     let headers = response.headers().clone();
     if status.is_success() && request.stream {
         return read_openai_stream(&provider, response, req_body, event_sink).await;

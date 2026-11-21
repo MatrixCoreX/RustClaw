@@ -13,6 +13,7 @@ use claw_core::{
 use serde::Serialize;
 use serde_json::Value;
 use tracing::{error, warn};
+#[cfg(test)]
 use uuid::Uuid;
 
 use crate::repo::TaskDeliveryRecord;

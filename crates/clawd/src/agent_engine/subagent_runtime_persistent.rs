@@ -163,7 +163,15 @@ fn schedule_child_task_specs(
             record_invalid_role_error(loop_state, global_step, step_in_round, args, config);
             return Err(SUBAGENT_STOP_SIGNAL_INVALID_ROLE);
         }
-        Err(signal) => return Err(signal),
+        Err(signal) => {
+            record_persistent_schedule_error(loop_state, global_step, step_in_round, signal, None);
+            loop_state.task_observations.push(
+                json!({"schema_version":1,"owner_layer":"subagent_runtime",
+                "status":"rejected","error_code":signal,"requested_budget":args.get("budget"),
+                "effective_budget":null,"side_effect_applied":false,"retryable":false}),
+            );
+            return Err(signal);
+        }
     };
     let policy_violations = super::super::skill_execution::child_task_execution_policy::
         readonly_child_spec_policy_violations(

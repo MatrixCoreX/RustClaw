@@ -51,6 +51,7 @@ pub(crate) fn prepare(
         output_cap,
         label: label.into(),
     });
+    let cost = state.task_llm_cost_summary(&task.task_id);
     let db = state
         .core
         .db
@@ -58,13 +59,12 @@ pub(crate) fn prepare(
         .map_err(|_| "task_budget_ledger_unavailable")?;
     db.execute_batch("CREATE TABLE IF NOT EXISTS task_model_token_reservations (attempt_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, reserved_tokens INTEGER NOT NULL, status TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS idx_task_model_token_reservations_task ON task_model_token_reservations(task_id);
-        CREATE TABLE IF NOT EXISTS task_model_budget_baselines (task_id TEXT PRIMARY KEY, historical_tokens INTEGER NOT NULL);")
+        CREATE TABLE IF NOT EXISTS task_model_budget_baselines (task_id TEXT PRIMARY KEY, historical_tokens INTEGER NOT NULL, token_ceiling INTEGER NOT NULL);")
         .map_err(|_| "task_budget_ledger_unavailable")?;
-    let cost = state.task_llm_cost_summary(&task.task_id);
-    db.execute("INSERT OR IGNORE INTO task_model_budget_baselines(task_id,historical_tokens) VALUES(?1,?2)",params![task.task_id,cost.input_tokens.saturating_add(cost.output_tokens)])
+    db.execute("INSERT OR IGNORE INTO task_model_budget_baselines(task_id,historical_tokens,token_ceiling) VALUES(?1,?2,?3)",params![task.task_id,cost.input_tokens.saturating_add(cost.output_tokens),ceiling])
         .map_err(|_| "task_budget_ledger_unavailable")?;
     admission
-        .remaining(&db)?
+        .remaining(&db, cost.input_tokens.saturating_add(cost.output_tokens))?
         .checked_sub(input_bound)
         .filter(|n| *n >= 256)
         .ok_or(ERROR)?;
@@ -75,20 +75,14 @@ pub(crate) fn prepare(
     Ok(admission)
 }
 impl ModelAdmission {
-    fn remaining(&self, db: &rusqlite::Connection) -> Result<u64, String> {
-        let cost = self.state.task_llm_cost_summary(&self.task.task_id);
+    fn remaining(&self, db: &rusqlite::Connection, known_tokens: u64) -> Result<u64, String> {
         let held: u64 = db.query_row("SELECT COALESCE(SUM(reserved_tokens),0) FROM task_model_token_reservations WHERE task_id=?1",[&self.task.task_id],|r|r.get(0)).map_err(|_| "task_budget_ledger_unavailable")?;
-        let baseline: u64 = db
-            .query_row(
-                "SELECT historical_tokens FROM task_model_budget_baselines WHERE task_id=?1",
-                [&self.task.task_id],
-                |r| r.get(0),
-            )
-            .map_err(|_| "task_budget_ledger_unavailable")?;
-        Ok(self.ceiling.saturating_sub(
-            cost.input_tokens
-                .saturating_add(cost.output_tokens)
-                .max(baseline.saturating_add(held)),
+        let (baseline,pinned):(u64,u64)=db.query_row("SELECT historical_tokens,token_ceiling FROM task_model_budget_baselines WHERE task_id=?1",[&self.task.task_id],|r|Ok((r.get(0)?,r.get(1)?))).map_err(|_|"task_budget_ledger_unavailable")?;
+        let delegated = delegated_tokens(db, &self.task.task_id)?;
+        Ok(self.ceiling.min(pinned).saturating_sub(
+            known_tokens
+                .max(baseline.saturating_add(held))
+                .saturating_add(delegated),
         ))
     }
     pub(crate) fn start(
@@ -97,6 +91,7 @@ impl ModelAdmission {
         provider: &str,
         model: &str,
     ) -> Result<Attempt, String> {
+        let cost = self.state.task_llm_cost_summary(&self.task.task_id);
         let mut db = self
             .state
             .core
@@ -106,7 +101,8 @@ impl ModelAdmission {
         let tx = db
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| "task_budget_ledger_unavailable")?;
-        let remaining = self.remaining(&tx)?;
+        let remaining =
+            self.remaining(&tx, cost.input_tokens.saturating_add(cost.output_tokens))?;
         let output = remaining
             .checked_sub(self.input_bound)
             .filter(|n| *n >= 256)
@@ -155,6 +151,7 @@ impl Attempt {
         usage: Option<&LlmUsageSnapshot>,
         error: Option<&ProviderError>,
         backoff_ms: u64,
+        observed_http_status: u16,
     ) {
         // Successful and failed calls with known usage are accounted by the existing cost ledger.
         // A missing usage record keeps its reservation, including when the request is cancelled.
@@ -178,7 +175,9 @@ impl Attempt {
                 "completed"
             },
             error.map(ProviderError::observability_kind),
-            error.and_then(|e| e.http_status),
+            error
+                .and_then(|e| e.http_status)
+                .or((observed_http_status > 0).then_some(observed_http_status)),
             backoff_ms,
         );
         self.finished = true;
@@ -198,3 +197,61 @@ impl Drop for Attempt {
 #[cfg(test)]
 #[path = "task_budget_model_admission_tests.rs"]
 mod tests;
+
+fn delegated_tokens(db: &rusqlite::Connection, task_id: &str) -> Result<u64, String> {
+    use rusqlite::OptionalExtension;
+    let exists: bool = db
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|_| "task_budget_ledger_unavailable")?;
+    if !exists {
+        return Ok(0);
+    }
+    let result: Option<Option<String>> = db
+        .query_row(
+            "SELECT result_json FROM tasks WHERE task_id=?1",
+            [task_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|_| "task_budget_ledger_unavailable")?;
+    let Some(raw) = result.flatten() else {
+        return Ok(0);
+    };
+    let value: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|_| "task_budget_checkpoint_invalid")?;
+    let Some(slice) = value
+        .pointer("/task_checkpoint/boundary_context/task_budget_slice")
+        .or_else(|| {
+            value.pointer("/final_result_json/task_checkpoint/boundary_context/task_budget_slice")
+        })
+    else {
+        return Ok(0);
+    };
+    let slice =
+        super::TaskBudgetSlice::from_machine_json(slice).ok_or("task_budget_checkpoint_invalid")?;
+    Ok(slice
+        .allocations
+        .iter()
+        .filter(|a| !a.settled && a.kind == super::BudgetAllocationKind::ChildTask)
+        .fold(slice.delegated_consumed.tokens, |sum, a| {
+            sum.saturating_add(a.granted.tokens)
+        }))
+}
+/// Conservative charges are budget accounting, separate from provider usage/cost observations.
+pub(crate) fn charged_tokens(
+    db: &rusqlite::Connection,
+    task_id: &str,
+) -> anyhow::Result<Option<u64>> {
+    use rusqlite::OptionalExtension;
+    let exists:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_model_budget_baselines')",[],|r|r.get(0))?;
+    if !exists {
+        return Ok(None);
+    }
+    let own:Option<u64>=db.query_row("SELECT historical_tokens+(SELECT COALESCE(SUM(reserved_tokens),0) FROM task_model_token_reservations WHERE task_id=?1) FROM task_model_budget_baselines WHERE task_id=?1",[task_id],|r|r.get(0)).optional()?;
+    let delegated = delegated_tokens(db, task_id).map_err(anyhow::Error::msg)?;
+    Ok(own.map(|tokens| tokens.saturating_add(delegated)))
+}

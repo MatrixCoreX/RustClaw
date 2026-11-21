@@ -9,6 +9,7 @@ use axum::{
 };
 use claw_core::types::{ApiResponse, TaskQueryResponse};
 use serde_json::{json, Value};
+#[cfg(test)]
 use uuid::Uuid;
 
 pub(crate) fn attach_status(

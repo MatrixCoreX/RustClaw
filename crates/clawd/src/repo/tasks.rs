@@ -1,6 +1,7 @@
 use rusqlite::{params, OptionalExtension};
 use serde_json::Value;
 use tracing::{debug, warn};
+#[cfg(test)]
 use uuid::Uuid;
 
 use crate::{now_ts, now_ts_u64, parse_task_status, AppState, ClaimedTask, TaskQueryResponse};

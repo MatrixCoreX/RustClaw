@@ -50,6 +50,9 @@ pub(super) async fn call_gemini_model_turn(
             }
         })?;
     let status = response.status();
+    hints
+        .observed_http_status
+        .store(status.as_u16(), std::sync::atomic::Ordering::Relaxed);
     let headers = response.headers().clone();
     let body_text = response.text().await.map_err(|error| {
         ProviderError::retryable(format!("read response failed: {error}"), req_body.clone())

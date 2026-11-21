@@ -11,6 +11,7 @@ use futures_util::stream::{self, Stream};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
+#[cfg(test)]
 use uuid::Uuid;
 
 use crate::repo::{check_task_view_access, get_task_query_record, TaskViewerAccessError};
