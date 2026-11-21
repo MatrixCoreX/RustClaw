@@ -21,6 +21,39 @@ pub(super) const SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED: &str =
 
 const MAX_SCHEDULE_ERROR_CHARS: usize = 512;
 
+pub(in crate::agent_engine) fn resume_child_graph_before_planner(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+) -> Result<Option<&'static str>, String> {
+    let config = super::load_subagent_runtime_config(state);
+    let step = loop_state.total_steps_executed + 1;
+    let Some(outcome) =
+        resume::reuse_checkpoint_child_graph(state, task, loop_state, step, 1, &config)
+            .map_err(str::to_string)?
+    else {
+        return Ok(None);
+    };
+    if outcome == resume::CheckpointChildGraphOutcome::Waiting {
+        return Ok(Some("waiting"));
+    }
+    let blocked = outcome == resume::CheckpointChildGraphOutcome::Blocked;
+    super::super::skill_execution::record_resumed_subagent_step(
+        task,
+        loop_state,
+        step,
+        1,
+        &json!({"action":"bounded_parallel_readonly"}),
+        "checkpoint_child_graph_refresh",
+        blocked.then_some(super::SUBAGENT_STOP_SIGNAL_REQUIRED_CHILD_FAILED),
+        "checkpoint_child_graph_refresh",
+    )?;
+    loop_state.total_steps_executed = step;
+    loop_state.last_stop_signal =
+        blocked.then(|| super::SUBAGENT_STOP_SIGNAL_REQUIRED_CHILD_FAILED.to_string());
+    Ok(Some(if blocked { "blocked" } else { "ready" }))
+}
+
 pub(super) fn persistent_child_task_requested(args: &Value) -> bool {
     args.get("action").and_then(Value::as_str) == Some("persistent_child_task")
 }
@@ -365,6 +398,22 @@ fn persistent_child_spec(
         "allowed_capabilities".to_string(),
         json!(allowed_capabilities.clone()),
     );
+    let capability_call_limits = args
+        .get("budget")
+        .or_else(|| top_level_args.and_then(|args| args.get("budget")))
+        .and_then(|budget| budget.get("capability_call_limits"))
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    if !super::super::skill_execution::child_task_execution_policy::valid_capability_call_limits(
+        &capability_call_limits,
+        &allowed_capabilities,
+    ) {
+        return Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED);
+    }
+    tool_policy_object.insert(
+        "capability_call_limits".to_string(),
+        capability_call_limits.clone(),
+    );
     let session_ref = child_session_ref(task);
     let scope = json!({
         "node_id": node_id.clone(),
@@ -376,6 +425,7 @@ fn persistent_child_spec(
         "owned_paths": owned_paths,
         "model_policy": model_policy,
         "tool_policy": tool_policy,
+        "capability_call_limits": capability_call_limits,
         "recursion_depth": child_recursion_depth_from_payload(&task.payload_json),
         "session_ref": session_ref,
         "session_open_capacity": config.max_concurrent_threads_per_session,

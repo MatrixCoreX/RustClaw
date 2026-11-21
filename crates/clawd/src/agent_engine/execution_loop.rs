@@ -765,6 +765,12 @@ async fn try_execute_independent_read_batch(
     snapshot: &RoundProgressSnapshot,
     actionable_count: usize,
 ) -> Result<Option<RoundOutcome>, String> {
+    // Serialize actions inside a capped child so parallel state clones cannot
+    // each spend the same remaining capability allowance. Child threads still
+    // run concurrently with one another.
+    if super::skill_execution::child_task_execution_policy::has_scoped_capability_budget(task) {
+        return Ok(None);
+    }
     if loop_state.execution_recipe.is_active()
         || loop_state.task_lifecycle.is_some()
         || loop_state.task_checkpoint.is_some()

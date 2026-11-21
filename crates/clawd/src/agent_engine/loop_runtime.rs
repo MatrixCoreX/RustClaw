@@ -85,7 +85,17 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             return Ok(reply);
         }
     }
-    let mut skip_planner_rounds = false;
+    let child_resume =
+        super::subagent_runtime::resume_child_graph_before_planner(state, task, &mut loop_state)?;
+    if child_resume == Some("waiting") {
+        return Ok(checkpoint_handoff_reply(
+            task,
+            &effective_user_text,
+            &loop_state,
+            agent_run_context,
+        ));
+    }
+    let mut skip_planner_rounds = child_resume == Some("blocked");
     loop {
         if !skip_planner_rounds {
             loop {

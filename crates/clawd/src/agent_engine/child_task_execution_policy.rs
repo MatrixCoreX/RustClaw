@@ -6,6 +6,23 @@ use crate::child_task_contract::{ChildTaskPermissionProfile, ChildTaskSpec};
 
 const MAX_CHILD_ALLOWED_CAPABILITIES: usize = 32;
 
+#[path = "child_capability_budget.rs"]
+mod capability_budget;
+pub(in crate::agent_engine) use capability_budget::{
+    has_scoped_capability_budget, valid_capability_call_limits,
+};
+
+pub(super) fn child_capability_budget_error(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &super::LoopState,
+    skill: &str,
+    args: &Value,
+) -> Option<String> {
+    let capability = selected_capability(state, skill, args)?;
+    capability_budget::capability_budget_error(state, task, loop_state, &capability.name, skill)
+}
+
 #[cfg(test)]
 #[path = "child_task_capability_lookup_tests.rs"]
 mod capability_lookup_tests;

@@ -29,7 +29,9 @@ mod skill_execution_subagent;
 #[path = "skill_output_contract.rs"]
 mod skill_output_contract;
 
-use child_task_execution_policy::child_task_execution_policy_error;
+use child_task_execution_policy::{
+    child_capability_budget_error, child_task_execution_policy_error,
+};
 #[cfg(test)]
 use skill_execution_auto_sudo::build_auto_sudo_retry_args;
 use skill_execution_auto_sudo::{
@@ -56,6 +58,7 @@ use skill_execution_preflight::{
     handle_preflight_argument_failure, structured_observation_path_argument_error,
     unresolved_runtime_template_argument_error,
 };
+pub(super) use skill_execution_subagent::record_subagent_step_execution as record_resumed_subagent_step;
 use skill_execution_subagent::{
     normalize_subagent_stop_signal, record_subagent_hook_stage, record_subagent_step_execution,
 };
@@ -1012,6 +1015,15 @@ pub(super) async fn execute_prepared_skill_action(
     }
     if let Some(err) =
         child_task_execution_policy_error(state, task, child_policy_skill, child_policy_args)
+            .or_else(|| {
+                child_capability_budget_error(
+                    state,
+                    task,
+                    loop_state,
+                    child_policy_skill,
+                    child_policy_args,
+                )
+            })
     {
         return handle_preflight_argument_failure(
             state,

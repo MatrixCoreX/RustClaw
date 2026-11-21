@@ -498,7 +498,15 @@ fn planner_native_capability_groups_for_task_filtered(
         if capability_names.is_empty() {
             continue;
         }
-        let tool_name = native_capability_group_tool_name(&skill, index, &mut used_tool_names);
+        // A scoped child may retain only one leaf from a multi-action skill.
+        // Keep its disclosed tool identity tied to that exact capability.
+        let tool_identity = if allowed.is_some() && capability_names.len() == 1 {
+            capability_names[0].as_str()
+        } else {
+            skill.as_str()
+        };
+        let tool_name =
+            native_capability_group_tool_name(tool_identity, index, &mut used_tool_names);
         let mut description_parts = vec!["runtime_capability_group_v1".to_string()];
         if let Some(description) = entry
             .description

@@ -883,3 +883,33 @@ fn child_task_catalog_exposes_only_contract_allowed_capabilities() {
     assert!(!compact.contains("agent.subagent"));
     assert!(!compact.contains("process.ps"));
 }
+
+#[test]
+fn scoped_single_leaf_uses_capability_identity_and_direct_argument_schema() {
+    let state = crate::AppState::test_default_with_fixture_provider().with_real_skill_registry();
+    let task = crate::ClaimedTask {
+        claim_attempt: 0,
+        task_id: "scoped-leaf".into(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".into(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".into(),
+        payload_json:
+            serde_json::json!({"task_role":"subagent_child","child_task_contract":{"scope":{
+            "allowed_capabilities":["filesystem.read_text_range"]}}})
+            .to_string(),
+    };
+    let groups = planner_native_capability_groups_for_task(&state, &task);
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].tool_name, "call_filesystem_read_text_range");
+    let schema = &groups[0].capability_argument_schemas["filesystem.read_text_range"];
+    assert!(schema["properties"]["path"].is_object());
+    assert!(schema["properties"].get("action").is_none());
+    assert_eq!(
+        planner_callable_capability_names_for_task(&state, &task),
+        vec!["filesystem.read_text_range"]
+    );
+}

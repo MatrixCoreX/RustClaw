@@ -6,6 +6,12 @@ use sha2::{Digest, Sha256};
 
 use super::{MAX_NATIVE_TOOL_NAME_BYTES, NATIVE_CALL_CAPABILITY_TOOL};
 
+pub(super) fn native_argument_values_valid(schema: &Value, args: &Value) -> bool {
+    crate::schema_contract::enum_constraint_violations(schema, args).is_empty()
+        && crate::schema_contract::type_constraint_violations(schema, args).is_empty()
+        && crate::schema_contract::value_constraint_violations(schema, args).is_empty()
+}
+
 pub(super) fn native_capability_tool_definition(
     tool_name: &str,
     description: &str,
@@ -158,3 +164,7 @@ pub(super) fn native_capability_tool_map(
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "native_argument_value_tests.rs"]
+mod argument_value_tests;

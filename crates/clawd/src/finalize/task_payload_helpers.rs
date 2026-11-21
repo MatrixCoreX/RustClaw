@@ -52,11 +52,20 @@ pub(super) fn answer_verifier_forces_task_failure(
     semantic_clarify: bool,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
-    !semantic_clarify
-        && journal
+    let rejected = match journal.answer_verification.as_ref() {
+        Some(record) => {
+            record.status == crate::answer_verifier::AnswerVerificationStatus::Failed
+                && journal
+                    .final_answer
+                    .as_deref()
+                    .is_some_and(|answer| record.matches(answer))
+        }
+        None => journal
             .answer_verifier_summary
             .as_ref()
-            .is_some_and(|summary| summary.high_confidence_retry_gap())
+            .is_some_and(|summary| !summary.pass && summary.confidence >= 0.55),
+    };
+    !semantic_clarify && rejected
 }
 
 pub(super) fn answer_verifier_should_force_task_failure(
@@ -97,3 +106,7 @@ pub(super) fn normalize_existing_file_delivery_token_answer(
     let resolved = candidate.canonicalize().unwrap_or(candidate);
     Some(format!("{}{}", kind.canonical_prefix(), resolved.display()))
 }
+
+#[cfg(test)]
+#[path = "task_rejection_status_tests.rs"]
+mod rejection_status_tests;

@@ -106,7 +106,7 @@ fn latest_subagent_runtime_observation_for_step(
         .map(Value::to_string)
 }
 
-pub(super) fn record_subagent_step_execution(
+pub(in crate::agent_engine) fn record_subagent_step_execution(
     task: &ClaimedTask,
     loop_state: &mut LoopState,
     global_step: usize,

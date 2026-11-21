@@ -27,6 +27,8 @@ mod subagent_runtime_model;
 #[path = "subagent_runtime_persistent.rs"]
 mod subagent_runtime_persistent;
 
+pub(super) use subagent_runtime_persistent::resume_child_graph_before_planner;
+
 use subagent_runtime_context::{
     context_evidence_action, context_evidence_combined_excerpt,
     context_evidence_has_available_excerpt, context_evidence_paths, context_evidence_summary,
@@ -714,6 +716,7 @@ fn subagent_budget_summary(budget: Option<&Value>, config: &SubagentRuntimeConfi
         "present": true,
         "max_rounds": budget.get("max_rounds").and_then(Value::as_u64),
         "max_tool_calls": budget.get("max_tool_calls").and_then(Value::as_u64),
+        "capability_call_limits": budget.get("capability_call_limits"),
         "max_context_chars": budget.get("max_context_chars").and_then(Value::as_u64),
         "max_tokens": budget.get("max_tokens").and_then(Value::as_u64),
         "runtime_deadline_ms": runtime_deadline_ms,

@@ -1076,10 +1076,24 @@ fn child_budget_consumed(result_json: &Value) -> Value {
         .get("llm_calls_per_task")
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    let tool_calls = summary
-        .get("step_results")
+    let tool_calls = result_json
+        .pointer("/task_journal/trace/step_results")
+        .or_else(|| result_json.pointer("/final_result_json/task_journal/trace/step_results"))
+        .or_else(|| summary.get("step_results"))
         .and_then(Value::as_array)
-        .map_or(0, |steps| steps.len() as u64);
+        .map_or(0, |steps| {
+            steps
+                .iter()
+                .filter(|step| {
+                    matches!(
+                        step.get("requested_action_type")
+                            .and_then(Value::as_str)
+                            .or_else(|| step.get("action_kind").and_then(Value::as_str)),
+                        Some("call_capability" | "call_tool" | "call_skill")
+                    )
+                })
+                .count() as u64
+        });
     let llm_cost = metrics.get("llm_cost").unwrap_or(&Value::Null);
     let tokens = llm_cost
         .get("input_tokens")
@@ -1495,3 +1509,7 @@ fn append_parent_child_enqueue_progress(
 #[cfg(test)]
 #[path = "child_tasks_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "child_budget_accounting_tests.rs"]
+mod budget_accounting_tests;

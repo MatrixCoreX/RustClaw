@@ -1558,6 +1558,14 @@ fn action_from_native_tool_call_with_schemas(
             {
                 return Err("native_plan_required_args_missing".to_string());
             }
+            if capability_argument_schemas
+                .get(capability)
+                .is_some_and(|schema| {
+                    !native_capability_tools::native_argument_values_valid(schema, &arguments)
+                })
+            {
+                return Err("native_plan_args_schema_invalid".to_string());
+            }
             Ok(AgentAction::CallCapability {
                 capability: capability.clone(),
                 args: arguments,
@@ -1647,6 +1655,14 @@ fn action_from_native_capability_call(
         .get(capability)
         .map(|schema| normalize_native_argument_to_schema(schema, &args))
         .unwrap_or(args);
+    if let Some(schema) = capability_argument_schemas.get(capability) {
+        if schema_has_missing_required_fields(schema, &args) {
+            return Err("native_plan_required_args_missing".to_string());
+        }
+        if !native_capability_tools::native_argument_values_valid(schema, &args) {
+            return Err("native_plan_args_schema_invalid".to_string());
+        }
+    }
     Ok(AgentAction::CallCapability {
         capability: capability.to_string(),
         args,

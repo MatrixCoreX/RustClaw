@@ -14,6 +14,11 @@ Delegate a clearly bounded task to an isolated child agent while the parent rema
 - Do not delegate work that is trivial, tightly sequential, or requires shared mutable state.
 - Child failure is observable evidence, not permission to silently perform broader work in the parent.
 
+- Project explicit per-capability user limits into `budget.capability_call_limits`, e.g. `[{"capability":"filesystem.read_text_range","max_calls":2}]`; objective prose alone is not an execution bound. Keep `max_tool_calls` consistent; synthesis model turns are separate.
+- A capability allowance counts executable attempts across retries and checkpoint/resume. When exhausted, synthesize from existing evidence or report an incomplete result; never reread for formatting repair.
+- An existing graph keeps its IDs, limits, and contracts after waiting or reconnecting. Do not redelegate to poll or reset it; the runtime refreshes its results before planning again.
+- Preserve every runtime child ID and status exactly. Overall parent failure does not imply that all siblings failed. Keep evidence from successful siblings in a partial result.
+
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
 Use these optional subheading labels when needed:

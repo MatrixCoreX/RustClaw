@@ -45,6 +45,23 @@ explicit application.
 | `persistent_child_task` | `depends_on` | no | object[] | `{node_id, required?}` dependency references. |
 | `persistent_child_task` | `owned_paths` | writer | string[] | Workspace-relative ownership boundaries for isolated writers. |
 
+## Enforced Call Budgets
+
+- Translate explicit user call/read limits into `budget.capability_call_limits`,
+  e.g. `[ {"capability":"filesystem.read_text_range","max_calls":2} ]`.
+  Only declared allowed capabilities may be capped. These are host-enforced
+  cumulative attempt counts, including retries and checkpoint/resume; writing
+  a limit only in the child's objective is insufficient. Keep total tool-call
+  budgets consistent and reserve model turns separately for final synthesis.
+- When the cap is reached, use existing evidence to finish or return a bounded
+  incomplete result. Do not reread to satisfy a verifier's repair suggestion.
+- Wait on existing child IDs. Repeated delegation cannot replace an active or
+  terminal child graph, change its contract, or reset a spent allowance.
+- Read each needed range once, use its returned line evidence, and avoid
+  requesting the same content again for formatting repairs.
+- Parent summaries must preserve each runtime-projected child ID and status;
+  one required child failing does not change a successful sibling's status.
+
 ## Structured Operation Contract
 
 - Planner input cannot provide child findings, permission profiles, runtime

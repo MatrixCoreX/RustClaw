@@ -1551,3 +1551,6 @@ fn subagent_runtime_config_rejects_undefined_role_as_machine_state() {
 
 #[path = "subagent_batch_dispatch_tests.rs"]
 mod batch_dispatch;
+
+#[path = "subagent_runtime_tests/enforced_contracts.rs"]
+mod enforced_contracts;
