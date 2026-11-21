@@ -326,23 +326,56 @@ fn resumed_agent_progress_cannot_erase_dispatch_coordination() {
 
 #[test]
 fn deferred_seeded_loop_projects_the_new_checkpoint_and_releases_its_lease() {
+    assert_deferred_seeded_projection("ckpt-deferred-new", "needs_user", None);
+}
+
+#[test]
+fn same_checkpoint_refresh_preserves_retry_progress_and_stops_at_exhaustion() {
+    assert_deferred_seeded_projection("ckpt-deferred-old", "waiting", Some(2));
+    assert_deferred_seeded_projection("ckpt-deferred-old", "needs_user", Some(3));
+}
+
+fn assert_deferred_seeded_projection(
+    next_checkpoint_id: &str,
+    lifecycle_state: &str,
+    invalid_response_count: Option<u32>,
+) {
     let now = 30_000;
     let (state, claimed) = claimed_dispatch_fixture("deferred-dispatch", "ckpt-deferred-old", now);
-    let deferred_result = json!({
+    let mut deferred_result = json!({
         "text": "waiting",
         "task_journal": {
             "summary": {
                 "task_lifecycle": {
                     "schema_version": 1,
-                    "state": "needs_user",
-                    "checkpoint_id": "ckpt-deferred-new",
-                    "resume_reason": "confirmation_required"
+                    "state": lifecycle_state,
+                    "checkpoint_id": next_checkpoint_id,
+                    "resume_reason": if invalid_response_count.is_some() { "answer_verification_unavailable" } else { "confirmation_required" }
                 },
-                "task_checkpoint": checkpoint_json("ckpt-deferred-new", vec![])
+                "task_checkpoint": checkpoint_json(next_checkpoint_id, vec!["effect:completed"])
             },
             "trace": {}
         }
     });
+    let retry = invalid_response_count.map(|count| {
+        json!({
+            "schema_version": 1, "candidate_sha256": "a".repeat(64),
+            "invalid_response_count": count
+        })
+    });
+    if let Some(retry) = retry.as_ref() {
+        deferred_result["task_journal"]["summary"]["task_checkpoint"]["boundary_context"]
+            ["verification_retry"] = retry.clone();
+        deferred_result["task_journal"]["summary"]["task_lifecycle"]["verification_retry"] =
+            retry.clone();
+    }
+    let next_check = (lifecycle_state == "waiting").then_some(now + 30);
+    deferred_result["task_journal"]["summary"]["task_lifecycle"]["next_check_after"] =
+        json!(next_check);
+    deferred_result["task_journal"]["summary"]["task_lifecycle"]["manual_resume_required"] =
+        json!(lifecycle_state == "needs_user");
+    deferred_result["task_journal"]["summary"]["task_checkpoint"]["budget"]["llm_calls"] =
+        json!(17);
     let execution_result = json!({
         "schema_version": 1,
         "checkpoint_id": claimed.checkpoint_id,
@@ -351,8 +384,9 @@ fn deferred_seeded_loop_projects_the_new_checkpoint_and_releases_its_lease() {
         "executor_status": claimed.executor_status,
         "dispatch_state": claimed.dispatch_state,
         "executor_result_status": "seeded_loop_deferred",
-        "deferred_checkpoint_id": "ckpt-deferred-new",
-        "deferred_lifecycle_state": "needs_user",
+        "deferred_checkpoint_id": next_checkpoint_id,
+        "deferred_lifecycle_state": lifecycle_state,
+        "next_check_after": next_check,
         "final_result_json": deferred_result
     });
     assert!(
@@ -405,14 +439,14 @@ fn deferred_seeded_loop_projects_the_new_checkpoint_and_releases_its_lease() {
     );
 
     let stored = stored_result_json(&state, "deferred-dispatch");
-    assert_eq!(stored["task_lifecycle"]["state"], "needs_user");
+    assert_eq!(stored["task_lifecycle"]["state"], lifecycle_state);
     assert_eq!(
         stored["task_lifecycle"]["checkpoint_id"],
-        "ckpt-deferred-new"
+        next_checkpoint_id
     );
     assert_eq!(
         stored["task_checkpoint"]["checkpoint_id"],
-        "ckpt-deferred-new"
+        next_checkpoint_id
     );
     assert_eq!(
         stored["task_lifecycle"]["previous_checkpoint_id"],
@@ -421,6 +455,44 @@ fn deferred_seeded_loop_projects_the_new_checkpoint_and_releases_its_lease() {
     assert!(stored["task_lifecycle"]
         .get("resume_executor_dispatch_claim")
         .is_none());
+    assert_eq!(stored["task_checkpoint"]["budget"]["llm_calls"], 17);
+    assert_eq!(
+        stored["task_checkpoint"]["completed_side_effect_refs"],
+        json!(["effect:completed"])
+    );
+    if let Some(retry) = retry {
+        assert_eq!(
+            stored["task_checkpoint"]["boundary_context"]["verification_retry"],
+            retry
+        );
+        assert_eq!(
+            stored["task_journal"]["summary"]["task_checkpoint"]["boundary_context"]
+                ["verification_retry"],
+            retry
+        );
+        assert_eq!(stored["task_lifecycle"]["verification_retry"], retry);
+        let checkpoint = crate::task_lifecycle::task_checkpoint_from_result_json(&stored).unwrap();
+        assert_eq!(checkpoint.boundary_context["verification_retry"], retry);
+        if lifecycle_state == "waiting" {
+            assert!(matches!(
+                crate::task_lifecycle::paused_checkpoint_resume_readiness(&stored, now + 86_400),
+                crate::task_lifecycle::PausedCheckpointResumeReadiness::Ready { .. }
+            ));
+        } else {
+            assert!(
+                crate::repo::claim_due_paused_checkpoint_task_internal(
+                    &state,
+                    "deferred-dispatch",
+                    next_checkpoint_id,
+                    now + 86_400,
+                    30,
+                )
+                .unwrap()
+                .is_none(),
+                "exhausted verification must not be scheduled again"
+            );
+        }
+    }
     let db = state.core.db.get().expect("get db");
     let (lease_owner, lease_expires_at): (Option<String>, i64) = db
         .query_row(
@@ -433,4 +505,16 @@ fn deferred_seeded_loop_projects_the_new_checkpoint_and_releases_its_lease() {
         .expect("select released lease");
     assert!(lease_owner.is_none());
     assert_eq!(lease_expires_at, 0);
+}
+
+#[test]
+fn stable_checkpoint_refresh_does_not_accept_a_cached_async_completion() {
+    let payload = json!({
+        "executor_result_status":"async_poll_completed",
+        "continuation_result_json":{
+            "task_lifecycle":{"schema_version":1,"state":"waiting","checkpoint_id":"ckpt-async"},
+            "task_checkpoint":checkpoint_json("ckpt-async", vec![])
+        }
+    });
+    assert!(crate::repo::deferred_dispatch_checkpoint_result(&payload, "ckpt-async").is_none());
 }

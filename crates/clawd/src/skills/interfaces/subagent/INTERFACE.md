@@ -59,6 +59,9 @@ explicit application.
   terminal child graph, change its contract, or reset a spent allowance.
 - Read each needed range once, use its returned line evidence, and avoid
   requesting the same content again for formatting repairs.
+- Carry exact path and inclusive line/byte bounds into each child objective.
+  File-size or continuation metadata cannot widen that requested scope; report
+  missing context to the parent instead of silently reading outside it.
 - `budget.max_tokens` is a total input-plus-output allowance across planning,
   retries, finalization and verification, not an output length. Omit it to use
   the host allocation unless a deliberate total cap is required. Admission

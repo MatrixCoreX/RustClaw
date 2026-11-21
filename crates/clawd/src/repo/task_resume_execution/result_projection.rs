@@ -748,6 +748,7 @@ fn deferred_seeded_loop_checkpoint_result(
         projection_payload,
         previous_checkpoint_id,
         "final_result_json",
+        true,
     )
 }
 
@@ -759,6 +760,7 @@ fn deferred_async_completion_checkpoint_result(
         projection_payload,
         previous_checkpoint_id,
         "continuation_result_json",
+        false,
     )
 }
 
@@ -766,6 +768,7 @@ fn deferred_checkpoint_result_for_key(
     projection_payload: &Value,
     previous_checkpoint_id: &str,
     result_key: &str,
+    allow_checkpoint_refresh: bool,
 ) -> Option<(Value, Value, crate::task_lifecycle::TaskCheckpoint)> {
     let result = projection_payload
         .get(result_key)
@@ -774,7 +777,10 @@ fn deferred_checkpoint_result_for_key(
     let lifecycle =
         crate::task_lifecycle::task_query_lifecycle_projection("running", Some(&result), None);
     let checkpoint = crate::task_lifecycle::task_checkpoint_from_result_json(&result)?;
-    if checkpoint.checkpoint_id == previous_checkpoint_id
+    // Seeded recovery can advance retry/budget state without changing the
+    // checkpoint identity. Rescheduling the old snapshot loses that progress
+    // and can turn a bounded verifier retry into an infinite loop.
+    if (checkpoint.checkpoint_id == previous_checkpoint_id && !allow_checkpoint_refresh)
         || !crate::task_lifecycle::has_matching_nonterminal_checkpoint(
             Some(&lifecycle),
             Some(&checkpoint.to_machine_json()),

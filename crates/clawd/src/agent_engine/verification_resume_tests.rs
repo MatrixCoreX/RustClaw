@@ -344,6 +344,14 @@ async fn format_retry_scenario(invalid_calls: usize, invalid_audit: bool) {
         async move {
             assert!(body.get("tools").is_none(), "resume must not invoke a planner/tool turn");
             let call = count.fetch_add(1, Ordering::SeqCst);
+            if call > 0 {
+                let prompt = body["messages"].as_array().unwrap().iter()
+                    .filter_map(|message| message["content"].as_str())
+                    .collect::<Vec<_>>().join("\n");
+                assert!(prompt.contains("\"verification_retry_context\""));
+                assert!(prompt.contains(&format!("\"invalid_response_count\":{call}")),
+                    "the verifier must receive the persisted attempt count");
+            }
             let mut verdict = json!({"operation_checks":[],"output_field_checks":[],"pass":true,
                 "missing_evidence_fields":[],"answer_incomplete_reason":"","should_retry":false,
                 "retry_instruction":"","confidence":0.99});

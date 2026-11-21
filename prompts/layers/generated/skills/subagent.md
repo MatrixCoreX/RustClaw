@@ -9,6 +9,7 @@ Delegate a clearly bounded task to an isolated child agent while the parent rema
 
 ## Contract
 - Give each child a specific `role`, `objective`, explicit `context_refs`, and the smallest `allowed_capabilities` set needed.
+- Preserve the caller's exact path and read interval in each child objective. A child must not widen that interval merely because file metadata reports more lines; missing context is reported to the parent, not treated as a new grant.
 - For inline read-only work, do not grant filesystem write, subprocess, network, credential, publish, package-install, or privilege-escalation capabilities.
 - Use `result_contract` when machine fields or evidence are required; the parent must ground its answer in the returned child result.
 - Do not delegate work that is trivial, tightly sequential, or requires shared mutable state.

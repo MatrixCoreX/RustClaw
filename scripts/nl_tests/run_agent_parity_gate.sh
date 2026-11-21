@@ -453,6 +453,8 @@ echo "AGENT_PARITY_GATE_STEP maintainability_skill_contracts"
   python3 "${ROOT_DIR}/scripts/check_whatsapp_split_config_contracts.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_whatsapp_split_config_contracts.py"
   python3 "${ROOT_DIR}/scripts/check_long_files.py"
+  python3 "${ROOT_DIR}/scripts/check_staged_secrets.py"
+  python3 -m unittest discover -s "${ROOT_DIR}/scripts/tests" -p test_check_staged_secrets.py
   python3 "${ROOT_DIR}/scripts/check_product_identity_coupling.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_product_identity_coupling.py"
   python3 "${ROOT_DIR}/scripts/check_runtime_resource_probe_coupling.py" --self-test

@@ -122,6 +122,10 @@ pub(in crate::answer_verifier) fn provider_safe_numeric_evidence_leaf(key: &str)
     matches!(
         key,
         "count"
+            | "start_line"
+            | "end_line"
+            | "total_lines"
+            | "returned_line_count"
             | "dirs"
             | "exists"
             | "files"
@@ -547,6 +551,24 @@ mod projection_tests;
 pub(in crate::answer_verifier) fn current_context_prompt_block(
     journal: &crate::task_journal::TaskJournal,
 ) -> String {
+    if let Some(retry) = journal
+        .task_checkpoint
+        .as_ref()
+        .and_then(|checkpoint| checkpoint.pointer("/boundary_context/verification_retry"))
+    {
+        // Retry feedback is bounded machine data, never the prior provider body
+        // or an instruction copied from task/evidence content.
+        return serde_json::to_string(&json!({
+            "current_task_context": journal.context_bundle_summary,
+            "verification_retry_context": {
+                "schema_version": retry.get("schema_version").and_then(serde_json::Value::as_u64),
+                "invalid_response_count": retry.get("invalid_response_count").and_then(serde_json::Value::as_u64),
+                "required_output_schema": "answer_verifier_v1",
+                "scope": "same_candidate_existing_evidence",
+            },
+        }))
+        .unwrap_or_else(|_| "{}".to_string());
+    }
     let Some(summary) = journal.context_bundle_summary.as_deref() else {
         return "<none>".to_string();
     };
