@@ -886,7 +886,9 @@ fn child_task_catalog_exposes_only_contract_allowed_capabilities() {
 
 #[test]
 fn scoped_single_leaf_uses_capability_identity_and_direct_argument_schema() {
-    let state = crate::AppState::test_default_with_fixture_provider().with_real_skill_registry();
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
     let task = crate::ClaimedTask {
         claim_attempt: 0,
         task_id: "scoped-leaf".into(),

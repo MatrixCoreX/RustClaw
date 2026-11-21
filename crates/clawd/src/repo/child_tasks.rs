@@ -1076,23 +1076,31 @@ fn child_budget_consumed(result_json: &Value) -> Value {
         .get("llm_calls_per_task")
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    let tool_calls = result_json
-        .pointer("/task_journal/trace/step_results")
-        .or_else(|| result_json.pointer("/final_result_json/task_journal/trace/step_results"))
-        .or_else(|| summary.get("step_results"))
-        .and_then(Value::as_array)
-        .map_or(0, |steps| {
-            steps
-                .iter()
-                .filter(|step| {
-                    matches!(
-                        step.get("requested_action_type")
-                            .and_then(Value::as_str)
-                            .or_else(|| step.get("action_kind").and_then(Value::as_str)),
-                        Some("call_capability" | "call_tool" | "call_skill")
-                    )
+    // Debug step arrays can be compacted; the host cumulative count remains exact.
+    let tool_calls = summary
+        .pointer("/cost_budget/observed/tool_calls")
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| {
+            result_json
+                .pointer("/task_journal/trace/step_results")
+                .or_else(|| {
+                    result_json.pointer("/final_result_json/task_journal/trace/step_results")
                 })
-                .count() as u64
+                .or_else(|| summary.get("step_results"))
+                .and_then(Value::as_array)
+                .map_or(0, |steps| {
+                    steps
+                        .iter()
+                        .filter(|step| {
+                            matches!(
+                                step.get("requested_action_type")
+                                    .and_then(Value::as_str)
+                                    .or_else(|| step.get("action_kind").and_then(Value::as_str)),
+                                Some("call_capability" | "call_tool" | "call_skill")
+                            )
+                        })
+                        .count() as u64
+                })
         });
     let llm_cost = metrics.get("llm_cost").unwrap_or(&Value::Null);
     let tokens = llm_cost

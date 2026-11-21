@@ -17,3 +17,12 @@ fn child_budget_counts_execution_calls_from_trace_instead_of_empty_summary() {
     assert_eq!(consumed["model_turns"], 4);
     assert_eq!(consumed["tokens"], 125);
 }
+
+#[test]
+fn compacted_trace_does_not_reclaim_spent_child_call_budget() {
+    let result = json!({"task_journal":{
+        "summary":{"cost_budget":{"observed":{"tool_calls":22}}},
+        "trace":{"step_results":[{"requested_action_type":"call_capability","status":"ok"}]}
+    }});
+    assert_eq!(child_budget_consumed(&result)["tool_calls"], 22);
+}
