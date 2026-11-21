@@ -486,7 +486,7 @@ fn wechat_media_progress_stays_transport_state_without_canned_replies() {
             .to_string(),
     );
     let mut task = TaskQueryResponse {
-        task_id: uuid::Uuid::nil().to_string(),
+        task_id: "00000000-0000-0000-0000-000000000000".to_string(),
         status: TaskStatus::Running,
         execution_state: None,
         goal: None,
