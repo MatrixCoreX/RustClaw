@@ -68,16 +68,17 @@ use output_path_facts::*;
 #[path = "observed_output_entries.rs"]
 mod output_entries;
 pub(crate) use output_entries::has_observed_answer_candidates;
+pub(super) use output_entries::latest_child_result_handoff;
 pub(super) use output_entries::latest_structured_capability_observation;
+#[cfg(test)]
+pub(super) use output_entries::observed_output_entries;
 pub(super) use output_entries::structured_capability_observation;
 use output_entries::{
     compound_listing_content_delivery_guard_entry, cross_turn_observed_output_entries,
     finalization_observed_output_entries,
 };
 #[cfg(test)]
-use output_entries::{
-    observed_output_entries, observed_step_entry, recent_generated_output_from_user_request,
-};
+use output_entries::{observed_step_entry, recent_generated_output_from_user_request};
 
 #[path = "observed_output_direct_scalar.rs"]
 mod output_direct_scalar;
@@ -752,15 +753,21 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
             }
         };
     let response_style_hint = observed_response_style_hint(agent_run_context);
+    let mut output_contract =
+        serde_json::from_str::<serde_json::Value>(&observed_contract_json(agent_run_context))
+            .unwrap_or_else(|_| serde_json::json!({}));
+    if let (Some(object), Some(contract)) = (
+        output_contract.as_object_mut(),
+        crate::repo::child_tasks::child_result_contract_for_task(task),
+    ) {
+        object.insert("child_result_contract_v1".to_string(), contract);
+    }
     let prompt = crate::render_prompt_template(
         &prompt_template,
         &[
             ("__USER_REQUEST__", &user_request_for_prompt),
             ("__RESOLVED_USER_INTENT__", &resolved_intent),
-            (
-                "__OUTPUT_CONTRACT__",
-                &observed_contract_json(agent_run_context),
-            ),
+            ("__OUTPUT_CONTRACT__", &output_contract.to_string()),
             ("__OBSERVED_OUTPUTS__", &observed_block),
             (
                 "__CONFIG_RESPONSE_LANGUAGE__",
@@ -846,19 +853,22 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
         answer.clear();
     }
     let route_result = agent_run_context.and_then(|ctx| ctx.output_contract());
-    let language_compatible = observed_answer_language_compatible_for_route(
-        route_result,
-        loop_state,
-        agent_run_context.and_then(|ctx| ctx.auto_locator_path.as_deref()),
-        &answer,
-        &request_language_hint,
-    ) || model_qualified_observed_passthrough_can_override_language(
-        &parsed,
-        parsed_from_schema,
-        direct_passthrough_disallowed,
-        &answer,
-        loop_state,
-    );
+    let language_compatible =
+        crate::repo::child_tasks::child_machine_result_valid_for_task(task, &answer)
+            || observed_answer_language_compatible_for_route(
+                route_result,
+                loop_state,
+                agent_run_context.and_then(|ctx| ctx.auto_locator_path.as_deref()),
+                &answer,
+                &request_language_hint,
+            )
+            || model_qualified_observed_passthrough_can_override_language(
+                &parsed,
+                parsed_from_schema,
+                direct_passthrough_disallowed,
+                &answer,
+                loop_state,
+            );
     if !answer.is_empty() && !language_compatible {
         tracing::info!(
             "observed_answer_fallback_reject_language_mismatch task_id={} language_hint={} answer={}",

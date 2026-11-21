@@ -234,12 +234,16 @@ fn child_structured_result_observation(merge: &Value) -> Option<Value> {
         .and_then(Value::as_array)?
         .iter()
         .filter_map(|node| {
-            let result = node.pointer("/runtime/child_task_result/structured_result")?;
+            let result = node.pointer("/runtime/child_task_result")?;
             Some(json!({
                 "child_task_id": node.get("child_task_id"),
                 "role": node.get("role"),
-                "status": node.pointer("/runtime/child_task_result/status"),
-                "result": result,
+                "status": result.get("status"),
+                "required": result.get("required"),
+                "error_code": result.get("error_code"),
+                "evidence_refs": result.get("evidence_refs"),
+                "finding_refs": result.get("finding_refs"),
+                "result": result.get("structured_result"),
             }))
         })
         .collect::<Vec<_>>();
@@ -247,6 +251,8 @@ fn child_structured_result_observation(merge: &Value) -> Option<Value> {
         json!({
             "schema_version": 1,
             "observation_kind": "subagent_structured_results",
+            "parent_task_id": merge.get("parent_task_id"),
+            "instruction_authority": "none",
             "status": "completed",
             "results": results,
         })

@@ -121,6 +121,10 @@ pub(crate) fn enforce_terminal_ask_reply_status(
     let failure = child_clarification_failure_payload(&payload, semantic_clarify)
         .map(|value| value.to_string())
         .or_else(|| {
+            crate::repo::child_tasks::child_result_contract_failure(&payload, &reply.text)
+                .map(|value| value.to_string())
+        })
+        .or_else(|| {
             answer_verifier_should_force_task_failure(enforce_required, semantic_clarify, journal)
                 .then(|| {
                     journal

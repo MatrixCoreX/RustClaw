@@ -270,6 +270,54 @@ fn resumed_child_clarification_is_unfinished_while_main_clarification_can_comple
 }
 
 #[test]
+fn resumed_child_cannot_complete_with_prose_when_parent_requires_machine_fields() {
+    let claimed = seeded_claimed_dispatch();
+    let payload = json!({"task_role":"subagent_child","child_task_contract":{
+        "scope":{},"result_contract":{"output_format":"machine_json","required_keys":["name","line"]}
+    }});
+    for (answer, should_fail) in [
+        ("name is Panel on line 9", true),
+        (r#"{"name":"Panel","line":9}"#, false),
+    ] {
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-seeded-terminal", "ask", "inspect");
+        journal.record_final_answer(answer);
+        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+        journal.record_answer_verification(
+            crate::answer_verifier::AnswerVerificationOutcome::Passed(Some(
+                crate::answer_verifier::AnswerVerifierOut {
+                    pass: true,
+                    confidence: 0.99,
+                    ..Default::default()
+                },
+            )),
+            answer,
+        );
+        let mut reply = crate::AskReply::non_llm(answer.into()).with_task_journal(journal);
+        crate::finalize::enforce_terminal_ask_reply_status(true, &payload.to_string(), &mut reply);
+        assert_eq!(reply.should_fail_task, should_fail);
+        if should_fail {
+            let error: serde_json::Value =
+                serde_json::from_str(reply.error_text.as_ref().unwrap()).unwrap();
+            assert_eq!(error["error_code"], "child_task_result_contract_invalid");
+        }
+        let result = super::dispatch_result::seeded_agent_loop_terminal_dispatch_result_payload(
+            &claimed,
+            Ok(reply),
+        )
+        .unwrap();
+        assert_eq!(
+            result["executor_result_status"],
+            if should_fail {
+                "seeded_loop_failed"
+            } else {
+                "seeded_loop_completed"
+            }
+        );
+    }
+}
+
+#[test]
 fn seeded_agent_loop_terminal_payload_is_machine_only_for_success_and_failure() {
     let claimed = seeded_claimed_dispatch();
     let mut journal =

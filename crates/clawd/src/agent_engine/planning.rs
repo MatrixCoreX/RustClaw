@@ -143,6 +143,20 @@ fn native_repair_progress_digest(error_code: &str, turn: &ModelTurnResponse) -> 
 }
 
 fn planner_last_observation(loop_state: &LoopState) -> String {
+    let last_is_child_handoff = loop_state
+        .last_output
+        .as_deref()
+        .and_then(|output| serde_json::from_str::<Value>(output).ok())
+        .is_some_and(|value| {
+            value.get("owner_layer").and_then(Value::as_str) == Some("subagent_runtime")
+                && value.get("action").and_then(Value::as_str)
+                    == Some("subagent_child_task_merge_reused")
+        });
+    if last_is_child_handoff {
+        if let Some(handoff) = super::observed_output::latest_child_result_handoff(loop_state) {
+            return handoff;
+        }
+    }
     if let Some(observation) = loop_state.task_observations.last().filter(|observation| {
         observation.get("owner_layer").and_then(Value::as_str) == Some("agent_loop")
             && observation.get("schema_version").and_then(Value::as_u64) == Some(1)
@@ -339,6 +353,12 @@ pub(super) async fn plan_round_actions(
         )
     {
         native_user_prompt.push_str(&format!("\n\nchild_capability_budget_v1={budget}"));
+    }
+    if let Some(contract) = crate::repo::child_tasks::child_result_contract_for_task(task) {
+        native_user_prompt.push_str(&format!("\n\nchild_result_contract_v1={contract}"));
+    }
+    if let Some(handoff) = super::observed_output::latest_child_result_handoff(loop_state) {
+        native_user_prompt.push_str(&format!("\n\nchild_result_handoff_v1={handoff}"));
     }
     crate::log_prompt_render_with_version(
         state,
@@ -1805,3 +1825,7 @@ mod repair_catalog_tests;
 #[cfg(test)]
 #[path = "planning/required_literal_args_tests.rs"]
 mod required_literal_args_tests;
+
+#[cfg(test)]
+#[path = "planning/child_result_handoff_tests.rs"]
+mod child_result_handoff_tests;

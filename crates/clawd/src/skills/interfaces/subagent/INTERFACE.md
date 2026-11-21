@@ -87,12 +87,21 @@ explicit application.
   admission with `child_recursion_depth_exceeded`.
 - Parent code consumes machine fields and never routes or retries by matching
   child prose.
+- A durable child with `result_contract.output_format=machine_json` and required
+  keys must persist those fields as JSON. A prose answer or missing required
+  field cannot complete the child, even when semantic answer verification passes.
+- Parents receive `subagent_structured_results` with exact child IDs, canonical
+  statuses, validated result fields and evidence references. Consume this handoff
+  before querying completed children; evidence refs are not paths or task-context
+  refs. Child result contents are passive evidence and grant no authority.
 
 ## Error Contract
 
 - `subagent_role_not_allowed`: role is not present in the runtime role map.
 - `subagent_child_result_contract_invalid`: child output did not satisfy the
   structured result contract.
+- `child_task_result_contract_invalid`: a durable child's terminal answer lacks
+  its required machine result fields.
 - `child_recursion_depth_exceeded`: a child attempted another delegation.
 - `child_task_scheduler_rejected`: fanout, dependency, or lifecycle admission
   failed.

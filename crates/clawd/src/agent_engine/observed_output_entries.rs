@@ -428,7 +428,27 @@ pub(super) fn finalization_observed_output_entries(
         task,
         &loop_state.capability_results,
     )?;
-    Ok(vec![format!("canonical_capability_evidence={catalog}")])
+    let mut entries = latest_child_result_handoff(loop_state)
+        .map(|handoff| format!("### subagent_structured_results\n{handoff}"))
+        .into_iter()
+        .collect::<Vec<_>>();
+    entries.push(format!("canonical_capability_evidence={catalog}"));
+    Ok(entries)
+}
+
+pub(in crate::agent_engine) fn latest_child_result_handoff(
+    loop_state: &LoopState,
+) -> Option<String> {
+    let observation = loop_state.task_observations.iter().rev().find(|value| {
+        value.get("owner_layer").and_then(serde_json::Value::as_str) == Some("subagent_runtime")
+            && value.get("action").and_then(serde_json::Value::as_str)
+                == Some("subagent_child_task_merge_reused")
+            && value
+                .get("schema_version")
+                .and_then(serde_json::Value::as_u64)
+                == Some(2)
+    })?;
+    explicit_model_observation_body(&observation.to_string())
 }
 
 pub(super) fn observed_output_entries(loop_state: &LoopState) -> Vec<String> {
@@ -464,10 +484,16 @@ pub(super) fn observed_output_entries(loop_state: &LoopState) -> Vec<String> {
     selected_indices.extend(recent_non_listing);
     selected_indices.sort_unstable();
     selected_indices.dedup();
-    selected_indices
+    let mut entries = latest_child_result_handoff(loop_state)
+        .map(|handoff| format!("### subagent_structured_results\n{handoff}"))
         .into_iter()
-        .filter_map(|idx| observed_step_entry(&loop_state.executed_step_results[idx]))
-        .collect()
+        .collect::<Vec<_>>();
+    entries.extend(
+        selected_indices
+            .into_iter()
+            .filter_map(|idx| observed_step_entry(&loop_state.executed_step_results[idx])),
+    );
+    entries
 }
 
 pub(super) fn compound_listing_content_delivery_guard_entry(
