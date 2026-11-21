@@ -90,6 +90,9 @@ explicit application.
 - A durable child with `result_contract.output_format=machine_json` and required
   keys must persist those fields as JSON. A prose answer or missing required
   field cannot complete the child, even when semantic answer verification passes.
+- The default `machine_json` contract also returns a bounded JSON object when no
+  `required_keys` list is supplied; all object fields are retained as passive
+  findings. Explicit key lists still project only the requested fields.
 - Parents receive `subagent_structured_results` with exact child IDs, canonical
   statuses, validated result fields and evidence references. Consume this handoff
   before querying completed children; evidence refs are not paths or task-context

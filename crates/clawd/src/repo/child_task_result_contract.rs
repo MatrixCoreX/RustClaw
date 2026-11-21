@@ -18,12 +18,8 @@ fn child_machine_result_contract(payload: &Value) -> Option<&Value> {
         return None;
     }
     let contract = payload.pointer("/child_task_contract/result_contract")?;
-    (contract.get("output_format").and_then(Value::as_str) == Some("machine_json")
-        && contract
-            .get("required_keys")
-            .and_then(Value::as_array)
-            .is_some_and(|keys| !keys.is_empty()))
-    .then_some(contract)
+    (contract.get("output_format").and_then(Value::as_str) == Some("machine_json"))
+        .then_some(contract)
 }
 
 pub(crate) fn child_result_contract_failure(payload: &Value, answer: &str) -> Option<Value> {
@@ -56,17 +52,14 @@ pub(crate) fn validated_child_structured_result(
     if result_contract.get("output_format").and_then(Value::as_str) != Some("machine_json") {
         return None;
     }
-    let required_keys = result_contract
-        .get("required_keys")
-        .and_then(Value::as_array)?
-        .iter()
-        .filter_map(Value::as_str)
-        .map(str::trim)
-        .filter(|key| !key.is_empty())
-        .collect::<Vec<_>>();
-    if required_keys.is_empty() {
-        return None;
-    }
+    let required_keys = match result_contract.get("required_keys") {
+        None => Vec::new(),
+        Some(keys) => keys
+            .as_array()?
+            .iter()
+            .map(|key| key.as_str().map(str::trim).filter(|key| !key.is_empty()))
+            .collect::<Option<Vec<_>>>()?,
+    };
 
     let candidate_strings = [
         result_json.get("text").and_then(Value::as_str),
@@ -106,15 +99,19 @@ pub(crate) fn validated_child_structured_result(
                 .filter(|value| value.is_object())
                 .unwrap_or(&candidate)
                 .as_object()?;
-            let projected = required_keys
-                .iter()
-                .map(|key| {
-                    source
-                        .get(*key)
-                        .cloned()
-                        .map(|value| ((*key).to_string(), value))
-                })
-                .collect::<Option<serde_json::Map<String, Value>>>()?;
+            let projected = if required_keys.is_empty() {
+                source.clone()
+            } else {
+                required_keys
+                    .iter()
+                    .map(|key| {
+                        source
+                            .get(*key)
+                            .cloned()
+                            .map(|value| ((*key).to_string(), value))
+                    })
+                    .collect::<Option<serde_json::Map<String, Value>>>()?
+            };
             let value = Value::Object(projected);
             (value.to_string().len() <= MAX_STRUCTURED_RESULT_BYTES).then_some(value)
         })

@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn default_machine_contract_keeps_real_findings_without_an_explicit_key_list() {
+    let payload = json!({"task_role":"subagent_child","child_task_contract":{
+        "result_contract":{"output_format":"machine_json"}
+    }});
+    let result = json!({"findings":{"name":"Panel","line":9},"evidence_refs":["read:1"]});
+    assert_eq!(
+        validated_child_structured_result(&payload, &json!({"text":result.to_string()})),
+        Some(result.clone())
+    );
+    assert!(child_result_contract_failure(&payload, &result.to_string()).is_none());
+    assert!(
+        child_result_contract_failure(&payload, "natural prose without machine data").is_some()
+    );
+    let mut invalid = payload.clone();
+    invalid["child_task_contract"]["result_contract"]["required_keys"] = json!("not-an-array");
+    assert!(child_result_contract_failure(&invalid, &result.to_string()).is_some());
+    let oversized = json!({"findings":"x".repeat(33*1024)});
+    assert!(child_result_contract_failure(&payload, &oversized.to_string()).is_some());
+}
+
+#[test]
 fn declared_child_result_requires_every_field_without_parsing_prose() {
     let payload = json!({"task_role":"subagent_child","child_task_contract":{
         "scope":{},"result_contract":{"output_format":"machine_json","required_keys":["name","line"]}
