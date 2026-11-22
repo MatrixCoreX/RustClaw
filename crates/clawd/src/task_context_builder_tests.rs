@@ -398,7 +398,7 @@ fn execution_context_is_projected_to_planner_and_chat_prompts() {
     )
     .unwrap();
     assert_eq!(
-        prompt_report,
+        crate::prompt_projection::tests::restore_report(prompt_report.clone()),
         super::execution_context_budget_report_json(view)
     );
     assert!(prompt_report["context_input_inventory"].is_object());

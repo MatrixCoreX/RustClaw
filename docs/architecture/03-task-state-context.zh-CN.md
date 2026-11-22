@@ -34,6 +34,13 @@ flowchart LR
     D --> H[有界 journal trace<br/>提出与生效合同 + decision_envelope]
 ```
 
+模型专用诊断视图可把相同键集合的连续记录表示为 `ordered_object_runs_v1`
+列名和数值行；字段值、顺序、空值和字段缺失均可精确还原，原始预算报告和任务证据保持不变。
+宿主规范上下文摘要可通过 `host_summary_report_v1` 携带前缀、紧凑报告和原文摘要。
+最新执行记录可引用相同的 `LAST_TOOL_OR_MODEL_OUTPUT` 或已记录的有界摘录，并绑定字符数和摘要；
+它不合并不同操作，也不证明未记录的尾部。引用目标不可用时应恢复既有证据，不重放已完成的副作用。
+
+
 ## 验证状态与授权回查
 
 任务 journal 的 summary 与 trace 分别记录 `execution_status` 和 `answer_verification`。

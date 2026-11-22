@@ -2,6 +2,7 @@
 Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.make_dir`, `filesystem.read_text_range`, and `artifact.read_range` through `{"type":"call_capability","capability":"<leaf>","args":{...}}`. A lower-level `{"type":"call_tool","tool":"fs_basic","args":{"action":"<canonical-action>",...}}` remains available when the plan already owns an exact canonical action. `fs_basic` is a virtual planner tool: runtime maps its actions to stable backing tools such as `system_basic`, `fs_search`, and file builtins.
 
 ## Capability
+- Inspect, read, find and edit workspace files through typed capabilities.
 - Mutations require the host grant and confirmation; prose never authorizes a wider path or operation.
 <!--a1:stat_paths-->
 - Inspect explicit path facts.
@@ -31,12 +32,14 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 <!--a1:write_text,append_text,make_dir,remove_path-->
 - Write or append text, create directories, or remove files/directories when confirmation permits.
 <!--/a1-->
+<!--a1:write_text,append_text,replace_text,apply_patch-->
 - Literal writes/appends preserve all requested whitespace and the final newline.
   A successful write is not content verification: compare read-back evidence with
   the requested content, repair an authorized mismatch before cleanup, and report
   unresolved mismatches without claiming completion.
-  A line-numbered excerpt or line count cannot prove that the last line ends in
-  a newline. `read_text_range` returns `line_endings` for the complete file
+<!--/a1-->
+- A line-numbered excerpt or line count cannot prove a final newline.
+  `read_text_range` returns `line_endings` for the complete file
   snapshot: bare `lf_count`, `crlf_count`, and `ends_with_newline`. Compare these
   fields, the byte count and content with the request before cleanup; do not
   substitute the line-numbered excerpt's formatting for source bytes.
@@ -45,70 +48,6 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 <!--/a1-->
 <!--a1:review_child_patch,apply_child_patch,reject_child_patch-->
 - Review and decide isolated child-task patches through parent-owned machine actions.
-<!--/a1-->
-## Actions
-<!--a1:stat_paths-->
-- `stat_paths`
-<!--/a1-->
-<!--a1:list_dir-->
-- `list_dir`
-<!--/a1-->
-<!--a1:count_entries-->
-- `count_entries`
-<!--/a1-->
-<!--a1:read_text_range-->
-- `read_text_range`
-<!--/a1-->
-<!--a1:read_artifact_range-->
-- `read_artifact_range`
-<!--/a1-->
-<!--a1:find_entries-->
-- `find_entries`
-<!--/a1-->
-<!--a1:grep_text-->
-- `grep_text`
-<!--/a1-->
-<!--a1:find_images-->
-- `find_images`
-<!--/a1-->
-<!--a1:compare_paths-->
-- `compare_paths`
-<!--/a1-->
-<!--a1:write_text-->
-- `write_text`
-<!--/a1-->
-<!--a1:append_text-->
-- `append_text`
-<!--/a1-->
-<!--a1:make_dir-->
-- `make_dir`
-<!--/a1-->
-<!--a1:remove_path-->
-- `remove_path`
-<!--/a1-->
-<!--a1:preview_replace_text-->
-- `preview_replace_text`
-<!--/a1-->
-<!--a1:replace_text-->
-- `replace_text`
-<!--/a1-->
-<!--a1:apply_patch-->
-- `apply_patch`
-<!--/a1-->
-<!--a1:diff-->
-- `diff`
-<!--/a1-->
-<!--a1:rewind-->
-- `rewind`
-<!--/a1-->
-<!--a1:review_child_patch-->
-- `review_child_patch`
-<!--/a1-->
-<!--a1:apply_child_patch-->
-- `apply_child_patch`
-<!--/a1-->
-<!--a1:reject_child_patch-->
-- `reject_child_patch`
 <!--/a1-->
 ## Parameter Contract
 | Action | Param | Required | Type | Default | Description |
@@ -295,12 +234,14 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 - Legacy `read_file`, `write_file`, `list_dir`, `make_dir`, `remove_file`, `fs_search`, and `system_basic` remain accepted for compatibility, but prefer `fs_basic` when this contract covers the task.
 
 ## Evidence & Final Answer Contract
+<!--a1:find_entries,list_dir,grep_text,find_images-->
 - For recursive search, preserve `completeness`, `known_match_count`, `total_count_is_complete`, and `continuation`. `partial_*` with zero matches is not authoritative absence; `stale_snapshot` requires a new first-page search.
 - Continue an opaque cursor from the same normalized query so runtime can reuse its bounded snapshot. Do not restart an equivalent broad scan from page zero unless the snapshot is stale/expired or the selector changes.
 - For `find_entries`, the returned `results` array is the authoritative current page and `count` is its returned item count.
 - If the user asks to find/list candidates and the tool returns multiple `results`, the final answer must include every returned candidate unless the user asked for a top-N subset or the tool result explicitly says it was capped/truncated.
 - Do not replace a full `results` array with a sample, examples, "etc.", "and others", or a smaller hand-picked subset.
 - If `count` is larger than the number of visible `results`, say that the result is capped/truncated and report only the visible candidates plus the observed count. Do not invent the missing candidates.
+<!--/a1-->
 - For strict scalar requests, derive the scalar from structured fields such as `exists`, `count`, `size_bytes`, `path`, or `value`; do not paste raw JSON when a scalar was requested.
 
 ## Multilingual Reinforcement

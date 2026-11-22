@@ -1,7 +1,7 @@
 use crate::capability_map::PlannerNativeCapabilityGroup;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 // Keep every authorized group discoverable. Unloaded leaf names live in the
 // canonical catalog and loader; their schemas become callable only after loading.
@@ -28,32 +28,31 @@ pub(super) fn build_index(
     );
     let capability_count: usize = groups.iter().map(|g| g.capability_names.len()).sum();
     let mut omitted = 0usize;
+    let mut undisclosed = BTreeMap::new();
     let groups = groups
         .into_iter()
-        .map(|group| {
-            let visible = disclosed.contains(&group.skill_name);
+        .filter_map(|group| {
             let count = group.capability_names.len();
-            let capabilities = if visible {
-                group.capability_names
-            } else {
+            if !disclosed.contains(&group.skill_name) {
                 omitted += count;
-                Vec::new()
-            };
-            json!({"group":group.skill_name,"disclosed":visible,
-            "capability_count":count,
-            "capabilities":capabilities})
+                undisclosed.insert(group.skill_name, count);
+                None
+            } else {
+                Some(json!({"group":group.skill_name,"disclosed":true,
+                "capability_count":count,"capabilities":group.capability_names}))
+            }
         })
         .collect::<Vec<_>>();
     let mcp = mcp_capabilities.into_iter().collect::<BTreeSet<_>>();
     let index = json!({
-        "schema_version":2,"catalog_complete":omitted == 0,
+        "schema_version":3,"catalog_complete":omitted == 0,
         "group_catalog_complete":true,"capability_names_scope":"disclosed_groups_only","canonical_capability_count":capability_count,
         "canonical_catalog_sha256":canonical_sha256,"omitted_capability_count":omitted,
         "contract_source":"native_model_tools","discovery_source":"skill_quick_index",
         "contract_expansion":"load_capability_groups","dispatch":"resolver_verifier",
         "undisclosed_group_recovery":{"tool":"load_capability_groups",
             "op":"load_groups","selector":"groups","values":"exact_group_tokens"},
-        "groups":groups,"mcp_capabilities":mcp,
+        "groups":groups,"undisclosed_groups":undisclosed,"mcp_capabilities":mcp,
     });
     format!("runtime_capability_map_v2\n{index}")
 }

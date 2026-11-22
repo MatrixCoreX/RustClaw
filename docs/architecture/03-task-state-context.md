@@ -38,6 +38,17 @@ flowchart LR
     D --> H[Bounded journal trace<br/>proposed and effective contracts + decision_envelope]
 ```
 
+Model-only diagnostic views may encode consecutive records with equal key sets as
+`ordered_object_runs_v1` column headers and value rows. Values, order, nulls and
+missing fields round-trip exactly; canonical budget reports and journal evidence
+remain unchanged. A canonical host context summary can use `host_summary_report_v1`
+to carry its prefix, encoded report and original digest. The latest attempt may
+reference the identical `LAST_TOOL_OR_MODEL_OUTPUT` value or its recorded bounded
+trace excerpt, with a digest and character count. That reference preserves each
+operation and does not prove an unrecorded tail; unavailable reference targets
+require evidence recovery without replaying completed effects.
+
+
 ## Verification and Authorized Recall
 
 `task_journal.summary` and `trace` expose independent `execution_status` and

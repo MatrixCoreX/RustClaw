@@ -21,12 +21,22 @@ pub(super) fn native_capability_tool_definition(
     if tool_name != NATIVE_CALL_CAPABILITY_TOOL {
         if let [capability] = capability_names {
             if let Some(input_schema) = capability_argument_schemas.get(capability) {
+                let mut input_schema = input_schema.clone();
+                // This is the generator's redundant root annotation, not a validation
+                // keyword or a package-authored semantic description.
+                let generated =
+                    format!("schema:planner_capability_arguments_v1; capability={capability}");
+                if input_schema.get("description").and_then(Value::as_str)
+                    == Some(generated.as_str())
+                {
+                    input_schema.as_object_mut().unwrap().remove("description");
+                }
                 return ModelToolDefinition {
                     name: tool_name.to_string(),
                     description: format!(
                         "{description}; schema:direct_runtime_capability_arguments_v1"
                     ),
-                    input_schema: input_schema.clone(),
+                    input_schema,
                     strict: true,
                 };
             }

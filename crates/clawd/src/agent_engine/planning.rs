@@ -30,6 +30,8 @@ use context_length_recovery::{compact_text_to_token_budget, context_length_recov
 mod native_capability_tools;
 #[path = "planning/native_context_index.rs"]
 mod native_context_index;
+#[path = "planning/native_ledger_projection.rs"]
+mod native_ledger_projection;
 use native_capability_tools::{
     native_capability_leaf_tool_name, native_capability_tool_definition,
     native_capability_tool_map, native_group_leaf_tool_name, native_group_tool_definitions,
@@ -333,6 +335,8 @@ pub(super) async fn plan_round_actions(
         String::new()
     };
     let native_last_output = planner_last_observation(loop_state);
+    let native_attempt_ledger =
+        native_ledger_projection::project(&attempt_ledger, &native_last_output);
     let mut native_user_prompt = crate::render_prompt_template(
         &native_turn_context.template,
         &[
@@ -342,7 +346,7 @@ pub(super) async fn plan_round_actions(
             ("__REQUEST_LANGUAGE_HINT__", &request_language_hint),
             ("__ROUND__", &loop_state.round_no.to_string()),
             ("__HISTORY_COMPACT__", &native_history),
-            ("__ATTEMPT_LEDGER__", &attempt_ledger),
+            ("__ATTEMPT_LEDGER__", &native_attempt_ledger),
             ("__LAST_ROUND_OUTPUT__", &native_last_output),
             ("__RECENT_ASSISTANT_REPLIES__", &recent_assistant_replies),
         ],

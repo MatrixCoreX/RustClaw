@@ -358,7 +358,7 @@ pub(super) fn execution_context_budget_report_json(view: &ExecutionContextView) 
 
 fn execution_context_budget_report_block(view: &ExecutionContextView) -> String {
     let report = execution_context_budget_report_json(view);
-    let body = report.to_string();
+    let body = crate::prompt_projection::budget_report(&report).to_string();
     let mut block = String::from("### CONTEXT_BUDGET_REPORT");
     block.push('\n');
     block.push_str(&body);

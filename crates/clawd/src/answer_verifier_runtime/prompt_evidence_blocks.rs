@@ -139,11 +139,23 @@ pub(in crate::answer_verifier) fn provider_safe_numeric_evidence_leaf(key: &str)
 pub(in crate::answer_verifier) fn provider_safe_step_evidence(
     step: &crate::task_journal::TaskJournalStepTrace,
 ) -> serde_json::Value {
+    let mut observation = crate::task_journal::observed_evidence_for_step_trace(step);
+    if let Some(observation) = observation.as_mut() {
+        if observation.get("host_item_encoding").is_none() {
+            if let Some(items) = observation.get_mut("items") {
+                if let Some(encoded) = crate::prompt_projection::compact_records(items) {
+                    *items = encoded;
+                    observation["host_item_encoding"] =
+                        json!(crate::prompt_projection::RECORD_ENCODING);
+                }
+            }
+        }
+    }
     json!({
         "step_id": step.step_id,
         "skill": step.skill,
         "status": step.status.as_str(),
-        "observed_evidence": crate::task_journal::observed_evidence_for_step_trace(step),
+        "observed_evidence": observation,
         "key_numeric_evidence": provider_safe_numeric_evidence(step),
         "structured_output_projection": provider_safe_structured_output_projection(step),
         "output_excerpt_present": step.output_excerpt.as_deref().is_some_and(|value| !value.trim().is_empty()),
@@ -601,7 +613,8 @@ pub(in crate::answer_verifier) fn current_context_prompt_block(
         // Retry feedback is bounded machine data, never the prior provider body
         // or an instruction copied from task/evidence content.
         return serde_json::to_string(&json!({
-            "current_task_context": journal.context_bundle_summary,
+            "current_task_context": journal.context_bundle_summary.as_deref().map(|summary|
+                crate::prompt_projection::context_summary(summary).unwrap_or_else(|| json!(summary))),
             "verification_retry_context": {
                 "schema_version": retry.get("schema_version").and_then(serde_json::Value::as_u64),
                 "invalid_response_count": retry.get("invalid_response_count").and_then(serde_json::Value::as_u64),
@@ -618,5 +631,7 @@ pub(in crate::answer_verifier) fn current_context_prompt_block(
     if trimmed.is_empty() {
         return "<none>".to_string();
     }
-    trimmed.to_string()
+    crate::prompt_projection::context_summary(trimmed)
+        .map(|view| view.to_string())
+        .unwrap_or_else(|| trimmed.to_string())
 }

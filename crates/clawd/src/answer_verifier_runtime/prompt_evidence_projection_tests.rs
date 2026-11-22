@@ -2,6 +2,43 @@ use super::*;
 use claw_core::capability_result::CapabilityResultEnvelope;
 
 #[test]
+fn verifier_record_view_roundtrips_without_modifying_the_journal_or_evidence() {
+    let output = json!({"extra":{"paths":(0..12).map(|index|json!({
+        "path":format!("documents/item-{index}.txt"),"exists":true,"kind":"file",
+        "size_bytes":index+10,"modified_ts":123456
+    })).collect::<Vec<_>>()}})
+    .to_string();
+    let step = crate::task_journal::TaskJournalStepTrace::ok("step_1", "fs_basic", &output);
+    let original = crate::task_journal::observed_evidence_for_step_trace(&step).unwrap();
+    let projected = provider_safe_step_evidence(&step);
+    let mut restored = projected["observed_evidence"].clone();
+    assert_eq!(
+        restored["host_item_encoding"],
+        crate::prompt_projection::RECORD_ENCODING
+    );
+    restored["items"] = crate::prompt_projection::tests::restore(&restored["items"]);
+    restored
+        .as_object_mut()
+        .unwrap()
+        .remove("host_item_encoding");
+    assert_eq!(restored, original);
+    assert_eq!(
+        crate::task_journal::observed_evidence_for_step_trace(&step),
+        Some(original)
+    );
+    assert_eq!(step.output_excerpt.as_deref(), Some(output.as_str()));
+    assert_eq!(
+        projected["output_excerpt_hash"],
+        provider_safe_excerpt_hash(&output)
+    );
+    assert!(
+        provider_safe_step_evidence(&crate::task_journal::TaskJournalStepTrace::default())
+            ["observed_evidence"]
+            .is_null()
+    );
+}
+
+#[test]
 fn equal_large_leaf_fields_are_losslessly_referenced_inside_the_same_result() {
     let body = "line\n".repeat(1200);
     let extra = json!({"excerpt":body,"a/b~c":["item".repeat(400)],"count":3,"host_only":true});

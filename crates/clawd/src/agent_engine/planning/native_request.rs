@@ -45,7 +45,7 @@ pub(super) fn native_planner_request(
     }
     tools.push(ModelToolDefinition {
         name: NATIVE_RESPOND_TOOL.to_string(),
-        description: "Submit a final answer or one missing-input clarification. This formats responses and does not execute or simulate capabilities: first call the matching mutation capability and observe success, even when the user constrains the final reply to one literal value. Clarification requires terminal_intent=clarify and missing_slot; never call invalid arguments to prove a declared missing input. Provider/config/permission, domain parse/normalize/validate/preview, dry-run, artifact/job, checkpoint/diff/verification/repair/rewind fields require a prior matching capability result. A lower-level observation is not a substitute for the disclosed domain capability. Shapes: free_text=prose/scalars/bare lines; list=numbered entries; object=named value_json fields; observed_object=runtime-copy current-loop success or structured failure fields. value_json is complete valid JSON; quote JSON strings. Follow the protocol's exact shape, count, source and conversation rules.".to_string(),
+        description: "Final answer or missing-input clarification; does not execute or simulate capabilities. For state claims, first call the matching mutation capability and observe success, even when the user constrains the final reply to one literal value. Provider/config/permission, domain parse/normalize/validate/preview, artifact/job, checkpoint, verification/repair/rewind fields require a prior matching capability result. A raw observation is not a substitute for the disclosed domain capability. Follow the protocol and typed shape/count/source fields.".to_string(),
         input_schema: json!({
             "type": "object",
             "required": [
@@ -75,7 +75,7 @@ pub(super) fn native_planner_request(
                         "side_reply",
                         "clarify"
                     ],
-                    "description": "semantic relation to the active task: continue_current=finish an accepted deliverable unchanged, including a terminal answer that contains both a requested side answer and the completed primary deliverable; amend_current=finish an accepted deliverable with mid-turn changes; start_followup=the initial primary deliverable when no plan/reply/effect was accepted yet, or an independent new primary goal; side_reply=a nonterminal side answer that leaves the primary task active; clarify=missing required input or an unresolved target_ref when multiple active targets remain equally plausible. Never terminate after only a side answer when the same input asks to complete the primary deliverable. Never guess, merge, or update all ambiguous targets. A conversation_input_batch is bound to the same task: merge it into an interrupted first attempt, but after any accepted plan/reply/effect classify its semantic change as amend_current or continue_current. Decide from meaning, never fixed phrases"
+                    "description": "continue_current=finish accepted goal unchanged; amend_current=apply bound changes; start_followup=initial/independent goal; side_reply=nonterminal side answer; clarify=required input/target_ref missing. conversation_input_batch: merge an interrupted first attempt; after any accepted plan/reply/effect use continue/amend. Finish requests include side and main deliverables; clarify ambiguous targets."
                 },
                 "clarify_reason_code": {
                     "type": "string",

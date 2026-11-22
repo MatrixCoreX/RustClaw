@@ -31,12 +31,12 @@ fn complete_index_keeps_authorized_unloaded_groups_without_duplicate_contracts()
     assert_eq!(value["omitted_capability_count"], 2);
     assert_eq!(value["groups"][0]["group"], "a");
     assert_eq!(value["groups"][0]["disclosed"], true);
-    assert_eq!(value["groups"][1]["capabilities"], json!([]));
-    assert_eq!(value["groups"][1]["capability_count"], 2);
+    assert_eq!(value["groups"].as_array().unwrap().len(), 1);
+    assert_eq!(value["undisclosed_groups"]["z"], 2);
     assert_eq!(value["capability_names_scope"], "disclosed_groups_only");
     assert_eq!(value["groups"][0]["capabilities"], json!(["a.read"]));
     assert_eq!(value["undisclosed_group_recovery"]["op"], "load_groups");
-    assert_eq!(value["groups"][1]["disclosed"], false);
+    assert!(value["groups"][0]["disclosed"].as_bool().unwrap());
     assert_eq!(value["mcp_capabilities"], json!(["mcp.sample"]));
     assert_eq!(value["dispatch"], "resolver_verifier");
 }
@@ -85,6 +85,10 @@ fn loading_preserves_canonical_catalog_identity_and_recovers_all_leaf_names() {
         unloaded["canonical_catalog_sha256"],
         restricted["canonical_catalog_sha256"]
     );
-    assert_eq!(restricted["groups"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        restricted["undisclosed_groups"].as_object().unwrap().len(),
+        1
+    );
+    assert!(restricted["undisclosed_groups"].get("z").is_none());
     assert_eq!(restricted["canonical_capability_count"], 1);
 }

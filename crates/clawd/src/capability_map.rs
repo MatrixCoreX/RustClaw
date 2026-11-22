@@ -159,10 +159,7 @@ fn planner_capability_hint(mapping: &PlannerCapabilityMapping) -> String {
 }
 
 fn planner_capability_leaf_description(mapping: &PlannerCapabilityMapping) -> String {
-    let mut parts = vec![format!(
-        "runtime_capability_leaf_v1; capability={}",
-        mapping.name
-    )];
+    let mut parts = vec![format!("capability={}", mapping.name)];
     if let Some(description) = mapping.description.as_deref() {
         parts.push(format!("purpose={}", compact_leaf_description(description)));
     }

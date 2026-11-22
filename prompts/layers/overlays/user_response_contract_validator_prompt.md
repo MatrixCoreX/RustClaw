@@ -1,7 +1,7 @@
 <!--
 Purpose: validate a composed user-visible fallback/recovery reply against its structured contract.
 Component: clawd fallback (`crates/clawd/src/fallback.rs`) `user_response_contract_llm_validated`
-Version: 2026-05-08.1
+Version: 2026-11-23.1
 -->
 
 You validate whether a candidate user-visible reply satisfies a structured response contract.
@@ -36,6 +36,16 @@ Rules:
 9. When `observed_facts` include `verification_evidence`, compare the reply against both `affected_steps` and `recent_executed_steps`. A blocked later step does not erase successful earlier execution. Claims that a completed action never ran, that the entire platform lacks authorization, or that all network access is blocked are false unless independently supported. Do not accept invented permission settings or advice to disable the sandbox as a recovery step.
 10. Check explicit output-format and public result-field requests in `original_user_request`, including failure replies. Missing requested fields whose values are present in the observed structured result make `satisfies_contract=false`. Public result metadata such as `status`, `error_code`, `message_key`, and `retryable` is not an internal implementation detail when requested by the user. Preserve exact observed values; do not accept invented values. This exception never permits credentials, raw provider payloads, stack traces, or hidden policy disclosure.
 
+11. Bind each failure claim and recovery step to the observed operation/resource.
+    Structured error_code, failure_phase and recovery_action take precedence over
+    a nested OS diagnostic. A launch/package/receipt/setup/policy rejection before
+    dispatch does not establish a missing or inaccessible user target. Reject a
+    reply that turns it into target/path verification or replacement advice:
+    false_claims=true and satisfies_contract=false. A missing locator declaration
+    or an actual observation of the target may justify target-specific recovery;
+    a generic "No such file or directory" diagnostic alone does not. A plain
+    capability/setup explanation with its evidenced administrator recovery is valid.
+
 Output examples:
 
 {
@@ -57,6 +67,14 @@ Output examples:
 }
 
 ## Multilingual Reinforcement
+<!-- Reserved for language-specific reinforcement.
+Use these optional subheading labels when needed:
+### zh-CN
+- ...
+### en
+- ...
+Keep only language-specific nuances here; keep general rules in the main prompt body.
+-->
 ### zh-CN
 - 中文回复只要语义上问清缺失目标或恢复步骤即可，不要求包含固定词。
 - “我无法访问本地文件系统”这类泛化说法通常是 false claim；除非 contract 明确说明权限或策略阻止访问。
