@@ -11,6 +11,8 @@ mod event_json_chunks;
 mod event_json_storage;
 #[path = "../task_event_storage_maintenance.rs"]
 mod task_event_storage_maintenance;
+#[path = "../task_journal_archive.rs"]
+mod task_journal_archive;
 
 fn main() {
     if let Err(error) = run() {
@@ -44,6 +46,30 @@ fn run() -> anyhow::Result<()> {
         "prepare" => {
             task_event_storage_maintenance::ensure_schema(&db)?;
             println!("{}", json!({"ok":true,"action":action}));
+        }
+        "pack-journals" => {
+            let before: i64 = argument("--before-ms")
+                .context("before_ms_required")?
+                .parse()?;
+            let mut total = 0;
+            loop {
+                let report = task_journal_archive::compact_batch(&mut db, batch, before)?;
+                total += report.compacted_rows;
+                let complete = report.scan_complete;
+                println!(
+                    "{}",
+                    json!({"ok":true,"action":action,"total_rows":total,"batch":report})
+                );
+                std::io::stdout().flush()?;
+                if complete {
+                    break;
+                }
+            }
+            checkpoint(&db)?;
+            println!(
+                "{}",
+                json!({"ok":true,"action":action,"total_rows":total,"complete":true})
+            );
         }
         "pack-chunks" => {
             task_event_storage_maintenance::ensure_schema(&db)?;
@@ -127,7 +153,10 @@ fn run() -> anyhow::Result<()> {
                 output.insert(table.into(), fingerprint(&db, table)?);
             }
             db.execute_batch("COMMIT")?;
-            println!("{}", json!({"ok":true,"fingerprints":output}));
+            println!(
+                "{}",
+                json!({"ok":true,"fingerprint_version":2,"fingerprints":output})
+            );
         }
         "vacuum" => {
             let destination = PathBuf::from(argument("--output").context("output_required")?);
@@ -174,6 +203,10 @@ fn fingerprint(db: &Connection, table: &str) -> anyhow::Result<Value> {
         .iter()
         .find(|(t, _)| *t == table)
         .and_then(|(_, field)| columns.iter().position(|(c, _)| c == field));
+    let result_column = columns
+        .iter()
+        .position(|(column, _)| column == "result_json");
+    let task_id_column = columns.iter().position(|(column, _)| column == "task_id");
     let version = if has_version { "storage_version" } else { "0" };
     let blob = if has_blob { "storage_blob" } else { "NULL" };
     let mut statement = db.prepare(&format!(
@@ -195,6 +228,19 @@ fn fingerprint(db: &Connection, table: &str) -> anyhow::Result<Value> {
                     row.get::<_, Option<Vec<u8>>>(columns.len() + 1)?.as_deref(),
                 )?;
                 ValueRef::Text(decoded.as_bytes())
+            } else if Some(n) == result_column && task_id_column.is_some() {
+                match row.get_ref(n)? {
+                    ValueRef::Text(raw) => {
+                        let task_key = task_id_column.context("task_fingerprint_id_missing")?;
+                        decoded = task_journal_archive::logical_result(
+                            db,
+                            &row.get::<_, String>(task_key)?,
+                            std::str::from_utf8(raw)?,
+                        )?;
+                        ValueRef::Text(decoded.as_bytes())
+                    }
+                    value => value,
+                }
             } else {
                 row.get_ref(n)?
             };

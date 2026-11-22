@@ -70,3 +70,10 @@ test("unavailable capacity does not invent numeric availability", async () => {
   assert.match(text, /Backup capacity is unavailable/);
   assert.doesNotMatch(text, /has 0|needs 0/);
 });
+
+test("admitted backups can still disclose their measured post-backup space warning", async () => {
+  const text = await show({ status: "verified_remote", capacity: { status: "ready", projected_destination_pressure: "warning", projected_destination_available_bytes: 2 * 1024 ** 3 } });
+  assert.match(text, /There is enough space for this backup/);
+  assert.match(text, /expected to remain afterward/);
+  assert.doesNotMatch(text, /waiting for space/);
+});

@@ -130,6 +130,7 @@ mod task_lifecycle;
 mod task_model_selection;
 mod task_read_id;
 mod task_result_objects;
+mod task_journal_archive;
 mod task_result_retention;
 mod token_estimator;
 mod turn_boundary_envelope;

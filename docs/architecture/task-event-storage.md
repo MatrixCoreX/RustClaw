@@ -71,3 +71,23 @@ and cumulative logical savings are transactional. After reaching the end, a late
 for tasks that completed through another writer. Normal artifact retention and delivery acknowledgment
 rules remain authoritative; compression does not change them. Rolling back to a runtime that cannot
 read these references requires the paired pre-upgrade database backup.
+## Cold journal fields
+
+Completed root `ask` tasks may archive only `task_journal.trace.rounds` and
+`task_journal.trace.event_stream`. Checkpoints, step evidence, budgets, lifecycle,
+summaries and final replies stay inline. Recent, active, failed and child tasks
+are excluded. Immutable payloads are bound to their owning task, length and SHA-256;
+invalid, missing, conflicting or corrupted references fail closed.
+
+Task queries and teaching/debug queries restore the original JSON fields before
+projection. History lists continue to avoid loading results. Deleting a task also
+deletes its private journal payload. Automatic maintenance stays disabled until
+an explicit `task-event-maintenance pack-journals --database <path> --before-ms <cutoff>`
+operation enrolls the database. Backfill is transactional, resumable, capped at
+64 row IDs and approximately 250 ms per batch, with bounded input/decompression.
+
+Maintenance `verify` now emits `fingerprint_version=2`: task result JSON is compared
+as canonical, fully restored JSON. Event/archive payloads and other columns keep
+their existing byte/hash rules. Verify before and after maintenance, with a tested
+backup and a stopped/fenced runtime. A rollback to an older host requires its
+matching pre-migration database checkpoint, rather than a binary-only rollback.

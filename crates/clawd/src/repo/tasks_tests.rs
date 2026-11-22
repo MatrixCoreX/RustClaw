@@ -1968,3 +1968,6 @@ mod child_graph;
 
 #[path = "tasks_tests/checkpoint_lease.rs"]
 mod checkpoint_lease;
+
+#[path = "tasks_tests/journal_archive.rs"]
+mod journal_archive;

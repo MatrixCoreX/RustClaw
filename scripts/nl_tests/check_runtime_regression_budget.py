@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 import tomllib
 from typing import Any
@@ -56,6 +57,10 @@ def load_contract(path: Path, profile: str) -> dict[str, Any]:
     missing = sorted(REQUIRED_FIELDS - set(selected))
     if missing:
         raise ValueError(f"runtime_budget.fields_missing fields={','.join(missing)}")
+    if "min_wall_time_samples" in selected and (type(selected["min_wall_time_samples"]) is not int or selected["min_wall_time_samples"] < 1):
+        raise ValueError("runtime_budget.min_wall_time_samples_invalid")
+    if "max_p95_wall_time_ms" in selected and (type(selected["max_p95_wall_time_ms"]) not in (int,float) or not math.isfinite(selected["max_p95_wall_time_ms"]) or selected["max_p95_wall_time_ms"] < 0):
+        raise ValueError("runtime_budget.max_p95_wall_time_ms_invalid")
     return selected
 
 
@@ -163,6 +168,21 @@ def evaluate(metrics: dict[str, Any], budget: dict[str, Any]) -> dict[str, Any]:
     )
 
     prompt_truncations = number(nested(metrics, "llm", "prompt_truncation_count"))
+    if "min_wall_time_samples" in budget:
+        count = nested(metrics,"wall_time","recorded_turns")
+        valid = type(count) is int and count >= 0
+        threshold(checks,"min_wall_time_samples",count if valid else None,budget["min_wall_time_samples"],
+                  valid and count >= budget["min_wall_time_samples"] and wall_status == "complete")
+    if "max_p95_wall_time_ms" in budget:
+        p95 = nested(metrics,"wall_time","p95_ms")
+        method = nested(metrics,"wall_time","percentile_method")
+        samples = nested(metrics,"wall_time","samples_ms")
+        count = nested(metrics,"wall_time","recorded_turns")
+        samples_valid = isinstance(samples,list) and bool(samples) and len(samples)==count and all(type(v) in (int,float) and math.isfinite(v) and v >= 0 for v in samples)
+        expected = sorted(samples)[math.ceil(len(samples)*.95)-1] if samples_valid else None
+        valid = type(p95) in (int,float) and math.isfinite(p95) and p95 >= 0
+        threshold(checks,"max_p95_wall_time_ms",p95 if valid else None,budget["max_p95_wall_time_ms"],
+                  valid and samples_valid and p95 == expected and method == "nearest_rank" and wall_status == "complete" and p95 <= budget["max_p95_wall_time_ms"])
     threshold(
         checks,
         "max_prompt_truncations",
@@ -210,6 +230,16 @@ def self_test() -> None:
     result = evaluate(regressed, budget)
     assert not result["passed"]
     assert "max_avg_uncached_input_tokens" in result["failures"]
+    repeated = load_contract(DEFAULT_CONTRACT,"repeated_readonly")
+    sample = json.loads(json.dumps(metrics))
+    sample["wall_time"] = {"recording_status":"complete","recorded_turns":10,"samples_ms":[12000]*9+[18000],"percentile_method":"nearest_rank","avg_ms":12600,"p95_ms":18000}
+    assert evaluate(sample,repeated)["passed"]
+    sample["wall_time"]["recorded_turns"] = 1
+    assert "min_wall_time_samples" in evaluate(sample,repeated)["failures"]
+    sample["wall_time"]["recorded_turns"] = 10
+    for invalid in (None,True,float('nan'),float('inf'),60001):
+        sample["wall_time"]["p95_ms"] = invalid
+        assert "max_p95_wall_time_ms" in evaluate(sample,repeated)["failures"]
     print("RUNTIME_REGRESSION_BUDGET_SELF_TEST ok")
 
 

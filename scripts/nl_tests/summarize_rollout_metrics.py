@@ -773,6 +773,7 @@ def count_bucket(value: int) -> str:
 
 
 def harness_wall_time_ms(obj: dict[str, Any]) -> int | None:
+    from math import isfinite
     candidates = [
         get_path(obj, "harness_metrics", "wall_time_ms"),
         get_path(obj, "data", "harness_metrics", "wall_time_ms"),
@@ -780,9 +781,21 @@ def harness_wall_time_ms(obj: dict[str, Any]) -> int | None:
     for value in candidates:
         if isinstance(value, bool):
             continue
-        if isinstance(value, (int, float)) and value >= 0:
+        if isinstance(value, (int, float)) and isfinite(value) and value >= 0:
             return int(value)
     return None
+
+
+def percentile_nearest_rank(samples: list[int], percentile: float) -> int | None:
+    from math import ceil, isfinite
+    if not 0 < percentile <= 100:
+        raise ValueError("wall_time_percentile_invalid")
+    if any(type(v) not in (int, float) or not isfinite(v) or v < 0 for v in samples):
+        raise ValueError("wall_time_sample_invalid")
+    if not samples:
+        return None
+    ordered = sorted(samples)
+    return ordered[max(0, ceil(len(ordered) * percentile / 100) - 1)]
 
 
 def capability_outcome_report(
@@ -1203,6 +1216,7 @@ def summarize_run(
     total_cache_write_input_tokens = 0
     cache_metric_record_count = 0
     wall_time_recorded_turns = 0
+    wall_time_samples = []
     total_wall_time_ms = 0
     max_wall_time_ms = 0
 
@@ -1275,6 +1289,7 @@ def summarize_run(
         total_repair_attempts += turn_repair_attempt_count
         repair_attempt_turn_counts[count_bucket(turn_repair_attempt_count)] += 1
         if (wall_time_ms := harness_wall_time_ms(obj)) is not None:
+            wall_time_samples.append(wall_time_ms)
             wall_time_recorded_turns += 1
             total_wall_time_ms += wall_time_ms
             max_wall_time_ms = max(max_wall_time_ms, wall_time_ms)
@@ -1487,6 +1502,10 @@ def summarize_run(
                 else "not_recorded"
             ),
             "recorded_turns": wall_time_recorded_turns,
+            "percentile_method": "nearest_rank",
+            "samples_ms": wall_time_samples,
+            "p50_ms": percentile_nearest_rank(wall_time_samples, 50),
+            "p95_ms": percentile_nearest_rank(wall_time_samples, 95),
             "missing_turns": max(0, total_turns - wall_time_recorded_turns),
             "total_ms": total_wall_time_ms,
             "avg_ms": (
@@ -1781,6 +1800,8 @@ def summarize_run_dirs(
     wall_time_recorded_turns = sum(
         safe_int(get_path(summary, "wall_time", "recorded_turns")) for summary in summaries
     )
+    wall_time_samples = [value for summary in summaries
+                         for value in (get_path(summary,"wall_time","samples_ms") or [])]
     total_wall_time_ms = sum(
         safe_int(get_path(summary, "wall_time", "total_ms")) for summary in summaries
     )
@@ -1821,6 +1842,11 @@ def summarize_run_dirs(
             ),
             "recorded_turns": wall_time_recorded_turns,
             "missing_turns": max(0, turns_total - wall_time_recorded_turns),
+            "percentile_method": "nearest_rank",
+            "samples_ms": wall_time_samples,
+            "percentile_recording_status": "complete" if len(wall_time_samples)==wall_time_recorded_turns and wall_time_recorded_turns else "partial" if wall_time_samples else "not_recorded",
+            "p50_ms": percentile_nearest_rank(wall_time_samples,50) if len(wall_time_samples)==wall_time_recorded_turns else None,
+            "p95_ms": percentile_nearest_rank(wall_time_samples,95) if len(wall_time_samples)==wall_time_recorded_turns else None,
             "total_ms": total_wall_time_ms,
             "avg_ms": (
                 round(total_wall_time_ms / wall_time_recorded_turns, 3)

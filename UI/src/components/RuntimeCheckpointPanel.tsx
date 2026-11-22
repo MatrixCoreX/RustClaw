@@ -4,7 +4,7 @@ import { readJsonApiResponse } from "../lib/api-response";
 import { formatBytes } from "../lib/display-format";
 import { formatUnixDateTime } from "../lib/date-format";
 import type { ApiResponse } from "../types/api";
-type BackupCapacity = { status?: string; estimated_snapshot_bytes?: number | null; reserve_bytes?: number | null; required_available_bytes?: number | null; destination_available_bytes?: number | null; destination_shortfall_bytes?: number | null; source_available_bytes?: number | null; source_shortfall_bytes?: number | null; current_source_covered?: boolean | null };
+type BackupCapacity = { status?: string; estimated_snapshot_bytes?: number | null; reserve_bytes?: number | null; required_available_bytes?: number | null; destination_available_bytes?: number | null; destination_shortfall_bytes?: number | null; source_available_bytes?: number | null; source_shortfall_bytes?: number | null; current_source_covered?: boolean | null; projected_destination_available_bytes?: number | null; projected_destination_pressure?: string };
 type Report = { capacity?: BackupCapacity; status: string; error_code?: string; created_at_ts?: number; bytes?: number; database_count?: number; backup_run?:{phase?:string;next_retry_at_ts?:number;notice_key?:string};vault?:{status?:string;encrypted?:boolean;retained_versions?:number;payload_scopes?:string[];reused_bytes?:number} };
 export function RuntimeCheckpointPanel({ t, apiFetch, requestScope }: { t: (zh: string, en: string) => string; apiFetch: (path: string, init?: RequestInit) => Promise<Response>; requestScope: string }) {
   const owns = useRequestOwner(requestScope);
@@ -50,6 +50,7 @@ export function RuntimeCheckpointPanel({ t, apiFetch, requestScope }: { t: (zh: 
       <p>{t("本次备份等待空间释放，已有副本会保留。", "This run is waiting for space; existing copies are retained.")}</p>
     </div>}
     {view.report?.capacity?.status === "unavailable" && <p role="status" className="mt-2 text-sm">{t("暂时无法读取备份容量，系统会重新检查。", "Backup capacity is unavailable; the system will check again.")}</p>}
+    {view.report?.capacity?.status === "ready" && view.report.capacity.projected_destination_pressure === "warning" && <p role="status" className="mt-2 text-sm">{t(`本次备份空间足够，但完成后预计仅剩 ${capacityBytes(view.report.capacity.projected_destination_available_bytes)}。建议为后续备份预留更多空间。`, `There is enough space for this backup, but only ${capacityBytes(view.report.capacity.projected_destination_available_bytes)} is expected to remain afterward. Allow more space for future backups.`)}</p>}
     {view.report?.capacity?.current_source_covered === false && <p role="status" className="mt-2 text-sm">{t("程序已更新，现有备份对应较早版本；系统会在空闲且空间足够时补做。", "The program has been updated since the existing backup. A new copy will be created when idle and space is available.")}</p>}
     {view.report?.backup_run?.next_retry_at_ts && <p role="status" className="mt-2 text-sm">{t("备份已延后，将自动重试：","Backup deferred; automatic retry: ")}{formatUnixDateTime(view.report.backup_run.next_retry_at_ts,t("zh-CN","en-US"))}</p>}
     {view.report?.backup_run?.notice_key==="backup.attention_required"&&<p role="alert" className="mt-2 text-sm">{t("自动重试未完成，请管理员检查备份空间、恢复密钥和服务器连接。已有副本会保留。","Automatic retries did not complete. Ask an administrator to check backup space, the recovery key and the server connection. Existing copies are retained.")}</p>}

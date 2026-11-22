@@ -60,5 +60,40 @@ class CapacityTests(unittest.TestCase):
         status.unlink();status.symlink_to(checkpoint/'manifest.json')
         self.assertIsNone(capacity.verified_source_revision(self.root,self.destination))
 
+    def checkpoint_database(self, path='data/state.db', previous=100):
+        recent=self.destination/'checkpoint-003';recent.mkdir()
+        (recent/'manifest.json').write_text(json.dumps({'files':[{'kind':'sqlite','path':path,'raw_bytes':previous}]}))
+        return recent
+
+    def test_live_database_and_wal_growth_increase_estimate_without_lowering_reserve(self):
+        source=self.root/'data/state.db';source.parent.mkdir();source.write_bytes(b'x'*150)
+        source.with_name(source.name+'-wal').write_bytes(b'x'*50)
+        self.checkpoint_database()
+        with patch.object(capacity,'estimate_snapshot_bytes',return_value=500),patch.object(capacity.shutil,'disk_usage',return_value=self.usage(750)):
+            value=capacity.capacity_report(self.root,self.destination,200)
+        self.assertEqual(value['estimated_database_growth_bytes'],100)
+        self.assertEqual(value['required_available_bytes'],800)
+        self.assertEqual(value['reserve_bytes'],200)
+        self.assertEqual(value['status'],'insufficient')
+
+    def test_shrinking_database_does_not_reduce_last_measured_snapshot_estimate(self):
+        source=self.root/'data/state.db';source.parent.mkdir();source.write_bytes(b'x'*20)
+        self.checkpoint_database()
+        self.assertEqual(capacity.database_growth_bytes(self.root,self.destination),0)
+
+    def test_unsafe_manifest_source_path_cannot_be_used_for_capacity(self):
+        self.checkpoint_database('../outside.db')
+        value=capacity.capacity_report(self.root,self.destination,200)
+        self.assertEqual(value['status'],'unavailable')
+        self.assertIsNone(value['destination_available_bytes'])
+
+    def test_post_backup_warning_is_distinct_from_the_configured_admission_floor(self):
+        usage=shutil._ntuple_diskusage(100*1024**3,97*1024**3,3*1024**3)
+        with patch.object(capacity,'estimate_snapshot_bytes',return_value=512*1024**2),patch.object(capacity.shutil,'disk_usage',return_value=usage):
+            value=capacity.capacity_report(self.root,self.destination,2*1024**3)
+        self.assertEqual(value['status'],'ready')
+        self.assertEqual(value['projected_destination_available_bytes'],int(2.5*1024**3))
+        self.assertEqual(value['projected_destination_pressure'],'warning')
+
 
 if __name__ == '__main__':unittest.main()

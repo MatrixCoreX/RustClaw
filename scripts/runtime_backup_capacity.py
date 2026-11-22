@@ -29,6 +29,52 @@ def probe_parent(path):
     return path
 
 
+def database_growth_bytes(root, destination):
+    """Include positive live SQLite growth since the latest measured snapshot."""
+    root = Path(root).resolve()
+    candidates = sorted(p for p in Path(destination).glob('checkpoint-*')
+                        if p.is_dir() and not p.is_symlink()
+                        and (p / 'manifest.json').is_file()
+                        and not (p / 'manifest.json').is_symlink())
+    if not candidates:
+        return 0
+    manifest = candidates[-1] / 'manifest.json'
+    if manifest.stat().st_size > 16 * 1024**2:
+        raise ValueError('checkpoint_estimate_manifest_oversized')
+    rows = json.loads(manifest.read_text()).get('files', [])
+    if not isinstance(rows, list):
+        raise ValueError('checkpoint_estimate_manifest_invalid')
+    growth = 0
+    seen = set()
+    for row in rows:
+        if not isinstance(row, dict) or row.get('kind') != 'sqlite':
+            continue
+        relative, previous = row.get('path'), row.get('raw_bytes')
+        if not isinstance(relative, str) or not relative or type(previous) is not int or previous < 0:
+            raise ValueError('checkpoint_estimate_database_invalid')
+        name = Path(relative)
+        if name.is_absolute() or '..' in name.parts or '\\' in relative:
+            raise ValueError('checkpoint_estimate_path_invalid')
+        source = (root / name).resolve()
+        if not source.is_relative_to(root):
+            raise ValueError('checkpoint_estimate_path_invalid')
+        if source in seen:
+            raise ValueError('checkpoint_estimate_database_duplicate')
+        seen.add(source)
+        if not source.exists():
+            continue
+        if not source.is_file():
+            raise ValueError('checkpoint_estimate_database_invalid')
+        size = source.stat().st_size
+        wal = source.with_name(source.name + '-wal')
+        if wal.exists():
+            if wal.is_symlink() or not wal.is_file():
+                raise ValueError('checkpoint_estimate_wal_invalid')
+            size += wal.stat().st_size
+        growth += max(0, size - previous)
+    return growth
+
+
 def capacity_report(root, destination, reserve):
     report = {'schema_version': 1, 'sampled_at_ts': int(time.time()), 'status': 'unavailable',
               'estimated_snapshot_bytes': None, 'reserve_bytes': reserve,
@@ -36,12 +82,20 @@ def capacity_report(root, destination, reserve):
               'destination_shortfall_bytes': None, 'source_available_bytes': None,
               'source_shortfall_bytes': None}
     try:
-        estimate = estimate_snapshot_bytes(destination)
-        free = shutil.disk_usage(probe_parent(destination)).free
+        growth = database_growth_bytes(root, destination)
+        estimate = estimate_snapshot_bytes(destination) + growth
+        destination_usage = shutil.disk_usage(probe_parent(destination))
+        free = destination_usage.free
         source = shutil.disk_usage(root).free
         report.update(estimated_snapshot_bytes=estimate, required_available_bytes=reserve + estimate,
                       destination_available_bytes=free, destination_shortfall_bytes=max(0, reserve + estimate - free),
                       source_available_bytes=source, source_shortfall_bytes=max(0, reserve - source))
+        warning = max(2 * 1024**3, int(destination_usage.total * .03))
+        projected = max(0, free - estimate)
+        report.update(estimated_database_growth_bytes=growth,
+                      projected_destination_available_bytes=projected,
+                      destination_warning_reserve_bytes=warning,
+                      projected_destination_pressure='warning' if projected < warning else 'normal')
         report['status'] = 'ready' if free >= reserve + estimate and source >= reserve else 'insufficient'
     except (OSError, ValueError):
         report['error_code'] = 'checkpoint_capacity_unavailable'

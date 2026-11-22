@@ -17,10 +17,11 @@ fn read_task_result_json_for_debug(
     let Some((db_status, raw_result_json)) = row else {
         return Ok(None);
     };
-    let result_json = raw_result_json
+    let mut result_json = raw_result_json
         .as_deref()
         .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
         .unwrap_or(Value::Null);
+    crate::task_journal_archive::hydrate(&db, task_id, &mut result_json)?;
     Ok(Some((db_status, result_json)))
 }
 

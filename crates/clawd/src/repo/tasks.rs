@@ -916,9 +916,17 @@ pub(crate) fn get_task_query_record(
 
             let status = parse_task_status(&status_str);
 
-            let result_json = result_json_str
+            let mut result_json = result_json_str
                 .as_deref()
                 .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+            if let Some(result) = result_json.as_mut() {
+                crate::task_journal_archive::hydrate(&db, &task_id, result).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        2, rusqlite::types::Type::Text,
+                        Box::new(std::io::Error::other(error.to_string())),
+                    )
+                })?;
+            }
             let mut lifecycle = crate::task_lifecycle::task_query_lifecycle_projection(
                 &status_str,
                 result_json.as_ref(),

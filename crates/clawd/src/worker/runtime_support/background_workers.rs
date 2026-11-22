@@ -861,6 +861,13 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
     if let Err(error) = crate::task_result_objects::compact_batch(&mut db, 64) {
         warn!(error = %error, "task_result_compaction_failed");
     }
+    if crate::task_journal_archive::enabled(&db)? {
+        if let Err(error) = crate::task_journal_archive::compact_batch(
+            &mut db, 32, now.saturating_sub(86_400).saturating_mul(1000),
+        ) {
+            warn!(error = %error, "task_journal_archive_compaction_failed");
+        }
+    }
     match crate::task_event_storage_maintenance::compact_batch(&mut db, 128) {
         Ok(report) if report.rows > 0 => info!(
             rows = report.rows,

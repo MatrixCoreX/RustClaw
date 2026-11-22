@@ -18,6 +18,8 @@ REQUIRED_TOKENS: dict[str, tuple[str, ...]] = {
         '"avg_uncached_input_tokens_per_turn"',
         '"usage_recording_status"',
         '"wall_time"',
+        '"p50_ms"',
+        '"p95_ms"',
         '"avg_tool_calls_per_turn"',
     ),
     "scripts/inventories/runtime_regression_budgets.toml": (
@@ -30,6 +32,8 @@ REQUIRED_TOKENS: dict[str, tuple[str, ...]] = {
         "max_avg_llm_calls",
         "max_avg_tool_calls",
         "max_avg_wall_time_ms",
+        "min_wall_time_samples",
+        "max_p95_wall_time_ms",
     ),
     "scripts/nl_tests/check_runtime_regression_budget.py": (
         "RUNTIME_REGRESSION_BUDGET_SELF_TEST ok",
@@ -39,6 +43,8 @@ REQUIRED_TOKENS: dict[str, tuple[str, ...]] = {
         '"max_avg_llm_calls"',
         '"max_avg_tool_calls"',
         '"max_avg_wall_time_ms"',
+        '"min_wall_time_samples"',
+        '"max_p95_wall_time_ms"',
     ),
 }
 
