@@ -334,3 +334,57 @@ fn checkpoint_capacity_projection_preserves_revision_and_tristate_coverage_witho
         json!({"current_source_revision":null,"verified_source_revision":null,"current_source_covered":null})
     );
 }
+
+#[tokio::test]
+async fn checkpoint_endpoint_exposes_bounded_growth_forecast_without_private_data() {
+    let root = tempfile::tempdir().unwrap();
+    fs::create_dir(root.path().join("data")).unwrap();
+    let path = root.path().join("data/runtime-backup-capacity.json");
+    let mut state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    state.skill_rt.workspace_root = root.path().to_path_buf();
+    state.seed_test_auth_identity("capacity-admin", "admin");
+    let router = Router::new()
+        .nest("/v1", build_ui_router())
+        .with_state(state);
+    for (pressure, growth, projected, expected) in [
+        (
+            json!("warning"),
+            json!(42),
+            json!(1024),
+            json!({"status":"ready","estimated_database_growth_bytes":42,"projected_destination_available_bytes":1024,"destination_warning_reserve_bytes":2048,"projected_destination_pressure":"warning"}),
+        ),
+        (
+            json!("normal"),
+            json!(0),
+            json!(4096),
+            json!({"status":"ready","estimated_database_growth_bytes":0,"projected_destination_available_bytes":4096,"destination_warning_reserve_bytes":2048,"projected_destination_pressure":"normal"}),
+        ),
+        (
+            json!("PRIVATE_BACKUP_PATH"),
+            json!(-1),
+            json!("PRIVATE_KEY_PATH"),
+            json!({"status":"ready","destination_warning_reserve_bytes":2048}),
+        ),
+    ] {
+        let input = json!({"status":"ready","estimated_database_growth_bytes":growth,"projected_destination_available_bytes":projected,"destination_warning_reserve_bytes":2048,"projected_destination_pressure":pressure,"key_file":"PRIVATE_KEY_PATH","recovery_key":"SECRET_SENTINEL"});
+        fs::write(&path, input.to_string()).unwrap();
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/system/checkpoint-status")
+                    .header("x-agent-key", "capacity-admin")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let raw = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+        let output: Value = serde_json::from_slice(&raw).unwrap();
+        assert_eq!(output["data"]["capacity"], expected);
+        assert!(!String::from_utf8_lossy(&raw).contains("PRIVATE_"));
+        assert!(!String::from_utf8_lossy(&raw).contains("SECRET_SENTINEL"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), input.to_string());
+    }
+}

@@ -364,6 +364,10 @@ async fn get_checkpoint_status(
                     "sampled_at_ts",
                     "status",
                     "estimated_snapshot_bytes",
+                    "estimated_database_growth_bytes",
+                    "projected_destination_available_bytes",
+                    "destination_warning_reserve_bytes",
+                    "projected_destination_pressure",
                     "reserve_bytes",
                     "required_available_bytes",
                     "destination_available_bytes",
@@ -430,6 +434,9 @@ fn read_operator_status_projection(path: &Path, fields: &[&str]) -> Option<Value
                         })
                 }),
                 "encrypted" => value.is_boolean(),
+                "projected_destination_pressure" => {
+                    matches!(value.as_str(), Some("normal" | "warning"))
+                }
                 "current_source_covered" => value.is_boolean() || value.is_null(),
                 "current_source_revision" | "verified_source_revision" => {
                     value.is_null()
