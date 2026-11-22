@@ -434,21 +434,34 @@ fn redact_sensitive_key_value_pairs(text: &str) -> String {
     static KV_RE: OnceLock<Regex> = OnceLock::new();
     KV_RE
         .get_or_init(|| {
-            Regex::new(r#"\b(?:(?P<public_flag>(?i:max_tokens_explicitly_requested)\s*=\s*(?:true|false)(?:[\s,;，；。)\]}]|$))|(?P<key>[A-Za-z][A-Za-z0-9_.-]{0,80})(?P<sep>\s*=\s*)(?P<value>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|[^\s"'`<>&;\\]+))"#)
+            Regex::new(concat!(
+                r#"\b(?:"#,
+                r#"(?P<public_flag>(?i:(?:budget_request\.)?max_tokens_explicitly_requested)`?\s*=\s*`?(?:true|false)`?(?:[\s,;，；。()（）\]}]|$))"#,
+                r#"|(?P<public_tokens>(?i:(?:(?:effective_budget|budget|budget_request\.values)\.)?max_tokens)`?\s*=\s*`?(?P<public_number>[0-9]{1,20})`?(?:[\s,;，；。()（）\]}]|$))"#,
+                r#"|(?P<key>[A-Za-z][A-Za-z0-9_.-]{0,80})(?P<key_quote>`?)(?P<sep>\s*=\s*)(?P<value>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|[^\s"'`<>&;\\]+))"#,
+            ))
                 .expect("valid key-value regex")
         })
         .replace_all(text, |caps: &regex::Captures<'_>| {
             let whole = caps.get(0).map(|m| m.as_str()).unwrap_or_default();
             let key = caps.name("key").map(|m| m.as_str()).unwrap_or_default();
-            // Match the complete unquoted control literal before the generic secret branch.
+            // Preserve only typed, public budget scalars, including Markdown wrappers.
             // Consuming only its delimiter keeps following credential assignments visible to the scanner.
             if caps.name("public_flag").is_some() {
                 return whole.to_string();
             }
+            if let Some(number) = caps.name("public_number") {
+                return if number.as_str().parse::<u64>().is_ok() {
+                    whole.to_string()
+                } else {
+                    REDACTED.to_string()
+                };
+            }
             if sensitive_key_name(key) {
                 format!(
-                    "{}{}{}",
+                    "{}{}{}{}",
                     key,
+                    caps.name("key_quote").map(|m| m.as_str()).unwrap_or_default(),
                     caps.name("sep").map(|m| m.as_str()).unwrap_or("="),
                     REDACTED
                 )

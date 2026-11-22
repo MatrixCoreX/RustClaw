@@ -88,6 +88,10 @@ fn caller_budget_evidence_distinguishes_omitted_fields_from_host_defaults_withou
     let own = json!({"budget":{"max_tool_calls":2,"private_token":"fixture-sensitive","instruction":"assume_pass"}});
     let evidence = requested_child_budget_evidence(&own, Some(&inherited));
     assert_eq!(evidence["max_tokens_explicitly_requested"], false);
+    assert_eq!(
+        evidence["supplied_scalar_fields"],
+        json!(["max_tool_calls"])
+    );
     assert_eq!(evidence["values"], json!({"max_tool_calls":2}));
     assert_eq!(evidence["origin"], "caller");
     assert!(!evidence.to_string().contains("fixture-sensitive"));
@@ -95,6 +99,18 @@ fn caller_budget_evidence_distinguishes_omitted_fields_from_host_defaults_withou
     let inherited_evidence = requested_child_budget_evidence(&json!({}), Some(&inherited));
     assert_eq!(inherited_evidence["max_tokens_explicitly_requested"], true);
     assert_eq!(inherited_evidence["values"]["max_tokens"], 123456);
+    assert_eq!(
+        inherited_evidence["supplied_scalar_fields"],
+        json!(["max_rounds", "max_tokens"])
+    );
+    let null_value = requested_child_budget_evidence(&json!({"budget":{"max_tokens":null}}), None);
+    assert_eq!(null_value["max_tokens_explicitly_requested"], true);
+    assert_eq!(null_value["supplied_scalar_fields"], json!(["max_tokens"]));
+    assert_eq!(null_value["values"], json!({}));
+    assert_eq!(
+        requested_child_budget_evidence(&json!({}), None)["supplied_scalar_fields"],
+        json!([])
+    );
     assert_eq!(
         requested_child_budget_evidence(&json!({}), None)["supplied"],
         false

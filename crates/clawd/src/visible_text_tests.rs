@@ -36,6 +36,44 @@ fn budget_request_boolean_survives_text_redaction_without_exempting_credentials(
 }
 
 #[test]
+fn public_budget_scalars_survive_markdown_and_dotted_keys() {
+    for raw in [
+        "`max_tokens_explicitly_requested=false`，`max_tokens = 1000000`。",
+        "`budget_request.max_tokens_explicitly_requested` = `true`;",
+        "effective_budget.max_tokens=1000000 (default)",
+        "budget_request.values.max_tokens=18446744073709551615",
+        "budget.max_tokens = `4`",
+    ] {
+        assert_eq!(sanitize_user_visible_text(raw), raw);
+    }
+    let raw = "`max_tokens` = `4`; `api_token` = `private fixture value`";
+    let sanitized = sanitize_user_visible_text(raw);
+    assert!(sanitized.contains("`max_tokens` = `4`"));
+    assert!(sanitized.contains("api_token` = [REDACTED]"));
+    assert!(!sanitized.contains("private fixture value"));
+}
+
+#[test]
+fn public_budget_exceptions_never_exempt_other_secret_shapes() {
+    for raw in [
+        "max_tokens=18446744073709551616",
+        "max_tokens=123456789012345678901",
+        "max_tokens=4private-fixture-value",
+        "api_key.max_tokens=1000000",
+        "api_key.max_tokens_explicitly_requested=false",
+        "max_tokens_explicitly_requested=falseprivate-fixture-value",
+        r#"{"max_tokens":"1000000"}"#,
+        r#"{"max_tokens_explicitly_requested":"false"}"#,
+        "max_tokens=\"1000000\"",
+        "https://example.invalid/?max_tokens=1000000",
+    ] {
+        let sanitized = sanitize_user_visible_text(raw);
+        assert!(sanitized.contains("[REDACTED]"), "{raw}: {sanitized}");
+        assert!(!sanitized.contains("private-fixture-value"));
+    }
+}
+
+#[test]
 fn sanitizes_ansi_and_sensitive_url_params() {
     let raw = "\u{1b}[32mconnected\u{1b}[0m to wss://host/ws?device_id=123&access_key=abc123&service_id=7&ticket=deadbeef";
 

@@ -570,12 +570,16 @@ fn requested_child_budget_evidence(args: &Value, inherited: Option<&Value>) -> V
         .get("budget")
         .or_else(|| inherited.and_then(|value| value.get("budget")));
     let mut values = serde_json::Map::new();
+    let mut supplied_scalar_fields = Vec::new();
     for field in [
         "max_rounds",
         "max_tool_calls",
         "max_tokens",
         "runtime_deadline_ms",
     ] {
+        if budget.is_some_and(|value| value.get(field).is_some()) {
+            supplied_scalar_fields.push(field);
+        }
         if let Some(value) = budget
             .and_then(|value| value.get(field))
             .and_then(Value::as_u64)
@@ -586,6 +590,7 @@ fn requested_child_budget_evidence(args: &Value, inherited: Option<&Value>) -> V
     json!({
         "schema_version":1,"origin":"caller","supplied":budget.is_some(),
         "max_tokens_explicitly_requested":budget.is_some_and(|value|value.get("max_tokens").is_some()),
+        "supplied_scalar_fields":supplied_scalar_fields,
         "values":values,
     })
 }

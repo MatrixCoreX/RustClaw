@@ -31,7 +31,7 @@ Delegate a clearly bounded task to an isolated child agent while the parent rema
 
 A child that needs clarification returns an unfinished `child_task_needs_parent_input` result to its parent; asking a question does not complete the delegated objective. The parent resolves the missing input or asks the user through the ordinary parent conversation.
 
-Budget provenance: `budget_request` records the caller input separately from the host `effective_budget`; a default token allocation is not an explicitly requested `max_tokens`. Report only observed results and required limits; do not turn host defaults into claims about what the caller filled in.
+Budget provenance: `budget_request` records caller input separately from host `effective_budget`. Its `supplied_scalar_fields` lists supplied scalar keys; `max_tokens_explicitly_requested=false` means that key was absent. Enforce constraints in the child contracts. Final replies summarize requested findings, exact child IDs/statuses and file/line evidence; add budget/policy diagnostics only when the user requests that output, and never present a host default as caller input.
 
 ## Enforced argument boundaries
 

@@ -245,6 +245,7 @@ fn child_structured_result_observation(merge: &Value) -> Option<Value> {
                 "finding_refs": result.get("finding_refs"),
                 "budget_request": result.get("budget_request"),
                 "effective_budget": result.get("effective_budget"),
+                "effective_allowed_capabilities": result.get("effective_allowed_capabilities"),
                 "effective_capability_call_limits": result.get("effective_capability_call_limits"),
                 "effective_capability_argument_constraints": result.get("effective_capability_argument_constraints"),
                 "budget_consumed": result.get("budget_consumed"),
