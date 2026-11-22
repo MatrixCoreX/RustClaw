@@ -271,15 +271,14 @@ async fn coding_execution_context_injects_workspace_instructions_and_attribution
     let _ = std::fs::remove_dir_all(workspace);
 }
 
-#[test]
-fn rewind_boundary_uses_authoritative_history_and_marks_side_effects_non_replayable() {
+fn assert_rewind_boundary(archive: bool) {
     let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let result = json!({
         "task_journal": {
             "summary": {"coding_workflow": {
                 "completed_side_effect_refs": ["mutation:1"]
             }},
-            "trace": {"event_stream": [
+            "trace": {"rounds":["archivable journal evidence".repeat(1000)], "event_stream": [
                 {"seq":1,"event_type":"task_started","payload":{}},
                 {"seq":2,"event_type":"tool_finished","payload":{"mutation_id":"mutation:1"}},
                 {"seq":3,"event_type":"task_final","payload":{}}
@@ -293,6 +292,15 @@ fn rewind_boundary_uses_authoritative_history_and_marks_side_effects_non_replaya
             params![result.to_string()],
         )
         .unwrap();
+    }
+    if archive {
+        let mut db = state.core.db.get().unwrap();
+        assert_eq!(
+            crate::task_journal_archive::compact_batch(&mut db, 64, 100_000)
+                .unwrap()
+                .compacted_rows,
+            1
+        );
     }
     let payload = json!({"session_rewind":{
         "schema_version":1,
@@ -328,4 +336,14 @@ fn rewind_boundary_uses_authoritative_history_and_marks_side_effects_non_replaya
         "already_occurred_do_not_replay"
     );
     assert_eq!(observation["instruction_authority"], "none");
+}
+
+#[test]
+fn rewind_boundary_uses_authoritative_history_and_marks_side_effects_non_replayable() {
+    assert_rewind_boundary(false);
+}
+
+#[test]
+fn rewind_boundary_restores_archived_events_without_replaying_side_effects() {
+    assert_rewind_boundary(true);
 }

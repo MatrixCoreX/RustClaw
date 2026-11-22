@@ -290,8 +290,9 @@ fn session_rewind_observation(
             |row| row.get(0),
         )
         .map_err(|_| anyhow::anyhow!("session_rewind_source_task_missing"))?;
-    let result = serde_json::from_str::<Value>(&raw_result)
+    let mut result = serde_json::from_str::<Value>(&raw_result)
         .map_err(|_| anyhow::anyhow!("session_rewind_source_result_invalid"))?;
+    crate::task_journal_archive::hydrate(&db, &source_task_id, &mut result)?;
     let events = result
         .pointer("/task_journal/trace/event_stream")
         .or_else(|| result.pointer("/result/task_journal/trace/event_stream"))
