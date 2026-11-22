@@ -1,18 +1,36 @@
 ## fs_basic — planner-facing filesystem tool
-
 Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.make_dir`, `filesystem.read_text_range`, and `artifact.read_range` through `{"type":"call_capability","capability":"<leaf>","args":{...}}`. A lower-level `{"type":"call_tool","tool":"fs_basic","args":{"action":"<canonical-action>",...}}` remains available when the plan already owns an exact canonical action. `fs_basic` is a virtual planner tool: runtime maps its actions to stable backing tools such as `system_basic`, `fs_search`, and file builtins.
 
 ## Capability
+- Mutations require the host grant and confirmation; prose never authorizes a wider path or operation.
+<!--a1:stat_paths-->
 - Inspect explicit path facts.
+<!--/a1-->
+<!--a1:list_dir-->
 - List directories with filters and caps.
+<!--/a1-->
+<!--a1:count_entries-->
 - Count directory entries with filters.
+<!--/a1-->
+<!--a1:read_text_range-->
 - Read bounded text ranges from explicit files. Each read also reports complete-snapshot `total_lines`/`line_count`, `size_bytes`, `sha256`, and `line_endings`; use `field_selector=title` for a document heading instead of invoking shell metadata commands.
+<!--/a1-->
 - Preserve explicit file and inclusive line/byte bounds on every read. Complete-file `total_lines`/`line_count`, `has_more`, or truncated previews do not authorize reading outside that scope. If a bounded excerpt already contains the requested facts, use it; do not expand to the whole file for reassurance or formatting. If needed facts lie outside the grant, report the missing evidence to the parent/user instead of silently widening the read.
+<!--a1:read_artifact_range-->
 - Resume bounded byte ranges from runtime-owned output artifacts.
+<!--/a1-->
+<!--a1:find_entries-->
 - Find filesystem entries by name or extension.
+<!--/a1-->
+<!--a1:grep_text-->
 - Search text content under a bounded root.
+<!--/a1-->
+<!--a1:compare_paths-->
 - Compare explicit paths.
+<!--/a1-->
+<!--a1:write_text,append_text,make_dir,remove_path-->
 - Write or append text, create directories, or remove files/directories when confirmation permits.
+<!--/a1-->
 - Literal writes/appends preserve all requested whitespace and the final newline.
   A successful write is not content verification: compare read-back evidence with
   the requested content, repair an authorized mismatch before cleanup, and report
@@ -22,32 +40,76 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
   snapshot: bare `lf_count`, `crlf_count`, and `ends_with_newline`. Compare these
   fields, the byte count and content with the request before cleanup; do not
   substitute the line-numbered excerpt's formatting for source bytes.
+<!--a1:preview_replace_text,replace_text,apply_patch,diff,rewind-->
 - Preview/apply unique, replace-all, or single-file atomic batch edits, and apply structured patches with hash, context, checkpoint, diff, and rewind protection.
+<!--/a1-->
+<!--a1:review_child_patch,apply_child_patch,reject_child_patch-->
 - Review and decide isolated child-task patches through parent-owned machine actions.
-
+<!--/a1-->
 ## Actions
+<!--a1:stat_paths-->
 - `stat_paths`
+<!--/a1-->
+<!--a1:list_dir-->
 - `list_dir`
+<!--/a1-->
+<!--a1:count_entries-->
 - `count_entries`
+<!--/a1-->
+<!--a1:read_text_range-->
 - `read_text_range`
+<!--/a1-->
+<!--a1:read_artifact_range-->
 - `read_artifact_range`
+<!--/a1-->
+<!--a1:find_entries-->
 - `find_entries`
+<!--/a1-->
+<!--a1:grep_text-->
 - `grep_text`
+<!--/a1-->
+<!--a1:find_images-->
 - `find_images`
+<!--/a1-->
+<!--a1:compare_paths-->
 - `compare_paths`
+<!--/a1-->
+<!--a1:write_text-->
 - `write_text`
+<!--/a1-->
+<!--a1:append_text-->
 - `append_text`
+<!--/a1-->
+<!--a1:make_dir-->
 - `make_dir`
+<!--/a1-->
+<!--a1:remove_path-->
 - `remove_path`
+<!--/a1-->
+<!--a1:preview_replace_text-->
 - `preview_replace_text`
+<!--/a1-->
+<!--a1:replace_text-->
 - `replace_text`
+<!--/a1-->
+<!--a1:apply_patch-->
 - `apply_patch`
+<!--/a1-->
+<!--a1:diff-->
 - `diff`
+<!--/a1-->
+<!--a1:rewind-->
 - `rewind`
+<!--/a1-->
+<!--a1:review_child_patch-->
 - `review_child_patch`
+<!--/a1-->
+<!--a1:apply_child_patch-->
 - `apply_child_patch`
+<!--/a1-->
+<!--a1:reject_child_patch-->
 - `reject_child_patch`
-
+<!--/a1-->
 ## Parameter Contract
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
@@ -89,10 +151,12 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 | `find_entries` | `match_mode` / `case_mode` | no | enums | `contains` / `smart` | Name matching: `exact|prefix|suffix|contains|fuzzy|glob`; `fuzzy` is typo-tolerant and relevance-ranked. Case: `smart|sensitive|insensitive`. |
 | `find_entries` | `sort_by` | no | string | `name` | `name|name_desc|mtime_desc|mtime_asc|size_desc|size_asc`; ties use path order. |
 <!--/a1-->
+<!--a1:find_entries,grep_text,find_images-->
 | `find_entries` / `grep_text` / `find_images` | `include_hidden` | no | boolean | `false` | Include hidden entries for an explicit request. |
 | `find_entries` / `grep_text` / `find_images` | `respect_ignore` | no | boolean | `true` | Respect repository ignore files by default. |
 | `find_entries` / `grep_text` / `find_images` | `max_depth` | no | integer | none | Explicit shallow-scope selector, never an implicit completeness limit. |
 | `find_entries` / `grep_text` / `find_images` | `max_results` / `cursor` | no | integer / opaque string | bounded / none | Bound the returned page and continue the same query/snapshot; they do not bound traversal. |
+<!--/a1-->
 <!--a1:grep_text-->
 | `grep_text` | `query` | yes | string | - | Text query. |
 | `grep_text` | `root` | no | string(path) | workspace | Search root or known file path. |
@@ -150,6 +214,7 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 <!--/a1-->
 ## Boundaries
 
+<!--a1:preview_replace_text,replace_text,apply_patch,diff,rewind-->
 ### Edit action matrix
 
 | Intent | Capability | Runtime action / arguments |
@@ -159,28 +224,73 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 | Several dependent edits in one file | `workspace.edit_text` | Same `replace_text` action with `path` and `edits[]`; the runtime commits once |
 | Multi-hunk or multi-file change | `workspace.apply_patch` | `apply_patch` with unified `patch` and optional `precondition_hashes` |
 | Inspect or undo a successful edit | `workspace.diff` / `workspace.revert_checkpoint` | Reuse the observed `checkpoint_id`; never reconstruct it from prose |
+<!--/a1-->
+<!--a1:stat_paths-->
 - Known explicit path facts: use `stat_paths`, not search.
+<!--/a1-->
+<!--a1:read_text_range,grep_text-->
 - Known explicit path content: use `read_text_range` or a known-file `grep_text`; do not launch a repository-wide path search first.
+<!--/a1-->
+<!--a1:grep_text-->
 - Symbol definitions, references, tests, and impact: prefer `code_index`. Use `grep_text` only as literal/regex fallback when parser coverage is unavailable or incomplete, and do not describe it as semantic resolution.
+<!--/a1-->
+<!--a1:find_entries-->
 - Unknown candidate discovery: use `find_entries`, not guessed reads.
+<!--/a1-->
+<!--a1:find_entries,grep_text,find_images-->
 - When the authenticated admin execution context reports unrestricted system scope, an explicit absolute `root` (including `/`) may search everything visible to the Agent Runtime service account. Never claim or request this scope for a non-admin task.
+<!--/a1-->
+<!--a1:find_entries,grep_text,find_images-->
 - Start at the narrowest known root with an exact basename/kind when possible. If results are broad, narrow root/filter; if completeness is partial, continue or refine from machine evidence rather than claiming absence.
+<!--/a1-->
+<!--a1:find_entries-->
 - Directories containing matching files: use `find_entries` to discover candidate files, then synthesize unique parent directories from returned paths.
+<!--/a1-->
+<!--a1:list_dir-->
 - Directory inventory: use `list_dir`, not `grep_text`.
+<!--/a1-->
+<!--a1:list_dir-->
 - File-name inventory is a file-only listing: prefer `filesystem.list_file_names` / `fs_basic.list_dir` with `files_only=true`, `dirs_only=false`, and `names_only=true`. Directory/folder-name inventory is directory-only with `dirs_only=true`, `files_only=false`. Use mixed file+directory inventory only for untyped entries/items/names.
+<!--/a1-->
+<!--a1:list_dir-->
 - Grouped file-vs-directory inventory: use `list_dir` and preserve kind metadata (`entries` or `names_by_kind`); do not answer from a flat untyped name list when the contract is grouped.
+<!--/a1-->
+<!--a1:count_entries-->
 - Directory counts: use `count_entries`, not `run_cmd` pipelines, unless shell behavior itself is the task.
+<!--/a1-->
+<!--a1:grep_text-->
 - Content search or matching-line requests: use `grep_text`, not `read_text_range`. For a known single file, set `root` to that file and `query` to the requested content token, then answer from returned structured line/byte provenance and bounded context rather than the full file excerpt.
+<!--/a1-->
+<!--a1:grep_text,find_entries-->
 - A `grep_text` content miss is not a filename search. Call `find_entries` separately when the requested selector is a basename/path.
+<!--/a1-->
+<!--a1:find_images,read_text_range-->
 - Image-file discovery uses `find_images`; image understanding uses the handoff capability returned by a rejected text read or `image_vision.describe`.
+<!--/a1-->
+<!--a1:read_text_range-->
 - Raw file excerpts: use `read_text_range`; semantic document understanding belongs to `doc_parse`.
+<!--/a1-->
+<!--a1:read_artifact_range-->
 - Truncated tool/skill output: follow its `range_handles` with `artifact.read_range`; never route a runtime artifact through unrestricted file reads or guess byte offsets.
+<!--/a1-->
+<!--a1:read_text_range-->
 - Last non-empty line of a known file: use `read_text_range` with `mode="last_non_empty"` and answer from observed `line_text`; do not replace this read-only operation with a shell pipeline.
+<!--/a1-->
+<!--a1:read_text_range-->
 - Document heading/title scalar from a known text/markdown file: use `read_text_range` with `field_selector="title"` and a bounded head read, then answer from observed `field_value` when present.
+<!--/a1-->
+<!--a1:append_text-->
 - File appends: use `append_text`, not `read_text_range` and not `run_cmd` redirection.
+<!--/a1-->
+<!--a1:preview_replace_text,replace_text,apply_patch-->
 - Existing source edits: prefer `replace_text` for one known fragment, `workspace.edit_text` for several dependent edits in one file, and `apply_patch` for multi-hunk/multi-file changes; resolve missing/ambiguous/stale machine facts from current content, never from user-language reinterpretation.
+<!--/a1-->
+<!--a1:diff,rewind-->
 - Review and recovery: use `diff` and `rewind` checkpoint artifacts; never reconstruct a patch or checkpoint id from final-answer prose.
+<!--/a1-->
+<!--a1:review_child_patch,apply_child_patch,reject_child_patch-->
 - Child patch decisions: call `review_child_patch` before `apply_child_patch`; use only observed `child_task_id` and `patch_ref` machine fields. Children never apply or merge directly into the primary workspace.
+<!--/a1-->
 - Shell semantics, pipelines, or platform-specific commands belong to `run_cmd`.
 - Legacy `read_file`, `write_file`, `list_dir`, `make_dir`, `remove_file`, `fs_search`, and `system_basic` remain accepted for compatibility, but prefer `fs_basic` when this contract covers the task.
 

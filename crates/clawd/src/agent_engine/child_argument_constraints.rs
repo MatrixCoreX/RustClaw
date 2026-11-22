@@ -3,15 +3,31 @@ use serde_json::{json, Value};
 use std::collections::BTreeSet;
 #[path = "child_argument_schema_compatibility.rs"]
 mod compatibility;
+#[path = "child_literal_constraints.rs"]
+mod literal_constraints;
+
+pub(in crate::agent_engine) fn normalize_capability_argument_constraints(
+    value: &Value,
+) -> Result<Value, Vec<Value>> {
+    literal_constraints::normalize(value)
+}
 
 pub(in crate::agent_engine) fn registry_argument_constraints_issues(
     state: &crate::AppState,
     value: &Value,
 ) -> Vec<Value> {
-    compatibility::issues(state, value)
+    match normalize_capability_argument_constraints(value) {
+        Ok(value) => compatibility::issues(state, &value),
+        Err(issues) => issues,
+    }
 }
 
 pub(in crate::agent_engine) fn argument_constraints_validation_issues(value: &Value) -> Vec<Value> {
+    let normalized = match normalize_capability_argument_constraints(value) {
+        Ok(value) => value,
+        Err(issues) => return issues,
+    };
+    let value = &normalized;
     let mut issues = Vec::new();
     let Some(rules) = value
         .as_array()

@@ -195,6 +195,11 @@ fn provider_safe_capability_result_evidence(
             })
         })
         .unwrap_or_else(|| deduplicated_capability_evidence(result));
+    let field_reference_contract = (result.data.pointer("/output/field_references").is_none()
+        && evidence_value
+            .pointer("/data/output/field_references")
+            .is_some())
+    .then_some("same_result_json_pointer_v1");
     let Ok(serialized) = serde_json::to_string(&evidence_value) else {
         return json!({
             "projection": "unavailable",
@@ -216,6 +221,7 @@ fn provider_safe_capability_result_evidence(
             "evidence_id": identity.evidence_id,
             "sha256": identity.sha256,
             "size_bytes": identity.size_bytes,
+            "field_reference_contract": field_reference_contract,
             "result": value,
         });
     }
@@ -242,7 +248,7 @@ fn deduplicated_capability_evidence(
     let mut value = serde_json::to_value(result).unwrap_or(serde_json::Value::Null);
     let duplicate_extra = value.pointer("/data/extra").is_some_and(|extra| {
         !extra.is_null() && Some(extra) == value.pointer("/data/output/extra")
-    });
+    }) && value.pointer("/data/output/extra_reference").is_none();
     if duplicate_extra {
         if let Some(output) = value
             .pointer_mut("/data/output")
@@ -250,6 +256,42 @@ fn deduplicated_capability_evidence(
         {
             output.remove("extra");
             output.insert("extra_reference".to_string(), json!("data.extra"));
+        }
+    }
+    // A number of producers expose the same large fields in both output and extra.
+    // Reference only byte-identical JSON values, keeping all distinct fields inline.
+    if value.pointer("/data/output/field_references").is_none() {
+        let shared = value
+            .pointer("/data/output")
+            .and_then(serde_json::Value::as_object)
+            .into_iter()
+            .flatten()
+            .filter_map(|(key, field)| {
+                (field.to_string().len() >= 512
+                    && value
+                        .pointer("/data/extra")
+                        .and_then(|extra| extra.get(key))
+                        == Some(field))
+                .then(|| {
+                    (
+                        key.clone(),
+                        format!("/data/extra/{}", key.replace('~', "~0").replace('/', "~1")),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        if !shared.is_empty() {
+            if let Some(output) = value
+                .pointer_mut("/data/output")
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                let mut references = serde_json::Map::new();
+                for (key, pointer) in shared {
+                    output.remove(&key);
+                    references.insert(key, json!(pointer));
+                }
+                output.insert("field_references".to_string(), references.into());
+            }
         }
     }
     value

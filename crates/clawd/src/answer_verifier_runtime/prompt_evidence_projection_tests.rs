@@ -2,6 +2,68 @@ use super::*;
 use claw_core::capability_result::CapabilityResultEnvelope;
 
 #[test]
+fn equal_large_leaf_fields_are_losslessly_referenced_inside_the_same_result() {
+    let body = "line\n".repeat(1200);
+    let extra = json!({"excerpt":body,"a/b~c":["item".repeat(400)],"count":3,"host_only":true});
+    let mut result = CapabilityResultEnvelope::ok(
+        "fixture.read",
+        None,
+        json!({"extra":extra,"output":{"excerpt":body,"a/b~c":["item".repeat(400)],"count":3,"distinct":"keep"}}),
+    );
+    result.provenance = json!({"step_id":"s1"});
+    let original = serde_json::to_value(&result).unwrap();
+    let projection = deduplicated_capability_evidence(&result);
+    let references = projection["data"]["output"]["field_references"]
+        .as_object()
+        .unwrap();
+    assert_eq!(references.len(), 2);
+    let mut restored = projection.clone();
+    restored["data"]["output"]
+        .as_object_mut()
+        .unwrap()
+        .remove("field_references");
+    for (field, reference) in references {
+        restored["data"]["output"][field] = projection
+            .pointer(reference.as_str().unwrap())
+            .unwrap()
+            .clone();
+    }
+    assert_eq!(restored, original);
+    assert_eq!(projection["data"]["output"]["count"], 3);
+    assert_eq!(projection["data"]["output"]["distinct"], "keep");
+    assert!(projection.to_string().len() + 6000 < original.to_string().len());
+    assert_eq!(serde_json::to_value(&result).unwrap(), original);
+    let model_evidence = provider_safe_capability_result_evidence(&result);
+    assert_eq!(
+        model_evidence["field_reference_contract"],
+        "same_result_json_pointer_v1"
+    );
+    assert_eq!(
+        model_evidence["evidence_id"],
+        result.canonical_evidence_identity().evidence_id
+    );
+}
+
+#[test]
+fn unequal_payloads_and_reserved_reference_names_are_never_overwritten() {
+    let payload = "x".repeat(1000);
+    for data in [
+        json!({"extra":{"excerpt":payload},"output":{"excerpt":"different".repeat(120)}}),
+        json!({"extra":{"excerpt":payload},"output":{"excerpt":payload,"field_references":"user-data"}}),
+        json!({"extra":{"v":payload},"output":{"extra":{"v":payload},"extra_reference":"user-data"}}),
+    ] {
+        let result = CapabilityResultEnvelope::ok("fixture.read", None, data);
+        assert_eq!(
+            deduplicated_capability_evidence(&result),
+            serde_json::to_value(&result).unwrap()
+        );
+        assert!(
+            provider_safe_capability_result_evidence(&result)["field_reference_contract"].is_null()
+        );
+    }
+}
+
+#[test]
 fn equal_nested_extra_is_referenced_without_losing_output_fields_or_identity() {
     let extra = json!({"fixture_data":"x".repeat(8000),"size_bytes":17});
     let mut result = CapabilityResultEnvelope::ok(

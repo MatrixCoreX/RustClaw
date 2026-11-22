@@ -34,3 +34,28 @@ fn unknown_actions_or_malformed_package_sections_fall_back_without_hiding_rules(
         assert!(render(body, &BTreeSet::new()).is_none());
     }
 }
+
+#[test]
+fn filesystem_read_playbook_retains_scope_and_byte_proof_without_edit_instructions() {
+    let body = include_str!("../../../../prompts/layers/generated/skills/fs_basic.md");
+    let selected = BTreeSet::from(["read_text_range".to_string()]);
+    let read = render(body, &selected).unwrap();
+    for rule in [
+        "inclusive line/byte bounds",
+        "confirmation",
+        "final newline",
+        "ends_with_newline",
+        "do not authorize reading outside that scope",
+        "field_selector",
+        "Multilingual Reinforcement",
+    ] {
+        assert!(read.contains(rule), "missing shared/read policy: {rule}");
+    }
+    assert!(!read.contains("### Edit action matrix"));
+    assert!(!read.contains("| `replace_text` |"));
+    assert!(read.len() * 2 < body.len());
+    assert!(render(body, &BTreeSet::from(["unknown_action".to_string()])).is_none());
+    let write = render(body, &BTreeSet::from(["write_text".to_string()])).unwrap();
+    assert!(write.contains("Requires confirmation"));
+    assert!(write.contains("Literal writes/appends preserve all requested whitespace"));
+}

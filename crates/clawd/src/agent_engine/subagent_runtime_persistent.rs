@@ -532,6 +532,9 @@ fn persistent_child_spec(
     let capability_argument_constraints =
         persistent_scope_value(args, top_level_args, "capability_argument_constraints")
             .unwrap_or_else(|| json!([]));
+    let capability_argument_constraints = super::super::skill_execution::child_task_execution_policy::normalize_capability_argument_constraints(
+        &capability_argument_constraints,
+    ).map_err(|_| super::SUBAGENT_STOP_SIGNAL_INVALID_ARGUMENT_CONSTRAINTS)?;
     if !super::super::skill_execution::child_task_execution_policy::valid_capability_argument_constraints(
         &capability_argument_constraints, &allowed_capabilities,
     ) {

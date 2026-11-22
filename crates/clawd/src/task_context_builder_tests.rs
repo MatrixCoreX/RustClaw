@@ -389,6 +389,20 @@ fn execution_context_is_projected_to_planner_and_chat_prompts() {
     );
     assert!(resolved.contains("### TASK_GOAL_CONTEXT"));
     assert!(resolved.contains("### CONTEXT_BUDGET_REPORT"));
+    let view = bundle.execution_view.as_ref().unwrap();
+    let report_block = super::execution_context_budget_report_block(view);
+    let prompt_report: serde_json::Value = serde_json::from_str(
+        report_block
+            .strip_prefix("### CONTEXT_BUDGET_REPORT\n")
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        prompt_report,
+        super::execution_context_budget_report_json(view)
+    );
+    assert!(prompt_report["context_input_inventory"].is_object());
+
     assert!(memory.contains("### RECENT_EXECUTION_CONTEXT"));
     assert!(resolved.contains("### COMPACTED_HISTORY_CONTEXT"));
     assert!(memory.contains("### COMPACTED_HISTORY_CONTEXT"));

@@ -66,6 +66,21 @@ synthesize from existing evidence or report what is missing.
 requested slice with `line_safety.excerpt_truncated=false` is complete; file
 metadata never asks for or authorizes another read.
 
+## Structured exact text in durable argument grants
+
+For a durable child's exact multiline string, a string property in an
+`allowed_args` schema may use `literal_text` instead of `enum`:
+`{"type":"string","literal_text":{"schema_version":1,"lines":["exact text"],"line_ending":"lf","trailing_newline":true}}`.
+Choose `lf`, `crlf`, or `cr` from the user's required format; set the boolean
+`trailing_newline` explicitly. Each of 1–512 lines is a string without CR/LF;
+use an empty line string when needed. Spaces, tabs and Unicode stay exact.
+The host joins the lines and freezes an ordinary one-value string `enum`
+before admission. It preserves every other bound and rejects conflicting
+`enum`, malformed controls and oversized grants. The child must match that
+resolved string exactly, including the final newline; it gains no extra scope.
+For requested line-based content, prefer this representation so that the
+terminator is explicit rather than encoded twice in nested JSON string values.
+
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
 Use these optional subheading labels when needed:

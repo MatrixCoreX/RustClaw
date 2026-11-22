@@ -51,9 +51,9 @@ fn attempt_ledger_renders_failed_step_with_retry_hint() {
             finished_at: 2,
         });
     let ledger = build_attempt_ledger_compact(&loop_state);
-    assert!(ledger.contains("\"tool_or_skill\": \"fs_search\""));
-    assert!(ledger.contains("\"error_code\": \"not_found\""));
-    assert!(ledger.contains("\"retryable\": true"));
+    assert!(ledger.contains("\"tool_or_skill\":\"fs_search\""));
+    assert!(ledger.contains("\"error_code\":\"not_found\""));
+    assert!(ledger.contains("\"retryable\":true"));
     assert!(ledger.contains("do_not_retry_same_target"));
     let value = ledger_value(&ledger);
     assert_eq!(
@@ -111,8 +111,8 @@ fn attempt_ledger_prefers_recorded_args_summary() {
         "completed",
     );
     let ledger = build_attempt_ledger_compact(&loop_state);
-    assert!(ledger.contains("\"args_summary\": \"command=pwd cwd=/tmp\""));
-    assert!(ledger.contains("\"retryable\": false"));
+    assert!(ledger.contains("\"args_summary\":\"command=pwd cwd=/tmp\""));
+    assert!(ledger.contains("\"retryable\":false"));
     assert!(!ledger.contains("not_recorded_in_step_result"));
 }
 
@@ -237,7 +237,7 @@ fn attempt_ledger_records_verifier_retry_instruction() {
         Some("Read README.md and Cargo.toml, then synthesize the requested article."),
     );
     let ledger = build_attempt_ledger_compact(&loop_state);
-    assert!(ledger.contains("\"tool_or_skill\": \"answer_verifier\""));
+    assert!(ledger.contains("\"tool_or_skill\":\"answer_verifier\""));
     assert!(ledger.contains("\"retry_instruction\""));
     assert!(ledger.contains("Read README.md and Cargo.toml"));
     let value = ledger_value(&ledger);
@@ -338,8 +338,8 @@ fn attempt_ledger_marks_policy_block_non_retryable() {
         "unsafe SQL requires refusal or confirmation",
     );
     let ledger = build_attempt_ledger_compact(&loop_state);
-    assert!(ledger.contains("\"error_code\": \"unsafe_sql\""));
-    assert!(ledger.contains("\"retryable\": false"));
+    assert!(ledger.contains("\"error_code\":\"unsafe_sql\""));
+    assert!(ledger.contains("\"retryable\":false"));
 }
 
 #[test]
@@ -365,8 +365,8 @@ fn attempt_ledger_marks_contract_rejections_non_retryable() {
             "contract preflight rejected the action",
         );
         let ledger = build_attempt_ledger_compact(&loop_state);
-        assert!(ledger.contains(&format!("\"error_code\": \"{kind}\"")));
-        assert!(ledger.contains("\"retryable\": false"));
+        assert!(ledger.contains(&format!("\"error_code\":\"{kind}\"")));
+        assert!(ledger.contains("\"retryable\":false"));
         assert!(ledger.contains(hint));
     }
 }
@@ -411,8 +411,8 @@ fn attempt_ledger_exposes_contract_policy_decision_for_repair_prompt() {
     let ledger = build_attempt_ledger_compact(&loop_state);
 
     assert!(ledger.contains("\"contract_policy\""));
-    assert!(ledger.contains("\"decision\": \"rejected_forbidden\""));
-    assert!(ledger.contains("\"policy_decision\": \"deny\""));
+    assert!(ledger.contains("\"decision\":\"rejected_forbidden\""));
+    assert!(ledger.contains("\"policy_decision\":\"deny\""));
     assert!(ledger.contains("\"preferred_actions\""));
     assert!(ledger.contains("fs_basic.list_dir"));
     let value = ledger_value(&ledger);
@@ -700,8 +700,8 @@ fn attempt_ledger_marks_terminal_failures_non_retryable() {
             "terminal failure",
         );
         let ledger = build_attempt_ledger_compact(&loop_state);
-        assert!(ledger.contains(&format!("\"error_code\": \"{kind}\"")));
-        assert!(ledger.contains("\"retryable\": false"));
+        assert!(ledger.contains(&format!("\"error_code\":\"{kind}\"")));
+        assert!(ledger.contains("\"retryable\":false"));
         let value = ledger_value(&ledger);
         let expected = match kind {
             "invalid_credentials" | "credential_missing" | "auth_failed" => "external_blocker",
@@ -715,4 +715,22 @@ fn attempt_ledger_marks_terminal_failures_non_retryable() {
             Some(expected)
         );
     }
+}
+
+#[test]
+fn compact_prompt_ledger_keeps_canonical_values_and_literal_bytes() {
+    let mut state = crate::agent_engine::LoopState::new();
+    super::record_attempt(
+        &mut state,
+        "fixture.read",
+        "path=fixture.txt",
+        crate::executor::StepExecutionStatus::Ok,
+        "first\nsecond\tvalue\n",
+        None,
+        "completed",
+    );
+    let canonical = build_attempt_ledger_snapshot(&state).unwrap();
+    let prompt = build_attempt_ledger_compact(&state);
+    assert_eq!(ledger_value(&prompt), canonical);
+    assert!(prompt.len() < serde_json::to_string_pretty(&canonical).unwrap().len());
 }

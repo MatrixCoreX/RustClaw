@@ -229,7 +229,7 @@ pub(super) fn build_attempt_ledger_compact(loop_state: &LoopState) -> String {
                     })
                 })
                 .unwrap_or(snapshot);
-            serde_json::to_string_pretty(&prompt_view).ok()
+            serde_json::to_string(&prompt_view).ok()
         })
         .flatten()
         .unwrap_or_else(|| "(empty)".to_string())

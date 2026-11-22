@@ -1,4 +1,92 @@
 use super::*;
+
+#[test]
+fn structured_literal_arguments_are_materialized_before_freezing_child_scope() {
+    let task = ClaimedTask {
+        claim_attempt: 1,
+        task_id: uuid::Uuid::new_v4().to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "ui".into(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".into(),
+        payload_json: "{}".into(),
+    };
+    let args = json!({"role":"explorer","objective":"inspect owned input","context_refs":["fixture.rs"],
+        "allowed_capabilities":["filesystem.read_text_range"],"capability_argument_constraints":[{
+        "capability":"filesystem.read_text_range","allowed_args":[{"type":"object","required":["path"],
+        "properties":{"path":{"type":"string","literal_text":{"schema_version":1,
+        "lines":["fixture.rs"],"line_ending":"lf","trailing_newline":false}}}}]}]});
+    let before = args.clone();
+    let specs = persistent_child_specs(&task, &args, &SubagentRuntimeConfig::default()).unwrap();
+    let grant = &specs[0].scope["capability_argument_constraints"][0]["allowed_args"][0];
+    assert_eq!(grant["properties"]["path"]["enum"], json!(["fixture.rs"]));
+    assert!(grant["properties"]["path"].get("literal_text").is_none());
+    assert_eq!(args, before);
+}
+
+#[test]
+fn invalid_literal_terminator_is_rejected_before_child_or_budget_allocation() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = ClaimedTask {
+        claim_attempt: 1,
+        task_id: uuid::Uuid::new_v4().to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "ui".into(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".into(),
+        payload_json: "{}".into(),
+    };
+    let args = json!({"role":"explorer","objective":"inspect owned input","context_refs":["fixture.rs"],
+        "allowed_capabilities":["filesystem.read_text_range"],"capability_argument_constraints":[{
+        "capability":"filesystem.read_text_range","allowed_args":[{"type":"object","required":["path"],
+        "properties":{"path":{"type":"string","literal_text":{"schema_version":1,
+        "lines":["fixture.rs"],"line_ending":"lf","trailing_newline":"true"}}}}]}]});
+    let mut loop_state = LoopState::new();
+    assert_eq!(
+        record_durable_readonly_child_task_from_args(
+            &state,
+            &task,
+            &mut loop_state,
+            1,
+            1,
+            &args,
+            &SubagentRuntimeConfig::default()
+        )
+        .unwrap_err(),
+        crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_INVALID_ARGUMENT_CONSTRAINTS
+    );
+    let observation = loop_state.task_observations.last().unwrap();
+    assert_eq!(observation["provider_called"], false);
+    assert_eq!(observation["side_effect_applied"], false);
+    assert!(observation["field_issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|issue| issue["reason"] == "literal_text_boolean_required"));
+    let count: i64 = state
+        .core
+        .db
+        .get()
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM child_task_graph_nodes WHERE parent_task_id=?1",
+            [&task.task_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 0);
+    assert!(loop_state
+        .task_budget_slice
+        .as_ref()
+        .is_none_or(|budget| budget.allocations.is_empty()));
+}
+
 #[test]
 fn single_batch_and_inherited_context_budgets_are_explicitly_rejected() {
     let task = ClaimedTask {
