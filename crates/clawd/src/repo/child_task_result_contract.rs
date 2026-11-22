@@ -377,6 +377,14 @@ pub(crate) fn validated_child_structured_result(
     if !child_result_contract_supported(result_contract) {
         return None;
     }
+    // Only the host's frozen execution payload selects projection semantics.
+    // Persisted children without this marker retain their legacy field filter.
+    let projection_version = match payload.pointer("/child_execution/result_projection_version") {
+        None => 1,
+        Some(version) => version
+            .as_u64()
+            .filter(|version| matches!(*version, 1 | 2))?,
+    };
     let required_keys = match result_contract.get("required_keys") {
         None => Vec::new(),
         Some(keys) => keys
@@ -433,7 +441,14 @@ pub(crate) fn validated_child_structured_result(
             {
                 return None;
             }
-            let projected = if required_keys.is_empty() {
+            if required_keys.iter().any(|key| {
+                source
+                    .get(*key)
+                    .is_none_or(|value| complete_fields_required && value.is_null())
+            }) {
+                return None;
+            }
+            let projected = if required_keys.is_empty() || projection_version == 2 {
                 source.clone()
             } else {
                 let mut projected = required_keys

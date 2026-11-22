@@ -145,7 +145,9 @@ explicit application.
   fields and contracts permitting partial results may still contain null.
 - The default `machine_json` contract also returns a bounded JSON object when no
   `required_keys` list is supplied; all object fields are retained as passive
-  findings. Explicit key lists still project only the requested fields.
+  findings. Newly admitted children use host-frozen projection version 2:
+  `required_keys` checks completeness while the full validated object survives
+  the handoff. Use `result_schema.additionalProperties=false` to restrict fields.
 - Optional `result_contract.schema_version=1` enables `result_schema` and
   `evidence_field`. The schema is an object limited to 16 KiB and depth 8;
   supported keywords are `type`, `properties`, `required`,
@@ -179,10 +181,13 @@ explicit application.
   never from child-supplied findings. Report requested results and evidence;
   include budget/policy diagnostics only when that output is requested.
 - Give every planned child an explicit stable `node_id`, preserving the user's subtask label when supplied. Child result evidence uses namespaced `step:<id>`; verifier operation-check IDs use bare journal IDs. Do not interchange them.
-- With explicit `required_keys`, validated optional fields named in
+- Persisted children without a host projection marker retain version 1. With
+  explicit `required_keys`, validated optional fields named in
   `result_schema.properties` and the declared `evidence_field` are also retained
   in the structured handoff. Undeclared extra fields remain excluded; schema,
-  required-field, evidence and result-size checks still apply.
+  required-field, evidence and result-size checks still apply. New version-2
+  children retain all bounded validated fields; child output cannot select
+  this host version. Unknown host versions fail closed.
 
 ## Error Contract
 

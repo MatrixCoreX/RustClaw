@@ -629,6 +629,18 @@ fn scheduler_persists_and_serializes_overlapping_local_worktree_children() {
         scheduled["child_task_graph"]["edges"][0]["edge_kind"],
         "path_ownership_serialization"
     );
+    let db = state.core.db.get().expect("get db");
+    for id in ["task-child-writer", "task-child-worker"] {
+        let stored: String = db
+            .query_row(
+                "SELECT payload_json FROM tasks WHERE task_id=?1",
+                rusqlite::params![id],
+                |row| row.get(0),
+            )
+            .expect("persisted batch payload");
+        let payload: Value = serde_json::from_str(&stored).expect("child payload");
+        assert_eq!(payload["child_execution"]["result_projection_version"], 2);
+    }
 }
 
 #[test]
@@ -667,6 +679,7 @@ fn inline_child_starts_with_independent_running_claim_and_graph_node() {
     assert_eq!(claimed.claim_attempt, 1);
     assert_ne!(claimed.task_id, parent_task_id);
     assert_eq!(payload["task_role"], "subagent_child");
+    assert_eq!(payload["child_execution"]["result_projection_version"], 2);
     assert_eq!(
         payload[crate::task_execution_policy::POLICY_PAYLOAD_FIELD]["execution_mode"],
         "configured"
@@ -685,6 +698,10 @@ fn inline_child_starts_with_independent_running_claim_and_graph_node() {
     assert_eq!(row.2, 1);
     let stored_payload: Value = serde_json::from_str(&row.3).expect("parse child payload");
     assert_eq!(stored_payload["parent_task_id"], parent_task_id);
+    assert_eq!(
+        stored_payload["child_execution"]["result_projection_version"],
+        2
+    );
     let readiness: String = db
         .query_row(
             "SELECT readiness FROM child_task_graph_nodes WHERE child_task_id = ?1",

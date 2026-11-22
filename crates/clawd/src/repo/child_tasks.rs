@@ -1358,6 +1358,7 @@ fn child_task_payload(
         "child_task_contract": spec.to_json(),
         "child_execution": {
             "schema_version": CHILD_TASK_SCHEMA_VERSION,
+            "result_projection_version": 2,
             "entrypoint": "agent_loop",
             "permission_profile": spec.permission_profile.as_str(),
             "required": spec.required,
