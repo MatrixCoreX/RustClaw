@@ -2,6 +2,8 @@
 
 #[path = "child_task_result_contract.rs"]
 mod result_contract;
+#[path = "child_task_terminal_failure.rs"]
+mod terminal_failure;
 use result_contract::validated_child_structured_result;
 pub(crate) use result_contract::{
     bounded_argument_schema_matches, bounded_argument_schema_supported,
@@ -524,12 +526,18 @@ pub(crate) fn record_child_task_terminal_projection(
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let row = db
         .query_row(
-            "SELECT status, result_json FROM tasks WHERE task_id = ?1 LIMIT 1",
+            "SELECT status, result_json, error_text FROM tasks WHERE task_id = ?1 LIMIT 1",
             params![task_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
         )
         .optional()?;
-    let Some((status, raw_result_json)) = row else {
+    let Some((status, raw_result_json, error_text)) = row else {
         return Ok(false);
     };
     if !matches!(
@@ -547,6 +555,7 @@ pub(crate) fn record_child_task_terminal_projection(
             "observed_result_json": result_json,
         });
     }
+    terminal_failure::attach(&mut result_json, &status, error_text.as_deref());
     let mut child_result = child_task_result_projection(&status, payload, &result_json);
     if let Some(charged) =
         crate::task_budget_contract::model_admission::charged_tokens(&db, task_id)?
@@ -937,6 +946,9 @@ fn child_task_result_projection(status: &str, payload: &Value, result_json: &Val
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let status = child_terminal_status(status);
+    let failure = (status != "succeeded")
+        .then(|| terminal_failure::from_result(result_json))
+        .flatten();
     let budget_allocation_id = contract
         .pointer("/scope/budget_allocation_id")
         .and_then(Value::as_str);
@@ -982,21 +994,20 @@ fn child_task_result_projection(status: &str, payload: &Value, result_json: &Val
         "error_code": if status == "succeeded" {
             Value::Null
         } else {
-            result_json
+            failure.as_ref().and_then(|value| value.get("error_code")).or_else(|| result_json
                 .get("error_code")
-                .or_else(|| result_json.get("status_code"))
+                .or_else(|| result_json.get("status_code")))
                 .cloned()
                 .unwrap_or_else(|| json!("child_task_terminal_not_succeeded"))
         },
         "message_key": if status == "succeeded" {
             json!("clawd.child_task.succeeded")
         } else {
-            result_json
-                .get("message_key")
+            failure.as_ref().and_then(|value| value.get("message_key")).or_else(|| result_json.get("message_key"))
                 .cloned()
                 .unwrap_or_else(|| json!("clawd.child_task.not_succeeded"))
         },
-        "retryable": result_json.get("retryable").and_then(Value::as_bool).unwrap_or(
+        "retryable": failure.as_ref().and_then(|value| value.get("retryable")).or_else(|| result_json.get("retryable")).and_then(Value::as_bool).unwrap_or(
             matches!(status, "failed" | "timed_out" | "cancelled")
         ),
         "evidence_refs": evidence_refs,
