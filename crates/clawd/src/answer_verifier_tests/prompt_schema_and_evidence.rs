@@ -232,8 +232,9 @@ fn answer_verifier_contract_preserves_explicit_output_field_tokens() {
     assert!(VERIFIER_PROMPT.contains("every requested token must appear as a visible label"));
     assert!(VERIFIER_PROMPT.contains("perform a literal label audit over the rendered candidate"));
     assert!(VERIFIER_PROMPT.contains("enumerate the missing exact tokens"));
-    assert!(VERIFIER_PROMPT
-        .contains("Descriptions of requested facts are not literal output labels"));
+    assert!(
+        VERIFIER_PROMPT.contains("Descriptions of requested facts are not literal output labels")
+    );
 }
 
 #[test]
@@ -542,7 +543,8 @@ fn execution_evidence_prompt_uses_provider_safe_redacted_view() {
     assert!(block.contains("provider:image_generate:minimax:dry_run"));
     let evidence: serde_json::Value = serde_json::from_str(&block).unwrap();
     let observed = &evidence["step_evidence"][0]["observed_evidence"];
-    assert!(observed["items"]
+    let items = crate::prompt_projection::tests::restore(&observed["items"]);
+    assert!(items
         .as_array()
         .unwrap()
         .iter()
@@ -697,7 +699,17 @@ fn execution_evidence_prompt_includes_error_step_observed_evidence() {
     assert_eq!(step["step_id"], "step_2");
     assert_eq!(step["status"], "error");
     assert!(block.contains(r#""command_output""#), "block: {block}");
-    assert!(step["observed_evidence"]["items"]
+    let mut restored = step["observed_evidence"].clone();
+    restored["items"] = crate::prompt_projection::tests::restore(&restored["items"]);
+    restored
+        .as_object_mut()
+        .unwrap()
+        .remove("host_item_encoding");
+    assert_eq!(
+        Some(restored.clone()),
+        crate::task_journal::observed_evidence_for_step_trace(&journal.step_results[1])
+    );
+    assert!(restored["items"]
         .as_array()
         .unwrap()
         .iter()
