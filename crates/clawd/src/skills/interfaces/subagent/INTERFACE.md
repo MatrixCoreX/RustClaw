@@ -178,6 +178,7 @@ explicit application.
   `effective_allowed_capabilities` also comes from the frozen host scope,
   never from child-supplied findings. Report requested results and evidence;
   include budget/policy diagnostics only when that output is requested.
+- Give every planned child an explicit stable `node_id`, preserving the user's subtask label when supplied. Child result evidence uses namespaced `step:<id>`; verifier operation-check IDs use bare journal IDs. Do not interchange them.
 - With explicit `required_keys`, validated optional fields named in
   `result_schema.properties` and the declared `evidence_field` are also retained
   in the structured handoff. Undeclared extra fields remain excluded; schema,

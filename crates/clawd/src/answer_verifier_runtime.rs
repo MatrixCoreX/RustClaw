@@ -1,5 +1,7 @@
 use super::*;
 
+#[path = "answer_verifier_runtime/child_result_evidence.rs"]
+mod child_result_evidence;
 #[path = "answer_verifier_runtime/compacted_machine_ref_gap.rs"]
 mod compacted_machine_ref_gap;
 #[path = "answer_verifier_runtime/delivery_manifest_gap.rs"]
@@ -105,7 +107,12 @@ pub(crate) async fn verify_answer_observe_only(
             ),
             (
                 "__OUTPUT_CONTRACT__",
-                &output_contract_prompt_block(route_result),
+                &child_result_evidence::output_contract_for_task(
+                    route_result,
+                    task,
+                    journal,
+                    candidate_answer,
+                ),
             ),
             (
                 "__EXECUTION_EVIDENCE__",

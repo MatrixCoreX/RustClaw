@@ -8,6 +8,7 @@ Delegate a clearly bounded task to an isolated child agent while the parent rema
 - `agent.subagent_persistent`: durable isolated child work; use only when the user authorizes its write/subprocess effects.
 
 ## Contract
+- Set an explicit stable `node_id` for each child; preserve user-supplied subtask names there. Emit compact delegation arguments and avoid unrelated plan reads.
 - Give each child a specific `role`, `objective`, explicit `context_refs`, and the smallest `allowed_capabilities` set needed.
 - Preserve the caller's exact path and read interval in each child objective. A child must not widen that interval merely because file metadata reports more lines; missing context is reported to the parent, not treated as a new grant.
 - For inline read-only work, do not grant filesystem write, subprocess, network, credential, publish, package-install, or privilege-escalation capabilities.
@@ -41,6 +42,7 @@ For explicit path/target/range limits, populate each child's
 `capability_argument_constraints` before enqueueing. A context ref and objective
 alone do not enforce argument bounds. Example:
 `[{"capability":"filesystem.read_text_range","allowed_args":[{"type":"object","required":["path","mode","start_line","end_line"],"properties":{"path":{"enum":["src/example.rs"]},"mode":{"enum":["range"]},"start_line":{"type":"integer","minimum":10,"maximum":20},"end_line":{"type":"integer","minimum":10,"maximum":20}}}]}]`.
+Use JSON numbers for schema versions, numeric bounds and call counts, never quoted numeric strings. Prefer short enum bounds for exact literals.
 Use the exact path the child will call. Disjoint slices require separate
 schemas in `allowed_args`; do not widen them into one enclosing interval.
 Each schema must have a nonempty `required` array, and every required key
