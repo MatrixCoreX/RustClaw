@@ -45,6 +45,9 @@ alone do not enforce argument bounds. Example:
 Use JSON numbers for schema versions, numeric bounds and call counts, never quoted numeric strings. Prefer short enum bounds for exact literals. Enum values must preserve the capability argument type: use `"start_line":{"enum":[12]}`, never `["12"]`; keep string identifiers as strings. Incompatible enum types are rejected before child creation with bounded field diagnostics.
 Use the exact path the child will call. Disjoint slices require separate
 schemas in `allowed_args`; do not widen them into one enclosing interval.
+Preserve string enums byte-for-byte, including leading/trailing whitespace and
+newline escapes. Never trim file content when deriving constraints; the child
+objective, frozen enum and actual invocation must specify the same bytes.
 Each schema must have a nonempty `required` array, and every required key
 must have its own enum or value bound in `properties`. Naming path, mode,
 start_line and end_line in `required` alone is insufficient: bind the exact

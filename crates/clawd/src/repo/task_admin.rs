@@ -6,6 +6,9 @@ use serde_json::{json, Value};
 
 use crate::{now_ts, AppState};
 
+#[path = "task_cancel_graph.rs"]
+mod graph_cancellation;
+
 const TASK_CANCELLED_SOURCE: &str = "task_admin_cancel";
 const TASK_CANCELLED_MESSAGE_KEY: &str = "clawd.task.cancelled";
 const CHILD_TASK_PARENT_CANCELLED_REASON: &str = "parent_cancelled";
@@ -628,6 +631,10 @@ fn cancel_task_records_with_reason(
             )?;
             let mut persisted_items = Vec::new();
             if count > 0 {
+                child_task_ids.extend(graph_cancellation::unfinished_child_task_ids(
+                    &tx,
+                    &record.task_id,
+                )?);
                 crate::repo::conversation_inputs::defer_pending_conversation_inputs_for_cancel_in_db(
                     &tx,
                     &record.task_id,

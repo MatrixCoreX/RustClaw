@@ -442,6 +442,13 @@ pub(crate) fn reconcile_child_task_graphs_after_restart(
          FROM child_task_graphs graph
          LEFT JOIN tasks task ON task.task_id = graph.parent_task_id
          WHERE graph.status = 'active'
+            OR (task.status IN ('failed', 'timeout', 'canceled')
+                AND EXISTS (
+                    SELECT 1 FROM child_task_graph_nodes node
+                    JOIN tasks child ON child.task_id = node.child_task_id
+                    WHERE node.parent_task_id = graph.parent_task_id
+                      AND child.status IN ('queued', 'running')
+                ))
          ORDER BY graph.parent_task_id",
     )?;
     let graphs = stmt
@@ -483,7 +490,6 @@ pub(crate) fn reconcile_child_task_graphs_after_restart(
                  WHERE task_id IN (
                      SELECT child_task_id FROM child_task_graph_nodes
                      WHERE parent_task_id = ?1
-                       AND readiness NOT IN ('succeeded', 'failed', 'timeout', 'canceled')
                  )
                    AND status IN ('queued', 'running')",
                 params![parent_task_id, now],
@@ -1588,3 +1594,7 @@ fn child_runtime_projection(raw_result: Option<&str>) -> Value {
 #[cfg(test)]
 #[path = "child_task_graph_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "child_task_graph_restart_cancel_tests.rs"]
+mod restart_cancellation_tests;

@@ -54,6 +54,9 @@ explicit application.
 - Example: `[{"capability":"filesystem.read_text_range","allowed_args":[{"type":"object","required":["path","mode","start_line","end_line"],"properties":{"path":{"enum":["src/example.rs"]},"mode":{"enum":["range"]},"start_line":{"type":"integer","minimum":10,"maximum":20},"end_line":{"type":"integer","minimum":10,"maximum":20}}}]}]`.
   Use the exact path spelling the child will call. A union of allowed slices
   uses separate schemas in `allowed_args`; never widen their enclosing range.
+- Preserve exact string values when deriving argument enums, including leading
+  and trailing whitespace and newline escapes. The objective, frozen constraints,
+  and requested invocation must agree byte-for-byte; never trim file content.
 - Every allowed schema must declare a nonempty `required` list, and every
   required key must have its own enum or value bound in `properties`. A list
   naming path/mode/start/end does not constrain those values. Do not omit
