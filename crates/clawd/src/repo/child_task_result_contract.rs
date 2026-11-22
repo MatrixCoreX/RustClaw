@@ -292,7 +292,7 @@ pub(crate) fn validated_child_structured_result(
             let projected = if required_keys.is_empty() {
                 source.clone()
             } else {
-                required_keys
+                let mut projected = required_keys
                     .iter()
                     .map(|key| {
                         source
@@ -301,7 +301,23 @@ pub(crate) fn validated_child_structured_result(
                             .cloned()
                             .map(|value| ((*key).to_string(), value))
                     })
-                    .collect::<Option<serde_json::Map<String, Value>>>()?
+                    .collect::<Option<serde_json::Map<String, Value>>>()?;
+                // Required keys are a completeness check, not a whitelist that drops
+                // validated optional findings explicitly declared by the contract.
+                let properties = result_contract
+                    .pointer("/result_schema/properties")
+                    .and_then(Value::as_object);
+                let evidence_field = result_contract
+                    .get("evidence_field")
+                    .and_then(Value::as_str);
+                for (key, value) in source {
+                    if properties.is_some_and(|fields| fields.contains_key(key))
+                        || evidence_field == Some(key.as_str())
+                    {
+                        projected.insert(key.clone(), value.clone());
+                    }
+                }
+                projected
             };
             let value = Value::Object(projected);
             (value.to_string().len() <= MAX_STRUCTURED_RESULT_BYTES).then_some(value)

@@ -48,6 +48,97 @@ fn declared_child_result_requires_every_field_without_parsing_prose() {
 }
 
 #[test]
+fn schema_declared_optional_findings_survive_required_key_projection() {
+    let payload = json!({"child_task_contract":{"result_contract":{
+        "schema_version":1,"output_format":"machine_json","required_keys":["name"],
+        "result_schema":{"type":"object","required":["name"],"additionalProperties":true,
+            "properties":{"name":{"type":"string"},"line":{"type":"integer","minimum":1},
+                "excerpt":{"type":"string"},"optional":{"type":["string","null"]}}}
+    }}});
+    let answer = json!({"name":"handler","line":321,"excerpt":"321| check_access()", "optional":null,
+        "undeclared":"not forwarded"});
+    let actual = validated_child_structured_result(&payload, &json!({"text":answer.to_string()}));
+    assert_eq!(
+        actual,
+        Some(json!({"name":"handler","line":321,
+        "excerpt":"321| check_access()","optional":null}))
+    );
+    for line in [json!("321"), json!(0)] {
+        let mut invalid = answer.clone();
+        invalid["line"] = line;
+        assert!(
+            validated_child_structured_result(&payload, &json!({"text":invalid.to_string()}))
+                .is_none()
+        );
+    }
+    let mut missing = answer.clone();
+    missing.as_object_mut().unwrap().remove("name");
+    assert!(
+        validated_child_structured_result(&payload, &json!({"text":missing.to_string()})).is_none()
+    );
+}
+
+#[test]
+fn declared_optional_evidence_is_retained_and_still_requires_real_receipts() {
+    let payload = json!({"task_role":"subagent_child","child_task_contract":{"result_contract":{
+        "output_format":"machine_json","required_keys":["name"],"evidence_field":"evidence",
+        "require_evidence":true
+    }}});
+    let mut journal = crate::task_journal::TaskJournal::new("fixture");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "read-1",
+            "fixture.read",
+            "observed",
+        ));
+    let answer = json!({"name":"handler","evidence":["step:read-1"],"undeclared":"excluded"});
+    assert_eq!(
+        validated_child_structured_result(&payload, &json!({"text":answer.to_string()})),
+        Some(json!({"name":"handler","evidence":["step:read-1"]}))
+    );
+    assert!(child_evidence_contract_valid(
+        &payload,
+        &answer.to_string(),
+        &journal
+    ));
+    for evidence in [json!([]), json!(["step:missing"])] {
+        let mut invalid = answer.clone();
+        invalid["evidence"] = evidence;
+        assert!(!child_evidence_contract_valid(
+            &payload,
+            &invalid.to_string(),
+            &journal
+        ));
+    }
+}
+
+#[test]
+fn optional_findings_do_not_bypass_complete_or_bounded_result_checks() {
+    let payload = json!({"child_task_contract":{"result_contract":{
+        "schema_version":1,"output_format":"machine_json","required_keys":["name"],"allow_partial":false,
+        "result_schema":{"type":"object","properties":{"name":{},"details":{"type":"string"}}}
+    }}});
+    assert!(child_result_contract_supported(
+        &payload["child_task_contract"]["result_contract"]
+    ));
+    assert!(validated_child_structured_result(
+        &payload,
+        &json!({"structured_result":{"name":"handler","details":"present"}})
+    )
+    .is_some());
+    for answer in [
+        json!({"name":null,"details":"present"}),
+        json!({"name":"handler","details":"x".repeat(33*1024)}),
+    ] {
+        assert!(
+            validated_child_structured_result(&payload, &json!({"structured_result":answer}))
+                .is_none()
+        );
+    }
+}
+
+#[test]
 fn complete_child_result_rejects_null_required_values_without_rejecting_valid_empty_values() {
     let mut payload = json!({"task_role":"subagent_child","child_task_contract":{
         "result_contract":{"output_format":"machine_json","allow_partial":false,

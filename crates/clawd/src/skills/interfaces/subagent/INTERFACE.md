@@ -178,6 +178,10 @@ explicit application.
   `effective_allowed_capabilities` also comes from the frozen host scope,
   never from child-supplied findings. Report requested results and evidence;
   include budget/policy diagnostics only when that output is requested.
+- With explicit `required_keys`, validated optional fields named in
+  `result_schema.properties` and the declared `evidence_field` are also retained
+  in the structured handoff. Undeclared extra fields remain excluded; schema,
+  required-field, evidence and result-size checks still apply.
 
 ## Error Contract
 
