@@ -65,10 +65,14 @@ that stale request; inputs that arrive during a tool call are consumed at the
 next safe execution boundary. The runtime never infers stop or amendment from
 user-language tokens.
 
-The always-on skill index contains one discovery entry per authorized capability:
+The canonical skill catalog contains one discovery entry per authorized capability:
 purpose, semantic tags, required fields, contract digest and expansion reference.
 Detailed policy/argument/output contracts are available through catalog expansion
 and selected playbooks; callable native tools retain their exact input schemas.
+The model view fits the provider budget and links back to that complete catalog.
+The native index retains every authorized group and its capability count; unloaded
+leaf names are omitted with explicit partial-view metadata and can be recovered
+through `load_capability_groups`. Loaded tools retain all exact argument schemas.
 Catalog compaction does not grant permissions or select tools from user phrases.
 For exact observed JSON answers, `observed_fields[].step_id` may select one
 current-loop result by its `provenance.step_id`. Omission/null selects the latest
@@ -150,6 +154,12 @@ admission and enable state, rather than release defaults. Read-only delegation
 cannot gain write or network permissions. A capability-policy rejection before
 enqueue returns structured evidence to the parent for bounded replanning;
 scheduler failures and required-child execution failures are not blindly retried.
+For exact multiline child argument grants, a string schema may specify
+`literal_text={schema_version:1,lines:[...],line_ending:lf|crlf|cr,trailing_newline:boolean}`.
+The host materializes a normal exact `enum` before freezing the child scope.
+All controls are explicit, embedded CR/LF in lines and a conflicting enum are rejected,
+and the existing size, scope, call and permission limits remain unchanged. Removing
+a required final newline still fails the same byte-exact execution boundary.
 An unresolved failed machine result is finalized as a failed task with a
 language-aware explanation, never promoted to success merely because it is JSON.
 

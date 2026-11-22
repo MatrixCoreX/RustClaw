@@ -40,14 +40,14 @@ pub(super) fn build_index(
                 Vec::new()
             };
             json!({"group":group.skill_name,"disclosed":visible,
-            "capability_count":count,"capabilities_complete":visible,
+            "capability_count":count,
             "capabilities":capabilities})
         })
         .collect::<Vec<_>>();
     let mcp = mcp_capabilities.into_iter().collect::<BTreeSet<_>>();
     let index = json!({
         "schema_version":2,"catalog_complete":omitted == 0,
-        "group_catalog_complete":true,"canonical_capability_count":capability_count,
+        "group_catalog_complete":true,"capability_names_scope":"disclosed_groups_only","canonical_capability_count":capability_count,
         "canonical_catalog_sha256":canonical_sha256,"omitted_capability_count":omitted,
         "contract_source":"native_model_tools","discovery_source":"skill_quick_index",
         "contract_expansion":"load_capability_groups","dispatch":"resolver_verifier",

@@ -33,7 +33,7 @@ fn complete_index_keeps_authorized_unloaded_groups_without_duplicate_contracts()
     assert_eq!(value["groups"][0]["disclosed"], true);
     assert_eq!(value["groups"][1]["capabilities"], json!([]));
     assert_eq!(value["groups"][1]["capability_count"], 2);
-    assert_eq!(value["groups"][1]["capabilities_complete"], false);
+    assert_eq!(value["capability_names_scope"], "disclosed_groups_only");
     assert_eq!(value["groups"][0]["capabilities"], json!(["a.read"]));
     assert_eq!(value["undisclosed_group_recovery"]["op"], "load_groups");
     assert_eq!(value["groups"][1]["disclosed"], false);

@@ -158,9 +158,9 @@ fn planner_capability_hint(mapping: &PlannerCapabilityMapping) -> String {
     }
 }
 
-fn planner_capability_leaf_description(skill: &str, mapping: &PlannerCapabilityMapping) -> String {
+fn planner_capability_leaf_description(mapping: &PlannerCapabilityMapping) -> String {
     let mut parts = vec![format!(
-        "runtime_capability_leaf_v1; source_group={skill}; capability={}; dispatch=resolver_verifier",
+        "runtime_capability_leaf_v1; capability={}",
         mapping.name
     )];
     if let Some(description) = mapping.description.as_deref() {
@@ -491,7 +491,7 @@ fn planner_native_capability_groups_for_task_filtered(
             .map(|mapping| {
                 (
                     mapping.name.clone(),
-                    planner_capability_leaf_description(&skill, mapping),
+                    planner_capability_leaf_description(mapping),
                 )
             })
             .collect::<BTreeMap<_, _>>();

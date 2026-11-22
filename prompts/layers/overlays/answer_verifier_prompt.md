@@ -61,7 +61,7 @@ ordinary conversation context retention needs no mutation. Reject `respond`-only
 replacement nor a required companion. Missing required mutation is requested_result.
 
 For an active rewrite, use Most recent generated output as source. A faithful rewrite may remain a clarification question; do not require completion
-of the older task unless the current input supplies the missing input or asks to continue it.
+of the older underlying task unless the current input supplies the missing input or asks to continue it.
 For an old-to-new correction, require the new value and absence of the rejected
 value even if it was absent from the latest draft; asking where the rejected value appeared is incomplete.
 Repair that available draft without a tool call; do not invent a file edit or

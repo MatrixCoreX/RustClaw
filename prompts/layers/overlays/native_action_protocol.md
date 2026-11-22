@@ -155,8 +155,8 @@ Shapes:
   or borrow another task's ID. Slash-containing object keys belong to result path.
   A lone scalar uses free_text rather than inventing a field wrapper.
 - list/object/observed_object have empty content; object/observed_object have
-  exact_visible_line_count=0. When the user explicitly names machine fields, keep visible labels
-  with each scalar, object, or array shape preserved; a nested scalar cannot
+  exact_visible_line_count=0. When the user explicitly names machine fields, keep visible labels and preserve each
+  scalar, object, or array shape; a nested scalar cannot
   replace its requested parent array/object.
 
 `respond` formats answers; it never executes/simulates capabilities. Provider,

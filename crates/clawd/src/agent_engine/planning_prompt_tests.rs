@@ -585,14 +585,24 @@ fn incremental_prompt_carries_structured_failed_attempt_for_planner_repair() {
         "/workspace",
     );
 
-    assert!(prompt.contains("\"tool_or_skill\": \"fs_basic\""));
-    assert!(prompt.contains("\"status\": \"error\""));
-    assert!(prompt.contains("\"error_code\": \"missing_required_field\""));
-    assert!(prompt.contains("\"missing_evidence\": ["));
-    assert!(prompt.contains("\"path\""));
-    assert!(prompt.contains("\"recovery_action\": \"collect_missing_evidence\""));
-    assert!(prompt.contains("\"repair_class\": \"loop_bounded_recovery\""));
-    assert!(prompt.contains("\"next_recovery_kind\": \"wait_background\""));
-    assert!(prompt.contains("\"forbidden_repeat_signature\""));
+    assert!(prompt.contains(&format!("ledger={attempt_ledger}")));
+    let ledger: serde_json::Value = serde_json::from_str(&attempt_ledger).unwrap();
+    let record = &ledger[0];
+    assert_eq!(record["tool_or_skill"], "fs_basic");
+    assert_eq!(record["status"], "error");
+    assert_eq!(record["error_code"], "missing_required_field");
+    assert_eq!(record["missing_evidence"], json!(["path"]));
+    assert_eq!(record["recovery_action"], "collect_missing_evidence");
+    assert_eq!(
+        record["repair_signal"]["repair_envelope"]["repair_class"],
+        "loop_bounded_recovery"
+    );
+    assert_eq!(
+        record["repair_signal"]["repair_envelope"]["next_recovery_kind"],
+        "wait_background"
+    );
+    assert!(record["forbidden_repeat_signature"]
+        .as_str()
+        .is_some_and(|v| !v.is_empty()));
     assert!(prompt.contains("round=2"));
 }
