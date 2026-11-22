@@ -9,6 +9,76 @@ use terminal_format::terminal_model_output_format_gap_satisfies_contract;
 const ANSWER_VERIFIER_EVIDENCE_REPLAN_USED: &str =
     "agent_loop.answer_verifier_evidence_replan_used";
 
+/// Repair only the reference encoding before spending a semantic-verifier call.
+/// Shares the existing one-shot recovery allowance; budgets and effects survive.
+pub(super) fn prepare_child_result_evidence_replan(
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+) -> bool {
+    if loop_state
+        .output_vars
+        .contains_key(ANSWER_VERIFIER_EVIDENCE_REPLAN_USED)
+        || loop_state.pending_user_input_required
+        || loop_state.pending_resume_failure_user_error.is_some()
+    {
+        return false;
+    }
+    let Some(answer) = loop_state.last_user_visible_respond.as_deref() else {
+        return false;
+    };
+    if !crate::repo::child_tasks::child_machine_result_valid_for_task(task, answer) {
+        return false;
+    }
+    let Ok(payload) = serde_json::from_str::<Value>(&task.payload_json) else {
+        return false;
+    };
+    let successful_steps = loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| step.is_ok())
+        .map(|step| step.step_id.as_str())
+        .collect::<Vec<_>>();
+    if successful_steps.is_empty()
+        || crate::repo::child_tasks::child_evidence_refs_valid(&payload, answer, &successful_steps)
+    {
+        return false;
+    }
+    let field = payload.pointer("/child_task_contract/result_contract/evidence_field");
+    let observation = json!({"schema_version":1,"owner_layer":"child_task_result_contract",
+        "observation_kind":"child_result_evidence_repair","status":"rejected",
+        "error_code":"child_result_evidence_invalid","message_key":"child_task.result_evidence_invalid",
+        "field":field,"allowed_refs":successful_steps.iter().take(128).map(|id|format!("step:{id}")).collect::<Vec<_>>(),
+        "next_action":"rewrite_result_from_existing_observations","required_dispatches":[],
+        "side_effect_applied":false,"retryable":true});
+    let rendered = observation.to_string();
+    loop_state.task_observations.push(observation);
+    loop_state.last_output = Some(rendered.clone());
+    loop_state.has_recoverable_failure_context = true;
+    loop_state.delivery_messages.clear();
+    loop_state.last_user_visible_respond = None;
+    loop_state.last_publishable_synthesis_output = None;
+    loop_state.last_capability_synthesis_output = None;
+    loop_state.last_stop_signal = Some("child_result_evidence_repair".into());
+    loop_state
+        .output_vars
+        .insert(ANSWER_VERIFIER_EVIDENCE_REPLAN_USED.into(), "true".into());
+    attempt_ledger::record_attempt_with_retry_instruction(
+        loop_state,
+        "child_result_contract",
+        "evidence_refs",
+        crate::executor::StepExecutionStatus::Error,
+        &rendered,
+        Some("child_result_evidence_invalid"),
+        &rendered,
+        None,
+    );
+    true
+}
+
+#[cfg(test)]
+#[path = "loop_control_child_evidence_recovery_tests.rs"]
+mod child_evidence_tests;
+
 pub(super) fn answer_verifier_gap_requires_planner_observation(
     summary: &crate::task_journal::TaskJournalAnswerVerifierSummary,
 ) -> bool {

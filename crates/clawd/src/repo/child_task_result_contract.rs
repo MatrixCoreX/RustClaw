@@ -142,6 +142,20 @@ pub(crate) fn child_evidence_contract_valid(
     answer: &str,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
+    let successful_steps = journal
+        .step_results
+        .iter()
+        .filter(|step| step.status == crate::executor::StepExecutionStatus::Ok)
+        .map(|step| step.step_id.as_str())
+        .collect::<Vec<_>>();
+    child_evidence_refs_valid(payload, answer, &successful_steps)
+}
+
+pub(crate) fn child_evidence_refs_valid(
+    payload: &Value,
+    answer: &str,
+    successful_steps: &[&str],
+) -> bool {
     let Some(contract) = child_machine_result_contract(payload) else {
         return true;
     };
@@ -160,12 +174,7 @@ pub(crate) fn child_evidence_contract_valid(
             reference
                 .as_str()
                 .and_then(|s| s.strip_prefix("step:"))
-                .is_some_and(|id| {
-                    journal.step_results.iter().any(|step| {
-                        step.step_id == id
-                            && step.status == crate::executor::StepExecutionStatus::Ok
-                    })
-                })
+                .is_some_and(|id| successful_steps.contains(&id))
         })
 }
 

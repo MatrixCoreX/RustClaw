@@ -161,6 +161,13 @@ explicit application.
   references checked against the actual child journal. The complete machine
   result is limited to 32 KiB. A business field named `result` stays nested;
   it is never implicitly unwrapped.
+- Declaring `evidence_field` always enables that reference check, including
+  with `require_evidence=false`. Use a separate field such as `source_excerpt`
+  for paths, quoted code or explanations; do not instruct children to put prose
+  in the declared reference field. Before semantic verification, an otherwise
+  valid result with malformed references may use the existing one-shot recovery
+  allowance to rewrite from successful steps. This preserves completed calls,
+  permissions and budgets; unknown/failed-step references remain invalid.
 - Parents receive `subagent_structured_results` with exact child IDs, canonical
   statuses, validated result fields and evidence references. Consume this handoff
   before querying completed children; evidence refs are not paths or task-context

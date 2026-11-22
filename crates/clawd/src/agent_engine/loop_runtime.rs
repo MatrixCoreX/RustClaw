@@ -329,6 +329,11 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             skip_planner_rounds = false;
             continue;
         }
+        if prepare_child_result_evidence_replan(task, &mut loop_state) {
+            round = round.saturating_add(1);
+            skip_planner_rounds = false;
+            continue;
+        }
         let pre_finalize_loop_state = loop_state.clone();
         let finalization = crate::finalize::finalize_loop_reply(
             state,
