@@ -37,7 +37,10 @@ fn task_query_restores_archived_fields_and_preserves_public_projection() {
         serde_json::to_value(&after.goal).unwrap(),
         serde_json::to_value(&before.goal).unwrap()
     );
-    assert_eq!(after.status, before.status);
+    assert_eq!(
+        serde_json::to_value(&after.status).unwrap(),
+        serde_json::to_value(&before.status).unwrap()
+    );
     let db = state.core.db.get().unwrap();
     db.execute(
         "UPDATE runtime_journal_archives SET storage_blob=x'00' WHERE task_id=?1",
