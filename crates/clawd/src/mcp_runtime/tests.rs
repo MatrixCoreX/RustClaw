@@ -260,30 +260,40 @@ fn configuration_validation_rejects_invalid_secret_reference_names() {
 
 #[tokio::test]
 async fn health_tick_reconnects_closed_transport_without_replaying_a_tool() {
-    let marker = std::env::temp_dir().join(format!(
-        "agent-runtime-mcp-reconnect-{}",
-        uuid::Uuid::new_v4()
-    ));
+    let directory = tempfile::tempdir().expect("reconnect fixture directory");
+    let marker = directory.path().join("exited");
+    let calls = directory.path().join("calls.jsonl");
     let mut config = fixture_config();
-    config
-        .servers
-        .get_mut("fixture")
-        .expect("fixture config")
-        .env
-        .insert(
-            "MCP_FIXTURE_EXIT_ONCE_MARKER".to_string(),
-            marker.to_string_lossy().into_owned(),
-        );
+    let server = config.servers.get_mut("fixture").expect("fixture config");
+    server.reconnect_base_seconds = 1;
+    server.reconnect_max_seconds = 1;
+    server.env.insert(
+        "MCP_FIXTURE_EXIT_ONCE_MARKER".to_string(),
+        marker.to_string_lossy().into_owned(),
+    );
+    server.env.insert(
+        "MCP_FIXTURE_CALL_LOG".to_string(),
+        calls.to_string_lossy().into_owned(),
+    );
     let runtime = McpRuntime::new(config);
     runtime.start().await;
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-    runtime.health_tick().await;
-
-    assert_eq!(
-        runtime.lifecycle_snapshots()[0].state,
-        McpLifecycleState::Ready
-    );
+    // The first transport may close during initial discovery, before it reaches Ready.
+    // Exercise the configured retry path and require protocol readiness on its successor.
+    let recovered = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            runtime.health_tick().await;
+            if marker.is_file()
+                && runtime.lifecycle_snapshots()[0].state == McpLifecycleState::Ready
+                && runtime.probe("fixture").await.is_ok()
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await;
+    assert!(recovered.is_ok(), "{:?}", runtime.lifecycle_snapshots());
+    assert!(!calls.exists(), "health recovery must not invoke tools");
     let result = runtime
         .call(
             "mcp.fixture.lookup",
@@ -293,8 +303,11 @@ async fn health_tick_reconnects_closed_transport_without_replaying_a_tool() {
         .await
         .expect("call after reconnect");
     assert_eq!(result.status, "ok");
+    assert_eq!(
+        std::fs::read_to_string(&calls).expect("tool call log"),
+        "lookup\n"
+    );
     runtime.stop().await;
-    let _ = std::fs::remove_file(marker);
 }
 
 #[tokio::test]

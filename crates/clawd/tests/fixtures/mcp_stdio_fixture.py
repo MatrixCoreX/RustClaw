@@ -94,6 +94,10 @@ for line in sys.stdin:
         params = message.get("params", {})
         name = params.get("name")
         arguments = params.get("arguments", {})
+        call_log = os.environ.get("MCP_FIXTURE_CALL_LOG")
+        if call_log:
+            with open(call_log, "a", encoding="utf-8") as call_file:
+                call_file.write(name + "\n")
         if name == "slow":
             time.sleep(2)
         if name == "fail":
