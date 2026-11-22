@@ -53,6 +53,35 @@ pub(crate) fn parent_interactive_approval_available(payload_json: &str) -> bool 
         .unwrap_or(true)
 }
 
+// Ownership comes from the persisted parent, never a child-supplied payload.
+pub(super) fn persisted_parent_principal(
+    db: &rusqlite::Connection,
+    parent_task_id: &str,
+    user_id: i64,
+    chat_id: i64,
+    user_key: Option<&str>,
+) -> anyhow::Result<Option<String>> {
+    let row = db
+        .query_row(
+            "SELECT user_id, chat_id, user_key, principal_id FROM tasks WHERE task_id = ?1",
+            params![parent_task_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
+        )
+        .optional()?
+        .ok_or_else(|| anyhow::anyhow!("parent_task_missing"))?;
+    if row.0 != user_id || row.1 != chat_id || row.2.as_deref() != user_key {
+        anyhow::bail!("child_parent_actor_mismatch");
+    }
+    Ok(row.3)
+}
+
 pub(crate) fn enqueue_child_task_specs(
     state: &AppState,
     parent: &ChildTaskParentContext,
@@ -90,6 +119,13 @@ pub(crate) fn enqueue_child_task_specs(
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let preliminary = super::child_task_graph::prepare_child_task_graph(specs, max_parallel)?;
     let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let principal_id = persisted_parent_principal(
+        &tx,
+        &parent.parent_task_id,
+        parent.user_id,
+        parent.chat_id,
+        parent.user_key.as_deref(),
+    )?;
     let open_count =
         super::child_task_graph::session_open_thread_count(&tx, &preliminary.session_ref)?;
     let available_session_slots = preliminary.session_open_capacity.saturating_sub(open_count);
@@ -141,9 +177,9 @@ pub(crate) fn enqueue_child_task_specs(
             "INSERT INTO tasks (
                 task_id, user_id, chat_id, user_key, channel, external_user_id,
                 external_chat_id, message_id, kind, payload_json, status,
-                result_json, error_text, created_at, updated_at
+                result_json, error_text, created_at, updated_at, principal_id
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, 'ask', ?8, 'queued', ?9, NULL, ?10, ?10)",
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, 'ask', ?8, 'queued', ?9, NULL, ?10, ?10, ?11)",
             params![
                 spec.child_task_id,
                 parent.user_id,
@@ -154,7 +190,8 @@ pub(crate) fn enqueue_child_task_specs(
                 parent.external_chat_id,
                 payload.to_string(),
                 result_json.to_string(),
-                now
+                now,
+                principal_id,
             ],
         )?;
         queued_child_ids.push(spec.child_task_id.clone());
@@ -227,16 +264,23 @@ pub(crate) fn start_inline_child_task(
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let tx = db.transaction()?;
+    let principal_id = persisted_parent_principal(
+        &tx,
+        &parent.parent_task_id,
+        parent.user_id,
+        parent.chat_id,
+        parent.user_key.as_deref(),
+    )?;
     super::child_task_graph::persist_child_task_graph(&tx, &graph, &now)?;
     tx.execute(
         "INSERT INTO tasks (
             task_id, user_id, chat_id, user_key, channel, external_user_id,
             external_chat_id, message_id, kind, payload_json, status,
             result_json, error_text, created_at, updated_at, lease_owner,
-            lease_expires_at, claim_attempt, claimed_at
+            lease_expires_at, claim_attempt, claimed_at, principal_id
          ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, 'ask', ?8, 'running',
-            ?9, NULL, ?10, ?10, ?11, ?12, 1, ?13
+            ?9, NULL, ?10, ?10, ?11, ?12, 1, ?13, ?14
          )",
         params![
             spec.child_task_id,
@@ -252,6 +296,7 @@ pub(crate) fn start_inline_child_task(
             state.worker.worker_id,
             lease_expires_at,
             claimed_at,
+            principal_id,
         ],
     )?;
     tx.execute(

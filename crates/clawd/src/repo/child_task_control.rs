@@ -116,6 +116,14 @@ pub(crate) fn retry_child_task_with_revised_goal(
         anyhow::bail!("parent_task_not_active");
     }
 
+    let principal_id = super::child_tasks::persisted_parent_principal(
+        &tx,
+        parent_task_id,
+        user_id,
+        chat_id,
+        user_key.as_deref(),
+    )?;
+
     let retry_index = payload
         .pointer("/child_retry/retry_index")
         .and_then(Value::as_u64)
@@ -159,10 +167,10 @@ pub(crate) fn retry_child_task_with_revised_goal(
         "INSERT INTO tasks (
             task_id, user_id, chat_id, user_key, channel, external_user_id,
             external_chat_id, message_id, kind, payload_json, status,
-            result_json, error_text, created_at, updated_at
+            result_json, error_text, created_at, updated_at, principal_id
          )
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?9, 'queued',
-                 ?10, NULL, ?11, ?11)",
+                 ?10, NULL, ?11, ?11, ?12)",
         params![
             new_child_task_id,
             user_id,
@@ -175,6 +183,7 @@ pub(crate) fn retry_child_task_with_revised_goal(
             payload.to_string(),
             result_json.to_string(),
             now,
+            principal_id,
         ],
     )?;
     let graph_node_replaced = super::child_task_graph::replace_child_graph_node_for_retry(

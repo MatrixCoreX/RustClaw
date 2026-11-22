@@ -116,3 +116,69 @@ fn caller_budget_evidence_distinguishes_omitted_fields_from_host_defaults_withou
         false
     );
 }
+
+#[test]
+fn incompatible_enum_is_rejected_before_child_creation_with_host_type_diagnostic() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    crate::agent_engine::tests::install_test_registry(
+        &state,
+        r#"
+[[skills]]
+name = "fixture_reader"
+enabled = true
+kind = "builtin"
+planner_kind = "tool"
+risk_level = "low"
+side_effect = false
+input_schema = { type = "object", properties = { path = { type = "string" }, line = { type = "integer" } } }
+planner_capabilities = [ { name = "fixture.read", required = ["path"], optional = ["line"], effect = "observe", risk_level = "low", isolation_profile = "read_only" } ]
+"#,
+        &["fixture_reader"],
+    );
+    let task = crate::agent_engine::tests::test_task();
+    let args = json!({"children":[{"role":"explorer","objective":"inspect","context_refs":["fixture.rs"],
+    "allowed_capabilities":["fixture.read"],"capability_argument_constraints":[{"capability":"fixture.read","allowed_args":[{
+        "type":"object","required":["path","line"],"properties":{"path":{"enum":["fixture.rs"]},"line":{"enum":["12"]}}
+    }]}]}]});
+    let mut loop_state = LoopState::new();
+    assert_eq!(
+        record_durable_readonly_child_task_from_args(
+            &state,
+            &task,
+            &mut loop_state,
+            1,
+            1,
+            &args,
+            &SubagentRuntimeConfig::default()
+        )
+        .unwrap_err(),
+        crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_INVALID_ARGUMENT_CONSTRAINTS
+    );
+    let observation = loop_state.task_observations.last().unwrap();
+    assert_eq!(observation["side_effect_applied"], false);
+    assert_eq!(observation["provider_called"], false);
+    assert!(observation["field_issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(
+            |v| v["reason"] == "enum_value_incompatible_with_capability_type"
+                && v["expected_type"] == "integer"
+        ));
+    let count: i64 = state
+        .core
+        .db
+        .get()
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM child_task_graph_nodes WHERE parent_task_id=?1",
+            [&task.task_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 0);
+    assert!(loop_state
+        .task_budget_slice
+        .as_ref()
+        .is_none_or(|b| b.allocations.is_empty()));
+}

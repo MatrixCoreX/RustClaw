@@ -614,3 +614,106 @@ async fn invalid_verifier_audit_recovers_without_rewriting_answer_or_replaying_t
 async fn repeated_invalid_verifier_audits_exhaust_the_same_persisted_retry_budget() {
     format_retry_scenario(2, true).await;
 }
+
+#[test]
+fn admitted_children_inherit_parent_principal_for_strict_resume_authorization() {
+    use crate::child_task_contract::{
+        ChildTaskBudget, ChildTaskMergePolicy, ChildTaskPermissionProfile, ChildTaskSpec,
+    };
+    let mut state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    state.reload_ctx.config_path_for_reload = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../configs/config.toml")
+        .display()
+        .to_string();
+    state.seed_test_auth_identity("child-owner", "admin");
+    let identity = crate::resolve_auth_identity_by_key(&state, "child-owner")
+        .unwrap()
+        .unwrap();
+    let (_, mut parent, _) = bound();
+    parent.user_key = Some(identity.user_key.clone());
+    state.core.db.get().unwrap().execute(
+        "INSERT INTO tasks(task_id,user_id,chat_id,user_key,principal_id,channel,kind,payload_json,status,created_at,updated_at) VALUES (?1,1,2,?2,?3,'ui','ask',?4,'running','1','1')",
+        rusqlite::params![parent.task_id, identity.user_key, identity.principal_id, parent.payload_json]).unwrap();
+    let context = crate::repo::child_tasks::ChildTaskParentContext {
+        parent_task_id: parent.task_id.clone(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: parent.user_key.clone(),
+        channel: "ui".into(),
+        external_user_id: None,
+        external_chat_id: None,
+        execution_policy_stamp: None,
+        interactive_approval_available: true,
+    };
+    let spec = |id: &str| ChildTaskSpec {
+        parent_task_id: parent.task_id.clone(),
+        child_task_id: id.into(),
+        role: "explorer".into(),
+        scope: json!({"objective":"fixture"}),
+        permission_profile: ChildTaskPermissionProfile::ReadOnly,
+        required: true,
+        budget: ChildTaskBudget::readonly_default(),
+        result_contract: json!({"output_format":"machine_json"}),
+        merge_policy: ChildTaskMergePolicy::StructuredFindings,
+    };
+    let batch = spec("principal-batch");
+    crate::repo::child_tasks::enqueue_child_task_specs(&state, &context, &[batch], 1, 1, 2)
+        .unwrap();
+    let (inline, _) = crate::repo::child_tasks::start_inline_child_task(
+        &state,
+        &context,
+        &spec("principal-inline"),
+    )
+    .unwrap();
+    let mut queued = inline.clone();
+    queued.task_id = "principal-batch".into();
+    assert!(authorized(&state, &queued));
+    assert!(authorized(&state, &inline));
+    state
+        .core
+        .db
+        .get()
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET status='failed' WHERE task_id=?1",
+            [&queued.task_id],
+        )
+        .unwrap();
+    let retry = crate::repo::retry_child_task_with_revised_goal(
+        &state,
+        &parent.task_id,
+        &queued.task_id,
+        "fixture revised",
+    )
+    .unwrap()
+    .unwrap();
+    queued.task_id = retry.child_task_id;
+    assert!(authorized(&state, &queued));
+    // No payload owner, forged context, or another key may widen the persisted owner.
+    let mut forged = context.clone();
+    forged.user_key = Some("another-owner".into());
+    assert!(crate::repo::child_tasks::enqueue_child_task_specs(
+        &state,
+        &forged,
+        &[spec("principal-forged")],
+        1,
+        1,
+        2
+    )
+    .is_err());
+    let mut other = queued.clone();
+    other.user_key = Some("another-owner".into());
+    assert!(!authorized(&state, &other));
+    state
+        .core
+        .db
+        .get()
+        .unwrap()
+        .execute(
+            "UPDATE auth_keys SET enabled=0 WHERE user_key=?1",
+            [&identity.user_key],
+        )
+        .unwrap();
+    assert!(!authorized(&state, &queued));
+    assert!(!authorized(&state, &inline));
+}

@@ -158,7 +158,12 @@ fn schedule_child_task_specs(
             }
         };
     }
-    let mut specs = match child_specs(task, args, config, force_readonly) {
+    let mut specs = match child_specs(task, args, config, force_readonly).and_then(|specs| {
+        if specs.iter().any(|spec| spec.scope.get("capability_argument_constraints").is_some_and(|value|
+            !super::super::skill_execution::child_task_execution_policy::registry_argument_constraints_issues(state, value).is_empty())) {
+            Err(super::SUBAGENT_STOP_SIGNAL_INVALID_ARGUMENT_CONSTRAINTS)
+        } else { Ok(specs) }
+    }) {
         Ok(specs) => specs,
         Err(signal) if signal == SUBAGENT_STOP_SIGNAL_INVALID_ROLE => {
             record_invalid_role_error(loop_state, global_step, step_in_round, args, config);
@@ -215,7 +220,9 @@ fn schedule_child_task_specs(
                 );
                 for (prefix, child) in children {
                     if let Some(value) = child.get("capability_argument_constraints") {
-                        for mut issue in super::super::skill_execution::child_task_execution_policy::argument_constraints_validation_issues(value) {
+                        for mut issue in super::super::skill_execution::child_task_execution_policy::argument_constraints_validation_issues(value).into_iter().chain(
+                            super::super::skill_execution::child_task_execution_policy::registry_argument_constraints_issues(state, value)
+                        ) {
                             let path = issue.get("path").and_then(Value::as_str).unwrap_or_default();
                             issue["path"] = json!(format!("{prefix}/capability_argument_constraints{path}"));
                             field_issues.push(issue);

@@ -1,6 +1,15 @@
 //! Frozen, narrowing-only child argument policy. Never derive grants from prose.
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
+#[path = "child_argument_schema_compatibility.rs"]
+mod compatibility;
+
+pub(in crate::agent_engine) fn registry_argument_constraints_issues(
+    state: &crate::AppState,
+    value: &Value,
+) -> Vec<Value> {
+    compatibility::issues(state, value)
+}
 
 pub(in crate::agent_engine) fn argument_constraints_validation_issues(value: &Value) -> Vec<Value> {
     let mut issues = Vec::new();

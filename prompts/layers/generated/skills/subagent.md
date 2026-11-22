@@ -42,7 +42,7 @@ For explicit path/target/range limits, populate each child's
 `capability_argument_constraints` before enqueueing. A context ref and objective
 alone do not enforce argument bounds. Example:
 `[{"capability":"filesystem.read_text_range","allowed_args":[{"type":"object","required":["path","mode","start_line","end_line"],"properties":{"path":{"enum":["src/example.rs"]},"mode":{"enum":["range"]},"start_line":{"type":"integer","minimum":10,"maximum":20},"end_line":{"type":"integer","minimum":10,"maximum":20}}}]}]`.
-Use JSON numbers for schema versions, numeric bounds and call counts, never quoted numeric strings. Prefer short enum bounds for exact literals.
+Use JSON numbers for schema versions, numeric bounds and call counts, never quoted numeric strings. Prefer short enum bounds for exact literals. Enum values must preserve the capability argument type: use `"start_line":{"enum":[12]}`, never `["12"]`; keep string identifiers as strings. Incompatible enum types are rejected before child creation with bounded field diagnostics.
 Use the exact path the child will call. Disjoint slices require separate
 schemas in `allowed_args`; do not widen them into one enclosing interval.
 Each schema must have a nonempty `required` array, and every required key
