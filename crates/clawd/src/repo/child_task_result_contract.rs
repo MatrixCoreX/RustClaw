@@ -191,6 +191,93 @@ pub(crate) fn child_machine_result_valid_for_task(task: &crate::ClaimedTask, ans
         && validated_child_structured_result(&payload, &json!({"text":answer})).is_some()
 }
 
+/// Machine-only, bounded diagnostics for an already-admitted child result.
+/// These hints never coerce the candidate or replace strict terminal validation.
+pub(crate) fn child_result_candidate_validation_issues(
+    task: &crate::ClaimedTask,
+    answer: &str,
+) -> Vec<Value> {
+    let Some(contract) = child_result_contract_for_task(task) else {
+        return Vec::new();
+    };
+    if answer.len() > 32 * 1024 {
+        return vec![json!({"path":"", "reason":"candidate_size_limit", "maximum_bytes":32*1024})];
+    }
+    let parsed = serde_json::from_str::<Value>(answer.trim())
+        .ok()
+        .or_else(|| {
+            crate::extract_first_json_value_any(answer).and_then(|v| serde_json::from_str(&v).ok())
+        });
+    let Some(candidate) = parsed.as_ref().and_then(Value::as_object) else {
+        return vec![json!({"path":"", "reason":"expected_json_object", "expected_type":"object"})];
+    };
+    let mut issues = Vec::new();
+    let required = contract
+        .get("required_keys")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .chain(
+            contract
+                .pointer("/result_schema/required")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten(),
+        );
+    for key in required.take(64).filter_map(Value::as_str) {
+        let missing = !candidate.contains_key(key);
+        let null = contract.get("allow_partial").and_then(Value::as_bool) == Some(false)
+            && candidate.get(key).is_some_and(Value::is_null);
+        if missing || null {
+            let key: String = key.chars().take(128).collect();
+            issues.push(
+                json!({"path":format!("/{}",key.replace('~',"~0").replace('/',"~1")),
+                "reason":if missing {"required_field_missing"} else {"required_non_null_field"}}),
+            );
+            if issues.len() == 16 {
+                return issues;
+            }
+        }
+    }
+    if let Some(properties) = contract
+        .pointer("/result_schema/properties")
+        .and_then(Value::as_object)
+    {
+        for (key, schema) in properties.iter().take(64) {
+            let Some(value) = candidate.get(key) else {
+                continue;
+            };
+            if !result_schema::matches(schema, value) {
+                let key: String = key.chars().take(128).collect();
+                let expected = schema.get("type").map(|t| {
+                    if let Some(types) = t.as_array() {
+                        Value::Array(types.iter().take(8).cloned().collect())
+                    } else {
+                        t.clone()
+                    }
+                });
+                let actual = match value {
+                    Value::Null => "null",
+                    Value::Bool(_) => "boolean",
+                    Value::Number(_) => "number",
+                    Value::String(_) => "string",
+                    Value::Array(_) => "array",
+                    Value::Object(_) => "object",
+                };
+                issues.push(json!({"path":format!("/{}",key.replace('~',"~0").replace('/',"~1")),
+                    "reason":"field_schema_mismatch", "expected_type":expected, "actual_type":actual}));
+                if issues.len() == 16 {
+                    return issues;
+                }
+            }
+        }
+    }
+    if issues.is_empty() && !child_machine_result_valid_for_task(task, answer) {
+        issues.push(json!({"path":"", "reason":"candidate_contract_mismatch"}));
+    }
+    issues
+}
+
 fn child_machine_result_contract(payload: &Value) -> Option<&Value> {
     if !super::is_child_subagent_payload(payload) {
         return None;

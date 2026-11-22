@@ -198,8 +198,13 @@ Protocol rules:
   unique names and materializes the final JSON object. `value_json` is
   serialized JSON, not an unquoted display string: encode the JSON string
   `text` as `"text"` inside `value_json`; numbers, booleans, `null`, arrays,
-  and objects use their normal JSON encoding. Never retry a rejected unquoted
-  string unchanged.
+  and objects use their normal JSON encoding. For example,
+  `{"name":"values","value_json":"[1,2]"}` produces an array. Preserve each
+  declared result-field type: an array or object must not be serialized again
+  as a JSON string containing its encoding. When structured `field_issues`
+  reports a result-field type mismatch, rewrite the result from existing
+  observations with that declared type; do not repeat the reads for formatting.
+  Never retry a rejected unquoted string unchanged.
 - Keep `content` empty for `list`, `object`, and `observed_object`; their arrays
   own the payload. In particular, prose in `object.content` is invalid even
   when `fields` are correct. Use `free_text` for prose rather than duplicating

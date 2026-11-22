@@ -9,7 +9,7 @@ use terminal_format::terminal_model_output_format_gap_satisfies_contract;
 const ANSWER_VERIFIER_EVIDENCE_REPLAN_USED: &str =
     "agent_loop.answer_verifier_evidence_replan_used";
 
-/// Repair only the reference encoding before spending a semantic-verifier call.
+/// Repair a child machine-result shape or reference encoding before semantic verification.
 /// Shares the existing one-shot recovery allowance; budgets and effects survive.
 pub(super) fn prepare_child_result_evidence_replan(
     task: &ClaimedTask,
@@ -26,9 +26,13 @@ pub(super) fn prepare_child_result_evidence_replan(
     let Some(answer) = loop_state.last_user_visible_respond.as_deref() else {
         return false;
     };
-    if !crate::repo::child_tasks::child_machine_result_valid_for_task(task, answer) {
+    let Some(contract) = crate::repo::child_tasks::child_result_contract_for_task(task) else {
+        return false;
+    };
+    if !crate::repo::child_tasks::child_result_contract_supported(&contract) {
         return false;
     }
+    let machine_valid = crate::repo::child_tasks::child_machine_result_valid_for_task(task, answer);
     let Ok(payload) = serde_json::from_str::<Value>(&task.payload_json) else {
         return false;
     };
@@ -39,14 +43,33 @@ pub(super) fn prepare_child_result_evidence_replan(
         .map(|step| step.step_id.as_str())
         .collect::<Vec<_>>();
     if successful_steps.is_empty()
-        || crate::repo::child_tasks::child_evidence_refs_valid(&payload, answer, &successful_steps)
+        || (machine_valid
+            && crate::repo::child_tasks::child_evidence_refs_valid(
+                &payload,
+                answer,
+                &successful_steps,
+            ))
     {
         return false;
     }
     let field = payload.pointer("/child_task_contract/result_contract/evidence_field");
+    let (error_code, message_key) = if machine_valid {
+        (
+            "child_result_evidence_invalid",
+            "child_task.result_evidence_invalid",
+        )
+    } else {
+        (
+            "child_task_result_contract_invalid",
+            "child_task.result_contract_invalid",
+        )
+    };
+    let field_issues =
+        crate::repo::child_tasks::child_result_candidate_validation_issues(task, answer);
     let observation = json!({"schema_version":1,"owner_layer":"child_task_result_contract",
         "observation_kind":"child_result_evidence_repair","status":"rejected",
-        "error_code":"child_result_evidence_invalid","message_key":"child_task.result_evidence_invalid",
+        "error_code":error_code,"message_key":message_key,
+        "candidate_machine_valid":machine_valid,"field_issues":field_issues,
         "field":field,"allowed_refs":successful_steps.iter().take(128).map(|id|format!("step:{id}")).collect::<Vec<_>>(),
         "next_action":"rewrite_result_from_existing_observations","required_dispatches":[],
         "side_effect_applied":false,"retryable":true});
@@ -68,7 +91,7 @@ pub(super) fn prepare_child_result_evidence_replan(
         "evidence_refs",
         crate::executor::StepExecutionStatus::Error,
         &rendered,
-        Some("child_result_evidence_invalid"),
+        Some(error_code),
         &rendered,
         None,
     );

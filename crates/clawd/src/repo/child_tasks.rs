@@ -8,7 +8,8 @@ use result_contract::validated_child_structured_result;
 pub(crate) use result_contract::{
     bounded_argument_schema_matches, bounded_argument_schema_supported,
     bounded_argument_schema_validation_issues, child_evidence_contract_valid,
-    child_evidence_refs_valid, child_machine_result_valid_for_task, child_result_contract_failure,
+    child_evidence_refs_valid, child_machine_result_valid_for_task,
+    child_result_candidate_validation_issues, child_result_contract_failure,
     child_result_contract_for_task, child_result_contract_supported,
     child_result_contract_validation_issues,
 };

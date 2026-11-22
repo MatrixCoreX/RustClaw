@@ -150,3 +150,77 @@ fn missing_fields_failed_steps_and_pending_controls_cannot_be_repaired_into_succ
         assert!(state.task_observations.is_empty());
     }
 }
+
+fn schema_fixture() -> (ClaimedTask, LoopState) {
+    let (mut task, state) = fixture();
+    let mut payload: Value = serde_json::from_str(&task.payload_json).unwrap();
+    payload["child_task_contract"]["result_contract"]["result_schema"] = json!({
+        "type":"object", "required":["name","evidence"],
+        "properties":{"name":{"type":"string","minLength":1},
+            "evidence":{"type":"array","items":{"type":"string"},"minItems":1}}
+    });
+    task.payload_json = payload.to_string();
+    (task, state)
+}
+
+#[test]
+fn serialized_evidence_array_uses_existing_repair_before_verification_without_coercion() {
+    let (task, mut state) = schema_fixture();
+    let wrong = json!({"name":"Panel","evidence":"[\"step:step_1\"]"}).to_string();
+    state.last_user_visible_respond = Some(wrong.clone());
+    let receipts = state.executed_step_results.clone();
+    let fingerprints = state.successful_action_fingerprints.clone();
+    assert!(!crate::repo::child_tasks::child_machine_result_valid_for_task(&task, &wrong));
+    assert!(prepare_child_result_evidence_replan(&task, &mut state));
+    let observed = state.task_observations.last().unwrap();
+    assert_eq!(observed["candidate_machine_valid"], false);
+    assert_eq!(observed["error_code"], "child_task_result_contract_invalid");
+    assert_eq!(observed["field_issues"][0]["path"], "/evidence");
+    assert_eq!(observed["field_issues"][0]["expected_type"], "array");
+    assert_eq!(observed["field_issues"][0]["actual_type"], "string");
+    assert_eq!(observed["allowed_refs"], json!(["step:step_1"]));
+    assert_eq!(observed["required_dispatches"], json!([]));
+    assert_eq!(state.tool_calls_total, 1);
+    assert_eq!(state.round_no, 2);
+    assert_eq!(state.successful_action_fingerprints, fingerprints);
+    assert_eq!(state.executed_step_results[0].output, receipts[0].output);
+    // The original invalid value stays invalid. Only the model can rewrite it.
+    assert!(!crate::repo::child_tasks::child_machine_result_valid_for_task(&task, &wrong));
+    state.last_user_visible_respond = Some(wrong);
+    assert!(!prepare_child_result_evidence_replan(&task, &mut state));
+    let fixed = json!({"name":"Panel","evidence":["step:step_1"]}).to_string();
+    let payload: Value = serde_json::from_str(&task.payload_json).unwrap();
+    assert!(crate::repo::child_tasks::child_machine_result_valid_for_task(&task, &fixed));
+    assert!(crate::repo::child_tasks::child_evidence_refs_valid(
+        &payload,
+        &fixed,
+        &["step_1"]
+    ));
+}
+
+#[test]
+fn missing_machine_fields_and_oversized_candidates_have_bounded_value_free_diagnostics() {
+    let (task, mut state) = schema_fixture();
+    let wrong = json!({"evidence":["step:step_1"]}).to_string();
+    state.last_user_visible_respond = Some(wrong);
+    assert!(prepare_child_result_evidence_replan(&task, &mut state));
+    assert!(state.task_observations.last().unwrap()["field_issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v["path"] == "/name" && v["reason"] == "required_field_missing"));
+    let huge = "sensitive-candidate-content".repeat(2048);
+    let issues = crate::repo::child_tasks::child_result_candidate_validation_issues(&task, &huge);
+    assert_eq!(issues.len(), 1);
+    assert_eq!(issues[0]["reason"], "candidate_size_limit");
+    let encoded = serde_json::to_string(&issues).unwrap();
+    assert!(!encoded.contains("sensitive-candidate-content"));
+    assert!(encoded.len() < 1024);
+    let (_, mut no_evidence) = schema_fixture();
+    no_evidence.executed_step_results.clear();
+    no_evidence.last_user_visible_respond = Some("invalid machine data".into());
+    assert!(!prepare_child_result_evidence_replan(
+        &task,
+        &mut no_evidence
+    ));
+}
