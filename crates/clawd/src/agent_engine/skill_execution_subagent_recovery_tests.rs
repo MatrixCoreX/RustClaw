@@ -107,6 +107,7 @@ fn policy_rejection_replans_without_retrying_scheduler_or_completed_child_failur
 fn invalid_pre_dispatch_contract_and_context_arguments_replan_within_existing_recovery() {
     for signal in [
         crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_INVALID_RESULT_CONTRACT,
+        crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_INVALID_ARGUMENT_CONSTRAINTS,
         crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_UNSUPPORTED_CONTEXT_BUDGET,
     ] {
         assert_eq!(

@@ -54,6 +54,16 @@ explicit application.
 - Example: `[{"capability":"filesystem.read_text_range","allowed_args":[{"type":"object","required":["path","mode","start_line","end_line"],"properties":{"path":{"enum":["src/example.rs"]},"mode":{"enum":["range"]},"start_line":{"type":"integer","minimum":10,"maximum":20},"end_line":{"type":"integer","minimum":10,"maximum":20}}}]}]`.
   Use the exact path spelling the child will call. A union of allowed slices
   uses separate schemas in `allowed_args`; never widen their enclosing range.
+- Every allowed schema must declare a nonempty `required` list, and every
+  required key must have its own enum or value bound in `properties`. A list
+  naming path/mode/start/end does not constrain those values. Do not omit
+  constraints or required keys to bypass a rejection. Fill the exact path,
+  the range mode, and both inclusive bounds from the user scope. Rejected
+  `subagent_argument_constraints_invalid` requests create no child; repair
+  only the reported `field_issues` and resubmit without changing the scope.
+- Parent summaries should present requested findings, evidence, child IDs and
+  statuses. Keep internal budget receipts and call parameters in machine
+  evidence unless requested; do not volunteer unsupported compliance claims.
 - The host freezes these constraints before enqueueing. Every resolved tool,
   skill and capability call is checked before dispatch, also after resume.
   This can only narrow existing capability and host permission grants.

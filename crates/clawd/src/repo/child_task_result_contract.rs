@@ -5,6 +5,75 @@ mod result_schema;
 pub(crate) fn bounded_argument_schema_supported(schema: &Value) -> bool {
     schema.get("type").and_then(Value::as_str) == Some("object")
         && result_schema::supported(schema, 0)
+        && bounded_argument_schema_validation_issues(schema).is_empty()
+}
+
+pub(crate) fn bounded_argument_schema_validation_issues(schema: &Value) -> Vec<Value> {
+    if schema.to_string().len() > 16 * 1024 {
+        return vec![json!({"path":"","reason":"argument_schema_size_limit"})];
+    }
+    let mut issues = Vec::new();
+    result_schema::diagnose(schema, "", 0, &mut issues);
+    if schema.get("type").and_then(Value::as_str) != Some("object") {
+        issues.push(json!({"path":"/type","reason":"expected_object_argument_schema"}));
+    }
+    let required = schema.get("required").and_then(Value::as_array);
+    if required.is_none_or(Vec::is_empty) {
+        issues.push(json!({"path":"/required","reason":"nonempty_required_arguments_missing"}));
+    }
+    argument_property_issues(schema, "", 0, &mut issues);
+    issues.truncate(16);
+    issues
+}
+
+fn argument_property_issues(schema: &Value, path: &str, depth: usize, issues: &mut Vec<Value>) {
+    if depth > 8 || issues.len() >= 16 {
+        return;
+    }
+    if let Some(required) = schema.get("required").and_then(Value::as_array) {
+        for name in required.iter().filter_map(Value::as_str) {
+            let property = schema.get("properties").and_then(|v| v.get(name));
+            let bound = property.and_then(Value::as_object).is_some_and(|v| {
+                [
+                    "enum",
+                    "minimum",
+                    "maximum",
+                    "minLength",
+                    "maxLength",
+                    "minItems",
+                    "maxItems",
+                ]
+                .iter()
+                .any(|key| v.contains_key(*key))
+                    || v.get("required")
+                        .and_then(Value::as_array)
+                        .is_some_and(|r| !r.is_empty())
+            });
+            if !bound {
+                let escaped = name.replace('~', "~0").replace('/', "~1");
+                issues.push(json!({"path":format!("{path}/properties/{escaped}"),
+                    "reason":"required_argument_value_constraint_missing",
+                    "expected":"enum_or_value_bound","required_argument":name}));
+                if issues.len() >= 16 {
+                    return;
+                }
+            }
+        }
+    }
+    if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
+        for (name, property) in properties {
+            let escaped = name.replace('~', "~0").replace('/', "~1");
+            argument_property_issues(
+                property,
+                &format!("{path}/properties/{escaped}"),
+                depth + 1,
+                issues,
+            );
+        }
+    }
+    if let Some(items) = schema.get("items") {
+        argument_property_issues(items, &format!("{path}/items"), depth + 1, issues);
+    }
 }
 
 pub(crate) fn bounded_argument_schema_matches(schema: &Value, args: &Value) -> bool {

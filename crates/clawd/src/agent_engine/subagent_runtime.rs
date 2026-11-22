@@ -14,6 +14,8 @@ pub(super) const SUBAGENT_STOP_SIGNAL_REQUIRED_CHILD_FAILED: &str =
     "subagent_required_child_failed";
 pub(super) const SUBAGENT_STOP_SIGNAL_INVALID_RESULT_CONTRACT: &str =
     "subagent_result_contract_invalid";
+pub(super) const SUBAGENT_STOP_SIGNAL_INVALID_ARGUMENT_CONSTRAINTS: &str =
+    "subagent_argument_constraints_invalid";
 pub(super) const SUBAGENT_STOP_SIGNAL_UNSUPPORTED_CONTEXT_BUDGET: &str =
     "subagent_durable_max_context_chars_unsupported";
 const MAX_SUBAGENT_CONTEXT_REFS: usize = 16;

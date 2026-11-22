@@ -18,6 +18,7 @@ pub(super) fn normalize_subagent_stop_signal(
             crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_INVALID_ROLE
                 | crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_CAPABILITY_POLICY_REJECTED
                 | crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_INVALID_RESULT_CONTRACT
+                | crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_INVALID_ARGUMENT_CONSTRAINTS
                 | crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_UNSUPPORTED_CONTEXT_BUDGET
         )
     );

@@ -40,6 +40,15 @@ alone do not enforce argument bounds. Example:
 `[{"capability":"filesystem.read_text_range","allowed_args":[{"type":"object","required":["path","mode","start_line","end_line"],"properties":{"path":{"enum":["src/example.rs"]},"mode":{"enum":["range"]},"start_line":{"type":"integer","minimum":10,"maximum":20},"end_line":{"type":"integer","minimum":10,"maximum":20}}}]}]`.
 Use the exact path the child will call. Disjoint slices require separate
 schemas in `allowed_args`; do not widen them into one enclosing interval.
+Each schema must have a nonempty `required` array, and every required key
+must have its own enum or value bound in `properties`. Naming path, mode,
+start_line and end_line in `required` alone is insufficient: bind the exact
+path, mode and both inclusive bounds. On `subagent_argument_constraints_invalid`,
+no child was created; fill the reported `field_issues`, preserve the user's
+scope and resubmit. Never bypass a rejection by dropping required bindings.
+Summaries should give requested findings, cited evidence and child IDs/statuses.
+Keep budget receipt internals and call parameters in machine evidence unless
+the user asks for them; do not add unsupported compliance guarantees.
 The host freezes this narrowing-only grant and checks actual arguments before
 any execution, including after resume. It does not grant new capabilities.
 A child receiving `child_argument_constraints_v1` must satisfy an allowed

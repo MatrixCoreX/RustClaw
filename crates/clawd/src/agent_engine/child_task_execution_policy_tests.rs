@@ -103,6 +103,17 @@ fn argument_scope_admission_is_bounded_and_can_allow_disjoint_slices() {
         "type":"object","required":["start_line"],"properties":{"start_line":{"enum":[50]}}
     }]}]);
     assert!(valid(&good, &allowed));
+    for schema in [
+        serde_json::json!({"type":"object"}),
+        serde_json::json!({"type":"object","required":["path","end_line"],"properties":{"end_line":{"enum":[20]}}}),
+        serde_json::json!({"type":"object","required":["path"],"properties":{"path":{"type":"string"}}}),
+    ] {
+        assert!(!crate::repo::child_tasks::bounded_argument_schema_supported(&schema));
+        assert!(
+            !crate::repo::child_tasks::bounded_argument_schema_validation_issues(&schema)
+                .is_empty()
+        );
+    }
     let mut invalid = good.clone();
     invalid[0]["allowed_args"][0]["$ref"] = serde_json::json!("https://invalid.example/schema");
     assert!(!valid(&invalid, &allowed));

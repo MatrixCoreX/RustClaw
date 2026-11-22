@@ -2,6 +2,43 @@
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
+pub(in crate::agent_engine) fn argument_constraints_validation_issues(value: &Value) -> Vec<Value> {
+    let mut issues = Vec::new();
+    let Some(rules) = value
+        .as_array()
+        .filter(|r| r.len() <= 32 && value.to_string().len() <= 16 * 1024)
+    else {
+        return vec![json!({"path":"","reason":"expected_bounded_constraint_array"})];
+    };
+    for (i, rule) in rules.iter().enumerate() {
+        let Some(schemas) = rule
+            .get("allowed_args")
+            .and_then(Value::as_array)
+            .filter(|s| !s.is_empty() && s.len() <= 8)
+        else {
+            issues.push(json!({"path":format!("/{i}/allowed_args"),"reason":"expected_nonempty_bounded_schema_array"}));
+            continue;
+        };
+        for (j, schema) in schemas.iter().enumerate() {
+            for mut issue in
+                crate::repo::child_tasks::bounded_argument_schema_validation_issues(schema)
+            {
+                let path = issue
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                issue["path"] = json!(format!("/{i}/allowed_args/{j}{path}"));
+                issues.push(issue);
+                if issues.len() >= 16 {
+                    return issues;
+                }
+            }
+        }
+    }
+    issues.truncate(16);
+    issues
+}
+
 pub(in crate::agent_engine) fn valid_capability_argument_constraints(
     value: &Value,
     allowed: &[String],

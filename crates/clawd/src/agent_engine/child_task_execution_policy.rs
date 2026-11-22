@@ -11,7 +11,8 @@ mod argument_constraints;
 #[path = "child_capability_budget.rs"]
 mod capability_budget;
 pub(in crate::agent_engine) use argument_constraints::{
-    planner_argument_context, valid_capability_argument_constraints,
+    argument_constraints_validation_issues, planner_argument_context,
+    valid_capability_argument_constraints,
 };
 pub(in crate::agent_engine) use capability_budget::{
     has_scoped_capability_budget, planner_budget_context, valid_capability_call_limits,

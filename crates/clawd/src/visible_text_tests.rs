@@ -6,6 +6,36 @@ use super::{
 };
 
 #[test]
+fn budget_request_boolean_survives_text_redaction_without_exempting_credentials() {
+    let raw = "max_tokens_explicitly_requested = false，实际生效的是宿主默认 1000000";
+    assert_eq!(sanitize_user_visible_text(raw), raw);
+    let raw = "max_tokens_explicitly_requested=true; api_token=private-fixture-value";
+    let sanitized = sanitize_user_visible_text(raw);
+    assert!(sanitized.contains("max_tokens_explicitly_requested=true"));
+    assert!(sanitized.contains("api_token=[REDACTED]"));
+    let raw = "max_tokens_explicitly_requested=false，api_token=private-fixture-value";
+    let sanitized = sanitize_user_visible_text(raw);
+    assert!(sanitized.contains("max_tokens_explicitly_requested=false，"));
+    assert!(sanitized.contains("api_token=[REDACTED]"));
+    assert!(!sanitized.contains("private-fixture-value"));
+    for raw in [
+        "max_tokens_explicitly_requested=private-fixture-value",
+        "max_tokens_explicitly_requested=falseprivate-fixture-value",
+        r#"{"max_tokens_explicitly_requested":"private-fixture-value"}"#,
+        "max_tokens_explicitly_requested=\"private-fixture-value\"",
+        "api_token=\"private fixture value\"",
+        "api_token='private fixture value'",
+        "api_token=`private fixture value`",
+        "api_token=false",
+    ] {
+        let sanitized = sanitize_user_visible_text(raw);
+        assert!(sanitized.contains("[REDACTED]"), "{sanitized}");
+        assert!(!sanitized.contains("private-fixture-value"));
+        assert!(!sanitized.contains("private fixture value"));
+    }
+}
+
+#[test]
 fn sanitizes_ansi_and_sensitive_url_params() {
     let raw = "\u{1b}[32mconnected\u{1b}[0m to wss://host/ws?device_id=123&access_key=abc123&service_id=7&ticket=deadbeef";
 

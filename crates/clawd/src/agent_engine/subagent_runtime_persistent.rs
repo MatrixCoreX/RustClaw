@@ -169,6 +169,7 @@ fn schedule_child_task_specs(
             let recoverable = matches!(
                 signal,
                 SUBAGENT_STOP_SIGNAL_INVALID_RESULT_CONTRACT
+                    | super::SUBAGENT_STOP_SIGNAL_INVALID_ARGUMENT_CONSTRAINTS
                     | SUBAGENT_STOP_SIGNAL_UNSUPPORTED_CONTEXT_BUDGET
             );
             let mut field_issues = Vec::new();
@@ -201,6 +202,33 @@ fn schedule_child_task_specs(
                             field_issues.push(issue);
                         }
                     }
+                }
+            } else if signal == super::SUBAGENT_STOP_SIGNAL_INVALID_ARGUMENT_CONSTRAINTS {
+                let children = std::iter::once((String::new(), args)).chain(
+                    args.get("children")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .take(16)
+                        .enumerate()
+                        .map(|(i, child)| (format!("/children/{i}"), child)),
+                );
+                for (prefix, child) in children {
+                    if let Some(value) = child.get("capability_argument_constraints") {
+                        for mut issue in super::super::skill_execution::child_task_execution_policy::argument_constraints_validation_issues(value) {
+                            let path = issue.get("path").and_then(Value::as_str).unwrap_or_default();
+                            issue["path"] = json!(format!("{prefix}/capability_argument_constraints{path}"));
+                            field_issues.push(issue);
+                            if field_issues.len() >= 16 { break; }
+                        }
+                    }
+                    if field_issues.len() >= 16 {
+                        break;
+                    }
+                }
+                if field_issues.is_empty() {
+                    field_issues.push(json!({"path":"/capability_argument_constraints",
+                        "reason":"invalid_or_unallowed_capability_constraints"}));
                 }
             } else if signal == SUBAGENT_STOP_SIGNAL_UNSUPPORTED_CONTEXT_BUDGET {
                 field_issues.push(json!({"path":"budget.max_context_chars","reason":"unsupported_for_durable_child"}));
@@ -500,7 +528,7 @@ fn persistent_child_spec(
     if !super::super::skill_execution::child_task_execution_policy::valid_capability_argument_constraints(
         &capability_argument_constraints, &allowed_capabilities,
     ) {
-        return Err(SUBAGENT_STOP_SIGNAL_CHILD_TASK_SCHEDULE_FAILED);
+        return Err(super::SUBAGENT_STOP_SIGNAL_INVALID_ARGUMENT_CONSTRAINTS);
     }
     let scope = json!({
         "node_id": node_id.clone(),
