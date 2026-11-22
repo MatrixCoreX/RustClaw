@@ -120,7 +120,7 @@ fn caller_budget_evidence_distinguishes_omitted_fields_from_host_defaults_withou
 #[test]
 fn incompatible_enum_is_rejected_before_child_creation_with_host_type_diagnostic() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
-    crate::agent_engine::tests::install_test_registry(
+    crate::agent_engine::skill_execution::tests::install_test_registry(
         &state,
         r#"
 [[skills]]
@@ -135,7 +135,18 @@ planner_capabilities = [ { name = "fixture.read", required = ["path"], optional 
 "#,
         &["fixture_reader"],
     );
-    let task = crate::agent_engine::tests::test_task();
+    let task = ClaimedTask {
+        claim_attempt: 1,
+        task_id: uuid::Uuid::new_v4().to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "ui".into(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".into(),
+        payload_json: "{}".into(),
+    };
     let args = json!({"children":[{"role":"explorer","objective":"inspect","context_refs":["fixture.rs"],
     "allowed_capabilities":["fixture.read"],"capability_argument_constraints":[{"capability":"fixture.read","allowed_args":[{
         "type":"object","required":["path","line"],"properties":{"path":{"enum":["fixture.rs"]},"line":{"enum":["12"]}}
