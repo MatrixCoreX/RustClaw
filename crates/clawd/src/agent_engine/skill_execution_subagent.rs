@@ -261,6 +261,7 @@ pub(in crate::agent_engine) fn record_subagent_step_execution(
     let step_error = stop_signal.map(|signal| {
         if matches!(signal,
             crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_INVALID_RESULT_CONTRACT
+            | crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_INVALID_ARGUMENT_CONSTRAINTS
             | crate::agent_engine::subagent_runtime::SUBAGENT_STOP_SIGNAL_UNSUPPORTED_CONTEXT_BUDGET
         ) {
             // Preserve host-produced field diagnostics in the standard error envelope too.
