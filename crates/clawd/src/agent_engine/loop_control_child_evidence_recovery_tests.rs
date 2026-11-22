@@ -50,10 +50,29 @@ fn reference_repair_preserves_effects_and_budgets_and_uses_only_one_existing_all
     assert_eq!(state.tool_calls_total, 1);
     assert_eq!(state.total_steps_executed, 1);
     assert_eq!(state.successful_action_fingerprints, fingerprints);
-    assert_eq!(
-        serde_json::to_value(&state.executed_step_results).unwrap(),
-        serde_json::to_value(receipts).unwrap()
-    );
+    assert_eq!(state.executed_step_results.len(), receipts.len());
+    for (actual, expected) in state.executed_step_results.iter().zip(&receipts) {
+        assert_eq!(
+            (
+                &actual.step_id,
+                &actual.skill,
+                &actual.status,
+                &actual.output,
+                &actual.error,
+                actual.started_at,
+                actual.finished_at
+            ),
+            (
+                &expected.step_id,
+                &expected.skill,
+                &expected.status,
+                &expected.output,
+                &expected.error,
+                expected.started_at,
+                expected.finished_at
+            )
+        );
+    }
     assert_eq!(
         state.task_observations[0]["allowed_refs"],
         json!(["step:step_1"])
