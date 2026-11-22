@@ -11,7 +11,7 @@ pub(crate) use result_contract::{
     child_evidence_refs_valid, child_machine_result_valid_for_task,
     child_result_candidate_validation_issues, child_result_contract_failure,
     child_result_contract_for_task, child_result_contract_supported,
-    child_result_contract_validation_issues,
+    child_result_contract_validation_issues, child_result_encoding_repairable,
 };
 
 use rusqlite::{params, OptionalExtension};

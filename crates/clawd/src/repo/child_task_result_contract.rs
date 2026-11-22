@@ -191,6 +191,63 @@ pub(crate) fn child_machine_result_valid_for_task(task: &crate::ClaimedTask, ans
         && validated_child_structured_result(&payload, &json!({"text":answer})).is_some()
 }
 
+/// Eligibility only: hypothetically decode existing field values, then require
+/// the complete original contract. Never return or deliver the decoded object.
+/// Missing facts, null required values, and unrelated schema errors stay rejected.
+pub(crate) fn child_result_encoding_repairable(task: &crate::ClaimedTask, answer: &str) -> bool {
+    if answer.len() > 32 * 1024 {
+        return false;
+    }
+    let Ok(payload) = serde_json::from_str::<Value>(&task.payload_json) else {
+        return false;
+    };
+    let Some(contract) = child_machine_result_contract(&payload) else {
+        return false;
+    };
+    if !child_result_contract_supported(contract) {
+        return false;
+    }
+    let Some(properties) = contract
+        .pointer("/result_schema/properties")
+        .and_then(Value::as_object)
+    else {
+        return false;
+    };
+    let parsed = serde_json::from_str::<Value>(answer.trim())
+        .ok()
+        .or_else(|| {
+            crate::extract_first_json_value_any(answer).and_then(|v| serde_json::from_str(&v).ok())
+        });
+    let Some(mut candidate) = parsed else {
+        return false;
+    };
+    let Some(fields) = candidate.as_object_mut() else {
+        return false;
+    };
+    let mut changed = false;
+    for (name, value) in fields.iter_mut().take(128) {
+        let Some(schema) = properties.get(name) else {
+            continue;
+        };
+        if result_schema::matches(schema, value) {
+            continue;
+        }
+        let Some(encoded) = value.as_str() else {
+            continue;
+        };
+        let Ok(decoded) = serde_json::from_str::<Value>(encoded.trim()) else {
+            continue;
+        };
+        if result_schema::matches(schema, &decoded) {
+            *value = decoded;
+            changed = true;
+        }
+    }
+    changed
+        && validated_child_structured_result(&payload, &json!({"text":candidate.to_string()}))
+            .is_some()
+}
+
 /// Machine-only, bounded diagnostics for an already-admitted child result.
 /// These hints never coerce the candidate or replace strict terminal validation.
 pub(crate) fn child_result_candidate_validation_issues(

@@ -9,7 +9,7 @@ use terminal_format::terminal_model_output_format_gap_satisfies_contract;
 const ANSWER_VERIFIER_EVIDENCE_REPLAN_USED: &str =
     "agent_loop.answer_verifier_evidence_replan_used";
 
-/// Repair a child machine-result shape or reference encoding before semantic verification.
+/// Repair existing child value encoding or reference encoding before semantic verification.
 /// Shares the existing one-shot recovery allowance; budgets and effects survive.
 pub(super) fn prepare_child_result_evidence_replan(
     task: &ClaimedTask,
@@ -33,6 +33,9 @@ pub(super) fn prepare_child_result_evidence_replan(
         return false;
     }
     let machine_valid = crate::repo::child_tasks::child_machine_result_valid_for_task(task, answer);
+    if !machine_valid && !crate::repo::child_tasks::child_result_encoding_repairable(task, answer) {
+        return false;
+    }
     let Ok(payload) = serde_json::from_str::<Value>(&task.payload_json) else {
         return false;
     };

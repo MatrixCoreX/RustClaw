@@ -202,13 +202,16 @@ fn serialized_evidence_array_uses_existing_repair_before_verification_without_co
 fn missing_machine_fields_and_oversized_candidates_have_bounded_value_free_diagnostics() {
     let (task, mut state) = schema_fixture();
     let wrong = json!({"evidence":["step:step_1"]}).to_string();
-    state.last_user_visible_respond = Some(wrong);
-    assert!(prepare_child_result_evidence_replan(&task, &mut state));
-    assert!(state.task_observations.last().unwrap()["field_issues"]
-        .as_array()
-        .unwrap()
+    let issues = crate::repo::child_tasks::child_result_candidate_validation_issues(&task, &wrong);
+    assert!(issues
         .iter()
         .any(|v| v["path"] == "/name" && v["reason"] == "required_field_missing"));
+    assert!(!crate::repo::child_tasks::child_result_encoding_repairable(
+        &task, &wrong
+    ));
+    state.last_user_visible_respond = Some(wrong);
+    assert!(!prepare_child_result_evidence_replan(&task, &mut state));
+    assert!(state.task_observations.is_empty());
     let huge = "sensitive-candidate-content".repeat(2048);
     let issues = crate::repo::child_tasks::child_result_candidate_validation_issues(&task, &huge);
     assert_eq!(issues.len(), 1);
@@ -222,5 +225,32 @@ fn missing_machine_fields_and_oversized_candidates_have_bounded_value_free_diagn
     assert!(!prepare_child_result_evidence_replan(
         &task,
         &mut no_evidence
+    ));
+}
+
+#[test]
+fn encoding_repair_does_not_fill_missing_data_or_bypass_unrelated_schema_failures() {
+    let (task, _) = schema_fixture();
+    for value in [
+        json!({"evidence":"[\"step:step_1\"]"}),
+        json!({"name":null,"evidence":"[\"step:step_1\"]"}),
+        json!({"name":"","evidence":"[\"step:step_1\"]"}),
+        json!({"name":"Panel","evidence":"[]"}),
+        json!({"name":"Panel","evidence":"not serialized JSON"}),
+    ] {
+        assert!(!crate::repo::child_tasks::child_result_encoding_repairable(
+            &task,
+            &value.to_string()
+        ));
+    }
+    let original = json!({"name":"[1,2]","evidence":"[\"step:step_1\"]"}).to_string();
+    assert!(crate::repo::child_tasks::child_result_encoding_repairable(
+        &task, &original
+    ));
+    assert!(!crate::repo::child_tasks::child_machine_result_valid_for_task(&task, &original));
+    let mut ordinary = task;
+    ordinary.payload_json = "{}".into();
+    assert!(!crate::repo::child_tasks::child_result_encoding_repairable(
+        &ordinary, &original
     ));
 }
