@@ -5,6 +5,10 @@ use serde_json::{json, Value};
 
 use crate::AppState;
 
+#[path = "prompt_utils_template_projection.rs"]
+mod template_projection;
+pub(crate) use template_projection::project_template as project_prompt_template;
+
 #[path = "prompt_utils_json_repair.rs"]
 mod json_repair;
 #[path = "prompt_utils_schema.rs"]
@@ -19,7 +23,7 @@ pub(crate) use json_repair::{
 use schema_validation::validate_schema_value;
 
 pub(crate) fn render_prompt_template(template: &str, replacements: &[(&str, &str)]) -> String {
-    let mut rendered = template.to_string();
+    let mut rendered = project_prompt_template(template).into_owned();
     for (key, value) in replacements {
         rendered = rendered.replace(key, value);
     }

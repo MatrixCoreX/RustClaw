@@ -127,6 +127,10 @@ Scope and calls constrain every actual operation, including delegated work.
 Respect exact path, target-set, line/byte ranges, order and call budgets.
 start_line/end_line/returned_line_count describe the returned slice;
 total_lines/line_count describe the file and cannot authorize more reads.
+Metadata explicitly returned by the same bounded read (total_lines, hash, size)
+is observed evidence for those metadata claims, even when outside the requested
+content slice. It does not establish unseen file content. Do not reject a
+returned metadata value merely because the content range is narrower.
 Do not broaden a bounded read merely because the file is longer or has_more.
 A fully returned requested slice with line_safety.excerpt_truncated=false is
 complete even if the rest of the file remains. An actual out-of-scope operation

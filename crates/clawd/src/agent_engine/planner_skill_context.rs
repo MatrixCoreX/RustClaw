@@ -105,6 +105,7 @@ fn build_skill_playbooks_for_actions(
 
         let prompt_body =
             crate::load_prompt_template_for_state(state, &registry_prompt_rel_path, "").0;
+        let prompt_body = crate::prompt_utils::project_prompt_template(&prompt_body).into_owned();
 
         debug!(
             "planner skill playbook: skill={} prompt_logical_path={} source=registry",

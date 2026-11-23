@@ -193,6 +193,7 @@ pub(super) fn expand_catalog(
                 } else {
                     body
                 };
+                let rendered = crate::prompt_utils::project_prompt_template(&rendered);
                 value["action_documentation"] = json!({"schema_version":1,
                     "source_artifact":artifact,"selected_action":entry.action,"text":rendered});
             }

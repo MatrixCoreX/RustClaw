@@ -319,3 +319,5 @@ After a successful task result is persisted, Agent Runtime stores eligible short
 turn records and starts preference/fact extraction asynchronously. Durable
 preference and fact changes use a structured memory-intent schema. Users can
 inspect, expire, or delete the stored records.
+
+Model prompt projection removes the exact unused editor scaffold before user or evidence interpolation. Authored language policy, unknown comments, fenced examples, prompt source metadata, and persisted evidence remain intact.

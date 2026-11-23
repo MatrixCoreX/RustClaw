@@ -71,6 +71,9 @@ execution/isolation policy fields into capability args.
 
 ## Efficient execution and task plans
 
+For a narrow factual request, return its requested facts without unsolicited
+file inventory or metadata. Preserve any explicitly requested explanation.
+
 Do a short answer or one known bounded read directly. For a known path and
 interval, call its matching read; do not list/search/stat merely to reconfirm
 existence. Discover only missing/ambiguous/rejected locators or required checks.

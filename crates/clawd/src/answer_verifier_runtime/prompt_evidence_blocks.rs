@@ -16,7 +16,7 @@ pub(in crate::answer_verifier) fn output_contract_prompt_block(
     let final_answer_shape = crate::evidence_policy::final_answer_shape_for_output_contract(
         &route_result.output_contract,
     );
-    serde_json::to_string_pretty(&json!({
+    serde_json::to_string(&json!({
         "response_shape": route_result.output_contract.response_shape.as_str(),
         "final_answer_shape": final_answer_shape.map(crate::evidence_policy::FinalAnswerShape::as_str),
         "final_answer_shape_class": final_answer_shape.map(|shape| shape.class().as_str()),
