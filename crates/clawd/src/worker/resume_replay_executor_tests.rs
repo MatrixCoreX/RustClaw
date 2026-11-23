@@ -13,7 +13,7 @@ async fn historical_quota_dispatch_terminates_before_input_materialization_and_m
     state.core.llm_providers.clear();
     state.seed_ask_task_row("quota-resume-dispatch", 7, 11, r#"{"text":"继续执行"}"#);
     let task = crate::repo::claim_next_task(&state).unwrap().unwrap();
-    let claimed = historical_quota_claim(task);
+    let claimed = historical_quota_claim(&task);
     let result = super::execute_seeded_agent_loop_dispatch_result(&state, &claimed)
         .await
         .unwrap()
@@ -60,7 +60,7 @@ async fn resumed_isolated_tasks_reuse_existing_writes_and_publish_patch_scope_on
         first.retain_for_parent_decision();
         drop(first);
 
-        let claimed = historical_quota_claim(task);
+        let claimed = historical_quota_claim(&task);
         let result = super::execute_seeded_agent_loop_dispatch_result(&state, &claimed)
             .await
             .unwrap()
@@ -188,7 +188,7 @@ impl Drop for ResumeScopeRepo {
 }
 
 fn historical_quota_claim(
-    task: crate::ClaimedTask,
+    task: &crate::ClaimedTask,
 ) -> crate::repo::ClaimedDispatchedPausedCheckpointResumeExecution {
     let checkpoint_id = "quota-checkpoint";
     let checkpoint = crate::task_lifecycle::TaskCheckpoint {
