@@ -89,6 +89,9 @@ pub(in crate::agent_engine) fn checkpoint_handoff_reply_with_verification(
         target.answer_verification_candidate = source.answer_verification_candidate.clone();
         target.answer_verification_checkpoint = source.answer_verification_checkpoint.clone();
         target.capability_results = source.capability_results.clone();
+        target.rounds = source.rounds.clone();
+        target.step_results = source.step_results.clone();
+        target.task_observations = source.task_observations.clone();
         // Bind before the outer finalizer's generic waiting-checkpoint early return.
         crate::answer_verifier::checkpoint_unavailable_verification(state, task, target);
     }

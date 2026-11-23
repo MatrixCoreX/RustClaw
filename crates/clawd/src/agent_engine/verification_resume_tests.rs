@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "verification_resume_answer_repair_tests.rs"]
+mod answer_repair_tests;
+
 fn bound() -> (AppState, ClaimedTask, crate::task_lifecycle::TaskCheckpoint) {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = ClaimedTask {

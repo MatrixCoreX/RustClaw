@@ -474,7 +474,7 @@ fn commit_answer_verifier_retry_answer(reply: &mut AskReply, retried_answer: Str
     true
 }
 
-async fn try_bounded_answer_verifier_synthesis_retry(
+pub(super) async fn try_bounded_answer_verifier_synthesis_retry(
     state: &AppState,
     task: &ClaimedTask,
     user_text: &str,

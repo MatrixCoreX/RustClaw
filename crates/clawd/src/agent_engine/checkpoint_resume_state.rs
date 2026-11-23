@@ -86,6 +86,9 @@ pub(crate) fn build_checkpoint_resume_state(
         "last_publishable_synthesis_output": loop_state.last_publishable_synthesis_output,
         "last_capability_synthesis_output": loop_state.last_capability_synthesis_output,
         "resource_wait_attempts": loop_state.resource_wait_attempts,
+        "verification_answer_repair_used": loop_state.output_vars.contains_key(
+            super::verification_resume::ANSWER_REPAIR_USED
+        ),
         "executed_step_results": executed_step_results
             .iter()
             .map(|step| json!({
@@ -186,6 +189,16 @@ pub(crate) fn restore_checkpoint_resume_state(
         .and_then(Value::as_u64)
         .and_then(|value| u32::try_from(value).ok())
         .unwrap_or_default();
+    if resume_state
+        .get("verification_answer_repair_used")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        loop_state.output_vars.insert(
+            super::verification_resume::ANSWER_REPAIR_USED.to_string(),
+            "true".to_string(),
+        );
+    }
     if loop_state.executed_step_results.is_empty() {
         loop_state
             .executed_step_results

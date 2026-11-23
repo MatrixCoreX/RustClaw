@@ -156,6 +156,7 @@ For explicit work, audit the delegated operation at the parent boundary: agent.s
 Cite the parent step and runtime-owned child/merge result.
 Do not require the parent to repeat the child's read, search or verification or invent child step IDs.
 Still audit each requested child, result completeness, scope and factual claim.
+Distinguish an explicitly attributed child-reported value from a claim of independent parent verification. Audit the former against the scoped child result, and the latter against independent execution evidence; never require a prohibited parent re-execution merely to repeat an attributed result.
 
 child_result_evidence_contract is structural evidence only. A host-valid
 candidate_evidence_refs_valid proves the reference shape and successful result

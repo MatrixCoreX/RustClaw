@@ -60,8 +60,13 @@ budgets and metrics in a verification-stage checkpoint; missing configuration
 requires user intervention. Recovery first checks the candidate, evidence,
 request and conversation-revision bindings, current authorization and task claim.
 Unchanged work resumes answer verification without a planner or tool turn. A
-changed instruction or rejected candidate returns to the agent loop with the
-completed mutation fingerprints intact. Provider outages respect the provider's
+resumed rejection limited to machine fields for answer format, unsupported claims
+or audit format permits one answer-only rewrite followed by fresh verification.
+The allowance survives checkpoints and restarts; repeated rejection fails without
+replaying completed actions. A changed instruction or genuine execution-evidence
+gap returns to the agent loop with the latest candidate, structured issue and
+completed mutation fingerprints intact, clearing stale delivery drafts.
+Provider outages respect the provider's
 cooldown, or wait 60 seconds when no cooldown is available. Invalid verifier
 responses use candidate-bound counts persisted in the checkpoint: the first two
 failures schedule verification-only retries after 2 and 5 seconds; a third leaves

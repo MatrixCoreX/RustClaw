@@ -36,6 +36,21 @@ fn provider_checkpoint_handoff_retains_unavailable_verification_instead_of_erasi
             Some("review".into()),
             json!({"reviewed": true}),
         ));
+    journal.step_results.push(TaskJournalStepTrace::ok(
+        "step_3",
+        "subagent",
+        r#"{"child_task_id":"fixture-child","status":"completed"}"#,
+    ));
+    journal
+        .rounds
+        .push(crate::task_journal::TaskJournalRoundTrace {
+            round_no: 3,
+            ..Default::default()
+        });
+    journal
+        .task_observations
+        .push(json!({"observation_kind":"fixture_completed_delegation",
+        "child_task_id":"fixture-child","step_id":"step_3"}));
     let prior = AskReply::non_llm("candidate".into()).with_task_journal(journal);
     let handoff = checkpoint_handoff_reply_with_verification(
         &state,
@@ -60,6 +75,13 @@ fn provider_checkpoint_handoff_retains_unavailable_verification_instead_of_erasi
     );
     assert_eq!(journal.capability_results.len(), 1);
     assert_eq!(journal.capability_results[0].data["reviewed"], true);
+    assert_eq!(journal.step_results.len(), 1);
+    assert_eq!(journal.step_results[0].step_id, "step_3");
+    assert_eq!(journal.rounds[0].round_no, 3);
+    assert_eq!(
+        journal.task_observations[0]["child_task_id"],
+        "fixture-child"
+    );
     let record = journal.answer_verification.unwrap();
     assert_eq!(
         record.status,

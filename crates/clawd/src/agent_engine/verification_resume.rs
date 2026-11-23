@@ -5,6 +5,10 @@ use crate::task_journal::{TaskJournal, TaskJournalFinalStatus};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
+#[path = "verification_resume_answer_repair.rs"]
+mod answer_repair;
+pub(super) const ANSWER_REPAIR_USED: &str = "agent_loop.verification_answer_repair_used";
+
 fn hash(value: &impl serde::Serialize) -> String {
     format!(
         "{:x}",
@@ -130,7 +134,8 @@ pub(super) async fn try_resume(
         return Ok(None);
     }
     let current_revision = revision(state, task)?;
-    let Some(candidate) = binding_matches(checkpoint, task, user_text, &current_revision) else {
+    let Some(mut candidate) = binding_matches(checkpoint, task, user_text, &current_revision)
+    else {
         return Ok(None);
     };
     let mut journal = crate::finalize::build_terminal_from_loop_state(
@@ -181,8 +186,43 @@ pub(super) async fn try_resume(
         ));
     }
     if !accepted {
-        loop_state.task_observations.push(json!({"observation_kind":"answer_verification","status":"failed","reason_code":"verification_resume_rejected","answer_verification":journal.answer_verification}));
-        return Ok(None);
+        let Some(reply) = answer_repair::try_repair(
+            state,
+            task,
+            user_text,
+            loop_state,
+            &contract,
+            journal.clone(),
+            &candidate,
+        )
+        .await
+        else {
+            answer_repair::record_rejection(loop_state, &journal, &candidate);
+            return Ok(None);
+        };
+        ensure_task_running(state, task)?;
+        if !authorized(state, task) {
+            return Err("verification_resume_authorization_revoked".into());
+        }
+        if current_revision != revision(state, task)?
+            || crate::repo::conversation_inputs::task_has_pending_conversation_inputs(
+                &state.core.db,
+                &task.task_id,
+            )
+            .map_err(|_| "verification_input_lookup_failed")?
+            || !crate::repo::pending_task_control_directives(state, &task.task_id, 1)
+                .map_err(|_| "verification_control_lookup_failed")?
+                .is_empty()
+        {
+            return Ok(None);
+        }
+        if reply.should_fail_task || reply.text.is_empty() {
+            return Ok(Some(reply));
+        }
+        candidate = reply.text;
+        journal = reply
+            .task_journal
+            .expect("verified repair retains its journal");
     }
     let rev = current_revision
         .get("instruction_revision")

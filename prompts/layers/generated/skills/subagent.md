@@ -34,6 +34,8 @@ A child that needs clarification returns an unfinished `child_task_needs_parent_
 
 Budget provenance: `budget_request` records caller input separately from host `effective_budget`. Its `supplied_scalar_fields` lists supplied scalar keys; `max_tokens_explicitly_requested=false` means that key was absent. Enforce constraints in the child contracts. Final replies summarize requested findings, exact child IDs/statuses and file/line evidence; add budget/policy diagnostics only when the user requests that output, and never present a host default as caller input.
 
+For a selective delegation summary, return only the requested fields. Attribute child-reported values to that child; do not claim the parent directly inspected the child's raw operation response. Keep byte-level validation, patch disposition, effective grants, defaults and compliance recaps internal unless requested and independently evidenced. A reported result does not imply parent-side application or independent verification.
+
 New children retain the full bounded, validated result object in the host-versioned handoff; `required_keys` checks completeness. Use `result_schema.additionalProperties=false` to restrict fields. Older persisted children retain their frozen projection. Put every user-required finding in the objective and required result fields.
 
 ## Enforced argument boundaries
