@@ -3,8 +3,7 @@ import { TriangleAlert } from "lucide-react";
 import { appStorageKey } from "../lib/product-identity";
 import type { HealthResponse } from "../types/api";
 
-const IGNORE_MINUTES = 30;
-const IGNORE_MS = IGNORE_MINUTES * 60_000;
+const IGNORE_MS = 12 * 60 * 60_000;
 
 function warningStorageKey(apiBase: string): string | null {
   try {
@@ -64,7 +63,7 @@ export function StoragePressureBanner({ apiBase, pressure, t }: {
         </p>
         {dismissible && (
           <button type="button" className="theme-storage-warning-dismiss" onClick={ignore}>
-            {t(`忽略 ${IGNORE_MINUTES} 分钟`, `Hide for ${IGNORE_MINUTES} minutes`)}
+            {t("忽略", "Ignore")}
           </button>
         )}
       </div>

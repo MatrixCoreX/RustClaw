@@ -6,7 +6,7 @@ import { StoragePressureBanner } from "../components/StoragePressureBanner";
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-test("ignoring the disk warning survives a reload, is scoped to the server, and expires", async context => {
+test("ignoring the disk warning survives a reload, is scoped to the server, and expires after twelve hours", async context => {
   context.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 100_000 });
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
   const stored = new Map<string, string>();
@@ -28,7 +28,7 @@ test("ignoring the disk warning survives a reload, is scoped to the server, and 
     await act(async () => { renderer = create(banner()); });
     const current = () => renderer!;
     const button = current().root.findByType("button");
-    assert.deepEqual(button.children, ["忽略 30 分钟"]);
+    assert.deepEqual(button.children, ["忽略"]);
     await act(async () => { button.props.onClick(); });
     assert.equal(current().toJSON(), null);
 
@@ -42,7 +42,7 @@ test("ignoring the disk warning survives a reload, is scoped to the server, and 
     assert.equal(current().root.findAllByType("button").length, 1);
     await act(async () => { current().update(banner()); });
     assert.equal(current().toJSON(), null);
-    await act(async () => { context.mock.timers.tick(30 * 60_000 - 1); });
+    await act(async () => { context.mock.timers.tick(12 * 60 * 60_000 - 1); });
     assert.equal(current().toJSON(), null);
     await act(async () => { context.mock.timers.tick(1); });
     assert.match(JSON.stringify(current().toJSON()), /磁盘可用空间偏低/);
