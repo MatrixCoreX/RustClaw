@@ -67,6 +67,12 @@ retain the host-generated workspace and patch projection; provider waits preserv
 the existing checkpoint, and completed writes remain available for explicit patch
 review without being replayed or merged into the parent workspace.
 
+Child patches omit the root host-state directory, isolation marker, and exact
+runtime trace/lock/archive paths even when a project has no ignore file. Other
+logs and similarly named business files remain visible to parent ownership
+validation; an out-of-scope business change still rejects review. A review failure
+is an observation failure and cannot be reported as an attempted patch apply.
+
 ## Model Control Plane
 
 Global text/multimodal configuration writes, provider-key updates and draft

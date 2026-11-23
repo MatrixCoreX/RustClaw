@@ -59,6 +59,12 @@ operations and their available concrete results. Explain the unfinished response
 and an appropriate recovery without claiming those operations never ran or
 proposing to repeat their completed effects. Do not expose internal schema names.
 
+Ground every failure description in the actual attempted operation and its
+declared effect. An observe/read/review/validate failure does not establish an
+attempt to apply, write, delete, or otherwise mutate a resource. Do not infer a
+mutation attempt from an error-code name; require an actual mutating step or
+explicit execution receipt.
+
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
 Use these optional subheading labels when needed:

@@ -92,6 +92,81 @@ fn unchanged_child_worktree_returns_empty_review_artifact() {
     cleanup_execution_isolation(&plan).expect("cleanup worktree");
 }
 
+#[test]
+fn child_patch_omits_host_state_without_hiding_unowned_business_changes() {
+    let repo = TempRepo::new("host_state");
+    assert!(!repo.path.join(".gitignore").exists());
+    let plan = plan_execution_isolation(
+        &repo.path,
+        "child-patch-host-state",
+        CapabilityIsolationProfile::LocalWorktree,
+    )
+    .expect("worktree plan");
+    create_execution_isolation(&plan, 100).expect("create worktree");
+    for path in [
+        ".agent-runtime/checkpoints/mutation_test/manifest.json",
+        "logs/act_plan.log",
+        "logs/model_io.log",
+        "logs/model_io.log.lock",
+        "logs/model_io.log.2026-11-23",
+    ] {
+        write_file(&plan.execution_root, path, "host-only evidence\n");
+    }
+    let expected = [
+        ".agent-runtime-business/report.txt",
+        "document/writer-result.txt",
+        "logs/customer.log",
+        "logs/model_io.log.customer",
+        "logs/model_io.logic",
+        "nested/.agent-runtime/report.txt",
+        "nested/logs/model_io.log",
+        "outside-owned-scope.txt",
+    ];
+    for path in expected {
+        write_file(&plan.execution_root, path, "business change\n");
+    }
+
+    let artifact = build_child_worktree_patch_artifact(&plan).expect("build filtered patch");
+    assert_eq!(artifact["changed_files"], serde_json::json!(expected));
+    assert_eq!(artifact["changed_file_count"], expected.len());
+    let patch_path = artifact["artifact_path"].as_str().expect("patch path");
+    let patch = fs::read_to_string(patch_path).expect("read patch");
+    assert!(!patch.contains("host-only evidence"));
+    assert!(patch.contains("outside-owned-scope.txt"));
+    assert!(git_status(&repo.path, &["apply", "--check", patch_path]).success());
+    assert!(git_status(&plan.execution_root, &["diff", "--cached", "--quiet"]).success());
+    cleanup_execution_isolation(&plan).expect("cleanup worktree");
+}
+
+#[test]
+fn child_patch_with_only_host_state_is_empty() {
+    let repo = TempRepo::new("host_state_only");
+    let plan = plan_execution_isolation(
+        &repo.path,
+        "child-patch-host-state-only",
+        CapabilityIsolationProfile::LocalWorktree,
+    )
+    .expect("worktree plan");
+    create_execution_isolation(&plan, 100).expect("create worktree");
+    write_file(
+        &plan.execution_root,
+        ".agent-runtime/checkpoints/state.json",
+        "{}\n",
+    );
+    write_file(&plan.execution_root, "logs/model_io.log", "host evidence\n");
+    let artifact = build_child_worktree_patch_artifact(&plan).expect("build host-only patch");
+    assert_eq!(artifact["status"], "empty");
+    assert_eq!(artifact["changed_file_count"], 0);
+    assert!(artifact["artifact_path"].is_null());
+    cleanup_execution_isolation(&plan).expect("cleanup worktree");
+}
+
+fn write_file(root: &Path, relative: &str, content: &str) {
+    let path = root.join(relative);
+    fs::create_dir_all(path.parent().expect("parent")).expect("create parent");
+    fs::write(path, content).expect("write fixture file");
+}
+
 fn init_git_repo(path: &Path) {
     for args in [
         ["init", "--quiet"].as_slice(),

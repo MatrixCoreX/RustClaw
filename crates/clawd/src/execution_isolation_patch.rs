@@ -14,7 +14,17 @@ use super::ExecutionIsolationPlan;
 
 const MAX_CHILD_PATCH_BYTES: usize = 2 * 1024 * 1024;
 const MAX_CHILD_PATCH_FILES: usize = 512;
-const ISOLATION_MARKER_PATHSPEC: &str = ":(exclude).agent-isolation.json";
+// These root-relative paths belong to the host, including in repositories that
+// do not ignore runtime state. Keep unrelated logs and similarly named business
+// files in the patch so the parent's ownership check still sees them.
+const HOST_STATE_PATHSPECS: &[&str] = &[
+    ":(top,exclude,literal).agent-isolation.json",
+    ":(top,exclude,literal).agent-runtime",
+    ":(top,exclude,literal)logs/act_plan.log",
+    ":(top,exclude,literal)logs/model_io.log",
+    ":(top,exclude,literal)logs/model_io.log.lock",
+    ":(top,exclude,glob)logs/model_io.log.[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]",
+];
 
 #[derive(Debug)]
 pub(crate) struct ValidatedChildPatchArtifact {
@@ -39,43 +49,27 @@ pub(crate) fn build_child_worktree_patch_artifact(plan: &ExecutionIsolationPlan)
     let _index_guard = TempIndexGuard(index_path.clone());
 
     run_git_with_index(plan, &index_path, &["read-tree", "HEAD"])?;
-    run_git_with_index(
-        plan,
-        &index_path,
-        &["add", "-A", "--", ".", ISOLATION_MARKER_PATHSPEC],
-    )?;
-    let names_output = run_git_with_index(
-        plan,
-        &index_path,
-        &[
-            "diff",
-            "--cached",
-            "--name-only",
-            "-z",
-            "HEAD",
-            "--",
-            ".",
-            ISOLATION_MARKER_PATHSPEC,
-        ],
-    )?;
+    let mut add_args = vec!["add", "-A", "--", "."];
+    add_args.extend_from_slice(HOST_STATE_PATHSPECS);
+    run_git_with_index(plan, &index_path, &add_args)?;
+    let mut names_args = vec!["diff", "--cached", "--name-only", "-z", "HEAD", "--", "."];
+    names_args.extend_from_slice(HOST_STATE_PATHSPECS);
+    let names_output = run_git_with_index(plan, &index_path, &names_args)?;
     let changed_files = parse_nul_paths(&names_output.stdout)?;
     if changed_files.len() > MAX_CHILD_PATCH_FILES {
         bail!("child_worktree_patch_file_limit_exceeded");
     }
-    let patch_output = run_git_with_index(
-        plan,
-        &index_path,
-        &[
-            "diff",
-            "--cached",
-            "--binary",
-            "--no-ext-diff",
-            "HEAD",
-            "--",
-            ".",
-            ISOLATION_MARKER_PATHSPEC,
-        ],
-    )?;
+    let mut patch_args = vec![
+        "diff",
+        "--cached",
+        "--binary",
+        "--no-ext-diff",
+        "HEAD",
+        "--",
+        ".",
+    ];
+    patch_args.extend_from_slice(HOST_STATE_PATHSPECS);
+    let patch_output = run_git_with_index(plan, &index_path, &patch_args)?;
     if patch_output.stdout.len() > MAX_CHILD_PATCH_BYTES {
         bail!("child_worktree_patch_byte_limit_exceeded");
     }
