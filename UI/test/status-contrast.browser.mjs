@@ -23,12 +23,13 @@ for (const file of await readdir(join(root, "src"), { recursive: true })) {
 assert.ok(tokens.size > 20, "Cover the real status classes, including opacity variants");
 const fixtures = [...tokens].sort().map(token => ({ token, tone: token.split("-")[1] }));
 fixtures.push({ token: "setup-status setup-status-done", tone: "emerald" },
-  { token: "setup-status setup-status-attention", tone: "amber" });
+  { token: "setup-status setup-status-attention", tone: "amber" },
+  { token: "theme-storage-warning", tone: "amber" });
 const browser = await chromium.launch({ executablePath: process.env.BROWSER_EXECUTABLE || undefined, headless: true });
 const results = [];
 try {
   for (const width of [1440, 390]) for (const theme of ["dark", "light"]) {
-    const page = await browser.newPage({ viewport: { width, height: 900 }, serviceWorkers: "block" });
+    const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme: "light", serviceWorkers: "block" });
     try {
       await page.route("**/*", route => route.abort());
       await page.setContent(`<!doctype html><html data-theme="${theme}"><head><style>${stylesheet}</style></head>
@@ -54,6 +55,10 @@ try {
           const channel = value / 255;
           return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
         }).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+        const contrast = (first, second) => {
+          const a = luminance(first), b = luminance(second);
+          return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+        };
         return elements.map(element => {
           const ancestors = [];
           for (let node = element; node; node = node.parentElement) ancestors.unshift(node);
@@ -61,17 +66,22 @@ try {
             { r: 255, g: 255, b: 255, a: 1 });
           const style = getComputedStyle(element);
           const foreground = over(rgba(style.color), background);
-          const a = luminance(foreground), b = luminance(background);
-          return { token: element.className, color: style.color, contrast: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) };
+          return { token: element.className, color: style.color, contrast: contrast(foreground, background),
+            ...(element.classList.contains("theme-storage-warning") && {
+              accent_contrast: contrast(over(rgba(style.borderInlineStartColor), background), background),
+              accent_width: Number.parseFloat(style.borderInlineStartWidth),
+            }) };
         });
       });
-      const failures = measurements.filter(row => row.contrast < 4.5);
+      const failures = measurements.filter(row => row.contrast < 4.5
+        || (row.token === "theme-storage-warning" && (row.accent_contrast < 3 || row.accent_width < 3)));
       const setupDimensions = await page.locator(".setup-status").evaluateAll(elements => elements.map(element => {
         const { width, height } = element.getBoundingClientRect();
         return { width, height };
       }));
       results.push({ width, theme, measured: measurements.length, passed: failures.length === 0,
-        failures, setup_dimensions: setupDimensions, minimum_contrast: Math.min(...measurements.map(row => row.contrast)) });
+        failures, setup_dimensions: setupDimensions, minimum_contrast: Math.min(...measurements.map(row => row.contrast)),
+        storage_warning: measurements.find(row => row.token === "theme-storage-warning") });
       await page.screenshot({ path: join(output, `${theme}-${width}.png`), fullPage: true });
     } finally { await page.close(); }
   }
@@ -82,5 +92,5 @@ try {
     "A theme-specific color correction must not change badge dimensions");
   console.log(JSON.stringify({ cases: results.length, measured_status_variants: fixtures.length,
     passed: results.filter(row => row.passed).length, failures: results.filter(row => !row.passed) }));
-  assert.ok(results.every(row => row.passed), "Small status text must reach 4.5:1 contrast in both themes");
+  assert.ok(results.every(row => row.passed), "Status text and the storage warning accent must meet contrast requirements in both themes");
 } finally { await browser.close(); }

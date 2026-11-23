@@ -3,6 +3,7 @@ import { ConsoleLayout } from "./components/ConsoleLayout";
 import { RenderErrorBoundary } from "./components/RenderErrorBoundary";
 import { FactoryResetModal } from "./components/FactoryResetModal";
 import { SignInPage } from "./components/SignInPage";
+import { StoragePressureBanner } from "./components/StoragePressureBanner";
 import { BANCOR_CANDLE_AUTO_REFRESH_SECONDS } from "./lib/bancor-refresh";
 import {
   formatAuthenticationError,
@@ -2023,13 +2024,7 @@ export default function App() {
       onLogout={logout}
       onOpenFactoryReset={openFactoryResetDialog}
     >
-      {health?.storage_pressure && health.storage_pressure.state !== "normal" && (
-        <div role="status" className="mb-4 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-100">
-          {health.storage_pressure.write_admission
-            ? t("磁盘可用空间偏低，请清理旧文件或扩容。", "Disk space is low. Remove old files or expand storage.")
-            : t("磁盘空间不足或状态暂时无法确认，已暂停新的文件写入。请释放空间后重试。", "New file writes are paused because storage is full or its status is unavailable. Free space and retry.")}
-        </div>
-      )}
+      <StoragePressureBanner key={apiBase} apiBase={apiBase} pressure={health?.storage_pressure} t={t} />
       <RenderErrorBoundary key={currentPage} t={t}>
       <Suspense
         fallback={

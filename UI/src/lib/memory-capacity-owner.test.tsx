@@ -18,6 +18,51 @@ test("capacity waits for policy loading and never performs a mutation request", 
   await view.close();
 });
 
+test("an unrelated parent render keeps the request and the loaded capacity", async () => {
+  const first = deferred<Response>();
+  let signal: AbortSignal | null | undefined;
+  let nextReads = 0;
+  const view = await mount(async (_path, init) => {
+    signal = init?.signal;
+    return first.promise;
+  });
+  const nextFetch = async () => {
+    nextReads++;
+    return json({ ...report(), sampled_at_ts: 200 });
+  };
+
+  await view.update({ apiFetch: nextFetch });
+  assert.equal(signal?.aborted, false);
+  assert.equal(nextReads, 0);
+  await act(async () => { first.resolve(json(report())); });
+  assert.equal(view.runtime.data?.sampled_at_ts, 100);
+
+  await view.update({ apiFetch: () => nextFetch() });
+  assert.equal(view.runtime.data?.sampled_at_ts, 100);
+  assert.equal(nextReads, 0);
+  await act(async () => { await view.runtime.refresh(); });
+  assert.equal(nextReads, 1);
+  assert.equal(view.runtime.data?.sampled_at_ts, 200);
+  await view.close();
+});
+
+test("refresh keeps the current capacity visible until the new reading arrives", async () => {
+  const pending = deferred<Response>();
+  let calls = 0;
+  const view = await mount(async () => ++calls === 1 ? json(report()) : pending.promise);
+  let refresh!: Promise<void>;
+  await act(async () => { refresh = view.runtime.refresh(); });
+  assert.equal(view.runtime.loading, true);
+  assert.equal(view.runtime.data?.sampled_at_ts, 100);
+  await act(async () => {
+    pending.resolve(json({ ...report(), sampled_at_ts: 200 }));
+    await refresh;
+  });
+  assert.equal(view.runtime.loading, false);
+  assert.equal(view.runtime.data?.sampled_at_ts, 200);
+  await view.close();
+});
+
 test("late account A read cannot render under account B", async () => {
   const old = deferred<Response>();
   let calls = 0;
