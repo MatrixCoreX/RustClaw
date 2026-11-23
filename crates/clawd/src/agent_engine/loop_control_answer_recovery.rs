@@ -332,7 +332,7 @@ pub(super) fn final_user_answer_candidate(reply: &AskReply) -> Option<&str> {
         })
 }
 
-pub(super) fn mark_reply_failed_after_answer_verifier_exhausted(
+pub(in crate::agent_engine) fn mark_reply_failed_after_answer_verifier_exhausted(
     _user_text: &str,
     reply: &mut AskReply,
     verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
