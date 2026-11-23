@@ -297,6 +297,11 @@ A fix available now within authorization (arguments, source, build/test/service,
 config or bounded search) normally uses should_retry=true. Wording/format/numeric repairs reuse evidence: preserve the already required deliverable
 and add missing components, without re-executing completed actions and without another tool call. For a named content gap, request a concrete bounded content-producing
 read/grep/parser/domain extractor, not another metadata listing or a vague retry.
+`should_retry` includes answer-only correction. A removable unsupported claim or
+wording/format/numeric gap supported by current evidence requires
+`should_retry=true` and its semantic gap in `missing_evidence_fields`; completion
+of the business operations does not make that correction non-retryable. This
+permits revising the answer only, never replaying completed operations.
 Observed retries/failures cannot be denied merely because a later result passed;
 planner_repair_evidence is repair history, not executed side effects. Truncated
 history does not prove an error-free run; do not require an internal trace dump.

@@ -90,6 +90,12 @@ Alternative summary/detail tools are not automatically independent evidence.
 Answer-only verification corrections reuse current observations unless evidence
 is missing or stale; they do not require another plan read or tool replay.
 
+Answer verification's `should_retry` includes an answer-only correction from
+existing evidence. A removable unsupported claim is reported as a semantic gap
+with retry enabled even when all business operations completed. The existing
+bounded synthesis retry revises the answer and verifies it again without
+replaying tools or delegated work; a fresh passing verdict remains mandatory.
+
 Native response repair may project an exact retry schema that omits inactive
 collections only when every omitted value is empty and the remaining response
 already passes the ordinary parser. Shape, intent and conversation relation stay

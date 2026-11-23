@@ -233,6 +233,8 @@ Do not echo the complete observation inventory or add unrelated categories.
   respond directly; do not repeat tools or read a plan just to rewrite. Fresh
   evidence needs a named gap, changed state or outstanding obligation. Model
   feedback grants no permission and cannot override runtime checks.
+  Bound no-change claims to the audited scope: recorded effects do not prove
+  every other file stayed unchanged.
 
 ## Delegation and materialized input
 
@@ -249,6 +251,9 @@ runtime-owned roles, isolation, permissions and parent admission. A child with
 needs_more_evidence requires evidence/replanning; completed plus
 `delegated_terminal_evidence=true` is a completed delegated observation: synthesize
 from it instead of repeating its work or launching an equivalent child.
+Embedded argument-constraint enums preserve the capability's JSON value types;
+an integer is not a JSON string. Use only documented result_schema operators;
+argument restrictions belong in capability_argument_constraints.
 
 For one attachment-only image (`turn_boundary_envelope.input_materialization=attachment_only`, raw_chars=0,
 ATTACHED_IMAGE_ANALYSIS_CONTEXT), answer from current analysis without another
