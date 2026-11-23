@@ -2,14 +2,14 @@
 
 Chinese version: `README.zh-CN.md`
 
-Agent Runtime is a self-hosted agent platform written in Rust and centered on the `clawd` daemon. It combines multi-channel chat access, task execution, tool and skill routing, memory, scheduling, a browser UI, and `user_key`-based identity in one deployable stack.
+Agent Runtime is a self-hosted platform for using an Agent from a browser or a messaging app. Ask a question, hand it a file, or give it a task, then follow the work from the same conversation. The Rust service `clawd` runs tools and skills, keeps task history, and manages memory and scheduling. An authenticated `user_key` ties work to the same account across bound channels.
 
 <!-- ai-learning-stage: foundations -->
 - Host free-space admission and growth estimates, supervised jobs, typed memory failures, model-reviewed unchanged-summary reuse, incremental encrypted backups with retry recovery, and restart-safe log retention: [operations protection](docs/runtime_operations_protection.md).
 
 ## Overview
 
-Agent Runtime is built for daily use and administration from messaging apps or a browser instead of a terminal-first workflow.
+The browser console covers everyday work such as setting up a model, following tasks, managing knowledge, and checking the health of the device. Bound messaging channels use the same runtime, so the tools available to your account follow you across those entry points.
 
 Current repository highlights:
 
@@ -35,15 +35,15 @@ Current repository highlights:
 
 ### From one request to a result
 
-For example, “summarize this document” becomes a task. The agent inspects the attached file, selects a document capability, runs the verified tool or skill, checks the observation, and then writes the answer. Runtime policy controls identity, permissions, budgets, and side effects; it does not guess intent from hardcoded language phrases.
+Send a document with a request such as “summarize this document.” The Agent decides how to read it, and the runtime checks that the chosen capability can access the attachment. The Agent reads the returned material, checks the evidence when the task calls for it, and writes a reply. You can follow the task while it runs and open its result later.
 
 ### Complete a first task
 
-1. Configure and save one text model on the Models page.
-2. Open Agent, create a task, and send a small request such as “summarize the main points in three bullets.”
-3. Keep the same task open for follow-up instructions. Check task details only when progress, permission, or recovery needs attention.
+1. Open **Models** and save a text model.
+2. Open **Agent** and send a short request. To test file handling too, attach a small document and ask for its three main points.
+3. Stay in the same conversation for follow-up questions. If a request stays on **Queued**, open **Task Management** and look for its task. The chat can show the initial waiting state before the server returns a task ID.
 
-Messaging channels are optional. Configure them only when the browser workflow is already working and you need access from another app.
+If you also want to use the Agent from a messaging app, start with **Communication Setup** and **Account Binding** once the first browser task works.
 
 On macOS, media browsing uses an installed, vendor-signed Google Chrome or
 Microsoft Edge, with Chrome preferred. Install a supported browser from the
@@ -129,9 +129,10 @@ large. These facts avoid redundant filesystem probes without bypassing final pub
 ```mermaid
 flowchart TD
     A[Channel / UI / API request] --> B{Ingress kind}
-    B -->|ordinary conversation input| BI[POST /v1/conversation-inputs/client-task]
+    B -->|live conversation input| BI[POST /v1/conversation-inputs/client-task]
     BI --> BJ[Persist input receipt<br/>scope + input_seq + idempotency]
-    BJ --> BK{Active conversation task?}
+    BJ -->|Run later| BQ[Save input for explicit activation]
+    BJ -->|process now| BK{Active conversation task?}
     BK -->|yes| BL[Bind to the same task<br/>wake loop + interrupt stale model turn]
     BK -->|no| BM[Atomically claim creation<br/>create one foreground ask task]
     BL --> BR[Return input receipt<br/>existing task_id + disposition]
@@ -140,8 +141,8 @@ flowchart TD
     B -->|explicit task / automation / run_skill| BT[POST /v1/tasks]
     BT --> BA[Authenticated task execution policy<br/>server-owned machine envelope]
     BA --> C[Persist task + queue]
-    C --> D[Return task_id<br/>caller can poll]
-    D --> E0[worker_once recovery tick<br/>stale running + due checkpoint]
+    C --> D[Return task ID<br/>and input receipt for chat submissions]
+    C --> E0[Worker checks stale tasks and due checkpoints]
     E0 --> E1[Claim next queued task]
     E1 --> E{Task kind}
     E -->|run_skill| RS[Direct run_skill path<br/>explicit skill_name only]
@@ -152,14 +153,18 @@ flowchart TD
     J --> L{Loop round}
     L --> N[Planner LLM<br/>native call_capability / respond<br/>validated structured plan when required]
     N -.-> PS[Recognized respond/free_text bytes<br/>public-output policy + presentation events]
-    N --> P[PlanVerifier<br/>permission_decision + risk + effect + contract]
+    N --> P[Resolve capability and verify the action<br/>permissions, arguments, risk and effect]
+    P -->|approval needed| PW[Save approval checkpoint]
+    PW --> AB
     P --> Q{Verified step}
     Q -->|respond| R[Structured terminal response<br/>free_text, exact list, authored object,<br/>or observed object projection]
     Q -->|synthesize_answer| S[Grounded synthesis]
-    Q -->|call_tool / call_skill| QP[Pre-tool hooks + adapter preflight<br/>policy_decision + contract args]
+    Q -->|resolved capability, tool or skill| QP[Pre-tool hooks and adapter preflight<br/>policy and argument checks]
     QP --> MG{Non-idempotent mutation?}
-    RS --> RSG[No planner / resolver choice<br/>no verifier semantic selection]
-    RSG --> MG
+    RS --> RSG[Verify the explicitly requested skill action]
+    RSG -->|allowed| MG
+    RSG -->|approval needed| PW
+    RSG -->|denied| RD[Finalize the direct skill task]
     MG -->|yes| MI[Persist intent + deterministic idempotency key<br/>persist attempt before invocation]
     MG -->|no| EX{Execution adapter<br/>sandbox backend diagnostics when process-backed}
     MI --> EX
@@ -169,10 +174,13 @@ flowchart TD
     EX -->|call_skill / direct run_skill| U[Shared skill dispatch]
     T --> MR{Mutation receipt state}
     U --> MR
-    MR -->|not a mutation| V[Observed result]
+    MR -->|not a mutation| VR{Execution path}
     MR -->|receipt returned| MC[Persist receipt + verification + commit<br/>under exact worker claim]
     MR -->|timeout / crash ambiguity| MU[Reconciliation checkpoint<br/>never infer from prose]
-    MC --> V
+    MC --> VR
+    VR -->|ask| V[Observed result]
+    VR -->|run_skill| RD
+    RD --> Z
     MU --> ASP
     S --> V
     V --> W[Evidence coverage + operation audit<br/>+ answer-shape check]
@@ -198,41 +206,33 @@ flowchart TD
     ASP --> AB
     ASP --> AD
     AD --> AE[CLI / UI watch + report]
+    D -.-> AE
     BR -.-> AE
     AD --> AF[Teaching mode timeline<br/>per-turn trace selection + raw JSON details]
     Z -. optional .-> AC[Background memory refresh]
 ```
 
-- `POST /v1/conversation-inputs/client-task`: ordinary UI, CLI, and communication-channel messages first enter the durable conversation-input ledger. The receipt is authoritative even before a task is bound. An active task is steered through the same agent loop; an idle conversation atomically creates one foreground `ask` task.
+- Browser chat and other clients with live conversation input use `POST /v1/conversation-inputs/client-task`. The server saves the message before binding it to an active task or creating one foreground `ask` task for an idle conversation. The receipt reports the saved input and its task binding when available. **Run later** keeps the input available for explicit activation.
 - `POST /v1/tasks`: remains the explicit task boundary for automation, direct skill execution, and callers that intentionally manage a standalone task.
 - `Authenticated task execution policy`: `clawcli` stays on the configured approval/sandbox policy unless an enabled admin key explicitly requests global `--yolo`. Other communication adapters authenticated with an enabled admin key default to YOLO. The server removes caller-supplied policy envelopes, reissues the machine contract after authentication, and revalidates the current admin key before each use. YOLO means `approval_policy=never` plus `sandbox_mode=danger_full`; it does not bypass registry allow/deny, schemas, path validation, external-publish controls, cancellation, budgets, redaction, or audit evidence.
 - `task_id polling`: API/channel request timeouts only affect how long the caller waits. The background task remains queryable through `GET /v1/tasks/{task_id}` unless worker lifecycle logic marks it terminal.
 - `worker_once recovery tick`: before claiming new queued work, the worker checks stale running tasks, protected paused checkpoints, due resume work, async poll results, and result projections.
 - Task-event archives and large event payloads use lossless binary compression while keeping activity indexes and public replay JSON stable. Verified duplicate caches for old terminal tasks are released in bounded batches. See [task-event storage and offline compaction](docs/architecture/task-event-storage.md).
-- `Task kind`: `kind=ask` enters the planner-owned natural-language path; `kind=run_skill` bypasses the planner loop, capability selection, and plan verifier, then calls the explicitly requested skill through the same shared skill dispatcher/protocol used by planner skill calls. Both task kinds persist results under the original `task_id`, so callers can still inspect final state through task query APIs.
+- `kind=ask` lets the Agent choose how to handle a natural-language request. With `kind=run_skill`, the caller supplies the exact skill and arguments, and the runtime verifies that action before using the shared skill dispatcher. Both task kinds save their results under the original `task_id`.
 - `Live conversation input`: each accepted message has a stable `input_id`, monotonic `input_seq`, disposition, instruction revision, and execution epoch. The planner reads ready inputs in order. A committed decision advances the revision; tool dispatch and terminal presentation are fenced against stale revisions. The Agent composer defaults to updating the active task immediately; **Run later** persists an input without starting work and exposes explicit **Run now** and **Withdraw** controls. Explicit `/cancel` uses the authenticated current-conversation control endpoint and does not require a model call.
 - `Single-owner steering`: one planner owns a conversation task at a time. New ordinary input interrupts an in-flight read-only/model step when the adapter can stop safely; otherwise it is applied at the next dispatch boundary. The runtime does not start a second control planner beside an in-flight mutation. Long mutations use supervised async/checkpoint contracts, while explicit stop remains an out-of-band machine control.
 - `Cancellation settlement`: acceptance, stop request, adapter acknowledgement, and cleanup settlement are separate machine facts. Parent cancellation propagates to child tasks and process groups, but a task is not presented or delivered as cancelled until registered runtime cleanup has settled. Unknown external effects enter reconciliation instead of being reported as rolled back.
 
 ### Ask and Run Skill Boundary
 
-This boundary is intentionally explicit because `run_skill` is an API-level task kind, not a natural-language routing shortcut.
+Use `ask` when you want the Agent to interpret a request. Use `run_skill` when your client already knows the skill name and its arguments, such as a console button for listing knowledge bases.
 
-Quick facts for direct skill tasks:
-
-- `kind=run_skill` does not run the planner / agent loop. The caller already supplied `payload.skill_name` and args.
-- `kind=run_skill` still uses the shared skill dispatcher and skill protocol after the explicit skill name is accepted.
-- `kind=run_skill` still creates and updates a normal task row, so the final state and result remain queryable by `task_id`.
-
-| Question | `kind=ask` | `kind=run_skill` |
+| Step | `kind=ask` | `kind=run_skill` |
 | --- | --- | --- |
-| Is there a pre-planner semantic LLM/router? | No. The front door only builds `TurnBoundaryEnvelope` and context refs. | No. The caller already supplied the target skill. |
-| Does it enter the planner / agent loop? | Yes for every ordinary natural-language task. | No. It does not ask the planner to choose a skill or action. |
-| Does it use `CapabilityResolver` / `PlanVerifier` as semantic selectors? | No. The planner owns ordinary semantic choice; resolver/verifier resolve and validate planned steps before execution. | No. Direct skill tasks bypass semantic selection; the explicit skill call still uses dispatch/protocol validation. |
-| Does it use the shared skill dispatcher? | Yes when the planner chooses `call_skill` or a capability resolved to a skill. | Yes. It dispatches `payload.skill_name` through the same builtin / external / runner skill protocol. |
-| Is the result queryable by `task_id`? | Yes. | Yes. The direct skill result is saved under the original task row and can be read through `GET /v1/tasks/{task_id}` or `clawcli get`. |
-
-Operationally: use `kind=ask` when the user gave a natural-language request and Agent Runtime should decide whether to answer, ask, plan, or execute. Use `kind=run_skill` when an API caller already knows the exact skill and args and only wants Agent Runtime to run that explicit skill under the task queue, auth, lifecycle, and result projection machinery.
+| Action selection | The request passes through `TurnBoundaryEnvelope` into the Agent loop. The planner decides whether to reply, clarify, or use a capability. | The caller supplies `payload.skill_name` and `payload.args` directly. |
+| Checks before execution | The resolver identifies the concrete action. The verifier checks its arguments, permissions, risk, and confirmation requirements. | The verifier checks the explicitly selected action under the authenticated task policy. A high-risk action may pause for approval. |
+| Skill execution | A capability that resolves to a skill uses the shared skill dispatcher. | The same dispatcher runs the approved skill. |
+| Progress and results | Both task kinds use the task queue and retain the same `task_id` for status and result queries. | Read the task with `GET /v1/tasks/{task_id}` or `clawcli get`. |
 
 - `Planner-owned front door`: materializes text/audio/attachments and builds `TurnBoundaryEnvelope` from task identity, explicit API fields, structured locator facts, and safety/budget profiles. It performs no semantic LLM call and contains no ordinary respond/clarify/execute branch.
 - `Agent-loop semantic authority`: every ordinary natural-language task enters the loop. Native turns choose `call_capability` or structured `respond`; structured-plan turns may express equivalent tool, skill, synthesis, clarification, repair, checkpoint, or stop steps.
@@ -391,7 +391,7 @@ The main persisted memory stores are:
 - `user_preferences`: structured user preferences such as response language, response style, response format, and agent display name.
 - `memory_facts`: durable fact cards with `fact_key`, `fact_value`, `fact_text`, source refs, confidence, status, expiry, and conflict-group metadata.
 - `long_term_memories`: supplemental summary rows used only where the current memory policy allows summary recall.
-- `memory_retrieval_index`: hybrid retrieval index over short-term records, preferences, fact cards, and knowledge snapshots.
+- `memory_retrieval_index`: hybrid retrieval index for short-term records, preferences, and fact cards. Imported knowledge base documents use the skill's own database.
 
 `configs/memory.toml` controls budgets, retention, long-term refresh intervals, write filters, preference extraction, retrieval limits, and embedding/index behavior. Defaults are conservative: short acknowledgement messages can be filtered, assistant replies are marked, and LLM-written preferences must pass confidence and runtime validation before they are stored.
 
@@ -440,62 +440,73 @@ Retrieval combines several signals instead of trusting a single score: exact / l
 
 ### Knowledge Base Design Flow
 
-The `kb` skill is the user-managed document knowledge-base path. It is selected like other ordinary capabilities: `ask` tasks let the agent loop plan `call_capability("kb.*")`, while direct API callers can use `kind=run_skill` with `skill_name=kb`. Runtime code does not special-case knowledge-base wording before the planner; it resolves and verifies registry capability metadata, then dispatches the same skill protocol as other runner skills.
+Use a knowledge base for documents you want to refer to across conversations, such as a support guide or an operations checklist. Give each collection a recognizable name so you can tell the Agent where to look.
+
+1. Open **Memory → Knowledge base → Add material**. The panel is below **Capacity and status**. Enter a library name and one file or folder path per line, then click **Start adding**. Use paths the Agent service can read. Relative paths start in its workspace.
+2. If the import offers **Continue unfinished work**, use it to process the next batch. Then click **Refresh libraries**, select the library, and use **View document status** to check what was indexed. Try a term from a document in **Search material** to see matching excerpts and their locations.
+3. In **Agent**, ask a question and name the library. For example, “Search the Returns guide library. Who pays for return shipping when the product is defective? Include the source.”
+
+Libraries belong to the account on the connected instance. Separate installations, such as a Raspberry Pi and a workstation, each keep their own libraries. If a library is missing, check the console address and signed-in account, then click **Refresh libraries**.
+
+The console panel sends explicit `run_skill` tasks to `kb`. In chat, an `ask` task gives the Agent loop the choice to call `kb.search` through the capability resolver and verifier.
 
 ```mermaid
-flowchart LR
-    A[User files] --> B[Typed extraction<br/>text, HTML, PDF, Office]
-    B --> C[Structure-aware chunks<br/>page, section, sheet, slide]
-    C --> D[(KB-private canonical store)]
-    D --> E[FTS candidates]
-    D --> F[Active vector generation<br/>exact or bounded ANN]
-    E --> G[Filter before limit<br/>hybrid fusion + diversity]
-    F --> G
-    G --> H[RetrievalHitV2 evidence map<br/>instruction_authority = none]
-    H --> I[Model selects runtime evidence IDs]
-    I --> J[Runtime validates revision/digest<br/>and emits neutral citations]
+flowchart TD
+    subgraph Import["Add material"]
+      A[Name a library and select source paths] --> B[Extract text and split it by structure<br/>keep pages, sections, sheets and slides]
+      B --> C[Save the batch and its progress]
+      C -->|more files| B
+    end
+    C --> D[(Account's library<br/>text and active vector indexes)]
+    subgraph Ask["Search or ask"]
+      Q[Search the panel or name the library in Agent] --> F[Scope by account and library<br/>apply filters before ranking]
+      F --> G[Rank text and vector matches]
+      G --> H{Relevant excerpts found?}
+      H -->|yes| I[Show excerpts or answer from verified evidence<br/>with source locations]
+      H -->|no| J[Return no matches or state that the library has no answer]
+    end
+    D --> G
 ```
 
 Detailed flows: [RAG knowledge retrieval](docs/architecture/17-rag-knowledge-retrieval.md), [Task state and context](docs/architecture/03-task-state-context.md), and [Skill-owned storage](docs/architecture/08-skill-owned-storage.md).
 
-Key boundaries:
+#### What gets indexed and cited
 
-- `kb.ingest` is a local mutation capability. Registry policy marks it medium risk, once per task, and async-preferred through the local process adapter.
-- `kb.search`, `kb.list_namespaces`, and `kb.stats` are observe-mode capabilities. They return structured machine fields such as `namespace`, `hits`, `names`, `document_count`, and `chunk_count`.
-- Namespace snapshots and `kb_doc` retrieval rows live only in the KB-owned database under `[database].skill_data_root` (normally `data/skills/kb/state.db`). The runtime queries that pool during recall; it does not copy KB rows into the main runtime database.
-- KB rows are scoped by `user_key` and workspace files, not by one chat thread. They can be recalled later only through the same memory use-policy filters as other knowledge docs, and current user input remains the authority.
-- Ingestion supports UTF-8 text and Markdown, JSON/JSONL, CSV/TSV, visible HTML, PDF text layers, and DOCX/XLSX/PPTX structure. It never executes macros, scripts, embedded objects, or remote resources. Scanned PDFs require an explicitly selected OCR capability rather than being mislabeled as parsed text.
-- Typed chunks preserve line, section, page, sheet, or slide locations. Search applies owner, namespace, path, file type, and time filters before candidate limits, then combines lexical and current-generation vector evidence. No relevant evidence is a normal empty result.
-- The built-in offline profile is `local-hash-v3`. It is deterministic and supports Unicode token projection but does not claim general cross-language semantics. A profile/parser/chunker change builds a resumable shadow generation and switches the active pointer only after verification; search never mixes incompatible generations.
-- Every hit is an untrusted data envelope with `instruction_authority=none`. The model may select only evidence IDs issued by the runtime, and the runtime checks owner, revision, digest, and relative source location again before rendering a citation.
+The importer reads UTF-8 text and Markdown, structured JSON/JSONL and CSV/TSV, visible HTML, PDFs with a text layer, and DOCX/XLSX/PPTX. It extracts text and structure without running macros or scripts or fetching remote resources. For a scanned PDF, run OCR first so the document has text to index.
 
-Operational limits and recovery are deliberate. Standard ingestion defaults to 500 files, 64 MiB of source data, 10,000 produced chunks, and a 20-second cooperative slice; constrained hosts default to 64 files, 16 MiB, 2,048 chunks, and 10 seconds. Incomplete work returns a persisted continuation instead of blocking indefinitely. Search uses exact vector scoring only for bounded candidate sets and switches to a disposable ANN projection above that limit. Capacity, concurrent writes, path traversal, malformed packages, expansion ratios, and parser resource use are bounded with structured errors.
+The library's records live in the skill-owned SQLite database under `[database].skill_data_root`, normally `data/skills/kb/state.db`. The runtime reads that database when the task's memory policy allows knowledge recall. For explicit searches, it applies owner, library, path, file type, and time filters before ranking full-text and vector matches. The built-in `local-hash-v3` embedding profile runs offline and works best with terms from the source document. When the parser, chunker, or embedding profile changes, the runtime verifies a new index generation before activating it.
+
+Each `RetrievalHitV2` keeps its source location and carries `instruction_authority=none`. Retrieved passages can support an answer. The runtime checks the owner, revision, digest, and relative location before using a cited evidence ID.
+
+For API clients, `kb.ingest` is a medium-risk local write. The registry allows it once per task and prefers the asynchronous process adapter. `kb.search`, `kb.list_namespaces`, and `kb.stats` are read-only actions that return structured fields such as `hits`, `names`, and `document_count`.
+
+Each file is limited to 2 MiB by default. A standard import batch processes up to 500 files, 64 MiB of source data, or 10,000 chunks, with a cooperative 20-second time budget. On constrained hosts the defaults are 64 files, 16 MiB, 2,048 chunks, and 10 seconds. When a batch stops early, the continuation points to the last saved progress. Search scores small vector candidate sets exactly and uses bounded approximate search for larger sets. Import and search report structured errors for path, capacity, concurrency, and parsing limits.
 
 To back up a knowledge base, stop writers or take a consistent SQLite backup of the complete skill-owned database, including its `-wal` state when applicable. Restore it under the same skill data root, run an integrity check, inspect namespace/job/generation status, and resume interrupted ingestion or vector reindex from its machine checkpoint. Deleting documents or a namespace removes its canonical chunks and projections transactionally; uninstalling or disabling the skill preserves private data unless the user explicitly requests data deletion.
 
 ### User Control
 
-The browser console includes a Memory page. It shows counts, preferences, fact cards, and recent records for the current identity. Users can:
+Open **Memory** to review what the Agent has saved and control how it uses those records.
 
-- delete a preference, fact, or recent memory item
-- mark a fact card as expired
-- clear recent records, preferences, facts, or all memory for the current identity
-- enable or disable long-term memory through `configs/memory.toml`
+- In **How memory is used**, choose **My defaults** or **Current conversation**. **Use saved memory** controls recall. **Learn from conversations** controls future memory formation. Either switch can be changed independently, and saving takes effect immediately. The service-wide defaults and resource budgets live in `configs/memory.toml`.
+- Use **Memory items** to search, filter, correct, or delete a record. You can mark an item as irrelevant or stop it from being used in replies. Use **Preview import** to review a memory file before importing it, or export existing records as JSON or Markdown.
+- Use **Bulk Clear** to clear recent records alone or together with their derived memory. The console shows the affected record and job counts before asking for confirmation.
+- **Capacity and status** shows the selected account or conversation's storage checks. **Refresh capacity** keeps the current reading and expanded usage details visible while fetching an update. **Memory background jobs** lets you review failed jobs, archive them, or check whether they can be recovered.
 
-The HTTP API behind the page is:
+The main console endpoints are listed below. The item list and memory settings require the current authenticated identity.
 
 ```text
 GET    /v1/memory
-GET    /v1/memory/recent
-GET    /v1/memory/preferences
-GET    /v1/memory/facts
-DELETE /v1/memory/:id
-POST   /v1/memory/:id/expire
-POST   /v1/memory/clear
+GET    /v1/memory/items
+GET    /v1/memory/settings
 POST   /v1/memory/settings
+GET    /v1/memory/availability
+GET    /v1/memory/jobs/review
+GET    /v1/memory/clear/preview
+POST   /v1/memory/clear/scoped
 ```
 
-Recent records with safety flags are hidden by default in the UI. Fact-card details such as reason, source, and conflict group are available in a secondary details view instead of being shown as raw JSON first.
+For safety-flagged recent records, the console hides the text. Open **Show details** on a fact card to see its source, the reason it was saved, and any conflict group.
 
 ### Trace and Troubleshooting
 
@@ -697,12 +708,25 @@ memory/concurrency shortage. Unknown probes stay unknown, and resumed/terminal t
 waiting details. See the recovery guide for backup capacity preflight and an offline procedure
 that shares identical immutable delivery snapshots while retaining every original path.
 
-Disk exhaustion is a separate persistence failure: freeing space does not itself restart a stalled
-executor or replay a task. Check filesystem capacity, task progress and checkpoint state together;
-preserve active packages and user data, then use a controlled service recovery if work still cannot
-advance. Supervised workers restart after a panic or lost execution heartbeat, while valid task and
-resume-lease heartbeats protect long work. Memory quotas count memory-owned logical payload bytes,
-excluding task archives and SQLite free pages. The detailed guide describes recovery safeguards.
+#### Disk warnings and write protection
+
+The console shows a disk-space warning while free space is low and the service can still accept writes. Click **Ignore** to hide this warning for 12 hours in the current browser for that service, including after a page refresh. It returns if free space is still low when the time expires. If storage becomes critical or its state cannot be verified, the console shows the write-pause warning as soon as it receives that status.
+
+```mermaid
+flowchart TD
+    A[Runtime samples filesystem capacity] --> B{Storage status}
+    B -->|normal| C[Continue accepting writes]
+    B -->|low space| D[Show the disk warning<br/>writes stay available]
+    D -->|Ignore| E[Hide the warning for 12 hours in this browser]
+    E -->|still low at expiry| D
+    B -->|critical or unavailable| F[Pause admission of new filesystem writes]
+    E -->|worsens while hidden| F
+    F --> G[Show the write-pause warning immediately]
+```
+
+The **Ignore** button affects only the banner. The service keeps checking capacity and applying its write policy. After freeing space, check task progress and the saved checkpoint before taking further action. Supervised workers can recover from a panic or lost heartbeat. Valid task and recovery-lease heartbeats protect long-running work. Memory quotas measure memory-owned logical data, excluding task archives and SQLite free pages.
+
+In **Automatic backups**, administrators can check which disk is holding up a backup and how much more space the run needs. When a backup is safe to start but would leave little free space, the panel shows the projected amount remaining. It reports the last verified copy and the current run separately. [Runtime operations protection](docs/runtime_operations_protection.md)
 
 ## Identity and Access
 
@@ -710,7 +734,7 @@ Agent Runtime uses `user_key` as the main identity across the UI and messaging c
 
 - permissions are resolved by `user_key`
 - conversations are resolved by `channel + external_chat_id`
-- the browser UI sends `X-Agent-Key`
+- browser clients can sign in through `webd` with a session cookie or use a key directly. For a session, `webd` authenticates the browser before forwarding the account's `X-Agent-Key` to the core API.
 - when the auth table is empty, `clawd` can bootstrap the first admin key
 
 Key management:
@@ -774,22 +798,22 @@ Telegram is limited to message transport, identity binding, and task control. It
 
 ## UI, API, and `webd`
 
-The main API is provided by the loopback-only `clawd`, while all browser traffic enters through `webd`:
+You can open the console directly through `webd` or use an nginx address configured for the device. With nginx, the browser downloads the page from nginx and sends its API requests through `webd`. In both cases, `webd` handles browser authentication and proxies requests to the local core service.
 
 ```mermaid
 flowchart LR
     B[Browser]
-    N[nginx<br/>optional TLS + static UI]
-    W[webd :8788<br/>UI + login + session + proxy]
+    N[nginx<br/>optional web server and TLS]
+    W[webd default port 8788<br/>login, session and API proxy]
     C[clawd 127.0.0.1:8787<br/>internal /v1 API]
     U[UI/dist]
 
-    B -->|local| W
-    B -->|domain / TLS| N
-    N -->|static files| U
-    N -->|/v1 and /webd| W
-    W -->|static files without nginx| U
-    W -->|authenticated /v1| C
+    B -->|direct connection| W
+    B -->|configured nginx address| N
+    N -->|serve the page| U
+    N -->|proxy /v1 and /webd| W
+    W -->|serve the page on direct access| U
+    W -->|proxy authenticated /v1| C
 ```
 
 - local workstation: open `webd` directly; it serves `UI/dist` and proxies authenticated `/v1` requests
@@ -1130,12 +1154,10 @@ Focused long-tail closed-loop entries:
 
 ### Validate UI delivery
 
-UI notes:
+The console source is in `UI/` and the browser serves the built files from `UI/dist` or the configured nginx site. For a source change, run the [UI and signed browser reliability workflow](.github/workflows/ui-browser-reliability-ci.yml) against the exact candidate commit. The Linux job publishes `verified-web-ui-<commit-sha>` with an archive checksum, source commit and build fingerprint.
 
-- source lives in `UI/`
-- built assets live in `UI/dist`
-- `build-ui-nginx.sh` builds `UI/dist` by default; pass `--deploy` only for an explicit nginx deployment
-- `build-ui-nginx.sh --deploy-if-configured` updates nginx only when an Agent Runtime nginx site already exists, so local updates never touch system configuration
+- `build-ui-nginx.sh` builds `UI/dist` by default. Use `--deploy` to publish existing assets to nginx, or `--build --deploy` to build and publish together.
+- `build-ui-nginx.sh --deploy-if-configured` builds the UI and deploys it when an Agent Runtime nginx site is already configured. Use `--copy-if-configured` to deploy existing assets to a configured site.
 - the full `build-all.sh` flow uses that conditional deployment mode: without nginx it only refreshes `UI/dist`; with nginx already deployed it syncs the latest UI to the site's existing `root`
 - `deploy-ui-nginx.sh` is the "deploy existing `UI/dist`" path, with optional `--build`
 - `install-agent-cmd.sh` defaults to a local no-nginx install; pass `--deploy-ui-nginx` for a cloud/server deployment
@@ -1169,9 +1191,12 @@ data-root overlay generation.
 flowchart LR
     A[Package + capability request] --> B[Validate + isolated adapter build]
     B --> C[Protocol smoke + immutable receipt]
-    C --> D[Host policy grant]
-    D --> E[Atomic overlay generation]
-    E --> F[Planner catalog + resolver + verifier]
+    C --> D[Record host policy and enable state]
+    D --> E[Publish an atomic overlay generation]
+    E --> EN{Approved and enabled?}
+    EN -->|yes| F[Planner catalog + resolver + verifier]
+    EN -->|awaiting approval or disabled| WAIT[Keep installed without making it callable]
+    WAIT -->|review and enable| D
     F --> G[Pinned version/receipt/policy execution]
     G --> H[Structured result + evidence]
     E --> I[Update publishes next generation]
@@ -1299,8 +1324,10 @@ flowchart LR
     H -->|sandbox bundle| F[Opaque iframe]
     F --> B[Allowlisted capability bridge]
     B --> L[Agent capability loop]
-    C -->|uninstall app only| T[Overlay tombstone]
+    C -->|hide the presentation via API| T[Update overlay app visibility]
     T -->|reinstall and revalidate| C
+    C -->|Uninstall app and skill in console| U[Confirm and submit Skill Store removal]
+    U -->|server confirms completion| X[Remove the app and skill<br/>keep configuration and private data]
 ```
 
 The implementation flow is language-neutral:

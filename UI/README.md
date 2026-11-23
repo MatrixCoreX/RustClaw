@@ -2,7 +2,7 @@
 
 本目录是 Agent Runtime 的浏览器控制台前端项目。
 
-它不是独立产品，而是通过 `webd` 访问核心服务的 Web 管理界面，用于查看运行状态、提交任务、配置部分运行参数、查看日志和做日常管理。
+控制台通过 `webd` 连接核心服务。在这里可以聊天、跟进任务、配置模型和查看主机状态。想把手册或文档交给 Agent 查询，可以从「记忆管理」打开知识库。 [知识库使用步骤](../README.zh-CN.md#知识库设计流程)
 
 ## 技术栈
 
@@ -52,7 +52,7 @@ cd UI
 npm run build
 ```
 
-构建输出目录为 `UI/dist`。
+构建输出目录为 `UI/dist`。发布前应对候选提交运行 UI 与浏览器验证工作流，并使用通过验证的提交产物。 [验证与部署流程](../README.zh-CN.md#验证-ui-构建与部署)
 
 类型检查：
 
@@ -70,17 +70,20 @@ Agent Runtime 当前常见的 UI 使用方式有两种：
 1. 使用完整 Release 包中的 UI，由 `webd` 提供页面与 API 入口
 2. 构建后复制到 nginx 静态目录，API 反向代理给 `webd`
 
-仓库内相关入口：
+根据已有产物和部署方式选择命令。
 
 ```bash
 # 构建整个仓库时顺带构建 UI
 ./build-all.sh
 
-# 单独构建并复制到 nginx 目录
-./build-ui-nginx.sh
+# 同时构建前端并部署到 nginx
+./build-ui-nginx.sh --build --deploy
+
+# 已有构建产物时，更新当前配置的 nginx 站点
+./build-ui-nginx.sh --copy-if-configured
 
 # 安装 agentctl 启动器时一并部署 UI 到 nginx
-bash install-agent-cmd.sh
+bash install-agent-cmd.sh --deploy-ui-nginx
 ```
 
 如果你只想本地安装而不部署 nginx，建议显式加上：

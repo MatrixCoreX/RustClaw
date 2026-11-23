@@ -45,6 +45,10 @@
 - `docs/skill_integration_guide.md`
 - `external_skills/example/README.md`
 
+### 想让 Agent 按自己的文档回答
+
+- [导入知识库、查看已收录文档和提问](README.zh-CN.md#知识库设计流程)
+
 ## 当前推荐入口
 
 - 项目总览：`README.zh-CN.md`

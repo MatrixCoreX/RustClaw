@@ -2,14 +2,14 @@
 
 英文版：`README.md`
 
-Agent Runtime 是一个用 Rust 编写、以 `clawd` 守护进程为核心的本地部署 Agent 平台。它把多通道聊天接入、任务执行、工具与技能路由、记忆、调度、浏览器 UI，以及基于 `user_key` 的身份体系整合到一套可部署系统里。
+Agent Runtime 是一套可以部署在自己设备上的 Agent 平台。你可以在浏览器或消息应用里提问、发文件、安排任务，再回到同一段对话查看进度和结果。后台 Rust 服务 `clawd` 负责执行工具与技能、记录任务，以及管理记忆和调度。绑定渠道后，系统通过已认证的 `user_key` 识别同一账号。
 
 <!-- ai-learning-stage: foundations -->
 - 磁盘写入保护与增长预测、后台任务监督、记忆错误分类、模型审核后的未变化摘要复用、增量加密备份与失败补跑、重启日志留存：[运行保护说明](docs/runtime_operations_protection.md)。
 
 ## 项目概览
 
-Agent Runtime 面向在消息应用或浏览器中完成日常使用和管理的场景，而不是命令行优先的工作流。
+配置模型、跟进任务、管理知识库和查看设备状态，都可以在浏览器控制台里完成。绑定消息渠道后，你也可以在平时使用的聊天应用里继续使用同一套 Agent 能力。
 
 当前仓库的主要能力包括：
 
@@ -34,15 +34,15 @@ Agent Runtime 面向在消息应用或浏览器中完成日常使用和管理的
 
 ### 一句话如何变成结果
 
-例如“总结这份文档”会先成为任务。Agent 查看附件，选择文档能力，运行经过验证的工具或技能，检查执行结果，再组织最终回复。运行时只负责身份、权限、预算和副作用边界，不靠写死的中文或英文短语猜测意图。
+例如，发一份文档并说「帮我总结成三条」。Agent 根据请求选择读取附件的方式，运行时先核对它是否有权访问这份文件，再执行对应工具。Agent 根据拿到的内容组织回复。处理较久时，你可以看任务进度，结束后也能回到该任务查看结果。
 
 ### 完成第一个任务
 
-1. 在“大模型”页面配置并保存一个文本模型。
-2. 打开“Agent”，新建任务，发送“把要点整理成三条”这类小请求。
-3. 在同一任务中继续补充要求；只有需要查看进度、授权或恢复时，再展开任务详情。
+1. 在 **大模型** 页面配置并保存一个文本模型。
+2. 打开 **Agent**，发送一个简短请求。想顺便测试文件处理时，可以附上一份小文档，请 Agent 提炼三条要点。
+3. 有补充问题时，留在同一对话里继续发。如果聊天页一直显示「正在等待执行」，到 **任务管理** 查找对应任务。服务器返回任务编号前，聊天页也可能先显示等待状态。
 
-通信渠道不是必选项。先确认浏览器里的 Agent 可以正常工作，有跨应用使用需求时再配置渠道。
+浏览器里的第一个任务跑通后，如果还想从消息应用使用 Agent，可以前往 **通信设置** 和 **账号绑定** 配置相应渠道。
 
 macOS 的媒体浏览优先使用已安装、厂商签名有效的 Google Chrome，其次使用
 Microsoft Edge；缺少可用浏览器时，请在系统依赖设置中安装。发布包不内嵌测试版
@@ -105,9 +105,10 @@ Plan verifier 的提示会保留展示，但不会被记成阻断失败或修复
 ```mermaid
 flowchart TD
     A[通道 / UI / API 请求] --> B{入口类型}
-    B -->|普通会话输入| BI[POST /v1/conversation-inputs/client-task]
+    B -->|实时会话输入| BI[POST /v1/conversation-inputs/client-task]
     BI --> BJ[持久化输入收据<br/>scope + input_seq + 幂等]
-    BJ --> BK{会话是否有活跃任务}
+    BJ -->|稍后处理| BQ[保存输入，等待用户手动启动]
+    BJ -->|立即处理| BK{会话是否有活跃任务}
     BK -->|是| BL[绑定同一任务<br/>唤醒循环 + 中断过期模型轮次]
     BK -->|否| BM[原子认领创建权<br/>只创建一个前台 ask 任务]
     BL --> BR[返回输入收据<br/>原 task_id + disposition]
@@ -116,8 +117,8 @@ flowchart TD
     B -->|显式任务 / 自动化 / run_skill| BT[POST /v1/tasks]
     BT --> BA[认证后的任务执行策略<br/>服务端拥有的机器 envelope]
     BA --> C[持久化任务并入队]
-    C --> D[返回 task_id<br/>调用方可轮询]
-    D --> E0[worker_once 恢复 tick<br/>stale running + due checkpoint]
+    C --> D[返回任务编号<br/>聊天提交还会返回输入回执]
+    C --> E0[执行器检查停滞任务和到期检查点]
     E0 --> E1[认领下一个 queued 任务]
     E1 --> E{任务类型}
     E -->|run_skill| RS[直接 run_skill 路径<br/>只接受显式 skill_name]
@@ -128,14 +129,18 @@ flowchart TD
     J --> L{循环轮次}
     L --> N[Planner LLM<br/>原生 call_capability / respond<br/>必要时输出经校验的结构化 plan]
     N -.-> PS[已识别的 respond/free_text 字节<br/>用户可见输出策略 + 公开呈现事件]
-    N --> P[PlanVerifier<br/>permission_decision + 风险 + 效果 + 契约]
+    N --> P[解析能力并核对动作<br/>权限、参数、风险和效果]
+    P -->|需要确认| PW[保存等待确认的检查点]
+    PW --> AB
     P --> Q{已验证步骤}
     Q -->|respond| R[结构化终端回复<br/>自由文本、精确列表、模型对象<br/>或观察对象投影]
     Q -->|synthesize_answer| S[基于证据合成]
-    Q -->|call_tool / call_skill| QP[Pre-tool hooks + adapter preflight<br/>policy_decision + contract args]
+    Q -->|已解析的能力、工具或技能| QP[执行前钩子和适配器预检<br/>核对策略与参数]
     QP --> MG{非幂等变更?}
-    RS --> RSG[不经过 planner / resolver 选择<br/>不做 verifier 语义选择]
-    RSG --> MG
+    RS --> RSG[核对调用方指定的技能与动作]
+    RSG -->|允许执行| MG
+    RSG -->|需要确认| PW
+    RSG -->|拒绝执行| RD[保存直接技能任务的结果]
     MG -->|是| MI[调用前持久化 intent + 确定性 idempotency key<br/>再持久化 attempt]
     MG -->|否| EX{执行 adapter<br/>进程型执行附带沙箱后端诊断}
     MI --> EX
@@ -145,10 +150,13 @@ flowchart TD
     EX -->|call_skill / 直接 run_skill| U[共享技能调度]
     T --> MR{Mutation receipt 状态}
     U --> MR
-    MR -->|非变更| V[观测结果]
+    MR -->|非变更| VR{执行路径}
     MR -->|收到 receipt| MC[在精确 worker claim 下<br/>持久化 receipt + verification + commit]
     MR -->|timeout / crash 不确定| MU[Reconciliation checkpoint<br/>不从 prose 猜测]
-    MC --> V
+    MC --> VR
+    VR -->|ask| V[观测结果]
+    VR -->|run_skill| RD
+    RD --> Z
     MU --> ASP
     S --> V
     V --> W[证据覆盖 + 操作审计<br/>+ 答案形状检查]
@@ -174,40 +182,32 @@ flowchart TD
     ASP --> AB
     ASP --> AD
     AD --> AE[CLI / UI watch + report]
+    D -.-> AE
     BR -.-> AE
     AD --> AF[教学模式时间线<br/>按轮次选择 trace + 原始 JSON 详情]
     Z -. 可选 .-> AC[后台记忆刷新]
 ```
 
-- `POST /v1/conversation-inputs/client-task`：UI、CLI 和通信端的普通消息先进入持久会话输入账本。即使尚未绑定任务，输入收据也是权威记录；会话有活跃任务时交给同一 agent loop 调整，空闲时则原子地只创建一个前台 `ask` 任务。
+- 浏览器聊天以及支持实时会话输入的客户端通过 `POST /v1/conversation-inputs/client-task` 发送消息。服务端先保存输入，再绑定到会话里的活跃任务，或为闲置会话创建一个前台 `ask` 任务。回执会报告已保存的输入和可用的任务编号。选择「稍后处理」则留待用户手动启动。
 - `POST /v1/tasks`：继续作为自动化、直接技能执行，以及明确自行管理独立任务的 API 边界。
 - `认证后的任务执行策略`：`clawcli` 默认继续使用配置中的 approval/sandbox 策略，只有当前仍启用的管理员密钥显式请求全局 `--yolo` 才会进入 YOLO；其他通信 adapter 使用管理员密钥认证时默认进入 YOLO。服务端会删除调用方提供的策略 envelope，在认证后重新签发机器合同，并在每次使用时再次确认管理员密钥仍有效。YOLO 表示 `approval_policy=never` 与 `sandbox_mode=danger_full`，不会绕过 registry allow/deny、参数 schema、路径校验、外部发布控制、取消、预算、脱敏和审计。
 - `task_id polling`：API/通道请求的等待超时只影响调用方等多久；后台任务仍可通过 `GET /v1/tasks/{task_id}` 查询，除非 worker 生命周期逻辑已经把它标记为终态。
-- `worker_once recovery tick`：worker 认领新 queued 任务前，会先检查 stale running、受保护 paused checkpoint、到期恢复任务、async poll 结果和结果投影。
-- `Task kind`：`kind=ask` 进入 planner-owned 自然语言路径；`kind=run_skill` 绕过 planner loop、能力选择和 plan verifier，只把显式提供的 `payload.skill_name` 交给共享 skill dispatcher / 协议执行。两种 task kind 都会把结果写回原始 `task_id`，调用方仍可通过 task 查询 API 查看最终状态。
+- `worker_once 恢复 tick` 会在认领新任务前处理已失去进度的任务，并核对到期检查点、异步操作及其结果。
+- `kind=ask` 由 Agent 理解自然语言并决定怎么做。`kind=run_skill` 由调用方指定技能和参数，运行时核对动作后交给共享技能调度层。两种任务的结果都可以用原来的 `task_id` 查询。
 - `连续会话输入`：每条已接收消息都有稳定的 `input_id`、单调 `input_seq`、disposition、instruction revision 和 execution epoch。Planner 按顺序读取 ready 输入；决策提交后推进 revision，工具派发和终态呈现都会拒绝过期版本。Agent 输入框默认立即补充当前任务；选择“稍后处理”只持久保存输入、不启动工作，并提供“立即处理”和“撤回”操作。显式 `/cancel` 直接调用当前会话的鉴权控制端点，不依赖模型。
 - `单一规划 owner`：同一会话任务同一时间只有一个 planner owner。普通新输入会在 adapter 可安全停止时中断正在进行的只读/模型步骤，否则在下一个派发安全边界应用；runtime 不会在在途 mutation 旁边再启动第二个控制 planner。长 mutation 使用受监督的 async/checkpoint 合同，显式停止继续作为模型外机器控制。
 - `取消收尾`：接收停止、发出停止请求、adapter 确认和 cleanup settled 是不同机器事实。父任务取消会传播到子任务与进程组，但已登记 runtime 的 cleanup 真正结算前，任务不会被呈现或投送为已取消；外部效果未知时进入 reconciliation，不会宣称已经回滚。
 
 ### Ask 与 Run Skill 边界
 
-这里需要明确区分，因为 `run_skill` 是 API 层任务类型，不是自然语言路由捷径。
+用户在聊天里提出需求时，用 `ask` 让 Agent 理解意图。调用方已经知道要执行哪个技能、要传什么参数时，用 `run_skill` 直接提交。例如，知识库面板的「刷新资料库」会直接调用列库动作。
 
-直接技能任务的关键点：
-
-- `kind=run_skill` 不进入 planner / agent loop；调用方已经提供了 `payload.skill_name` 和参数。
-- `kind=run_skill` 接受显式技能名后，仍使用共享 skill dispatcher 和技能协议。
-- `kind=run_skill` 仍创建和更新普通 task row，因此最终状态和结果仍可通过 `task_id` 查询。
-
-| 问题 | `kind=ask` | `kind=run_skill` |
+| 环节 | `kind=ask` | `kind=run_skill` |
 | --- | --- | --- |
-| planner 前是否有语义 LLM/router？ | 否。front door 只构造 `TurnBoundaryEnvelope` 和上下文引用。 | 否。调用方已经提供目标技能。 |
-| 是否进入 planner / agent loop？ | 是，每个普通自然语言任务都会进入。 | 否。不会让 planner 选择技能或 action。 |
-| 是否把 `CapabilityResolver` / `PlanVerifier` 当作语义选择器？ | 否。普通语义选择由 planner 负责；resolver/verifier 只解析和校验 planner step，再允许执行。 | 否。直接技能任务绕过语义选择；显式 skill call 仍走调度和协议校验。 |
-| 是否使用共享 skill dispatcher？ | 是，planner 选择 `call_skill` 或 capability 解析到 skill 时使用。 | 是。把 `payload.skill_name` 派发到同一套 builtin / external / runner 技能协议。 |
-| 结果是否能用 `task_id` 查询？ | 是。 | 是。直接技能结果保存到原始 task row，可通过 `GET /v1/tasks/{task_id}` 或 `clawcli get` 读取。 |
-
-操作上：用户给自然语言请求时使用 `kind=ask`，让 Agent Runtime 自己判断回答、澄清、规划或执行。API 调用方已经知道明确技能和参数时使用 `kind=run_skill`，只把 Agent Runtime 当作任务队列、鉴权、生命周期和结果投影层来运行该技能。
+| 如何确定动作 | 请求经 `TurnBoundaryEnvelope` 进入 Agent loop，由 planner 决定回答、澄清或调用能力。 | 调用方直接提供 `payload.skill_name` 和 `payload.args`。 |
+| 执行前怎么检查 | 解析器找到具体动作，验证器检查参数、权限、风险和确认要求。 | 验证器按已认证的任务策略核对指定动作。高风险操作可能暂停等待确认。 |
+| 技能如何执行 | 解析到技能的能力由共享技能调度层派发。 | 通过检查后，由同一调度层执行指定技能。 |
+| 到哪里看进度和结果 | 两种任务都进入任务队列，保留原来的 `task_id`。 | 都可以用 `GET /v1/tasks/{task_id}` 或 `clawcli get` 查询。 |
 
 - `Planner-owned front door`：物化文本/语音/附件，并根据 task 身份、显式 API 字段、结构化 locator facts 和安全/预算 profile 构造 `TurnBoundaryEnvelope`。它不做语义 LLM 调用，也没有普通 respond/clarify/execute 分支。
 - `Agent-loop 语义权威`：每个普通自然语言任务都会进入循环。原生回合选择 `call_capability` 或结构化 `respond`；结构化 plan 回合可以表达等价的工具、技能、合成、澄清、修复、checkpoint 或停止步骤。
@@ -337,7 +337,7 @@ Agent Runtime 记忆分为短期对话记录、结构化用户偏好、长期事
 - `user_preferences`：结构化用户偏好，例如回复语言、回复风格、回复格式和 agent 显示名。
 - `memory_facts`：长期事实卡，包含 `fact_key`、`fact_value`、`fact_text`、来源引用、置信度、状态、过期时间和冲突组元数据。
 - `long_term_memories`：补充摘要行，只在当前记忆策略允许摘要召回的场景使用。
-- `memory_retrieval_index`：覆盖短期记录、偏好、事实卡和知识快照的混合检索索引。
+- `memory_retrieval_index` 为短期记录、偏好和事实卡提供混合检索。导入知识库的文档保存在技能自己的数据库里。
 
 `configs/memory.toml` 控制预算、保留期、长期刷新间隔、写入过滤、偏好提取、检索上限和 embedding/索引行为。默认值偏保守：简短的应答消息可以被过滤，助手回复会被标记，LLM 写入的偏好必须先通过置信度和运行时校验才会存储。
 
@@ -384,40 +384,47 @@ Agent Runtime 记忆分为短期对话记录、结构化用户偏好、长期事
 
 ### 知识库设计流程
 
-`kb` 技能是用户管理文档知识库的路径。它和其他普通能力一样接入：`ask` 任务由 agent loop 规划 `call_capability("kb.*")`，直接 API 调用可以用 `kind=run_skill` 加 `skill_name=kb`。运行时不会在 planner 前按用户自然语言特殊判断知识库意图；它只解析和校验 registry capability metadata，然后通过同一套 runner skill 协议派发。
+运营手册、产品说明和常见问题这类资料，可以导入知识库，在之后的对话中反复使用。给资料库起一个容易辨认的名字，提问时就可以告诉 Agent 去哪一库查。
 
+1. 打开 **记忆管理 → 知识库 → 添加资料**。「知识库」在「容量与状态」下方。填写资料库名称，再逐行填写文件或文件夹路径，点击 **开始添加**。路径要能被 Agent 服务读取，相对路径以它的工作目录为起点。
+2. 出现 **继续未完成工作** 时，点击处理下一批。导入后点 **刷新资料库**，选中库名，用 **查看文档状态** 核对已收录的文件。也可以在 **搜索资料** 中输入原文里的关键词，先查看命中的内容和出处。
+3. 回到 **Agent** 聊天，把库名写进问题。例如「请查『售后手册』知识库。商品有质量问题时，退回运费由谁承担？请给出处。」
+
+资料库归当前实例上的登录账号所有。树莓派和工作站各自部署时，各自保存已导入的资料。如果列表看不到刚导入的库，先确认登录账号和控制台地址，再点 **刷新资料库**。
+
+知识库面板把明确的动作作为 `run_skill` 任务交给 `kb`。在聊天里，自然语言请求进入 `ask` 流程，由 Agent 决定是否检索，再通过能力解析和验证调用 `kb.search`。
 
 ```mermaid
-flowchart LR
-    A[用户文件] --> B[类型化提取<br/>文本、HTML、PDF、Office]
-    B --> C[按结构分块<br/>页、章节、工作表、幻灯片]
-    C --> D[(KB 私有规范存储)]
-    D --> E[FTS 候选]
-    D --> F[活跃向量 generation<br/>精确评分或有界 ANN]
-    E --> G[先过滤再限量<br/>混合融合与多样性选择]
-    F --> G
-    G --> H[RetrievalHitV2 证据映射<br/>instruction_authority = none]
-    H --> I[模型选择运行时签发的证据 ID]
-    I --> J[运行时校验 revision 与摘要<br/>输出中性引用]
+flowchart TD
+    subgraph Import["导入资料"]
+      A[填写库名和文件路径] --> B[提取正文并按结构分段<br/>保留页码、章节、工作表或幻灯片]
+      B --> C[保存本批资料和处理进度]
+      C -->|还有资料| B
+    end
+    C --> D[(当前账号的资料库<br/>全文索引与当前向量索引)]
+    subgraph Ask["搜索与提问"]
+      Q[在面板搜索，或在 Agent 里指定库名提问] --> F[按账号与库名限定范围<br/>先应用筛选条件]
+      F --> G[对全文与向量命中排序]
+      G --> H{有相关资料片段？}
+      H -->|有| I[显示片段或根据已核验证据回答<br/>附上来源位置]
+      H -->|没有| J[返回空结果或说明资料里查不到]
+    end
+    D --> G
 ```
 
 详细流程见：[RAG 知识检索](docs/architecture/17-rag-knowledge-retrieval.zh-CN.md)、[任务状态与上下文](docs/architecture/03-task-state-context.zh-CN.md)和[技能独立存储](docs/architecture/08-skill-owned-storage.zh-CN.md)。
 
-关键边界：
+#### 支持的文件与引用方式
 
-- `kb.ingest` 是本地知识库写入能力；registry policy 把它标成 medium risk、once per task，并通过 local process adapter 走 async-preferred。
-- `kb.search`、`kb.list_namespaces`、`kb.stats` 是 observe-mode 能力，返回 `namespace`、`hits`、`names`、`document_count`、`chunk_count` 等结构化机器字段。
-- namespace 快照和 `kb_doc` 检索行只写入 `[database].skill_data_root` 下的 KB 私有库（通常是 `data/skills/kb/state.db`）。运行时召回会查询该连接池，不会再把 KB 行复制到主运行时数据库。
-- KB 行按 `user_key` 和 workspace 文件作用域管理，不绑定单个 chat thread。后续只有 memory use policy 允许时才进入 planner/chat/skill 上下文，且当前用户输入始终优先。
-- 摄取支持 UTF-8 文本、Markdown、JSON/JSONL、CSV/TSV、可见 HTML、PDF 文本层和 DOCX/XLSX/PPTX 结构，不执行宏、脚本、嵌入对象或远程资源。扫描 PDF 需要明确选择 OCR 能力。
-- 分块保留行、章节、页、工作表或幻灯片定位。检索先按所有者、namespace、路径、类型和时间过滤，再融合词法与当前向量 generation；没有相关证据时正常返回空结果。
-- 离线 `local-hash-v3` 是确定性投影，不承诺通用跨语言语义。Profile、parser 或 chunker 变化时先构建可恢复的 shadow generation，校验后原子切换，不混用不兼容版本。
-- 检索命中是 `instruction_authority=none` 的不可信数据。模型只能选择运行时签发的证据 ID；输出引用前再次核对所有者、revision、摘要和相对来源位置。
+可以导入 UTF-8 文本、Markdown、JSON/JSONL、CSV/TSV、可见 HTML、带文本层的 PDF，以及 DOCX、XLSX、PPTX。导入过程只提取内容与结构，不执行文档里的宏、脚本或嵌入对象，也不访问远程资源。纯扫描 PDF 可以先做 OCR，再导入识别后的文档。
 
-普通设备摄取默认限制为 500 个文件、64 MiB 源数据、10,000 个块和 20 秒协作切片；受限设备
-默认 64 个文件、16 MiB、2,048 个块和 10 秒。未完成工作返回持久化 continuation。向量候选集
-较小时精确评分，超过边界使用可重建的 ANN 投影；容量、并发写入、路径越界、格式、解包比例和
-解析资源都有结构化限制。
+资料保存在 `[database].skill_data_root` 下的技能私有 SQLite 库，通常是 `data/skills/kb/state.db`。任务的记忆策略允许参考知识资料时，运行时会从这份数据库读取相关内容。显式搜索时，服务先按所属账号、库名、路径、类型和时间筛选，再综合全文和向量匹配排序。内置的 `local-hash-v3` 离线运行，使用原文关键词通常更容易搜到。解析、分段或向量规则变化时，系统会先校验新版索引，再切换到新版本。
+
+每条命中以 `RetrievalHitV2` 返回，带有对应的行号、章节、页码、工作表或幻灯片位置。命中内容的 `instruction_authority` 为 `none`，可以作为回答的依据。Agent 选用引用时，运行时会重新核对所有者、文档版本、摘要和相对来源位置。
+
+在 API 中，`kb.ingest` 是中风险的本地写入，每个任务最多调用一次，优先异步执行。`kb.search`、`kb.list_namespaces` 和 `kb.stats` 都是只读动作，返回 `hits`、`names` 和 `document_count` 等结构化字段。
+
+默认跳过超过 2 MiB 的单个文件。普通设备单批默认上限为 500 个文件、64 MiB 源数据和 10,000 个分段，时间预算为 20 秒。受限设备的默认值为 64 个文件、16 MiB、2,048 个分段和 10 秒。剩余资料可以从已保存的进度接着处理。检索对较小的向量候选集精确评分，对较大的候选集使用有上限的近似搜索。路径、容量、并发写入和解析超限会返回可定位的错误。
 
 备份知识库时停止写入，或对完整技能私有库执行一致的 SQLite 备份，正确处理适用的 `-wal` 状态。
 恢复后检查完整性、namespace、job 与 generation 状态，再从机器 checkpoint 继续摄取或重建。
@@ -425,27 +432,27 @@ flowchart LR
 
 ### 用户控制
 
-浏览器控制台包含 Memory 页面。它会展示当前身份下的数量、偏好、事实卡和最近记录。用户可以：
+在控制台打开 **记忆管理**，可以查看 Agent 已经保存的信息，决定它今后怎么用。
 
-- 删除某条偏好、事实或最近记忆
-- 把事实卡标记为过期
-- 清空当前身份下的最近记录、偏好、事实或全部记忆
-- 通过 `configs/memory.toml` 开启或关闭长期记忆
+- 在 **记忆使用方式** 中选择「我的默认设置」或「当前对话」。「参考已有记忆」控制回复时是否查阅已有记录；「从对话形成未来记忆」控制是否从后续对话提取新记忆。两个开关可以分别调整，保存后立即生效。服务级默认值和资源预算见 `configs/memory.toml`。
+- 在 **记忆条目** 中搜索、筛选、纠正或删除记录，也可以把某条标为「与本次无关」或「不要再用」。导入记忆文件前先看预检结果，已有记录可导出为 JSON 或 Markdown。
+- 在 **批量清理** 中选择只清理近期记录，或连同派生记忆一起清理。确认前会显示受影响的条目和后台任务数量。
+- 在 **容量与状态** 查看当前账号或对话的存储检查。点击 **刷新容量** 时，当前读数和展开的用量详情会保留到新结果返回。在 **记忆后台任务** 可以查看失败记录、归档，或核验它是否可以恢复。
 
-对应 HTTP API：
+下面是控制台主要使用的接口，查询条目和修改设置都按已认证的身份执行。
 
 ```text
 GET    /v1/memory
-GET    /v1/memory/recent
-GET    /v1/memory/preferences
-GET    /v1/memory/facts
-DELETE /v1/memory/:id
-POST   /v1/memory/:id/expire
-POST   /v1/memory/clear
+GET    /v1/memory/items
+GET    /v1/memory/settings
 POST   /v1/memory/settings
+GET    /v1/memory/availability
+GET    /v1/memory/jobs/review
+GET    /v1/memory/clear/preview
+POST   /v1/memory/clear/scoped
 ```
 
-带 safety 标记的 recent records 默认不会在 UI 中展示。事实卡的 reason、source、conflict group 等细节放在二级详情视图，而不是默认暴露原始 JSON。
+带安全标记的近期记录会隐藏正文。需要核对事实卡时，可以展开「查看依据」了解来源、记录原因和冲突分组。
 
 ### 追踪与排障
 
@@ -649,11 +656,27 @@ flowchart LR
 swap 余量；该选项默认关闭，也不会允许多个重任务同时消耗这部分余量。资源档位、管理员覆盖、
 可观测性和验收证据见[运行期资源准入与恢复](docs/architecture/16-runtime-resource-recovery.zh-CN.md)。
 
-磁盘耗尽属于单独的持久化故障：释放空间不会自动重启停滞的执行器，也不代表任务已经重跑。
-应同时检查文件系统容量、任务进度和 checkpoint 状态，保留活跃技能包与用户数据；仍不能推进时
-再按安装方式受控恢复服务。执行器在 panic 或执行心跳丢失后重建；有效的任务心跳和恢复租约
-续期保护正常长任务。记忆配额只统计记忆自身的逻辑数据字节，排除任务归档和 SQLite 空闲页。
-详细指南说明恢复保护与边界。
+等待任务的详情可通过 `task_lifecycle.resource_wait` 显示具体原因。例如，哪个磁盘空间不足、还剩多少、恢复需要多少空间，或当前缺少内存或并发名额。采样无法确认时会明确显示为未知。任务恢复或结束后会清除已过时的等待信息。 [运行期资源准入与恢复](docs/architecture/16-runtime-resource-recovery.zh-CN.md)
+
+#### 磁盘提示与写入保护
+
+磁盘可用空间偏低、服务仍允许写入时，控制台会显示提示。点 **忽略** 可在当前浏览器里隐藏这台服务的提示 12 小时，刷新页面也有效。到期后如果空间仍偏低，提示会重新出现。如果磁盘空间降到临界水平，或者服务无法确认磁盘状态，控制台收到状态后会立即显示暂停写入的警告。
+
+```mermaid
+flowchart TD
+    A[运行时采样文件系统容量] --> B{磁盘状态}
+    B -->|正常| C[继续接受写入]
+    B -->|空间偏低| D[显示低空间提示<br/>仍允许写入]
+    D -->|点忽略| E[当前浏览器隐藏提示 12 小时]
+    E -->|到期仍偏低| D
+    B -->|临界或无法确认| F[暂停接受新的文件写入]
+    E -->|隐藏期间状态恶化| F
+    F --> G[立即显示暂停写入警告]
+```
+
+「忽略」只影响显示，后台仍按采样结果保护写入。释放空间后，先查看任务是否继续推进、检查点是否已恢复，再决定如何处理。执行器异常退出或丢失执行心跳时会受监督恢复，有效的任务心跳和恢复租约会保护正常长任务。记忆配额统计记忆自身的逻辑数据，排除任务归档和 SQLite 空闲页。
+
+管理员还可以在首页的 **自动备份** 里查看哪个磁盘空间不足、还差多少。空间够做本次备份，但预计剩余容量偏低时，界面会显示预计剩余空间。最近一份通过校验的副本与本次运行进度分别显示，便于判断目前哪份备份可用。 [运行保护说明](docs/runtime_operations_protection.md)
 
 任务事件归档与大正文采用无损二进制压缩，保留活动索引和公开回放 JSON。已结束任务的旧重复
 缓存经归档核验后分批释放。编码、恢复边界与历史库瘦身流程见[任务事件存储](docs/architecture/task-event-storage.zh-CN.md)。
@@ -664,7 +687,7 @@ Agent Runtime 使用 `user_key` 作为跨 UI 和消息通道的主身份标识�
 
 - 权限按 `user_key` 解析
 - 会话按 `channel + external_chat_id` 解析
-- 浏览器 UI 通过 `X-Agent-Key` 传递身份
+- 浏览器可通过 `webd` 登录并使用会话 Cookie，也可直接使用密钥。使用会话时，`webd` 验证登录状态后，会向核心 API 转发该账号的 `X-Agent-Key`。
 - 当鉴权表为空时，`clawd` 可以引导生成首个管理员 key
 
 常用 key 管理命令：
@@ -719,22 +742,22 @@ Telegram 只承担消息传输、身份绑定和任务控制，不再维护技�
 
 ## UI、API 与 `webd`
 
-主 API 由只监听 loopback 的 `clawd` 提供，所有浏览器流量统一从 `webd` 进入：
+可以直接通过 `webd` 打开控制台，也可以使用设备已配置的 nginx 地址。走 nginx 时，浏览器从 nginx 加载网页，接口请求仍由 `webd` 处理登录和鉴权，再转给本机的 `clawd`。
 
 ```mermaid
 flowchart LR
     B[浏览器]
-    N[nginx<br/>可选 TLS + 静态 UI]
-    W[webd :8788<br/>UI + 登录 + 会话 + 代理]
+    N[nginx<br/>可选的 Web 服务与 TLS]
+    W[webd 默认端口 8788<br/>登录、会话和 API 代理]
     C[clawd 127.0.0.1:8787<br/>内部 /v1 API]
     U[UI/dist]
 
-    B -->|本地| W
-    B -->|域名 / TLS| N
-    N -->|静态文件| U
-    N -->|/v1 与 /webd| W
-    W -->|无 nginx 时的静态文件| U
-    W -->|已鉴权 /v1| C
+    B -->|直接访问| W
+    B -->|已配置的 nginx 地址| N
+    N -->|提供网页| U
+    N -->|转发 /v1 与 /webd| W
+    W -->|直连时提供网页| U
+    W -->|转发已鉴权的 /v1 请求| C
 ```
 
 - 本地机器：直接打开 `webd`；它托管 `UI/dist` 并代理已鉴权的 `/v1` 请求
@@ -964,12 +987,10 @@ Agent parity gate 还会先运行 `scripts/nl_tests/check_secret_scan_contract.p
 
 ### 验证 UI 构建与部署
 
-UI 相关说明：
+源码在 `UI/`，浏览器加载的是 `UI/dist` 或 nginx 站点中的构建产物。改动源码后，可以对候选提交运行 [UI 与浏览器验证工作流](.github/workflows/ui-browser-reliability-ci.yml)。Linux 作业生成 `verified-web-ui-<commit-sha>`，包含校验和、源提交和构建指纹，方便上线前核对。
 
-- 源码位于 `UI/`
-- 构建产物位于 `UI/dist`
-- `build-ui-nginx.sh` 默认只构建 `UI/dist`；只有显式传 `--deploy` 才会配置 nginx
-- `build-ui-nginx.sh --deploy-if-configured` 只更新机器上已存在的 Agent Runtime nginx 站点，本地更新不会因此写系统配置
+- `build-ui-nginx.sh` 默认只构建 `UI/dist`。将已有产物部署到 nginx 时使用 `--deploy`，同时构建和部署时使用 `--build --deploy`。
+- `build-ui-nginx.sh --deploy-if-configured` 会构建前端，并在已有 Agent Runtime nginx 站点时部署。已有构建产物时可用 `--copy-if-configured` 更新已配置的站点。
 - `build-all.sh` 的完整编译流程会调用上述按需部署模式：没有 nginx 时只更新 `UI/dist`，已经部署 nginx 时会把最新 UI 同步到现有站点的实际 `root`
 - `deploy-ui-nginx.sh` 更偏向“部署已有 `UI/dist`”，可选 `--build`
 - `install-agent-cmd.sh` 默认走本地无 nginx 安装；云服务器使用 `--deploy-ui-nginx`
@@ -1000,9 +1021,12 @@ registry、配置或 prompt。准入流程会验证类型化 manifest，使用�
 flowchart LR
     A[Package + capability request] --> B[校验 + 隔离 adapter 构建]
     B --> C[协议冒烟 + 不可变 receipt]
-    C --> D[宿主 policy grant]
-    D --> E[原子 overlay generation]
-    E --> F[Planner catalog + resolver + verifier]
+    C --> D[记录宿主授权与启用状态]
+    D --> E[原子发布新的技能配置版本]
+    E --> EN{已批准并启用？}
+    EN -->|是| F[进入能力目录并接受解析与验证]
+    EN -->|待批准或已禁用| WAIT[保留安装，暂不开放调用]
+    WAIT -->|审核并启用| D
     F --> G[固定版本/receipt/policy 执行]
     G --> H[结构化结果 + 证据]
     E --> I[更新发布下一代]
@@ -1091,8 +1115,10 @@ flowchart LR
     H -->|sandbox bundle| F[无同源权限 iframe]
     F --> B[capability allowlist bridge]
     B --> L[Agent capability loop]
-    C -->|只卸载应用| T[overlay tombstone]
+    C -->|通过 API 仅隐藏应用| T[更新应用显示状态]
     T -->|重新安装并校验| C
+    C -->|控制台卸载应用和技能| U[确认后提交 Skill Store 卸载任务]
+    U -->|服务端确认完成| X[移除应用和技能<br/>保留配置与私有数据]
 ```
 
 如果要回答“某个 skill 怎么配置、怎么绑定、缺什么前置条件”，优先看：`prompts/references/skill_setup_guide.zh-CN.md`。
