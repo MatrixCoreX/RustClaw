@@ -1019,6 +1019,20 @@
     color: var(--theme-warning-accent);
   }
 
+  .theme-storage-warning-dismiss {
+    @apply min-h-9 shrink-0 rounded-md border px-3 text-sm;
+    border-color: var(--theme-warning-border);
+  }
+
+  .theme-storage-warning-dismiss:hover {
+    background-color: color-mix(in srgb, var(--theme-warning-accent) 12%, transparent);
+  }
+
+  .theme-storage-warning-dismiss:focus-visible {
+    outline: 2px solid var(--theme-warning-accent);
+    outline-offset: 2px;
+  }
+
   .theme-shell ::selection {
     background: var(--theme-selection);
   }
