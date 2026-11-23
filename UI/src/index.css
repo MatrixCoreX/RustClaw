@@ -19,6 +19,10 @@
   --theme-border-strong: rgba(255, 255, 255, 0.15);
   --theme-text-strong: #f6f2ea;
   --theme-danger-text: #ffe2e2;
+  --theme-warning-bg: #34291b;
+  --theme-warning-text: #ffe3a5;
+  --theme-warning-border: #826335;
+  --theme-warning-accent: #e6ac53;
   --theme-text-soft: rgba(246, 242, 234, 0.9);
   --theme-text-body: rgba(246, 242, 234, 0.8);
   --theme-text-muted: rgba(246, 242, 234, 0.6);
@@ -80,6 +84,10 @@
   --theme-border-strong: rgba(60, 60, 67, 0.46);
   --theme-text-strong: #1d1d1f;
   --theme-danger-text: #b04a45;
+  --theme-warning-bg: #fff3d5;
+  --theme-warning-text: #654014;
+  --theme-warning-border: #c6944b;
+  --theme-warning-accent: #946017;
   --theme-text-soft: rgba(29, 29, 31, 0.92);
   --theme-text-body: rgba(29, 29, 31, 0.8);
   --theme-text-muted: rgba(60, 60, 67, 0.68);
@@ -997,6 +1005,18 @@
   .theme-status-pill {
     background: rgba(255, 138, 76, 0.18);
     color: #ffd0b4;
+  }
+
+  .theme-storage-warning {
+    @apply mb-4 flex items-start gap-2.5 rounded-xl border px-4 py-3 text-sm font-medium;
+    background-color: var(--theme-warning-bg);
+    color: var(--theme-warning-text);
+    border-color: var(--theme-warning-border);
+    border-inline-start: 4px solid var(--theme-warning-accent);
+  }
+
+  .theme-storage-warning > svg {
+    color: var(--theme-warning-accent);
   }
 
   .theme-shell ::selection {

@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { TriangleAlert } from "lucide-react";
 import { ConsoleLayout } from "./components/ConsoleLayout";
 import { RenderErrorBoundary } from "./components/RenderErrorBoundary";
 import { FactoryResetModal } from "./components/FactoryResetModal";
@@ -2024,10 +2025,13 @@ export default function App() {
       onOpenFactoryReset={openFactoryResetDialog}
     >
       {health?.storage_pressure && health.storage_pressure.state !== "normal" && (
-        <div role="status" className="mb-4 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-100">
-          {health.storage_pressure.write_admission
-            ? t("磁盘可用空间偏低，请清理旧文件或扩容。", "Disk space is low. Remove old files or expand storage.")
-            : t("磁盘空间不足或状态暂时无法确认，已暂停新的文件写入。请释放空间后重试。", "New file writes are paused because storage is full or its status is unavailable. Free space and retry.")}
+        <div role="status" className="theme-storage-warning">
+          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>
+            {health.storage_pressure.write_admission
+              ? t("磁盘可用空间偏低，请清理旧文件或扩容。", "Disk space is low. Remove old files or expand storage.")
+              : t("磁盘空间不足或状态暂时无法确认，已暂停新的文件写入。请释放空间后重试。", "New file writes are paused because storage is full or its status is unavailable. Free space and retry.")}
+          </span>
         </div>
       )}
       <RenderErrorBoundary key={currentPage} t={t}>
