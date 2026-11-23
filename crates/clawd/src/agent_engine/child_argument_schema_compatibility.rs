@@ -141,11 +141,14 @@ fn compare_injected_action(constraint: &Value, action: &str, path: &str, issues:
             .get("additionalProperties")
             .and_then(Value::as_bool)
             == Some(false);
-    let excluded_value = property.is_some_and(|schema| {
-        !crate::schema_contract::enum_constraint_violations(schema, &action_value).is_empty()
-            || !crate::schema_contract::type_constraint_violations(schema, &action_value).is_empty()
-            || !crate::schema_contract::value_constraint_violations(schema, &action_value)
-                .is_empty()
+    let excluded_value = property.is_some_and(|property| {
+        // Shared argument validators inspect object fields. Preserve that entry
+        // contract so primitive action enums and types are actually checked.
+        let schema = json!({"type":"object","properties":{"action":property}});
+        let arguments = json!({"action":action_value});
+        !crate::schema_contract::enum_constraint_violations(&schema, &arguments).is_empty()
+            || !crate::schema_contract::type_constraint_violations(&schema, &arguments).is_empty()
+            || !crate::schema_contract::value_constraint_violations(&schema, &arguments).is_empty()
     });
     let excluded_object = constraint
         .get("enum")

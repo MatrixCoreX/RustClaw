@@ -59,7 +59,7 @@ fn injected_action_conflicts_are_reported_without_widening_closed_grants() {
         let original = proposal.clone();
         let mut issues = Vec::new();
         compare_injected_action(&proposal, "write_text", "/0/allowed_args/0", &mut issues);
-        assert_eq!(issues.len(), 1);
+        assert_eq!(issues.len(), 1, "{proposal}");
         assert_eq!(
             issues[0]["reason"],
             "constraint_excludes_registry_injected_argument"
@@ -113,7 +113,10 @@ risk_level = "low"
 side_effect = false
 input_schema = { type = "object", properties = { path = { type = "string" } } }
 planner_capability_aliases = { "fixture.legacy_read" = "fixture.read" }
-planner_capabilities = [ { name = "fixture.read", action = "read_range", required = ["path"], effect = "observe", risk_level = "low", isolation_profile = "read_only" } ]
+planner_capabilities = [
+ { name = "fixture.read", action = "read_range", required = ["path"], effect = "observe", risk_level = "low", isolation_profile = "read_only" },
+ { name = "fixture.legacy_read", action = "read_range", required = ["path"], effect = "observe", risk_level = "low", isolation_profile = "read_only" },
+]
 "#,
         &["fixture_storage"],
     );
