@@ -13,6 +13,183 @@ async fn historical_quota_dispatch_terminates_before_input_materialization_and_m
     state.core.llm_providers.clear();
     state.seed_ask_task_row("quota-resume-dispatch", 7, 11, r#"{"text":"继续执行"}"#);
     let task = crate::repo::claim_next_task(&state).unwrap().unwrap();
+    let claimed = historical_quota_claim(task);
+    let result = super::execute_seeded_agent_loop_dispatch_result(&state, &claimed)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(result["executor_result_status"], "seeded_loop_failed");
+    let failure = &result["failure_result_json"];
+    assert_eq!(failure["text"], "API quota exhausted. Task terminated.");
+    assert_eq!(
+        failure["task_journal"]["summary"]["task_metrics"]["llm_calls_per_task"],
+        2
+    );
+    assert!(failure["task_journal"]["summary"]["task_checkpoint"].is_null());
+    assert_eq!(state.task_llm_call_count(&task.task_id), 2);
+    assert!(failure.get("child_task_execution_scope").is_none());
+    assert!(failure.get("execution_workspace").is_none());
+}
+
+#[tokio::test]
+async fn resumed_isolated_tasks_reuse_existing_writes_and_publish_patch_scope_on_terminal_failure()
+{
+    for primary in [false, true] {
+        let repo = ResumeScopeRepo::new();
+        let mut state =
+            crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+        state.core.llm_providers.clear();
+        state.skill_rt.workspace_root = repo.0.clone();
+        state.skill_rt.default_locator_search_dir = repo.0.clone();
+        let payload = if primary {
+            json!({"text":"bounded objective","execution_workspace":{"mode":"independent"}})
+        } else {
+            json!({"text":"bounded objective","task_role":"subagent_child",
+                "parent_task_id":"parent-task","child_task_id":"scope-resume-task",
+                "child_task_contract":{"permission_profile":"local_worktree","scope":{}}})
+        };
+        state.seed_ask_task_row("scope-resume-task", 7, 11, &payload.to_string());
+        let task = crate::repo::claim_next_task(&state).unwrap().unwrap();
+        let mut first = super::super::child_task_execution_scope::ChildTaskExecutionScope::prepare(
+            &state, &task, &payload,
+        )
+        .unwrap();
+        let execution_root = first.state(&state).skill_rt.workspace_root.clone();
+        let written = execution_root.join("README.md");
+        std::fs::write(&written, "isolated existing write\n").unwrap();
+        first.retain_for_parent_decision();
+        drop(first);
+
+        let claimed = historical_quota_claim(task);
+        let result = super::execute_seeded_agent_loop_dispatch_result(&state, &claimed)
+            .await
+            .unwrap()
+            .unwrap();
+        let field = if primary {
+            "execution_workspace"
+        } else {
+            "child_task_execution_scope"
+        };
+        let scope = &result["failure_result_json"][field];
+        assert_eq!(
+            scope["workspace_root"],
+            execution_root.to_string_lossy().as_ref()
+        );
+        assert_eq!(scope["allocation_reused"], true);
+        assert_eq!(scope["patch_artifact"]["status"], "ready");
+        assert_eq!(
+            scope["patch_artifact"]["changed_files"],
+            json!(["README.md"])
+        );
+        assert_eq!(
+            std::fs::read(&written).unwrap(),
+            b"isolated existing write\n"
+        );
+        assert_eq!(
+            std::fs::read(repo.0.join("README.md")).unwrap(),
+            b"original\n"
+        );
+        assert_eq!(state.task_llm_call_count(&claimed.task_id), 2);
+        crate::execution_isolation::cleanup_child_worktree_artifacts(&repo.0, &claimed.task_id)
+            .unwrap();
+    }
+}
+
+#[test]
+fn resumed_provider_wait_keeps_checkpoint_and_deferred_result_keeps_scope() {
+    let repo = ResumeScopeRepo::new();
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = repo.0.clone();
+    let payload = json!({"text":"bounded objective","task_role":"subagent_child",
+        "child_task_contract":{"permission_profile":"local_worktree","scope":{}}});
+    let task = crate::ClaimedTask {
+        task_id: "scope-wait-task".into(),
+        claim_attempt: 1,
+        user_id: 7,
+        chat_id: 11,
+        user_key: None,
+        channel: "ui".into(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".into(),
+        payload_json: payload.to_string(),
+    };
+    let scope = super::super::child_task_execution_scope::ChildTaskExecutionScope::prepare(
+        &state, &task, &payload,
+    )
+    .unwrap();
+    let mut provider_wait = json!({"executor_result_status":"seeded_loop_deferred",
+        "provider_status":{"status_code":"rate_limited"}});
+    let original = provider_wait.clone();
+    super::bind_resume_execution_scope(&scope, &state, &mut provider_wait);
+    assert_eq!(provider_wait, original);
+    let mut deferred = json!({"executor_result_status":"seeded_loop_deferred",
+        "final_result_json":{"task_lifecycle":{"state":"waiting"}}});
+    super::bind_resume_execution_scope(&scope, &state, &mut deferred);
+    assert_eq!(
+        deferred["final_result_json"]["task_lifecycle"]["state"],
+        "waiting"
+    );
+    assert_eq!(
+        deferred["final_result_json"]["child_task_execution_scope"]["patch_artifact"]["status"],
+        "empty"
+    );
+}
+
+struct ResumeScopeRepo(std::path::PathBuf);
+
+impl ResumeScopeRepo {
+    fn new() -> Self {
+        let path = std::env::temp_dir().join(format!("resume-scope-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&path).unwrap();
+        for args in [
+            vec!["init", "--quiet"],
+            vec!["config", "user.email", "test@example.invalid"],
+            vec!["config", "user.name", "Runtime Test"],
+        ] {
+            assert!(std::process::Command::new("git")
+                .arg("-C")
+                .arg(&path)
+                .args(args)
+                .status()
+                .unwrap()
+                .success());
+        }
+        std::fs::write(path.join("README.md"), "original\n").unwrap();
+        assert!(std::process::Command::new("git")
+            .arg("-C")
+            .arg(&path)
+            .args(["add", "README.md"])
+            .status()
+            .unwrap()
+            .success());
+        assert!(std::process::Command::new("git")
+            .arg("-C")
+            .arg(&path)
+            .args([
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--quiet",
+                "-m",
+                "fixture"
+            ])
+            .status()
+            .unwrap()
+            .success());
+        Self(path)
+    }
+}
+
+impl Drop for ResumeScopeRepo {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn historical_quota_claim(
+    task: crate::ClaimedTask,
+) -> crate::repo::ClaimedDispatchedPausedCheckpointResumeExecution {
     let checkpoint_id = "quota-checkpoint";
     let checkpoint = crate::task_lifecycle::TaskCheckpoint {
         schema_version: 1,
@@ -42,7 +219,7 @@ async fn historical_quota_dispatch_terminates_before_input_materialization_and_m
         repair_signal: None,
         resume_entrypoint: crate::task_lifecycle::ResumeEntrypoint::NextPlannerRound,
     };
-    let claimed = crate::repo::ClaimedDispatchedPausedCheckpointResumeExecution {
+    crate::repo::ClaimedDispatchedPausedCheckpointResumeExecution {
         task: task.clone(),
         task_id: task.task_id.clone(),
         checkpoint_id: checkpoint_id.into(),
@@ -60,20 +237,7 @@ async fn historical_quota_dispatch_terminates_before_input_materialization_and_m
         dispatch_payload: json!({}),
         dispatch_claim: json!({}),
         task_checkpoint: checkpoint,
-    };
-    let result = super::execute_seeded_agent_loop_dispatch_result(&state, &claimed)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(result["executor_result_status"], "seeded_loop_failed");
-    let failure = &result["failure_result_json"];
-    assert_eq!(failure["text"], "API quota exhausted. Task terminated.");
-    assert_eq!(
-        failure["task_journal"]["summary"]["task_metrics"]["llm_calls_per_task"],
-        2
-    );
-    assert!(failure["task_journal"]["summary"]["task_checkpoint"].is_null());
-    assert_eq!(state.task_llm_call_count(&task.task_id), 2);
+    }
 }
 
 fn resource_replay_test_state() -> crate::AppState {

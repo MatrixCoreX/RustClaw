@@ -60,6 +60,13 @@ implicitly on macOS. Missing sandbox support fails closed with a structured
 unsupported result rather than silently falling back to unrestricted
 execution.
 
+Background checkpoint resumes bind the same task-owned execution workspace before
+input preparation, action replay, or planner execution. Isolated child and primary
+worktrees are reused across slices. Their successful and failed terminal results
+retain the host-generated workspace and patch projection; provider waits preserve
+the existing checkpoint, and completed writes remain available for explicit patch
+review without being replayed or merged into the parent workspace.
+
 ## Model Control Plane
 
 Global text/multimodal configuration writes, provider-key updates and draft

@@ -13,6 +13,65 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
     if !claimed_seeded_agent_loop_dispatch_ready(claimed) {
         return Ok(None);
     }
+    let payload: Value = serde_json::from_str(&claimed.task.payload_json)?;
+    let mut execution_scope = super::child_task_execution_scope::ChildTaskExecutionScope::prepare(
+        state,
+        &claimed.task,
+        &payload,
+    )?;
+    let mut result =
+        execute_scoped_seeded_agent_loop_dispatch_result(execution_scope.state(state), claimed)
+            .await;
+    if let Ok(Some(dispatch)) = &mut result {
+        bind_resume_execution_scope(&execution_scope, state, dispatch);
+    }
+    // A resumed slice may yield, fail, or await a provider. Its existing writes
+    // remain parent-owned until an explicit patch decision; Drop must not erase
+    // the workspace when a slice exits before terminal projection.
+    execution_scope.retain_for_parent_decision();
+    result
+}
+
+fn bind_resume_execution_scope(
+    scope: &super::child_task_execution_scope::ChildTaskExecutionScope,
+    state: &AppState,
+    dispatch: &mut Value,
+) {
+    let Some(projection) = scope.projection(state) else {
+        return;
+    };
+    let key = match dispatch
+        .get("executor_result_status")
+        .and_then(Value::as_str)
+    {
+        Some("seeded_loop_failed") => "failure_result_json",
+        Some("seeded_loop_completed" | "seeded_loop_deferred") => "final_result_json",
+        _ => return,
+    };
+    let Some(dispatch) = dispatch.as_object_mut() else {
+        return;
+    };
+    // Provider waits carry no replacement result; preserve their existing
+    // checkpoint rather than introducing an empty final result.
+    if key == "final_result_json" && !dispatch.contains_key(key) {
+        return;
+    }
+    let result = dispatch.entry(key).or_insert_with(|| json!({}));
+    let Some(result) = result.as_object_mut() else {
+        return;
+    };
+    let field = if scope.is_primary_task_scope() {
+        "execution_workspace"
+    } else {
+        "child_task_execution_scope"
+    };
+    result.insert(field.to_string(), projection);
+}
+
+async fn execute_scoped_seeded_agent_loop_dispatch_result(
+    state: &AppState,
+    claimed: &repo::ClaimedDispatchedPausedCheckpointResumeExecution,
+) -> Result<Option<Value>> {
     if let Some(metrics) = claimed
         .task_checkpoint
         .boundary_context
