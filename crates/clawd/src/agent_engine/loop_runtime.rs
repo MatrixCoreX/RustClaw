@@ -253,6 +253,12 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                             round = round.saturating_add(1);
                             continue;
                         }
+                        if super::planner_protocol_failure::retain_terminal_failure(
+                            &mut loop_state,
+                            &error,
+                        ) {
+                            break;
+                        }
                         return Err(error);
                     }
                 };
@@ -320,16 +326,21 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
                 agent_run_context,
             ));
         }
-        if super::task_plan_reconciliation::prepare_task_plan_reconciliation(
-            state,
-            task,
-            &mut loop_state,
-        )? {
+        let terminal_planner_failure =
+            super::planner_protocol_failure::terminal_failure_payload(&loop_state).is_some();
+        if !terminal_planner_failure
+            && super::task_plan_reconciliation::prepare_task_plan_reconciliation(
+                state,
+                task,
+                &mut loop_state,
+            )?
+        {
             round = round.saturating_add(1);
             skip_planner_rounds = false;
             continue;
         }
-        if prepare_child_result_evidence_replan(task, &mut loop_state) {
+        if !terminal_planner_failure && prepare_child_result_evidence_replan(task, &mut loop_state)
+        {
             round = round.saturating_add(1);
             skip_planner_rounds = false;
             continue;
@@ -384,7 +395,7 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             skip_planner_rounds = false;
             continue;
         }
-        if loop_state_has_checkpoint_handoff(&pre_finalize_loop_state) {
+        if terminal_planner_failure || loop_state_has_checkpoint_handoff(&pre_finalize_loop_state) {
             return Ok(reply);
         }
         let mut blocked_loop_state = pre_finalize_loop_state.clone();

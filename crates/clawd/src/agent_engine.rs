@@ -38,6 +38,7 @@ pub(crate) use mutation_ledger::{
 pub(crate) mod observed_output;
 mod parallel_read_batch;
 mod plan_verifier_observation;
+pub(crate) mod planner_protocol_failure;
 mod planner_skill_context;
 mod planning;
 mod progress_contract;

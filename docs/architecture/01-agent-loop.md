@@ -90,6 +90,14 @@ Alternative summary/detail tools are not automatically independent evidence.
 Answer-only verification corrections reuse current observations unless evidence
 is missing or stale; they do not require another plan read or tool replay.
 
+Native response repair may project an exact retry schema that omits inactive
+collections only when every omitted value is empty and the remaining response
+already passes the ordinary parser. Shape, intent and conversation relation stay
+pinned; a fresh model call must still satisfy the normal parser and verifier.
+Exhausted response-protocol repair retains completed execution and its journal,
+then produces an overall failure owned by the planner protocol. It neither
+relabels completed tools as failed nor replays their effects.
+
 Each planner decision records the covered input sequence, instruction revision,
 and execution epoch. A tool or skill action must atomically claim that exact
 version immediately before dispatch. Terminal presentation uses the same

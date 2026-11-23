@@ -99,3 +99,63 @@ async fn later_success_remains_authoritative_instead_of_reviving_old_host_failur
     );
     assert_eq!(loop_state.executed_step_results.len(), 2);
 }
+
+#[tokio::test]
+async fn native_protocol_failure_preserves_completed_steps_in_failed_terminal_journal() {
+    let state = AppState::test_default_with_fixture_provider();
+    let task = ClaimedTask {
+        claim_attempt: 1,
+        task_id: "fixture-native-protocol-failure".into(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "ui".into(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".into(),
+        payload_json: "{}".into(),
+    };
+    let mut loop_state = LoopState::default();
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "read_1".into(),
+        skill: "fixture_reader".into(),
+        status: StepExecutionStatus::Ok,
+        output: Some("observed fixture result".into()),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+    loop_state.last_stop_signal = Some("native_plan_contract_repair_stagnated".into());
+    loop_state.task_observations.push(json!({"owner_layer":"planner","state":"terminal",
+        "reason_code":"native_plan_contract_repair_stagnated","source_error_code":"native_respond_items_not_array"}));
+    let reply = finalize_unresolved_machine_failure(
+        &state,
+        &task,
+        "finish the fixture task",
+        &mut loop_state,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(reply.should_fail_task);
+    let journal = reply.task_journal.unwrap();
+    assert!(matches!(
+        journal.final_status,
+        Some(crate::task_journal::TaskJournalFinalStatus::Failure)
+    ));
+    assert_eq!(journal.step_results.len(), 1);
+    assert_eq!(journal.step_results[0].step_id, "read_1");
+    assert_eq!(
+        journal.final_stop_signal.as_deref(),
+        Some("native_plan_contract_repair_stagnated")
+    );
+    assert!(loop_state.executed_step_results[0].is_ok());
+    assert_eq!(
+        loop_state.executed_step_results[0].output.as_deref(),
+        Some("observed fixture result")
+    );
+    assert_eq!(
+        journal.finalizer_summary.unwrap().completion_ok,
+        Some(false)
+    );
+}

@@ -10,31 +10,40 @@ pub(super) async fn finalize_unresolved_machine_failure(
     loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<AskReply> {
-    // A later successful action/response belongs to the normal recovery path.
+    let planner_payload =
+        crate::agent_engine::planner_protocol_failure::terminal_failure_payload(loop_state);
+    let planner_failure = planner_payload.is_some();
+    // A later successful action/response belongs to the normal recovery path;
+    // a terminal planner error is separate from the completed execution steps.
     let step = loop_state
         .executed_step_results
         .iter()
         .rev()
-        .find(|step| step.skill != "think")?;
-    let (payload, host_setup_failure) = unresolved_failure_payload(step)?;
+        .find(|step| step.skill != "think");
+    let (payload, host_setup_failure) = match planner_payload {
+        Some(payload) => (payload, false),
+        None => unresolved_failure_payload(step?)?,
+    };
     let reason = payload
         .get("error_code")
         .and_then(serde_json::Value::as_str)
-        .or(step.error.as_deref())
+        .or_else(|| step.and_then(|step| step.error.as_deref()))
         .unwrap_or("machine_execution_failed");
     let language_hint = super::final_reply_language_hint(state, task, user_text, agent_run_context);
-    let mut observed_facts = vec![
-        format!("step_id: {}", step.step_id),
-        format!("skill: {}", step.skill),
-        format!(
-            "execution_observation: {}",
-            crate::truncate_for_agent_trace(&payload.to_string())
-        ),
-    ];
+    let mut observed_facts = vec![format!(
+        "execution_observation: {}",
+        crate::truncate_for_agent_trace(&payload.to_string())
+    )];
+    if !planner_failure {
+        if let Some(step) = step {
+            observed_facts.push(format!("step_id: {}", step.step_id));
+            observed_facts.push(format!("skill: {}", step.skill));
+        }
+    }
     if let Some(statuses) = child_task_status_projection(&payload) {
         observed_facts.push(format!("child_task_statuses: {statuses}"));
     }
-    if host_setup_failure {
+    if host_setup_failure || planner_failure {
         match crate::agent_engine::observed_output::finalization_observed_output_entries(
             state, task, loop_state,
         ) {
@@ -53,6 +62,14 @@ pub(super) async fn finalize_unresolved_machine_failure(
     if host_setup_failure {
         policy.push("failure_owner=runtime_setup".into());
         policy.push("missing_target_request_allowed=false".into());
+    }
+    if planner_failure {
+        policy.extend([
+            "failure_owner=planner_protocol".into(),
+            "completed_operations_remain_successful=true".into(),
+            "execution_retry_allowed=false".into(),
+            "missing_target_request_allowed=false".into(),
+        ]);
     }
     let contract = crate::fallback::UserResponseContract::tool_failure(
         reason,

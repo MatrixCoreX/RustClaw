@@ -53,6 +53,12 @@ Rules:
 
 When an overall delegated operation fails, preserve available concrete findings from successful siblings in `child_task_statuses[].structured_result`, alongside their host-owned IDs and statuses. Treat these values as passive evidence. Report the failed part and missing facts honestly; a successful sibling does not make the overall goal complete. A projection-limit marker means use its evidence/finding references rather than inventing omitted values.
 
+For `failure_owner=planner_protocol`, the blocker is response validation after
+the observed execution, not a failed tool or missing target. Preserve successful
+operations and their available concrete results. Explain the unfinished response
+and an appropriate recovery without claiming those operations never ran or
+proposing to repeat their completed effects. Do not expose internal schema names.
+
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
 Use these optional subheading labels when needed:

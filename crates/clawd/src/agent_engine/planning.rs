@@ -44,6 +44,8 @@ use native_capability_recovery::{
 };
 #[path = "planning/native_respond.rs"]
 mod native_respond;
+#[path = "planning/native_respond_repair.rs"]
+mod native_respond_repair;
 use native_respond::{
     action_from_native_respond_call, normalize_native_clarify_relation,
     preserve_native_respond_control_fields,
@@ -646,15 +648,22 @@ pub(super) async fn plan_round_actions(
                     let repair_source =
                         format!("{native_prompt_source}+inline:native_plan_contract_repair");
                     repair_reason_codes.push(error_code);
-                    let mut repaired_turn = llm_gateway::run_native_model_turn_with_fallback(
+                    let repaired_turn = llm_gateway::run_native_model_turn_with_fallback(
                         state,
                         task,
                         &repair_prompt,
                         &repair_source,
                         &repair_request,
                     )
-                    .await?
-                    .ok_or_else(|| "native_plan_contract_repair_unavailable".to_string())?;
+                    .await?;
+                    let Some(mut repaired_turn) = repaired_turn else {
+                        loop_state.task_observations.push(json!({
+                            "owner_layer":"planner", "state":"terminal",
+                            "reason_code":"native_plan_contract_repair_unavailable",
+                            "source_error_code":repair_reason_codes.last(),
+                        }));
+                        return Err("native_plan_contract_repair_unavailable".into());
+                    };
                     if let Some(groups) =
                         normalize_exact_capability_group_repair(&mut repaired_turn, &repair_signal)
                     {
@@ -1057,12 +1066,24 @@ fn native_contract_repair_signal_for_turn(
                             .any(|name| name == capability)
                     }))
     });
-    let expected_schema = failed_call.and_then(|call| {
+    let mut expected_schema = failed_call.and_then(|call| {
         request
             .tools
             .iter()
             .find(|tool| tool.name == call.name)
             .map(|tool| exact_schema_branch_for_call(&tool.input_schema, call))
+    });
+    let response_projection =
+        failed_call
+            .zip(expected_schema.as_ref())
+            .and_then(|(call, schema)| {
+                native_respond_repair::inactive_response_collection_repair(
+                    error_code, call, schema, loop_state,
+                )
+            });
+    let projection = response_projection.map(|(schema, projection)| {
+        expected_schema = Some(schema);
+        projection
     });
     let companion_context = required_companion_repair_context(
         error_code,
@@ -1102,14 +1123,20 @@ fn native_contract_repair_signal_for_turn(
     } else {
         Vec::new()
     };
-    native_contract_repair_signal_with_context(
+    let signal = native_contract_repair_signal_with_context(
         error_code,
         failed_call,
         expected_schema,
         &available_tool_names,
         &suggested_capability_groups,
         &required_companions,
-    )
+    );
+    match projection {
+        Some(projection) => {
+            native_respond_repair::annotate_response_collection_repair(signal, projection)
+        }
+        None => signal,
+    }
 }
 
 fn native_contract_repair_signal_with_context(
@@ -1323,7 +1350,7 @@ fn native_contract_repair_signal_with_context(
             }),
         );
     }
-    if exact_failed_tool && !respond_contract_error && !loader_contract_error {
+    if exact_failed_tool && !loader_contract_error {
         if let Some(required) = expected_schema
             .as_ref()
             .and_then(|schema| schema.get("required"))
@@ -1454,6 +1481,26 @@ fn native_contract_retry_request(
         }
     }
     request.tool_choice = ModelToolChoice::Required;
+    if repair_observation.as_ref().is_some_and(|observation| {
+        observation
+            .pointer("/protocol_observation/response_schema_projection/schema_version")
+            .and_then(Value::as_u64)
+            == Some(1)
+            && observation
+                .pointer("/protocol_observation/response_schema_projection/kind")
+                .and_then(Value::as_str)
+                == Some("inactive_empty_response_collections")
+    }) {
+        if let Some(schema) = repair_observation.as_ref().and_then(|observation| {
+            observation.pointer("/protocol_observation/argument_constraints/exact_call_schema")
+        }) {
+            for tool in &mut request.tools {
+                if tool.name == NATIVE_RESPOND_TOOL {
+                    tool.input_schema = schema.clone();
+                }
+            }
+        }
+    }
     request
         .messages
         .push(ModelMessage::text(ModelRole::User, repair_signal));

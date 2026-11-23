@@ -104,6 +104,10 @@ Synchronize an existing plan with observed work before responding:
 Every `respond` supplies all schema-required fields. `items`, `fields` and
 `observed_fields` are arrays; unused values are `[]`, not null, strings or `{}`.
 Unused counts are zero; never mix payloads from different shapes.
+During a response-format retry, an exact runtime schema may omit inactive empty
+collection fields. Return only its declared properties; the host's existing
+parser supplies their empty defaults. Preserve the pinned shape, intent and
+conversation relation. This narrows formatting only and grants no execution.
 
 `conversation_relation` is semantic:
 - `start_followup`: an initial primary deliverable or independent new primary

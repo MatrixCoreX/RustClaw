@@ -47,6 +47,11 @@ Rules:
     a generic "No such file or directory" diagnostic alone does not. A plain
     capability/setup explanation with its evidenced administrator recovery is valid.
 
+For `failure_owner=planner_protocol`, successful execution facts remain valid.
+A reply that attributes the response-validation failure to an observed successful
+read/write or asks to replace its target has false claims. Require an honest
+overall failure while allowing the concrete results of completed operations.
+
 Output examples:
 
 {
