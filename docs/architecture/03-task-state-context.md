@@ -66,6 +66,10 @@ The allowance survives checkpoints and restarts; repeated rejection fails withou
 replaying completed actions. A changed instruction or genuine execution-evidence
 gap returns to the agent loop with the latest candidate, structured issue and
 completed mutation fingerprints intact, clearing stale delivery drafts.
+Typed pre-dispatch admission failures remain execution failures even when they
+arrive through the runner's error channel. Finalization preserves completed
+sibling observations and reports runtime setup ownership; it cannot turn an
+existing target into a request for missing user content.
 Provider outages respect the provider's
 cooldown, or wait 60 seconds when no cooldown is available. Invalid verifier
 responses use candidate-bound counts persisted in the checkpoint: the first two

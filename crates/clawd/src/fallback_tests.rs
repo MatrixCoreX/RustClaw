@@ -498,6 +498,35 @@ fn low_confidence_never_overrides_explicit_false_claim_or_internal_disclosure() 
 }
 
 #[test]
+fn explicit_host_failure_policy_rejects_missing_target_workaround_at_any_confidence() {
+    let contract = UserResponseContract {
+        kind: UserResponseKind::ToolFailure,
+        response_shape: "brief_failure_with_next_step".into(),
+        policy_boundary: vec!["missing_target_request_allowed=false".into()],
+        ..Default::default()
+    };
+    for confidence in [0.0, 0.2, 0.54, 0.55, 1.0] {
+        let mut validation = UserResponseContractValidationOut {
+            satisfies_contract: true,
+            false_claims: false,
+            asks_for_missing_target: true,
+            mentions_internal_details: false,
+            confidence,
+            reason: "fixture".into(),
+        };
+        assert!(!user_response_contract_validation_accepts(
+            &contract,
+            &validation
+        ));
+        validation.asks_for_missing_target = false;
+        assert!(user_response_contract_validation_accepts(
+            &contract,
+            &validation
+        ));
+    }
+}
+
+#[test]
 fn user_response_contract_validator_schema_drift() {
     const SCHEMA_RAW: &str =
         include_str!("../../../prompts/schemas/user_response_contract_validator.schema.json");

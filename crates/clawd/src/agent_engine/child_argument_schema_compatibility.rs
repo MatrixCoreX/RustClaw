@@ -14,7 +14,7 @@ pub(super) fn issues(state: &crate::AppState, value: &Value) -> Vec<Value> {
         let canonical = registry
             .canonical_planner_capability_name(name)
             .unwrap_or(name);
-        let Some(schema) = registry.all_names().into_iter().find_map(|skill| {
+        let Some((schema, action)) = registry.all_names().into_iter().find_map(|skill| {
             let mapping = registry
                 .planner_capabilities(&skill)
                 .iter()
@@ -25,6 +25,7 @@ pub(super) fn issues(state: &crate::AppState, value: &Value) -> Vec<Value> {
                 mapping,
             )
             .ok()
+            .map(|schema| (schema, mapping.action.clone()))
         }) else {
             continue;
         };
@@ -36,6 +37,14 @@ pub(super) fn issues(state: &crate::AppState, value: &Value) -> Vec<Value> {
             .take(8)
             .enumerate()
         {
+            if let Some(action) = action.as_deref() {
+                compare_injected_action(
+                    constraint,
+                    action,
+                    &format!("/{i}/allowed_args/{j}"),
+                    &mut issues,
+                );
+            }
             compare(
                 constraint,
                 &schema,
@@ -118,53 +127,41 @@ fn compare(constraint: &Value, host: &Value, path: &str, depth: usize, issues: &
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn numeric_strings_are_rejected_without_coercing_the_constraint() {
-        let host = json!({"type":"object","properties":{"line":{"type":"integer"},"code":{"type":"string"}}});
-        let proposal = json!({"properties":{"line":{"enum":["12"]},"code":{"enum":["12"]}}});
-        let original = proposal.clone();
-        let mut errors = Vec::new();
-        compare(&proposal, &host, "", 0, &mut errors);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0]["path"], "/properties/line/enum");
-        assert_eq!(errors[0]["expected_type"], "integer");
-        assert_eq!(proposal, original);
-        errors.clear();
-        compare(
-            &json!({"properties":{"line":{"enum":[12]}}}),
-            &host,
-            "",
-            0,
-            &mut errors,
-        );
-        assert!(errors.is_empty());
+// The executor injects the registry-selected action before the frozen scope
+// check. Reject an impossible proposal before allocating a durable child;
+// never insert a new property into the caller's permission grant.
+fn compare_injected_action(constraint: &Value, action: &str, path: &str, issues: &mut Vec<Value>) {
+    if issues.len() >= 16 {
+        return;
     }
-    #[test]
-    fn nullable_and_nested_literal_types_are_checked_with_bounded_diagnostics() {
-        let host =
-            json!({"properties":{"entries":{"type":"array","items":{"type":["integer","null"]}}}});
-        for (values, valid) in [
-            (json!([12, null]), true),
-            (json!(["12"]), false),
-            (json!([true]), false),
-        ] {
-            let mut errors = Vec::new();
-            compare(
-                &json!({"properties":{"entries":{"items":{"enum":values}}}}),
-                &host,
-                "",
-                0,
-                &mut errors,
-            );
-            assert_eq!(errors.is_empty(), valid);
-        }
-        let host = json!({"properties":(0..64).map(|i|(format!("p{i}"),json!({"type":"integer"}))).collect::<serde_json::Map<_,_>>()});
-        let constraint = json!({"properties":(0..64).map(|i|(format!("p{i}"),json!({"enum":["1"]}))).collect::<serde_json::Map<_,_>>()});
-        let mut errors = Vec::new();
-        compare(&constraint, &host, "", 0, &mut errors);
-        assert_eq!(errors.len(), 16);
+    let property = constraint.get("properties").and_then(|p| p.get("action"));
+    let action_value = json!(action);
+    let excluded_property = property.is_none()
+        && constraint
+            .get("additionalProperties")
+            .and_then(Value::as_bool)
+            == Some(false);
+    let excluded_value = property.is_some_and(|schema| {
+        !crate::schema_contract::enum_constraint_violations(schema, &action_value).is_empty()
+            || !crate::schema_contract::type_constraint_violations(schema, &action_value).is_empty()
+            || !crate::schema_contract::value_constraint_violations(schema, &action_value)
+                .is_empty()
+    });
+    let excluded_object = constraint
+        .get("enum")
+        .and_then(Value::as_array)
+        .is_some_and(|values| {
+            !values
+                .iter()
+                .any(|v| v.get("action") == Some(&action_value))
+        });
+    if excluded_property || excluded_value || excluded_object {
+        issues.push(json!({"path":format!("{path}/properties/action"),
+            "reason":"constraint_excludes_registry_injected_argument",
+            "argument":"action","expected_value":action}));
     }
 }
+
+#[cfg(test)]
+#[path = "child_argument_schema_compatibility_tests.rs"]
+mod tests;

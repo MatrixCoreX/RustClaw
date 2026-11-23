@@ -16,10 +16,7 @@ pub(super) async fn finalize_unresolved_machine_failure(
         .iter()
         .rev()
         .find(|step| step.skill != "think")?;
-    let payload = raw_machine_envelope_payload(step.output.as_deref()?)?;
-    if step.is_ok() && !machine_envelope_reports_failure(&payload) {
-        return None;
-    }
+    let (payload, host_setup_failure) = unresolved_failure_payload(step)?;
     let reason = payload
         .get("error_code")
         .and_then(serde_json::Value::as_str)
@@ -37,17 +34,32 @@ pub(super) async fn finalize_unresolved_machine_failure(
     if let Some(statuses) = child_task_status_projection(&payload) {
         observed_facts.push(format!("child_task_statuses: {statuses}"));
     }
+    if host_setup_failure {
+        match crate::agent_engine::observed_output::finalization_observed_output_entries(
+            state, task, loop_state,
+        ) {
+            Ok(entries) => observed_facts.extend(entries),
+            Err(_) => {
+                observed_facts.push("completed_observation_projection_available=false".into())
+            }
+        }
+    }
+    let mut policy = vec![
+        "success_allowed=false".to_string(),
+        "raw_machine_payload_visible=false".to_string(),
+        "child_status_source=child_task_statuses".to_string(),
+        "failed_parent_does_not_fail_successful_siblings=true".to_string(),
+    ];
+    if host_setup_failure {
+        policy.push("failure_owner=runtime_setup".into());
+        policy.push("missing_target_request_allowed=false".into());
+    }
     let contract = crate::fallback::UserResponseContract::tool_failure(
         reason,
         user_text,
         &super::route_resolved_intent(agent_run_context),
         observed_facts,
-        vec![
-            "success_allowed=false".to_string(),
-            "raw_machine_payload_visible=false".to_string(),
-            "child_status_source=child_task_statuses".to_string(),
-            "failed_parent_does_not_fail_successful_siblings=true".to_string(),
-        ],
+        policy,
         "brief_failure_with_next_step",
         &language_hint,
     );
@@ -97,6 +109,53 @@ pub(super) async fn finalize_unresolved_machine_failure(
             .with_failure(message),
     )
 }
+
+fn unresolved_failure_payload(
+    step: &crate::executor::StepExecutionResult,
+) -> Option<(serde_json::Value, bool)> {
+    if let Some(payload) = step
+        .output
+        .as_deref()
+        .and_then(raw_machine_envelope_payload)
+    {
+        return (!step.is_ok() || machine_envelope_reports_failure(&payload))
+            .then_some((payload, false));
+    }
+    if step.is_ok() {
+        return None;
+    }
+    // Runner admission failures live in the typed error channel, not stdout.
+    // Decode once through the shared producer-aware contract; never infer the
+    // failure owner from the diagnostic prose or the requested target's name.
+    let error = crate::skills::parse_structured_skill_error(step.error.as_deref()?)?;
+    let extra = error.extra?;
+    if extra.get("message_key").and_then(serde_json::Value::as_str)
+        != Some("clawd.skill.pre_dispatch_failed")
+        || extra
+            .get("failure_phase")
+            .and_then(serde_json::Value::as_str)
+            != Some("pre_dispatch")
+        || extra
+            .get("side_effect_applied")
+            .and_then(serde_json::Value::as_bool)
+            != Some(false)
+        || extra
+            .get("recovery_action")
+            .and_then(serde_json::Value::as_str)
+            != Some("refresh_skill_admission")
+    {
+        return None;
+    }
+    Some((
+        serde_json::json!({"schema_version":1,"status":"error",
+        "source_skill":error.skill,"error_code":error.error_code,"extra":extra}),
+        true,
+    ))
+}
+
+#[cfg(test)]
+#[path = "loop_reply_machine_failure_tests.rs"]
+mod tests;
 
 fn child_task_status_projection(payload: &serde_json::Value) -> Option<serde_json::Value> {
     let nodes = payload

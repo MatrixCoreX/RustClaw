@@ -54,6 +54,13 @@ explicit application.
 - Example: `[{"capability":"filesystem.read_text_range","allowed_args":[{"type":"object","required":["path","mode","start_line","end_line"],"properties":{"path":{"enum":["src/example.rs"]},"mode":{"enum":["range"]},"start_line":{"type":"integer","minimum":10,"maximum":20},"end_line":{"type":"integer","minimum":10,"maximum":20}}}]}]`.
   Use the exact path spelling the child will call. A union of allowed slices
   uses separate schemas in `allowed_args`; never widen their enclosing range.
+- Argument grants check the resolved skill arguments, including the registry's
+  injected `action`. A closed schema (`additionalProperties=false`) must declare
+  that action with its exact registry value (for example, `action.enum=["write_text"]`
+  for a write capability mapped to `write_text`). It need not be in the native
+  tool call. Admission reports `constraint_excludes_registry_injected_argument`
+  when these disagree; correct the proposal before creating the child. The host
+  never adds permissions to a frozen grant.
 - Preserve exact string values when deriving argument enums, including leading
   and trailing whitespace and newline escapes. The objective, frozen constraints,
   and requested invocation must agree byte-for-byte; never trim file content.

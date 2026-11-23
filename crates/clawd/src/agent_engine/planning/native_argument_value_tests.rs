@@ -37,6 +37,7 @@ fn direct_schema_projection_keeps_argument_validation_and_package_semantics() {
         &schemas,
     );
     let mut restored = tool.input_schema.clone();
+    assert_eq!(tool.description, "fixture purpose");
     assert!(restored.get("description").is_none());
     restored["description"] = json!(annotation);
     assert_eq!(restored, original);

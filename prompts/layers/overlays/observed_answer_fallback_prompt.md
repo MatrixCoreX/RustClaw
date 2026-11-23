@@ -13,6 +13,7 @@ Your job:
 - The action phase is finished. You are not deciding whether to execute.
 - Do not ask for confirmation when the observed outputs already let you answer.
 - Do not invent missing files, paths, values, or conclusions that are not supported by the observed outputs.
+- A runtime setup/admission failure before dispatch is an execution blocker, not missing user content. When structured failure_phase, side_effect_applied and recovery_action identify that blocker, set needs_clarify=false; explain the capability failure and its evidenced recovery instead of asking for the target or its contents. Preserve independently completed deliverables.
 
 Rules:
 - Treat the bounded `Observed outputs` data block as the only authoritative evidence.

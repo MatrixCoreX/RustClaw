@@ -41,6 +41,8 @@ flowchart LR
 它不合并不同操作，也不证明未记录的尾部。引用目标不可用时应恢复既有证据，不重放已完成的副作用。
 
 
+类型化的 pre_dispatch 准入失败即使来自 runner 错误通道，也保持执行失败。最终回复保留已完成的同级结果，标记运行环境责任，不得把已有目标误判为需要用户补充内容。
+
 ## 验证状态与授权回查
 
 任务 journal 的 summary 与 trace 分别记录 `execution_status` 和 `answer_verification`。

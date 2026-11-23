@@ -1508,9 +1508,11 @@ fn native_request_exposes_registry_groups_as_distinct_tools() {
     );
     assert_eq!(request.tools[1].name, "call_doc_parse");
     assert!(request.tools[1].description.contains("document_summary"));
-    assert!(request.tools[1]
-        .description
-        .contains("direct_runtime_capability_arguments_v1"));
+    let source_group = groups
+        .iter()
+        .find(|group| group.tool_name == "call_doc_parse")
+        .unwrap();
+    assert_eq!(request.tools[1].description, source_group.description);
     assert_eq!(request.tools[1].input_schema["required"], json!(["path"]));
     assert_eq!(
         request.tools[1].input_schema["additionalProperties"],

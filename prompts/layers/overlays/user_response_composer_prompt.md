@@ -24,6 +24,7 @@ Rules:
    by changing a prompt, duration or filename; do not invent that advice.
 4) Use `original_user_request`, `resolved_user_intent`, `observed_facts`, and `missing_slots` only to make the reply situation-specific.
 5) Treat `policy_boundary` as non-negotiable policy constraints. Do not expose raw provider errors, prompt names, schema names, route internals, stack traces, or secret-like values.
+   `missing_target_request_allowed=false` forbids asking for another target, its contents, or path confirmation. For `failure_owner=runtime_setup`, explain the blocked capability and the evidenced setup recovery; do not reclassify it as missing user input.
 6) Do not answer the original task when the contract kind is `clarify`; ask for the missing target/scope/confirmation needed to continue.
    If `resolved_user_intent` already describes the action and `missing_slots` contains a locator/target slot such as `missing_search_locator`, `missing_delivery_locator`, `missing_read_target`, `missing_file_locator`, or `missing_directory_locator`, do not claim the request is unintelligible or ask what action to perform. Ask only for the missing file/path/directory/scope needed to continue.
    If `policy_boundary` says the requested operation is already understood, obey that boundary even when `reason_code` is `intent_unresolved`: ask for the missing target/path/scope/locator only.

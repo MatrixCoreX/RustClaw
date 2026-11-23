@@ -415,7 +415,7 @@ fn run_cmd_body_allows_command_output_observation(body: &str) -> bool {
     true
 }
 
-pub(super) fn finalization_observed_output_entries(
+pub(crate) fn finalization_observed_output_entries(
     state: &AppState,
     task: &ClaimedTask,
     loop_state: &LoopState,

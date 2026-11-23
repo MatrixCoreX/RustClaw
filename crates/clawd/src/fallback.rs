@@ -652,6 +652,14 @@ fn user_response_contract_validation_accepts(
     if validation.false_claims || validation.mentions_internal_details {
         return false;
     }
+    if validation.asks_for_missing_target
+        && contract
+            .policy_boundary
+            .iter()
+            .any(|policy| policy == "missing_target_request_allowed=false")
+    {
+        return false;
+    }
     if validation.confidence < 0.55 {
         return true;
     }

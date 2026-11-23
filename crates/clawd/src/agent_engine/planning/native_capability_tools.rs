@@ -33,9 +33,7 @@ pub(super) fn native_capability_tool_definition(
                 }
                 return ModelToolDefinition {
                     name: tool_name.to_string(),
-                    description: format!(
-                        "{description}; schema:direct_runtime_capability_arguments_v1"
-                    ),
+                    description: description.to_string(),
                     input_schema,
                     strict: true,
                 };

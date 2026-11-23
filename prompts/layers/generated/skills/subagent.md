@@ -57,6 +57,11 @@ path, mode and both inclusive bounds. On `subagent_argument_constraints_invalid`
 no child was created; fill the reported `field_issues`, preserve the user's
 scope and resubmit. Never bypass a rejection by dropping required bindings.
 Summaries should give requested findings, cited evidence and child IDs/statuses.
+A grant checks resolved skill arguments, including the registry-injected `action`.
+A closed schema must declare its exact action value (for example `action.enum=["write_text"]`
+when the registry maps the capability to `write_text`); native tool calls need not
+supply it. Repair `constraint_excludes_registry_injected_argument` before enqueueing.
+Never remove other bounds or widen permissions to resolve that diagnostic.
 Keep budget receipt internals and call parameters in machine evidence unless
 the user asks for them; do not add unsupported compliance guarantees.
 The host freezes this narrowing-only grant and checks actual arguments before

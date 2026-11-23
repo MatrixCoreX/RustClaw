@@ -67,6 +67,7 @@ use output_path_facts::*;
 
 #[path = "observed_output_entries.rs"]
 mod output_entries;
+pub(crate) use output_entries::finalization_observed_output_entries;
 pub(crate) use output_entries::has_observed_answer_candidates;
 pub(super) use output_entries::latest_child_result_handoff;
 pub(super) use output_entries::latest_structured_capability_observation;
@@ -75,7 +76,6 @@ pub(super) use output_entries::observed_output_entries;
 pub(super) use output_entries::structured_capability_observation;
 use output_entries::{
     compound_listing_content_delivery_guard_entry, cross_turn_observed_output_entries,
-    finalization_observed_output_entries,
 };
 #[cfg(test)]
 use output_entries::{observed_step_entry, recent_generated_output_from_user_request};
