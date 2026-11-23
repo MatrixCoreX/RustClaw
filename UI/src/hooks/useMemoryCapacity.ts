@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { capacitySelection, parseMemoryCapacity, type MemoryCapacity } from "../lib/memory-capacity";
 import type { MemorySettingsResult } from "../types/api";
 import { useRequestOwner } from "./useRequestOwner";
@@ -20,14 +20,19 @@ export function useMemoryCapacity({ requestScope, settings, scope, conversationI
   const sequence = useRef(0);
   const pending = useRef<AbortController | null>(null);
   const [stored, setStored] = useState<View | null>(null);
-  const refresh = useCallback(async () => {
+  const refresh = async () => {
     if (!owns() || !key) return;
     const ticket = ++sequence.current;
     pending.current?.abort();
     const controller = new AbortController();
     pending.current = controller;
     const current = () => owns() && sequence.current === ticket && !controller.signal.aborted;
-    setStored({ owner: owns, loading: true, failed: false, data: null });
+    setStored(previous => ({
+      owner: owns,
+      loading: true,
+      failed: false,
+      data: previous?.owner === owns ? previous.data : null,
+    }));
     try {
       const response = await apiFetch(path, { signal: controller.signal });
       const reply: unknown = await response.json();
@@ -37,11 +42,12 @@ export function useMemoryCapacity({ requestScope, settings, scope, conversationI
     } catch {
       if (current()) setStored({ owner: owns, loading: false, failed: true, data: null });
     }
-  }, [apiFetch, key, owns, path]);
+  };
+  const refreshSelection = useEffectEvent(refresh);
   useEffect(() => {
-    void refresh();
+    void refreshSelection();
     return () => { pending.current?.abort(); };
-  }, [refresh]);
+  }, [owns]);
   // Hide old observations during render, not only after effect cleanup.
   const view = stored?.owner === owns && owns() && key ? stored : null;
   return { data: view?.data ?? null, loading: view?.loading ?? false, failed: view?.failed ?? false,
