@@ -47,7 +47,15 @@ async fn fixture(
                 let prompt = body["messages"].as_array().unwrap().iter()
                     .filter_map(|message|message["content"].as_str()).collect::<Vec<_>>().join("\n");
                 assert!(prompt.contains("Rejected answer:\nlatest candidate"));
-                assert!(prompt.contains("Remove unrequested metadata"));
+                let issue = prompt.split_once("Structured verifier issue JSON:\n").unwrap().1
+                    .split_once("\n\nCurrent task context:").unwrap().0;
+                let issue: Value = serde_json::from_str(issue.trim()).unwrap();
+                assert_eq!(issue["issue_kind"], "answer_contract_gap");
+                assert_eq!(issue["missing_evidence_fields"], json!(["unsupported_claims"]));
+                assert_eq!(issue["should_retry"], true);
+                assert!(issue.get("retry_instruction").is_none());
+                assert!(!prompt.contains("Remove unrequested metadata"),
+                    "verifier prose must not become retry instructions");
                 "corrected candidate".to_string()
             } else {
                 if matches!(scenario, Scenario::ExecutionGap) {
