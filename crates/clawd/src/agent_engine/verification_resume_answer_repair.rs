@@ -2,13 +2,7 @@
 use super::*;
 
 fn answer_only(summary: &crate::task_journal::TaskJournalAnswerVerifierSummary) -> bool {
-    summary.high_confidence_retry_gap()
-        && summary.missing_evidence_fields.iter().all(|field| {
-            matches!(
-                field.as_str(),
-                "output_format" | "unsupported_claims" | "verification_audit"
-            )
-        })
+    summary.is_answer_only_retry_gap()
 }
 
 pub(super) async fn try_repair(
@@ -24,15 +18,12 @@ pub(super) async fn try_repair(
         .answer_verifier_summary
         .clone()
         .filter(answer_only)?;
-    let already_used = loop_state.output_vars.contains_key(ANSWER_REPAIR_USED);
-    loop_state
-        .output_vars
-        .insert(ANSWER_REPAIR_USED.into(), "true".into());
+    let available = take_answer_repair_allowance(loop_state);
     journal.answer_verification_checkpoint = Some(std::sync::Arc::new(
         verification_checkpoint_payload(task, loop_state),
     ));
     let mut reply = AskReply::non_llm(candidate.into()).with_task_journal(journal);
-    if !already_used
+    if available
         && super::super::loop_control::try_bounded_answer_verifier_synthesis_retry(
             state, task, user_text, contract, &summary, &mut reply,
         )

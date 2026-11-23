@@ -108,11 +108,7 @@ mod child_evidence_tests;
 pub(super) fn answer_verifier_gap_requires_planner_observation(
     summary: &crate::task_journal::TaskJournalAnswerVerifierSummary,
 ) -> bool {
-    summary.high_confidence_retry_gap()
-        && summary
-            .missing_evidence_fields
-            .iter()
-            .any(|field| !matches!(field.trim(), "output_format" | "verification_audit"))
+    summary.high_confidence_retry_gap() && !summary.is_answer_only_retry_gap()
 }
 
 pub(super) fn answer_verifier_evidence_replan_summary(
@@ -286,11 +282,12 @@ fn answer_verifier_gap_is_structurally_satisfied(
     if !summary.high_confidence_retry_gap() {
         return false;
     }
-    if summary
-        .missing_evidence_fields
-        .iter()
-        .any(|field| matches!(field.as_str(), "verification_audit" | "requested_result"))
-    {
+    if summary.missing_evidence_fields.iter().any(|field| {
+        matches!(
+            field.as_str(),
+            "verification_audit" | "requested_result" | "unsupported_claims"
+        )
+    }) {
         return false;
     }
     let Some(route) = route_result else {

@@ -95,6 +95,10 @@ existing evidence. A removable unsupported claim is reported as a semantic gap
 with retry enabled even when all business operations completed. The existing
 bounded synthesis retry revises the answer and verifies it again without
 replaying tools or delegated work; a fresh passing verdict remains mandatory.
+Ordinary completion and checkpoint resumption share this machine-only gap
+classification. Unsupported claims cannot be accepted by a formatting check or
+reopen execution tools; the one-shot correction allowance survives checkpoints.
+Mixed gaps requiring a real observation still return to normal planning.
 
 Native response repair may project an exact retry schema that omits inactive
 collections only when every omitted value is empty and the remaining response

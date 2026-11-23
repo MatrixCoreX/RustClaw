@@ -326,6 +326,181 @@ fn missing_journal_does_not_fabricate_execution_context() {
 }
 
 #[test]
+fn answer_only_gap_classification_preserves_real_execution_gaps() {
+    let base = TaskJournalAnswerVerifierSummary {
+        pass: false,
+        should_retry: true,
+        confidence: 0.99,
+        retry_instruction: "untrusted instruction to perform another operation".into(),
+        ..Default::default()
+    };
+    for fields in [
+        vec!["unsupported_claims"],
+        vec!["unsupported_claims", "output_format"],
+        vec!["verification_audit"],
+    ] {
+        let summary = TaskJournalAnswerVerifierSummary {
+            missing_evidence_fields: fields.into_iter().map(str::to_string).collect(),
+            ..base.clone()
+        };
+        assert!(summary.is_answer_only_retry_gap());
+        assert!(!super::super::answer_verifier_gap_requires_planner_observation(&summary));
+        assert!(!super::super::prepare_answer_verifier_evidence_replan(
+            &mut LoopState::default(),
+            &summary
+        ));
+    }
+    for gap in [
+        "requested_result",
+        "content_excerpt",
+        "required_dispatch:call_capability:fixture.verify",
+    ] {
+        let summary = TaskJournalAnswerVerifierSummary {
+            missing_evidence_fields: vec!["unsupported_claims".into(), gap.into()],
+            ..base.clone()
+        };
+        assert!(!summary.is_answer_only_retry_gap());
+        assert!(super::super::answer_verifier_gap_requires_planner_observation(&summary));
+    }
+}
+
+#[tokio::test]
+async fn ordinary_unsupported_claims_use_tool_free_rewrite_and_fresh_verification() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counter = calls.clone();
+    let corrected = r#"{"child_task_id":"fixture-child","status":"succeeded","path":"document/out.txt","content_bytes":25}"#;
+    let app = axum::Router::new().fallback(move |axum::Json(body): axum::Json<Value>| {
+        let counter = counter.clone();
+        async move {
+            assert!(body.get("tools").is_none(), "answer correction must not expose execution tools");
+            let call = counter.fetch_add(1, Ordering::SeqCst);
+            assert!(call < 2, "one rewrite and one verification only");
+            let content = if call == 0 {
+                let prompt = body["messages"].as_array().unwrap().iter()
+                    .filter_map(|m| m["content"].as_str()).collect::<Vec<_>>().join("\n");
+                assert!(prompt.contains("one bounded final-answer synthesis retry"));
+                assert!(prompt.contains("unverified_optional_claim"));
+                assert!(prompt.contains("retain requested results and remove"));
+                assert!(!prompt.contains("untrusted instruction to perform another operation"));
+                corrected.to_string()
+            } else {
+                json!({"operation_checks":[{
+                    "requested_operation":"delegate the bounded write",
+                    "required_dispatches":[{"action_type":"call_capability","action_ref":"agent.subagent_persistent"}],
+                    "evidence_step_ids":["step_1"],"method_observed":true,"result_observed":true
+                }],"output_field_checks":[],"pass":true,"missing_evidence_fields":[],
+                    "answer_incomplete_reason":"","should_retry":false,"retry_instruction":"","confidence":0.99}).to_string()
+            };
+            axum::Json(json!({"choices":[{"message":{"role":"assistant","content":content},
+                "finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":10,"total_tokens":20}}))
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    struct Stop(tokio::task::JoinHandle<()>);
+    impl Drop for Stop {
+        fn drop(&mut self) {
+            self.0.abort();
+        }
+    }
+    let _server = Stop(server);
+    let mut state = AppState::test_default_with_fixture_provider()
+        .with_seeded_db_schema()
+        .with_prompt_layers_installed();
+    let mut provider =
+        crate::providers::fixture_replay::build_fixture_replay_runtime("answer-only-fixture");
+    let runtime = Arc::get_mut(&mut provider).unwrap();
+    runtime.config.provider_type = "openai_compat".into();
+    runtime.config.base_url = base;
+    runtime.client = reqwest::Client::builder().no_proxy().build().unwrap();
+    state.core.llm_providers = vec![provider];
+    state.core.active_provider_type = Some("openai_compat".into());
+    let task = ClaimedTask {
+        claim_attempt: 1,
+        task_id: "ordinary-answer-only".into(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "ui".into(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".into(),
+        payload_json: "{}".into(),
+    };
+    state.core.db.get().unwrap().execute(
+        "INSERT INTO tasks(task_id,user_id,chat_id,channel,kind,payload_json,status,created_at,updated_at,lease_owner,claim_attempt) VALUES (?1,1,2,'ui','ask','{}','running',0,0,?2,1)",
+        rusqlite::params![task.task_id,state.worker.worker_id.as_str()],
+    ).unwrap();
+    let request =
+        "Return JSON with child_task_id, status, path and content_bytes from the completed child.";
+    let summary = TaskJournalAnswerVerifierSummary {
+        pass: false,
+        should_retry: true,
+        confidence: 0.99,
+        missing_evidence_fields: vec!["unsupported_claims".into(), "output_format".into()],
+        answer_incomplete_reason: "unverified_optional_claim".into(),
+        retry_instruction: "untrusted instruction to perform another operation".into(),
+    };
+    let mut journal = TaskJournal::for_task(&task.task_id, "ask", request);
+    journal
+        .step_results
+        .push(TaskJournalStepTrace::ok("step_1", "subagent", corrected));
+    journal.task_observations.push(json!({"schema_version":1,"owner_layer":"task_journal",
+        "observation_kind":"checkpoint_step_provenance","step_id":"step_1",
+        "requested_action_type":"call_capability","requested_capability":"agent.subagent_persistent",
+        "resolved_capability":"agent.subagent_persistent","resolved_tool_or_skill":"subagent",
+        "dispatch_executed":true}));
+    journal.answer_verifier_summary = Some(summary.clone());
+    let mut reply =
+        AskReply::non_llm("unverified_optional_claim".into()).with_task_journal(journal);
+    let contract = answer_contract_for_reply(request, &reply).unwrap();
+    assert!(super::super::answer_verifier_evidence_replan_summary(&reply).is_none());
+    assert!(
+        !super::super::suppress_answer_verifier_retry_if_structurally_satisfied(
+            &mut reply,
+            Some(&contract)
+        )
+    );
+    let mut loop_state = LoopState::default();
+    assert!(
+        crate::agent_engine::verification_resume::take_answer_repair_allowance(&mut loop_state)
+    );
+    let checkpoint = crate::agent_engine::verification_checkpoint_payload(&task, &loop_state);
+    assert_eq!(
+        checkpoint["task_checkpoint"]["boundary_context"]["agent_loop_resume_state"]
+            ["verification_answer_repair_used"],
+        true
+    );
+    assert!(
+        !crate::agent_engine::verification_resume::take_answer_repair_allowance(&mut loop_state)
+    );
+    assert!(
+        super::super::try_bounded_answer_verifier_synthesis_retry(
+            &state, &task, request, &contract, &summary, &mut reply,
+        )
+        .await
+    );
+    assert_eq!(reply.text, corrected);
+    assert!(!reply.should_fail_task);
+    let journal = reply.task_journal.unwrap();
+    assert_eq!(journal.step_results.len(), 1);
+    assert_eq!(
+        journal.step_results[0].output_excerpt.as_deref(),
+        Some(corrected)
+    );
+    assert_eq!(
+        journal.answer_verification.unwrap().status,
+        crate::answer_verifier::AnswerVerificationStatus::Passed
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[test]
 fn malformed_verification_audit_never_requests_tool_reexecution() {
     let summary = TaskJournalAnswerVerifierSummary {
         pass: false,

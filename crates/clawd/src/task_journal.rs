@@ -571,6 +571,16 @@ impl TaskJournalAnswerVerifierSummary {
         !self.pass && self.should_retry && self.confidence >= 0.55
     }
 
+    pub(crate) fn is_answer_only_retry_gap(&self) -> bool {
+        self.high_confidence_retry_gap()
+            && self.missing_evidence_fields.iter().all(|field| {
+                matches!(
+                    field.trim(),
+                    "output_format" | "unsupported_claims" | "verification_audit"
+                )
+            })
+    }
+
     pub(crate) fn required_evidence_failure_payload_text(&self) -> String {
         json!({
             "schema_version": 1,

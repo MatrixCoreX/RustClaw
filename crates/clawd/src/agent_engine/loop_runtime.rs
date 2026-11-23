@@ -345,7 +345,7 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
             skip_planner_rounds = false;
             continue;
         }
-        let pre_finalize_loop_state = loop_state.clone();
+        let mut pre_finalize_loop_state = loop_state.clone();
         let finalization = crate::finalize::finalize_loop_reply(
             state,
             task,
@@ -491,15 +491,20 @@ async fn run_agent_with_loop_seeded_and_initial_plan(
         suppress_answer_verifier_retry_if_structurally_satisfied(&mut reply, route_result);
         if let Some(verifier) = answer_verifier_retry_summary(&reply, route_result).cloned() {
             if let Some(route) = route_result {
-                if try_bounded_answer_verifier_synthesis_retry(
-                    state,
-                    task,
-                    &effective_user_text,
-                    route,
-                    &verifier,
-                    &mut reply,
-                )
-                .await
+                let available = !verifier.is_answer_only_retry_gap()
+                    || super::verification_resume::take_answer_repair_allowance(
+                        &mut pre_finalize_loop_state,
+                    );
+                if available
+                    && try_bounded_answer_verifier_synthesis_retry(
+                        state,
+                        task,
+                        &effective_user_text,
+                        route,
+                        &verifier,
+                        &mut reply,
+                    )
+                    .await
                 {
                     info!("answer_verifier_bounded_synthesis_retry_succeeded");
                     if active_task_boundary_control_pending(state, task)? {

@@ -9,6 +9,13 @@ use sha2::{Digest, Sha256};
 mod answer_repair;
 pub(super) const ANSWER_REPAIR_USED: &str = "agent_loop.verification_answer_repair_used";
 
+pub(super) fn take_answer_repair_allowance(loop_state: &mut LoopState) -> bool {
+    loop_state
+        .output_vars
+        .insert(ANSWER_REPAIR_USED.into(), "true".into())
+        .is_none()
+}
+
 fn hash(value: &impl serde::Serialize) -> String {
     format!(
         "{:x}",
