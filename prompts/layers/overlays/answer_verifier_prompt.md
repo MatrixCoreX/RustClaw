@@ -89,6 +89,12 @@ readback. An equivalent or inferable end state never replaces a required method.
 requested_result even if the value/end state is otherwise known. Do not invent extra procedures for outcome-only requests or repeat an already evidenced method.
 
 For each required tool operation, emit one concise operation_checks row:
+On a protocol retry, verification_retry_context.operation_audit_contract supplies
+the schema's required fields and a bounded host-owned step/dispatch map. Copy
+all required fields, using [] for empty arrays. Match dispatches only within the
+cited row; delegated child methods cannot be attributed to their parent step.
+When truncated=true, omitted rows remain unknown; consult the full host evidence.
+Omit presentation-only operation rows and evaluate their content in the verdict.
 - requested_operation: the requested method, briefly.
 - required_dispatches: exact {action_type,action_ref} alternatives performing
   that method on that target. Prefer canonical call_capability names; otherwise
@@ -173,6 +179,9 @@ Cite the parent step and runtime-owned child/merge result.
 Do not require the parent to repeat the child's read, search or verification or invent child step IDs.
 Still audit each requested child, result completeness, scope and factual claim.
 Distinguish an explicitly attributed child-reported value from a claim of independent parent verification. Audit the former against the scoped child result, and the latter against independent execution evidence; never require a prohibited parent re-execution merely to repeat an attributed result.
+A requested pass/fail result supports the check defined by that child's frozen
+objective and result contract. Do not demand an additional raw-value field when
+the user requested only that check's outcome; it proves no unrelated value.
 The runtime-owned child result may include execution_receipts with
 source=host_child_execution_receipts and the exact owning child_task_id. These
 are projected from that child's retained journal, not its structured_result or

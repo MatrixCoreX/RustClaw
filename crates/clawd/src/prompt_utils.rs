@@ -111,7 +111,7 @@ impl PromptSchemaId {
         }
     }
 
-    fn schema_value(self) -> &'static Value {
+    pub(crate) fn schema_value(self) -> &'static Value {
         fn parse_schema(raw: &str) -> Value {
             serde_json::from_str(raw).expect("prompt schema must be valid JSON")
         }

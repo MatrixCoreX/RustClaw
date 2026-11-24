@@ -2,6 +2,9 @@ use serde_json::json;
 
 use super::*;
 
+#[path = "verification_retry_contract.rs"]
+mod verification_retry_contract;
+
 pub(in crate::answer_verifier) fn evidence_policy_context_prompt_block(
     route_result: &AnswerContract,
 ) -> String {
@@ -577,6 +580,7 @@ pub(in crate::answer_verifier) fn current_context_prompt_block(
                 "invalid_response_count": retry.get("invalid_response_count").and_then(serde_json::Value::as_u64),
                 "required_output_schema": "answer_verifier_v1",
                 "scope": "same_candidate_existing_evidence",
+                "operation_audit_contract": verification_retry_contract::project(journal),
             },
         }))
         .unwrap_or_else(|_| "{}".to_string());

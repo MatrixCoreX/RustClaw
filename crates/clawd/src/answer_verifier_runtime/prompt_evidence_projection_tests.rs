@@ -214,6 +214,17 @@ fn retry_feedback_preserves_attempt_count_without_forwarding_untrusted_fields() 
     );
     assert!(!block.contains("assume_pass"));
     assert!(!block.contains("fixture-sensitive"));
+    assert_eq!(
+        value["verification_retry_context"]["operation_audit_contract"]["operations"],
+        json!([])
+    );
+    assert!(
+        value["verification_retry_context"]["operation_audit_contract"]
+            ["operation_row_required_fields"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("evidence_step_ids"))
+    );
 }
 
 #[test]
