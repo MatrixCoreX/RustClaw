@@ -5,6 +5,7 @@
       <a href="#media-discovery">Media Discovery skill</a>
       <a href="#media-download">Media Download skill</a>
       <a href="#weather">Weather forecast skill</a>
+      <a href="#speech-transcription">Speech transcription skill</a>
       <a href="#aipp">AiAPP</a>
       <a href="#troubleshooting">Troubleshooting</a>
     </nav>
@@ -52,6 +53,18 @@
         <figcaption>Three-day forecast for Hangzhou in Agent chat (demo data).</figcaption>
       </figure>
       <p><a href="$repo/blob/main/optional_skills/weather/INTERFACE.md#actions">See the weather skill’s query options</a></p>
+    </section>
+
+    <section id="speech-transcription">
+      <h2>Speech transcription skill</h2>
+      <p>In the console, open <strong>Models → Multimodal Modules → Audio STT</strong> and confirm that transcription is enabled and a speech recognition model is configured. Then attach <code>meeting.wav</code> in <strong>Agent</strong> chat and send this request.</p>
+      <blockquote>“Transcribe the meeting recording I uploaded, meeting.wav. Paste the full transcript here and attach a TXT file.”</blockquote>
+      <p>When the task finishes, read the full transcript in the reply and use the download button on <code>transcript.txt</code> to save a copy.</p>
+      <figure class="example-shot">
+        <a href="${examples}speech-transcription.png"><img src="${examples}speech-transcription.png" alt="Agent chat shows the text of a meeting recording and a transcript.txt download." width="714" height="331" loading="lazy" decoding="async"></a>
+        <figcaption>Meeting transcript and TXT download in Agent chat (demo data).</figcaption>
+      </figure>
+      <p><a href="$repo/blob/main/crates/skills/audio_transcribe/INTERFACE.md#config-entry-points">See speech recognition configuration options</a></p>
     </section>
 
     <section id="aipp">

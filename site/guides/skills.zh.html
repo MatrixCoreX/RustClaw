@@ -5,6 +5,7 @@
       <a href="#media-discovery">媒体采集技能</a>
       <a href="#media-download">媒体下载技能</a>
       <a href="#weather">天气查询技能</a>
+      <a href="#speech-transcription">语音转写技能</a>
       <a href="#aipp">AiAPP</a>
       <a href="#troubleshooting">排查问题</a>
     </nav>
@@ -52,6 +53,18 @@
         <figcaption>Agent 对话中的杭州三天天气预报（演示数据）。</figcaption>
       </figure>
       <p><a href="$repo/blob/main/optional_skills/weather/INTERFACE.md#actions">查看天气技能支持的查询方式</a></p>
+    </section>
+
+    <section id="speech-transcription">
+      <h2>语音转写技能</h2>
+      <p>在控制台打开<strong>大模型 → 多模态模块 → 语音转写</strong>，确认转写已启用并配置好识别模型。然后回到 <strong>Agent</strong> 聊天，上传 <code>meeting.wav</code> 并发出这条请求。</p>
+      <blockquote>「把我上传的会议录音 meeting.wav 转成文字，回复里贴上全文，再给我一个 TXT 文件。」</blockquote>
+      <p>任务完成后，可以在回复中阅读完整文字稿。点击 <code>transcript.txt</code> 旁的下载按钮即可保存一份。</p>
+      <figure class="example-shot">
+        <a href="${examples}speech-transcription.png"><img src="${examples}speech-transcription.png" alt="Agent 对话展示会议录音的转写全文和 transcript.txt 下载按钮。" width="714" height="289" loading="lazy" decoding="async"></a>
+        <figcaption>Agent 对话中的会议转写和 TXT 下载（演示数据）。</figcaption>
+      </figure>
+      <p><a href="$repo/blob/main/crates/skills/audio_transcribe/INTERFACE.md#config-entry-points">查看语音识别配置说明</a></p>
     </section>
 
     <section id="aipp">

@@ -95,8 +95,10 @@ class ProjectSiteTest(unittest.TestCase):
                     check=True,
                 )
                 pi_guide = "zh/raspberry-pi-install/"
+                skill_examples = ("media-discovery", "media-download", "weather", "speech-transcription")
+                example_sections = ("mcp", "rag", *skill_examples)
                 topic_sections = {
-                    "skills/": {"install", "media-discovery", "media-download", "weather", "aipp", "troubleshooting"},
+                    "skills/": {"install", "aipp", "troubleshooting", *skill_examples},
                     "mcp/": {"connect", "permissions", "test", "troubleshooting"},
                     "rag/": {"prepare", "import", "ask", "troubleshooting"},
                 }
@@ -120,6 +122,7 @@ class ProjectSiteTest(unittest.TestCase):
                     topic = part.removeprefix("zh/")
                     preview = {"skills/": "media-discovery.png", "rag/": "rag.png"}.get(topic, "mcp.png")
                     example_dir = f"assets/examples/{locale.split('-')[0]}/"
+                    example_path = "../" * part.count("/") + example_dir
                     self.assertEqual(page.preview_image, base + example_dir + preview)
                     self.assertGreater((output / example_dir / preview).stat().st_size, 0)
                     alternates = {"en": base + topic, "zh-CN": base + "zh/" + topic, "x-default": base + topic}
@@ -131,7 +134,7 @@ class ProjectSiteTest(unittest.TestCase):
                     elif not topic:
                         self.assertIn(f"<title>{brand} by {owner} | ", source)
                         self.assertLessEqual(
-                            {"skills", "mcp", "rag", "media", "media-discovery", "media-download", "weather", "aipp"},
+                            {"skills", "mcp", "rag", "media", "aipp", *skill_examples},
                             page.ids,
                         )
                         for section_id in ("skills", "mcp", "rag"):
@@ -162,23 +165,22 @@ class ProjectSiteTest(unittest.TestCase):
                         self.assertIn("AiAPP", page.description)
                         self.assertCountEqual(
                             [asset for asset in page.assets if "assets/examples/" in asset],
-                            ["../" * part.count("/") + example_dir + name for name in (
-                                "mcp.png", "rag.png", "media-discovery.png", "media-download.png", "weather.png",
-                            )],
+                            [f"{example_path}{name}.png" for name in example_sections],
                         )
-                        for section_id in ("mcp", "rag", "media-discovery", "media-download", "weather"):
-                            self.assertEqual(
-                                page.section_assets[section_id],
-                                ["../" * part.count("/") + example_dir + section_id + ".png"],
-                            )
+                        for section_id in example_sections:
+                            self.assertEqual(page.section_assets[section_id], [f"{example_path}{section_id}.png"])
                         hrefs = {link["href"] for link in page.links}
                         self.assertLessEqual(set(topic_sections), hrefs)
-                        self.assertIn("skills/#weather", hrefs)
+                        self.assertLessEqual({f"skills/#{name}" for name in skill_examples}, hrefs)
                         self.assertIn(pi_guide if not part else "raspberry-pi-install/", hrefs)
                     else:
                         self.assertLessEqual(topic_sections[topic], page.ids)
                         if topic == "skills/":
-                            self.assertIn("../" * part.count("/") + example_dir + "weather.png", page.assets)
+                            for section_id in skill_examples:
+                                self.assertEqual(
+                                    page.section_assets[section_id],
+                                    [f"{example_path}{section_id}.png"],
+                                )
                         other_locale = "zh-CN" if locale == "en" else "en"
                         switches = [link for link in page.links if link.get("lang") == other_locale]
                         self.assertEqual(len(switches), 1)
