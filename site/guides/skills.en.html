@@ -21,25 +21,37 @@
 
     <section id="media-discovery">
       <h2>Media Discovery skill</h2>
-      <p>With <strong>Media Discovery</strong> enabled, name a supported platform, a topic, and a limit for your first batch. The results can include previews, author captions, source links, and engagement counts available at collection time.</p>
-      <blockquote>“Search Xiaohongshu for camping gear. Collect one batch of up to five posts and keep their captions, previews, and source links.”</blockquote>
+      <p>With <strong>Media Discovery</strong> enabled, name the platforms, a topic, and a limit for your first batch. The results can include previews, author captions, source links, and engagement counts available at collection time.</p>
+      <blockquote>“Collect one post about camping gear from Xiaohongshu and one from Douyin. Keep the captions, previews, and source links.”</blockquote>
       <p>Open <strong>AiAPP → Media Discovery</strong> to filter by platform or content type, preview a post, or open the source. You can also ask the agent to start, pause, or stop an ongoing collection.</p>
-      <figure class="example-shot">
-        <a href="${examples}media-discovery.png"><img src="${examples}media-discovery.png" alt="$preview_alt" width="1120" height="642" loading="lazy" decoding="async"></a>
-        <figcaption>Screenshot of the Media Discovery skill’s companion AiAPP, with sample collection results.</figcaption>
-      </figure>
+      <div class="media-steps">
+        <figure class="example-shot">
+          <a href="${examples}media-discovery-agent.png"><img src="${examples}media-discovery-agent.png" alt="Agent chat shows a camping gear collection request and a reply listing one post from each platform." width="714" height="281" loading="lazy" decoding="async"></a>
+          <figcaption><strong>Agent</strong> · Start the collection and see which two posts were saved.</figcaption>
+        </figure>
+        <figure class="example-shot">
+          <a href="${examples}media-discovery.png"><img src="${examples}media-discovery.png" alt="The Media Discovery AiAPP shows two sample camping posts with previews, captions, and source links." width="1120" height="642" loading="lazy" decoding="async"></a>
+          <figcaption><strong>AiAPP</strong> · Open Media Discovery to see the previews, captions, and source links (demo data).</figcaption>
+        </figure>
+      </div>
       <p><a href="$repo/blob/main/docs/architecture/12-media-discovery.md">Media Discovery platforms and collection behavior</a></p>
     </section>
 
     <section id="media-download">
       <h2>Media Download skill</h2>
       <p>With <strong>Media Download</strong> enabled, paste a supported post URL or the full message copied from the platform's share menu. The skill can save available original videos or images, along with the original text for supported article posts. Larger image sets are delivered as a ZIP.</p>
-      <blockquote>“Save the original images and any available article text from this Xiaohongshu post: [paste the share link].”</blockquote>
+      <blockquote>“Save the original photos and article from this camping post: [paste the Xiaohongshu share link].”</blockquote>
       <p>Download the files from the Agent result, or go to <strong>AiAPP → Media Download</strong> to review retained tasks and their files. The history includes tasks run in Agent chat and through connected messaging channels.</p>
-      <figure class="example-shot">
-        <a href="${examples}media-download.png"><img src="${examples}media-download.png" alt="AiAPP lists sample downloads, saved image and text files, and a failed task." width="1120" height="853" loading="lazy" decoding="async"></a>
-        <figcaption>Screenshot of the Media Download skill’s companion AiAPP, with sample tasks and files.</figcaption>
-      </figure>
+      <div class="media-steps">
+        <figure class="example-shot">
+          <a href="${examples}media-download-agent.png"><img src="${examples}media-download-agent.png" alt="Agent chat shows a request to download a camping post and a reply with two original photos and a text file." width="714" height="330" loading="lazy" decoding="async"></a>
+          <figcaption><strong>Agent</strong> · Send a post’s share link and download the photos and text from the reply.</figcaption>
+        </figure>
+        <figure class="example-shot">
+          <a href="${examples}media-download.png"><img src="${examples}media-download.png" alt="The Media Download AiAPP shows one completed task with two original photos and the article text file." width="702" height="943" loading="lazy" decoding="async"></a>
+          <figcaption><strong>AiAPP</strong> · Open Media Download to find the completed task and its files (demo data).</figcaption>
+        </figure>
+      </div>
       <p><a href="$repo/blob/main/optional_skills/media_download/INTERFACE.md">Media Download platforms and output formats</a></p>
     </section>
 

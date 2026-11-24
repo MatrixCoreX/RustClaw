@@ -29,31 +29,39 @@
       <article class="skills-overview">
         <p>Enable skills to work with files, transcribe audio, collect and download media, or check current weather and daily forecasts through chat.</p>
         <a href="skills/">Install and use skills</a>
-        <p class="skill-example-intro">Start media collection and downloads in Agent chat. The screenshots show the media skills’ companion AiAPP views, where you can review the results.</p>
+        <p class="skill-example-intro">Start each task in Agent chat, then open the skill’s companion AiAPP to review the results. The screenshots use demo data.</p>
         <div class="skill-examples" id="media">
-          <section class="workflow" id="media-discovery" aria-labelledby="discovery-heading">
-            <div>
-              <h3 id="discovery-heading">Media Discovery skill</h3>
-              <p>Collect posts by topic from supported sites such as Xiaohongshu, Douyin, and Bilibili. A collection can keep the original captions, previews, source links, and engagement numbers available at the time. Run a single batch or ask the agent to start, pause, or stop an ongoing collection.</p>
-              <blockquote>“Search Xiaohongshu for camping gear. Collect one batch of up to five posts and keep their captions, previews, and source links.”</blockquote>
-              <div class="detail-links"><a href="skills/#media-discovery">Try the Media Discovery example</a></div>
+          <section id="media-discovery" aria-labelledby="discovery-heading">
+            <h3 id="discovery-heading">Media Discovery skill</h3>
+            <p>Collect posts by topic from supported sites such as Xiaohongshu, Douyin, and Bilibili. A collection can keep the original captions, previews, source links, and engagement numbers available at the time. Run a single batch or ask the agent to start, pause, or stop an ongoing collection.</p>
+            <blockquote>“Collect one post about camping gear from Xiaohongshu and one from Douyin. Keep the captions, previews, and source links.”</blockquote>
+            <div class="detail-links"><a href="skills/#media-discovery">Try the Media Discovery example</a></div>
+            <div class="media-steps">
+              <figure class="example-shot">
+                <a href="${examples}media-discovery-agent.png"><img src="${examples}media-discovery-agent.png" alt="Agent chat shows a camping gear collection request and a reply listing one post from each platform." width="714" height="281" loading="lazy" decoding="async"></a>
+                <figcaption><strong>Agent</strong> · Start the collection and see which two posts were saved.</figcaption>
+              </figure>
+              <figure class="example-shot">
+                <a href="${examples}media-discovery.png"><img src="${examples}media-discovery.png" alt="The Media Discovery AiAPP shows two sample camping posts with previews, captions, and source links." width="1120" height="642" loading="lazy" decoding="async"></a>
+                <figcaption><strong>AiAPP</strong> · Open Media Discovery to see the previews, captions, and source links.</figcaption>
+              </figure>
             </div>
-            <figure class="example-shot">
-              <a href="${examples}media-discovery.png"><img src="${examples}media-discovery.png" alt="Media Discovery in AiAPP shows two sample camping posts with previews, captions, and engagement figures." width="1120" height="642" loading="lazy" decoding="async"></a>
-              <figcaption>The Media Discovery companion AiAPP shows sample collection results.</figcaption>
-            </figure>
           </section>
-          <section class="workflow" id="media-download" aria-labelledby="download-heading">
-            <div>
-              <h3 id="download-heading">Media Download skill</h3>
-              <p>Send a supported post URL or paste its app share message. The skill saves the available original video or images and can return the original article text for supported posts. Larger image sets are delivered in a ZIP file.</p>
-              <blockquote>“Save the original images and any available article text from this Xiaohongshu post: [paste the share link].”</blockquote>
-              <div class="detail-links"><a href="skills/#media-download">Try the Media Download example</a></div>
+          <section id="media-download" aria-labelledby="download-heading">
+            <h3 id="download-heading">Media Download skill</h3>
+            <p>Send a supported post URL or paste its app share message. The skill saves the available original video or images and can return the original article text for supported posts. Larger image sets are delivered in a ZIP file.</p>
+            <blockquote>“Save the original photos and article from this camping post: [paste the Xiaohongshu share link].”</blockquote>
+            <div class="detail-links"><a href="skills/#media-download">Try the Media Download example</a></div>
+            <div class="media-steps">
+              <figure class="example-shot">
+                <a href="${examples}media-download-agent.png"><img src="${examples}media-download-agent.png" alt="Agent chat shows a request to download a camping post and a reply with two original photos and a text file." width="714" height="330" loading="lazy" decoding="async"></a>
+                <figcaption><strong>Agent</strong> · Send a post’s share link and download the photos and text from the reply.</figcaption>
+              </figure>
+              <figure class="example-shot">
+                <a href="${examples}media-download.png"><img src="${examples}media-download.png" alt="The Media Download AiAPP shows one completed task with two original photos and the article text file." width="702" height="943" loading="lazy" decoding="async"></a>
+                <figcaption><strong>AiAPP</strong> · Open Media Download to find the completed task and its files.</figcaption>
+              </figure>
             </div>
-            <figure class="example-shot">
-              <a href="${examples}media-download.png"><img src="${examples}media-download.png" alt="Media Download in AiAPP shows a completed sample task with image and text files alongside a failed task." width="1120" height="853" loading="lazy" decoding="async"></a>
-              <figcaption>The Media Download companion AiAPP shows sample tasks and output files.</figcaption>
-            </figure>
           </section>
         </div>
         <section class="workflow" id="weather" aria-labelledby="weather-heading">

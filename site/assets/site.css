@@ -69,8 +69,9 @@ article p, .install p { color: var(--muted); margin: .6rem 0; }
 .skill-examples, .skills-overview > section { margin-top: 1.2rem; padding-top: 1.2rem; border-top: 1px solid var(--edge); }
 .skills-overview h3 { margin: 0; font-size: 1.1rem; }
 .skills-overview .skill-example-intro { margin-top: 1rem; }
-.skill-examples > .workflow:first-child { margin-top: 0; }
-.skill-examples > .workflow + .workflow { padding-top: 1.2rem; border-top: 1px solid var(--edge); }
+.skill-examples > section + section { margin-top: 1.65rem; padding-top: 1.45rem; border-top: 1px solid var(--edge); }
+.media-steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 1.25rem; margin-top: 1.2rem; }
+.media-steps > .example-shot { margin: 0; }
 blockquote { margin: 1.1rem 0; padding: .55rem .8rem; border-inline-start: 3px solid var(--accent); background: var(--highlight); border-radius: 0 .4rem .4rem 0; }
 .workflow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; gap: clamp(1rem, 4vw, 3rem); margin-top: 2rem; }
 .workflow h3 { margin: 0 0 .55rem; }
@@ -93,7 +94,7 @@ blockquote { margin: 1.1rem 0; padding: .55rem .8rem; border-inline-start: 3px s
 #install-macos:checked ~ .platform-actions [data-platform="macos"] { display: inline-flex; }
 .footer { padding: 1.6rem 0 2.1rem; font-size: .94rem; color: var(--muted); }
 @media (max-width: 55rem) {
-  .workflow { grid-template-columns: 1fr; }
+  .workflow, .media-steps { grid-template-columns: 1fr; }
 }
 @media (max-width: 36rem) {
   .wrap { width: calc(100% - 2rem); }

@@ -22,24 +22,36 @@
     <section id="media-discovery">
       <h2>媒体采集技能</h2>
       <p>启用<strong>媒体采集</strong>后，可以指定支持的平台、关键词和本批数量。采集结果可以保留预览、作者文案、来源链接和采集当时能读取到的互动数据。</p>
-      <blockquote>「在小红书搜索『露营装备』，只采一批，最多 5 条，保留作者文案、预览和来源链接。」</blockquote>
+      <blockquote>「在小红书和抖音各采集一条关于露营装备的帖子，保留作者文案、预览和来源链接。」</blockquote>
       <p>打开 <strong>AiAPP → 媒体发现</strong>，可以按平台或内容类型筛选、预览结果和打开原帖。需要持续采集时，可以在 Agent 中提出开启、暂停或停止的请求。</p>
-      <figure class="example-shot">
-        <a href="${examples}media-discovery.png"><img src="${examples}media-discovery.png" alt="$preview_alt" width="1120" height="622" loading="lazy" decoding="async"></a>
-        <figcaption>媒体采集技能的配套 AiAPP「媒体发现」截图（演示数据）。</figcaption>
-      </figure>
+      <div class="media-steps">
+        <figure class="example-shot">
+          <a href="${examples}media-discovery-agent.png"><img src="${examples}media-discovery-agent.png" alt="Agent 对话中发起露营装备采集，并收到小红书和抖音各一条帖子的回复。" width="714" height="261" loading="lazy" decoding="async"></a>
+          <figcaption><strong>Agent</strong> · 发起采集，确认保存了两条帖子。</figcaption>
+        </figure>
+        <figure class="example-shot">
+          <a href="${examples}media-discovery.png"><img src="${examples}media-discovery.png" alt="AiAPP「媒体发现」显示两条露营帖子及其预览、文案和来源入口。" width="1120" height="622" loading="lazy" decoding="async"></a>
+          <figcaption><strong>AiAPP</strong> · 在「媒体发现」查看帖子预览、作者文案和来源（演示数据）。</figcaption>
+        </figure>
+      </div>
       <p><a href="$repo/blob/main/docs/architecture/12-media-discovery.zh-CN.md">查看媒体采集支持的平台和执行方式</a></p>
     </section>
 
     <section id="media-download">
       <h2>媒体下载技能</h2>
       <p>启用<strong>媒体下载</strong>后，把支持平台的作品链接或完整分享文案发给 Agent。可以保存能获取到的原视频、原图，以及支持的图文作品正文。图片较多时会打包为 ZIP。</p>
-      <blockquote>「帮我保存这条小红书图文的原图和能获取到的正文：[粘贴分享链接]。」</blockquote>
+      <blockquote>「保存这条露营图文的原图和正文：[粘贴小红书分享链接]。」</blockquote>
       <p>可以从 Agent 回复里下载文件，也可以到 <strong>AiAPP → 媒体下载</strong>查找已保留的任务和附件。记录覆盖 Agent 聊天和已接入的消息渠道。</p>
-      <figure class="example-shot">
-        <a href="${examples}media-download.png"><img src="${examples}media-download.png" alt="AiAPP 显示模拟下载任务、已保存的图片和正文，以及一条失败记录。" width="1120" height="833" loading="lazy" decoding="async"></a>
-        <figcaption>媒体下载技能的配套 AiAPP「媒体下载」截图（演示数据）。</figcaption>
-      </figure>
+      <div class="media-steps">
+        <figure class="example-shot">
+          <a href="${examples}media-download-agent.png"><img src="${examples}media-download-agent.png" alt="Agent 对话中提交一条露营图文的下载请求，回复附有两张原图和一份正文。" width="714" height="307" loading="lazy" decoding="async"></a>
+          <figcaption><strong>Agent</strong> · 发送图文分享链接，从回复中下载原图和正文。</figcaption>
+        </figure>
+        <figure class="example-shot">
+          <a href="${examples}media-download.png"><img src="${examples}media-download.png" alt="AiAPP「媒体下载」显示一条已完成的任务，包含两张原图和一份正文文件。" width="702" height="943" loading="lazy" decoding="async"></a>
+          <figcaption><strong>AiAPP</strong> · 在「媒体下载」找到这条已完成的任务和生成文件（演示数据）。</figcaption>
+        </figure>
+      </div>
       <p><a href="$repo/blob/main/optional_skills/media_download/INTERFACE.md">查看媒体下载支持的平台和交付格式</a></p>
     </section>
 

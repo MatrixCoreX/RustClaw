@@ -95,7 +95,8 @@ class ProjectSiteTest(unittest.TestCase):
                     check=True,
                 )
                 pi_guide = "zh/raspberry-pi-install/"
-                skill_examples = ("media-discovery", "media-download", "weather", "speech-transcription")
+                media_examples = ("media-discovery", "media-download")
+                skill_examples = (*media_examples, "weather", "speech-transcription")
                 example_sections = ("mcp", "rag", *skill_examples)
                 topic_sections = {
                     "skills/": {"install", "aipp", "troubleshooting", *skill_examples},
@@ -123,6 +124,9 @@ class ProjectSiteTest(unittest.TestCase):
                     preview = {"skills/": "media-discovery.png", "rag/": "rag.png"}.get(topic, "mcp.png")
                     example_dir = f"assets/examples/{locale.split('-')[0]}/"
                     example_path = "../" * part.count("/") + example_dir
+                    example_images = {section: [f"{example_path}{section}.png"] for section in example_sections}
+                    for section in media_examples:
+                        example_images[section].insert(0, f"{example_path}{section}-agent.png")
                     self.assertEqual(page.preview_image, base + example_dir + preview)
                     self.assertGreater((output / example_dir / preview).stat().st_size, 0)
                     alternates = {"en": base + topic, "zh-CN": base + "zh/" + topic, "x-default": base + topic}
@@ -165,10 +169,10 @@ class ProjectSiteTest(unittest.TestCase):
                         self.assertIn("AiAPP", page.description)
                         self.assertCountEqual(
                             [asset for asset in page.assets if "assets/examples/" in asset],
-                            [f"{example_path}{name}.png" for name in example_sections],
+                            [image for images in example_images.values() for image in images],
                         )
                         for section_id in example_sections:
-                            self.assertEqual(page.section_assets[section_id], [f"{example_path}{section_id}.png"])
+                            self.assertEqual(page.section_assets[section_id], example_images[section_id])
                         hrefs = {link["href"] for link in page.links}
                         self.assertLessEqual(set(topic_sections), hrefs)
                         self.assertLessEqual({f"skills/#{name}" for name in skill_examples}, hrefs)
@@ -179,7 +183,7 @@ class ProjectSiteTest(unittest.TestCase):
                             for section_id in skill_examples:
                                 self.assertEqual(
                                     page.section_assets[section_id],
-                                    [f"{example_path}{section_id}.png"],
+                                    example_images[section_id],
                                 )
                         other_locale = "zh-CN" if locale == "en" else "en"
                         switches = [link for link in page.links if link.get("lang") == other_locale]
