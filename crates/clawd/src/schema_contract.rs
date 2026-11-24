@@ -471,7 +471,17 @@ pub(crate) fn unknown_argument_violations(
     args: &Value,
 ) -> Vec<UnknownArgumentViolation> {
     let mut violations = Vec::new();
-    collect_unknown_argument_violations(input_schema, args, "", true, &mut violations);
+    collect_unknown_argument_violations(input_schema, args, "", true, true, &mut violations);
+    violations.sort_by(|left, right| left.field.cmp(&right.field));
+    violations
+}
+
+pub(crate) fn explicit_unknown_argument_violations(
+    input_schema: &Value,
+    args: &Value,
+) -> Vec<UnknownArgumentViolation> {
+    let mut violations = Vec::new();
+    collect_unknown_argument_violations(input_schema, args, "", true, false, &mut violations);
     violations.sort_by(|left, right| left.field.cmp(&right.field));
     violations
 }
@@ -481,15 +491,26 @@ fn collect_unknown_argument_violations(
     value: &Value,
     path: &str,
     root: bool,
+    close_unspecified: bool,
     violations: &mut Vec<UnknownArgumentViolation>,
 ) {
+    let empty_properties = serde_json::Map::new();
     if let (Some(properties), Some(object)) = (
-        schema.get("properties").and_then(Value::as_object),
+        schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .or_else(|| {
+                (!close_unspecified
+                    && schema.get("additionalProperties") == Some(&Value::Bool(false)))
+                .then_some(&empty_properties)
+            }),
         value.as_object(),
     ) {
         let open = schema
             .get("additionalProperties")
             .is_some_and(|value| value == &Value::Bool(true) || value.is_object());
+        let closed = schema.get("additionalProperties") == Some(&Value::Bool(false))
+            || (close_unspecified && !open);
         for (field, field_value) in object {
             if let Some(field_schema) = properties.get(field) {
                 collect_unknown_argument_violations(
@@ -497,9 +518,10 @@ fn collect_unknown_argument_violations(
                     field_value,
                     &object_field_path(path, field),
                     false,
+                    close_unspecified,
                     violations,
                 );
-            } else if !open
+            } else if closed
                 && !(root && field == "action")
                 && !(root && field.starts_with("_clawd_"))
             {
@@ -516,6 +538,7 @@ fn collect_unknown_argument_violations(
                 item,
                 &array_item_path(path, index),
                 false,
+                close_unspecified,
                 violations,
             );
         }

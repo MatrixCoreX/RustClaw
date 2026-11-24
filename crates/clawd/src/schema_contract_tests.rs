@@ -6,6 +6,40 @@ use super::{
 };
 
 #[test]
+fn explicit_unknown_fields_honor_open_defaults_and_preserve_legacy_checks() {
+    let open = json!({"type":"object","properties":{"known":{"type":"string"}}});
+    let args = json!({"known":"value","extra":false});
+    assert!(super::explicit_unknown_argument_violations(&open, &args).is_empty());
+    assert_eq!(unknown_argument_violations(&open, &args).len(), 1);
+    let mut closed = open;
+    closed["additionalProperties"] = json!(false);
+    assert_eq!(
+        super::explicit_unknown_argument_violations(&closed, &args).len(),
+        1
+    );
+    assert_eq!(unknown_argument_violations(&closed, &args).len(), 1);
+}
+
+#[test]
+fn explicit_unknown_fields_cover_nested_objects_arrays_and_empty_closed_objects() {
+    let schema = json!({"type":"object","additionalProperties":false,"properties":{
+        "open":{"type":"object","properties":{"known":{}}},
+        "closed":{"type":"object","additionalProperties":false,"properties":{"known":{}}},
+        "items":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"known":{}}}},
+        "empty":{"type":"object","additionalProperties":false}}});
+    let args =
+        json!({"open":{"extra":1},"closed":{"extra":1},"items":[{"extra":1}],"empty":{"extra":1}});
+    let fields = super::explicit_unknown_argument_violations(&schema, &args)
+        .into_iter()
+        .map(|v| v.field)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        fields,
+        vec!["closed.extra", "empty.extra", "items[0].extra"]
+    );
+}
+
+#[test]
 fn required_literal_args_do_not_bypass_other_schema_constraints() {
     let field = json!({"type": "string", "minLength": 0, "enum": ["accepted"]});
     assert!(super::required_value_is_present(Some(&field), &json!("\n")));

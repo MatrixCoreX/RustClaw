@@ -26,6 +26,8 @@ use crate::capability_map::loader_contract::tool_definition as native_capability
 #[path = "planning/context_length_recovery.rs"]
 mod context_length_recovery;
 use context_length_recovery::{compact_text_to_token_budget, context_length_recovery_request};
+#[path = "planning/child_native_argument_fields.rs"]
+mod child_native_argument_fields;
 #[path = "planning/native_capability_tools.rs"]
 mod native_capability_tools;
 #[path = "planning/native_context_index.rs"]
@@ -453,11 +455,17 @@ pub(super) async fn plan_round_actions(
         .as_ref()
         .map(crate::task_budget_contract::TaskBudgetSlice::provider_call_timeout_seconds);
     let callable_capability_names = planner_tool_library.callable_capability_names(loop_state);
-    let mcp_capability_argument_schemas =
+    let mut mcp_capability_argument_schemas =
         planner_tool_library.mcp_capability_argument_schemas(loop_state);
     let all_native_capability_groups = planner_tool_library.all_native_capability_groups();
-    let native_capability_groups =
+    let mut native_capability_groups =
         planner_tool_library.disclosed_native_capability_groups(loop_state);
+    child_native_argument_fields::restrict(
+        state,
+        task,
+        &mut mcp_capability_argument_schemas,
+        &mut native_capability_groups,
+    );
     let mut native_capability_argument_schemas = mcp_capability_argument_schemas.clone();
     for group in &native_capability_groups {
         native_capability_argument_schemas.extend(group.capability_argument_schemas.clone());

@@ -10,6 +10,7 @@ pub(super) fn native_argument_values_valid(schema: &Value, args: &Value) -> bool
     crate::schema_contract::enum_constraint_violations(schema, args).is_empty()
         && crate::schema_contract::type_constraint_violations(schema, args).is_empty()
         && crate::schema_contract::value_constraint_violations(schema, args).is_empty()
+        && crate::schema_contract::explicit_unknown_argument_violations(schema, args).is_empty()
 }
 
 pub(super) fn native_capability_tool_definition(
