@@ -5,6 +5,8 @@
     <a href="#skills">技能</a>
     <a href="#mcp">MCP</a>
     <a href="#rag">知识库</a>
+    <a href="#media">媒体技能</a>
+    <a href="#aipp">AiAPP</a>
     <a href="#install">安装</a>
     <a href="../" lang="en" hreflang="en">English</a>
     <a class="source-link" href="$repo">GitHub</a>
@@ -26,7 +28,7 @@
       <figcaption>网页控制台中的订单查询示例，使用模拟数据。</figcaption>
     </figure>
   </section>
-  <section id="use-cases" aria-labelledby="use-heading">
+  <section class="page-section" id="use-cases" aria-labelledby="use-heading">
     <h2 id="use-heading">Agent 技能、MCP 工具与 RAG 知识库</h2>
     <div class="capabilities">
       <article class="capability" id="skills" aria-labelledby="skills-heading">
@@ -34,7 +36,7 @@
           <h3 id="skills-heading">使用和安装 Agent 技能</h3>
           <p>技能让 Agent 能处理文件、提取文档内容或转写语音。你可以在聊天里直接描述想要的结果，Agent 会根据任务选择可用的技能。</p>
           <blockquote>「读一下我上传的 PDF，列出需要跟进的事项和截止日期。」</blockquote>
-          <a href="$repo/blob/main/README.zh-CN.md#技能体系">了解内置技能和按需安装的技能</a>
+          <a href="#media">试试媒体技能</a> · <a href="$repo/blob/main/README.zh-CN.md#技能体系">了解完整技能体系</a>
         </div>
         <ol>
           <li>在首页打开<strong>工具技能</strong>，查看已安装技能及其启用状态。</li>
@@ -74,6 +76,43 @@
       <p>接好订单查询工具并导入售后手册后，一条消息就可以同时查当前物流状态和书面退货规则。</p>
       <blockquote>「查一下订单 3 是否发货，再根据《售后手册》说明商品有质量问题时谁承担退货运费，并给出规则出处。」</blockquote>
     </div>
+  </section>
+  <section class="page-section" id="media" aria-labelledby="media-heading">
+    <h2 id="media-heading">媒体采集与媒体下载</h2>
+    <p class="section-intro">在 <strong>Skill Store</strong> 可以查看这两个技能的安装状态和所需依赖。启用想用的技能后，在 <strong>Agent</strong> 聊天里试试下面的指令。</p>
+    <div class="detail-grid">
+      <article id="media-discovery" aria-labelledby="discovery-heading">
+        <h3 id="discovery-heading">媒体采集</h3>
+        <p>按关键词从小红书、抖音、哔哩哔哩等支持的平台收集帖子，保留作者文案、预览、来源链接和采集时能读取到的互动数据。可以只采一批，也可以在 Agent 里开启、暂停或停止持续采集。</p>
+        <blockquote>「在小红书搜索『露营装备』，只采一批，最多 5 条，保留作者文案、预览和来源链接。」</blockquote>
+        <a href="$repo/blob/main/docs/architecture/12-media-discovery.zh-CN.md">了解媒体采集的方式和结果</a>
+      </article>
+      <article id="media-download" aria-labelledby="download-heading">
+        <h3 id="download-heading">媒体下载</h3>
+        <p>把支持平台的作品链接或完整分享文案发给 Agent，就可以保存能获取到的原视频或原图。支持的图文作品还可以一并保存原文，图片较多时会打成 ZIP 文件。</p>
+        <blockquote>「帮我保存这条小红书图文的原图和能获取到的正文：[粘贴分享链接]。」</blockquote>
+        <a href="$repo/blob/main/optional_skills/media_download/INTERFACE.md">查看支持的平台和交付格式</a>
+      </article>
+    </div>
+  </section>
+  <section class="page-section" id="aipp" aria-labelledby="aipp-heading">
+    <h2 id="aipp-heading">AiAPP 技能配套界面</h2>
+    <p class="section-intro">管理员可以在网页控制台的 <strong>AiAPP</strong> 打开配套界面，或通过<strong>安装应用</strong>添加已启用技能的配套应用。进入<strong>媒体发现</strong>，可以按平台筛选、预览帖子并打开原帖。进入<strong>媒体下载</strong>，可以按渠道或状态筛选任务、查看失败原因并下载附件。</p>
+    <dl class="aipp-design">
+      <div>
+        <dt>由技能包声明</dt>
+        <dd>技能在 <code>skill.toml</code> 的 <code>[aipp]</code> 段声明要提供的界面。应用能否访问取决于对应技能的版本、启用状态和授权。</dd>
+      </div>
+      <div>
+        <dt>由控制台按约定提供数据</dt>
+        <dd>内置界面按版本化的数据约定读取结果。媒体发现读取本技能的采集记录。媒体下载展示从 Agent 和已绑定消息渠道发起的下载任务历史。</dd>
+      </div>
+      <div>
+        <dt>支持独立扩展</dt>
+        <dd>技能也可以随包提供自定义静态界面。界面在沙箱中运行，通过宿主调用明确授权的能力。</dd>
+      </div>
+    </dl>
+    <p class="detail-links"><a href="$repo/blob/main/docs/architecture/14-aipp-skill-companions.zh-CN.md">阅读 AiAPP 设计</a> <a href="$repo/blob/main/docs/architecture/15-aipp-development-guide.zh-CN.md">查看 AiAPP 开发手册</a></p>
   </section>
   <section id="install" class="install" aria-labelledby="install-heading">
     <div>

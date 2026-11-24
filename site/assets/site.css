@@ -40,6 +40,7 @@ a:hover { text-decoration-thickness: .13em; }
 .site-header { min-height: 4.75rem; border-bottom: 1px solid var(--edge); }
 .brand { display: inline-flex; align-items: center; gap: .55rem; font-weight: 760; color: var(--ink); text-decoration: none; }
 nav { display: flex; align-items: center; gap: clamp(.75rem, 3vw, 1.7rem); }
+.site-header nav { justify-content: flex-end; flex-wrap: wrap; row-gap: .45rem; }
 nav a { color: var(--ink); font-size: .92rem; text-decoration: none; }
 nav a:hover, .byline a:hover { text-decoration: underline; }
 .source-link { font-weight: 650; }
@@ -60,7 +61,8 @@ h1 span { display: block; margin-top: .4rem; font-size: clamp(1.35rem, 2.5vw, 2.
 .preview { margin: 0; padding: .7rem; border: 1px solid var(--edge); border-radius: 1.1rem; background: var(--surface); box-shadow: var(--shadow); }
 .preview img { display: block; width: 100%; height: auto; aspect-ratio: 794 / 540; object-fit: contain; border-radius: .65rem; background: #253036; }
 figcaption { margin: .52rem .2rem 0; font-size: .87rem; color: var(--muted); }
-#use-cases { border-top: 1px solid var(--edge); padding: clamp(2rem, 5vw, 4rem) 0; }
+.page-section { border-top: 1px solid var(--edge); padding: clamp(2rem, 5vw, 4rem) 0; }
+.section-intro { max-width: 74ch; margin: 0 0 1.15rem; color: var(--muted); }
 h2 { margin: 0 0 1rem; font-size: clamp(1.65rem, 3.6vw, 2.6rem); letter-spacing: -.04em; }
 .capabilities { display: grid; gap: 1rem; }
 article { padding: clamp(1.1rem, 3vw, 1.8rem); border-radius: 1rem; border: 1px solid var(--edge); background: var(--surface); }
@@ -75,6 +77,13 @@ blockquote { margin: 1.1rem 0; padding: .55rem .8rem; border-inline-start: 3px s
 .workflow h3 { margin-bottom: .55rem; }
 .workflow p { margin: 0; color: var(--muted); }
 .workflow blockquote { margin-bottom: 0; }
+.detail-grid, .aipp-design { display: grid; gap: 1rem; }
+.detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.aipp-design { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 1.2rem 0; }
+.aipp-design div { border-top: 1px solid var(--edge); padding-top: .8rem; }
+.aipp-design dt { font-weight: 700; }
+.aipp-design dd { margin: .3rem 0 0; color: var(--muted); }
+.detail-links { display: flex; flex-wrap: wrap; gap: .45rem 1.2rem; margin: 1.2rem 0 0; }
 .install { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 1rem; padding: clamp(1.25rem, 4vw, 2.4rem); border-radius: 1rem; background: var(--highlight); }
 .install h2 { margin: 0; }
 .platforms { display: flex; flex-wrap: wrap; gap: .35rem 1.2rem; padding: 0; margin: .75rem 0 0; list-style: none; font-size: .95rem; font-weight: 650; }
@@ -82,12 +91,17 @@ blockquote { margin: 1.1rem 0; padding: .55rem .8rem; border-inline-start: 3px s
 @media (max-width: 55rem) {
   .hero { grid-template-columns: 1fr; }
   .capability { grid-template-columns: 1fr; }
+  .aipp-design { grid-template-columns: 1fr; }
   .install { grid-template-columns: 1fr; }
+}
+@media (max-width: 42rem) {
+  .detail-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 36rem) {
   .wrap { width: calc(100% - 2rem); }
   .site-header { align-items: flex-start; flex-direction: column; padding: .75rem 0; gap: .5rem; }
   nav { flex-wrap: wrap; }
+  .site-header nav { justify-content: flex-start; }
 }
 
 .platform-guide { grid-column: 1 / -1; justify-self: start; font-weight: 650; }

@@ -37,12 +37,12 @@ def build(output: Path):
     pages = [
         (
             "en.html", "en", "", f"{brand} by {owner} | Self-hosted AI Agent with MCP & RAG",
-            f"{brand} by {owner} is a self-hosted AI agent for Raspberry Pi, Ubuntu, and macOS. Run skills, connect MCP servers, and search your documents with RAG.",
+            f"{brand} by {owner} is a self-hosted AI agent for Raspberry Pi, Ubuntu, and macOS. Use MCP, RAG, and media skills, then review results in AiAPP.",
             "Agent chat showing the status, location, and tracking number of a sample order.",
         ),
         (
             "zh.html", "zh-CN", "zh/", f"{brand} by {owner} | 自托管 AI Agent · MCP 工具与 RAG 知识库",
-            f"{brand} 是 {owner} 开发的开源自托管 AI Agent，可运行在树莓派、Ubuntu 和 macOS，支持技能安装、MCP 工具接入和带出处的 RAG 知识库问答。",
+            f"{brand} 是 {owner} 开发的开源自托管 AI Agent，可运行在树莓派、Ubuntu 和 macOS，支持 MCP 工具、RAG 知识库及媒体采集与下载，可在 AiAPP 查看结果。",
             "Agent 对话窗口展示模拟订单的状态、物流位置和快递单号。",
         ),
         (

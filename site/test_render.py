@@ -72,9 +72,12 @@ class ProjectSiteTest(unittest.TestCase):
                         alternates = {}
                     else:
                         self.assertIn(f"<title>{brand} by {owner} | ", source)
-                        self.assertLessEqual({"skills", "mcp", "rag"}, page.ids)
+                        self.assertLessEqual(
+                            {"skills", "mcp", "rag", "media", "media-discovery", "media-download", "aipp"}, page.ids,
+                        )
                         self.assertIn("MCP", page.description)
                         self.assertIn("RAG", page.description)
+                        self.assertIn("AiAPP", page.description)
                         self.assertIn('href="' + (guide if not part else 'raspberry-pi-install/') + '"', source)
                         alternates = {"en": base, "zh-CN": base + "zh/", "x-default": base}
                     self.assertEqual([link["href"] for link in page.links if link.get("rel") == "canonical"], [base + part])

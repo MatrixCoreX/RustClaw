@@ -5,6 +5,8 @@
     <a href="#skills">Skills</a>
     <a href="#mcp">MCP</a>
     <a href="#rag">Knowledge base</a>
+    <a href="#media">Media skills</a>
+    <a href="#aipp">AiAPP</a>
     <a href="#install">Install</a>
     <a href="zh/" lang="zh-CN" hreflang="zh-CN">中文</a>
     <a class="source-link" href="$repo">GitHub</a>
@@ -26,7 +28,7 @@
       <figcaption>Web console showing an order lookup with sample data.</figcaption>
     </figure>
   </section>
-  <section id="use-cases" aria-labelledby="use-heading">
+  <section class="page-section" id="use-cases" aria-labelledby="use-heading">
     <h2 id="use-heading">Agent skills, MCP tools, and RAG knowledge bases</h2>
     <div class="capabilities">
       <article class="capability" id="skills" aria-labelledby="skills-heading">
@@ -34,7 +36,7 @@
           <h3 id="skills-heading">Use and install agent skills</h3>
           <p>Skills give the agent ways to work with files, extract text from documents, and transcribe audio. You can describe what you want in chat and the agent can select an enabled skill for the task.</p>
           <blockquote>“Read the attached PDF and list the action items and deadlines.”</blockquote>
-          <a href="$repo#skills">Explore built-in and optional skills</a>
+          <a href="#media">Try the media skills</a> · <a href="$repo#skills">Explore all skills</a>
         </div>
         <ol>
           <li>On the dashboard, open <strong>Tools &amp; Skills</strong> to see which skills are installed and enabled.</li>
@@ -74,6 +76,43 @@
       <p>With an order lookup tool connected and a returns handbook imported, you can ask for the current shipment status and the written return policy in a single message.</p>
       <blockquote>“Check whether order 3 has shipped, then use the Returns Handbook to explain who pays return shipping if the item is defective. Cite the policy.”</blockquote>
     </div>
+  </section>
+  <section class="page-section" id="media" aria-labelledby="media-heading">
+    <h2 id="media-heading">Media discovery and download</h2>
+    <p class="section-intro">Find both skills in <strong>Skill Store</strong>, where you can check installation status and required dependencies. Once the skill you want is enabled, try one of these prompts in <strong>Agent</strong> chat.</p>
+    <div class="detail-grid">
+      <article id="media-discovery" aria-labelledby="discovery-heading">
+        <h3 id="discovery-heading">Media Discovery</h3>
+        <p>Collect posts by topic from supported sites such as Xiaohongshu, Douyin, and Bilibili. A collection can keep the original captions, previews, source links, and engagement numbers available at the time. Run a single batch or ask the agent to start, pause, or stop an ongoing collection.</p>
+        <blockquote>“Search Xiaohongshu for camping gear. Collect one batch of up to five posts and keep their captions, previews, and source links.”</blockquote>
+        <a href="$repo/blob/main/docs/architecture/12-media-discovery.md">See how media discovery works</a>
+      </article>
+      <article id="media-download" aria-labelledby="download-heading">
+        <h3 id="download-heading">Media Download</h3>
+        <p>Send a supported post URL or paste its app share message. The skill saves the available original video or images and can return the original article text for supported posts. Larger image sets are delivered in a ZIP file.</p>
+        <blockquote>“Save the original images and any available article text from this Xiaohongshu post: [paste the share link].”</blockquote>
+        <a href="$repo/blob/main/optional_skills/media_download/INTERFACE.md">See supported platforms and download formats</a>
+      </article>
+    </div>
+  </section>
+  <section class="page-section" id="aipp" aria-labelledby="aipp-heading">
+    <h2 id="aipp-heading">AiAPP companion views for skills</h2>
+    <p class="section-intro">Admins can open companion views in <strong>AiAPP</strong> or add one for an enabled skill with <strong>Install app</strong>. In <strong>Media Discovery</strong>, filter by platform, preview posts, and open the originals. In <strong>Media Download</strong>, filter tasks by channel or status, see why a download failed, or retrieve the files.</p>
+    <dl class="aipp-design">
+      <div>
+        <dt>Declared by the skill</dt>
+        <dd>An optional <code>[aipp]</code> section in <code>skill.toml</code> describes the view. Access follows the associated skill’s version, enabled state, and permissions.</dd>
+      </div>
+      <div>
+        <dt>Data provided by the console</dt>
+        <dd>Built-in views use a versioned data contract. Media Discovery reads its own collection records. Media Download shows retained runs from Agent chat and connected messaging channels.</dd>
+      </div>
+      <div>
+        <dt>Isolated custom views</dt>
+        <dd>A skill can also ship its own static interface. It runs in a sandbox and can request only capabilities allowed by the host.</dd>
+      </div>
+    </dl>
+    <p class="detail-links"><a href="$repo/blob/main/docs/architecture/14-aipp-skill-companions.md">Read the AiAPP design</a> <a href="$repo/blob/main/docs/architecture/15-aipp-development-guide.md">Build a companion view</a></p>
   </section>
   <section id="install" class="install" aria-labelledby="install-heading">
     <div>
