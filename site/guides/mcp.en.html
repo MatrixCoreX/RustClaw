@@ -1,53 +1,85 @@
-    <h1 id="guide-title">Connect and test MCP tools in $brand</h1>
-    <p class="guide-intro">The Model Context Protocol (MCP) lets the agent use tools from other systems. For example, an order server can return the current shipping status, carrier, and tracking number.</p>
+    <h1 id="guide-title">Set up an MCP server and test order lookup in $brand</h1>
+    <p class="guide-intro">The Model Context Protocol (MCP) lets the agent use tools from other systems. Connect a local stdio command or a remote Streamable HTTP server. The downloadable example below lets you look up an order and find it again by its tracking number.</p>
     <nav class="guide-nav" aria-label="On this page">
       <a href="#connect">Add a server</a>
+      <a href="#demo">Download and configure the demo</a>
       <a href="#permissions">Allow tools</a>
-      <a href="#test">Test with an order lookup</a>
+      <a href="#test">Test the connection and lookup</a>
       <a href="#troubleshooting">Troubleshooting</a>
     </nav>
 
     <section id="connect">
       <h2>Add a local or remote MCP server</h2>
-      <p>In the admin console, open <strong>Models → External tool servers → Add server</strong>. Give each server a unique name and fill in the connection details provided by that server.</p>
+      <p>Sign in as an administrator and open <strong>Models → External tool servers → Add server</strong>. You can add multiple servers. Give each one a unique name and configure its connection, enabled state, and allowed tools separately.</p>
       <dl>
         <dt>Local command (stdio)</dt>
-        <dd>Enter the startup command and its arguments, one argument per line. The command runs on the device hosting the agent, so use paths that exist on that device.</dd>
+        <dd>Enter the startup command and its arguments in separate fields, one argument per line. The command runs on the agent host, so the executable and any paths must be accessible there.</dd>
         <dt>Remote server (Streamable HTTP)</dt>
-        <dd>Enter the full MCP endpoint URL, such as <code>https://tools.example.com/mcp</code>. If the server requires authentication, select its authentication method. Enter the environment variable name in credential fields and set its value on the service host.</dd>
+        <dd>Choose <strong>HTTP</strong> under <strong>Connection</strong> and enter the full MCP endpoint from your provider, such as <code>https://tools.example.com/mcp</code>. Follow the provider’s authentication instructions for a Bearer Token or OAuth client credentials. Enter the variable name in the console, such as <code>ORDER_MCP_TOKEN</code>, and set its value in the agent service’s environment.</dd>
       </dl>
     </section>
 
+    <section id="demo">
+      <h2>Connect a local Python server for order lookup</h2>
+      <p>This read-only example uses the Python 3 standard library and fixed sample orders. Save the downloaded file on the device running the agent and enter the following server settings.</p>
+      <div class="actions"><a class="button secondary" href="${assets}examples/mcp-orders-demo.py" download>Download the sample order server (Python)</a></div>
+      <table class="setup-fields">
+        <thead><tr><th scope="col">Console field</th><th scope="col">Value</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Server name</th><td><code>orders_demo</code></td></tr>
+          <tr><th scope="row">Connection</th><td>Local command (stdio)</td></tr>
+          <tr><th scope="row">Startup command</th><td><code>python3</code>. If the service cannot find it, use the full path to the Python 3 executable on the host.</td></tr>
+          <tr><th scope="row">Command arguments</th><td>Enter the full script path on one line. Replace <code>/home/agent/mcp-orders-demo.py</code> with the location where you saved it.</td></tr>
+          <tr><th scope="row">Allowed tools</th><td><code>lookup_order</code><br><code>find_order_by_tracking</code></td></tr>
+        </tbody>
+      </table>
+    </section>
+
     <section id="permissions">
-      <h2>Choose which tools the agent can call</h2>
+      <h2>Trust the server and enable the allowed tools</h2>
       <ol>
-        <li>Review the server details and mark it as trusted if you manage it or trust its operator.</li>
-        <li>In <strong>Allowed tools</strong>, enter each exact tool name from the server on its own line. For this walkthrough, allow the read-only order lookup tool supplied by your server.</li>
-        <li>Enable the server and turn on <strong>Enable MCP tools</strong>. Select <strong>Save MCP settings</strong> and restart the service if prompted.</li>
+        <li>Review the command or address and select <strong>I trust this server</strong> if you manage it or trust its operator.</li>
+        <li>Enter each exact tool name on its own line under <strong>Allowed tools</strong>. The two lookup tools in the table are enough for the order demo.</li>
+        <li>Turn on <strong>Enable this server</strong> and <strong>Enable MCP tools</strong>. Select <strong>Save MCP settings</strong>, restart the agent service, then select <strong>Refresh status</strong>.</li>
       </ol>
-      <p><a href="$repo/blob/main/docs/architecture/02-security-execution.md">Read how the agent checks tool requests and permissions</a></p>
+      <p><a href="$repo/blob/main/docs/architecture/02-security-execution.md">Read how tool requests and permissions are checked</a></p>
     </section>
 
     <section id="test">
-      <h2>Test the connection, then look up an order</h2>
-      <p>Once the server shows <strong>Ready</strong>, select <strong>Test protocol</strong>. Confirm that the tool list includes your lookup tool, then send a request in <strong>Agent</strong> chat.</p>
-      <blockquote>“Where is order 3? What is its tracking number?”</blockquote>
-      <p>Use an order that exists in your test system. Compare the status and tracking number in the reply with the record from the order system.</p>
+      <h2>Check the connection, allowed tools, and order result</h2>
+      <ol>
+        <li>When the server shows <strong>Ready</strong>, select <strong>Test protocol</strong> and confirm that the console shows <strong>Connection healthy</strong>.</li>
+        <li>Check the tool count and names. The demo exposes two order lookup tools.</li>
+        <li>Use a natural-language request in <strong>Agent</strong> chat. The agent can choose from the available tools. If asked to approve a call, review the tool and its lookup arguments before confirming.</li>
+      </ol>
+      <figure class="example-shot">
+        <a href="${examples}mcp-setup.png"><img src="${examples}mcp-setup.png" alt="The External tool servers panel shows two allowed order tools and a successful connection test." width="1280" height="772" loading="lazy" decoding="async"></a>
+        <figcaption>Sample order server settings and connection test in the console.</figcaption>
+      </figure>
+      <h3>Two requests to try</h3>
+      <blockquote>“Where is order 3? What is the tracking number?”</blockquote>
+      <p>Order 3 is in transit at the Hangzhou sorting center. Its tracking number is <code>7898047967</code>.</p>
+      <blockquote>“Which order has tracking number 7898047967?”</blockquote>
+      <p>The tracking number should match order <strong>3</strong>. The location and delivery date are fixed demo data.</p>
       <figure class="example-shot">
         <a href="${examples}mcp.png"><img src="${examples}mcp.png" alt="$preview_alt" width="794" height="370" loading="lazy" decoding="async"></a>
-        <figcaption>Order lookup in the web console with sample data.</figcaption>
+        <figcaption>Agent chat shows the logistics result for sample order 3.</figcaption>
       </figure>
     </section>
 
     <section id="troubleshooting">
-      <h2>When the server or tool is unavailable</h2>
+      <h2>When the connection or order lookup fails</h2>
       <dl>
-        <dt>The server shows Pending restart</dt>
-        <dd>Restart the agent service, then refresh the server status.</dd>
-        <dt>The server is Ready and the tool list is empty</dt>
-        <dd>Check that the server exposes the tool names in <strong>Allowed tools</strong>. Match the names exactly and put one on each line.</dd>
-        <dt>The connection test fails</dt>
-        <dd>Check the local command or remote endpoint from the agent host. For an authenticated server, verify the expected environment variables are available to the service.</dd>
+        <dt>The External tool servers section is missing</dt>
+        <dd>Sign in as an administrator and scroll to the MCP section on the Models page.</dd>
+        <dt>Test protocol is disabled</dt>
+        <dd>Save changes if the server shows Pending save. If it shows Pending restart, restart the service and refresh its status. Run the test once the server is Ready.</dd>
+        <dt>The server is Ready with zero tools</dt>
+        <dd>An empty allowlist exposes zero tools. Enter the exact tool names from the provider, one per line. Save, restart, and refresh the status.</dd>
+        <dt>The connection is healthy, but the lookup fails</dt>
+        <dd>Check that the relevant lookup tool appears in the list. Try sample order 3 or tracking number <code>7898047967</code> and check both numbers in the reply.</dd>
+        <dt>The server shows Needs attention</dt>
+        <dd>For a local command, verify that the service can find the executable and read the script. For a remote server, check that the service host can reach the MCP endpoint and has the required credential variables.</dd>
       </dl>
-      <p class="detail-links"><a href="../skills/">Install and use agent skills</a> <a href="../rag/">Pair order lookup with a returns knowledge base</a></p>
+      <p class="detail-links"><a href="../rag/#prepare">Import a returns handbook into a RAG knowledge base</a> <a href="../skills/#install">Install agent skills from Skill Store</a></p>
     </section>

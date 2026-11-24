@@ -1,6 +1,7 @@
 """Exercise the site entry point with both repository product identity fixtures."""
 
 from html.parser import HTMLParser
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -100,7 +101,7 @@ class ProjectSiteTest(unittest.TestCase):
                 example_sections = ("mcp", "rag", *skill_examples)
                 topic_sections = {
                     "skills/": {"install", "aipp", "troubleshooting", *skill_examples},
-                    "mcp/": {"connect", "permissions", "test", "troubleshooting"},
+                    "mcp/": {"connect", "demo", "permissions", "test", "troubleshooting"},
                     "rag/": {"prepare", "import", "ask", "test", "troubleshooting"},
                 }
                 pages = [("", "en"), ("zh/", "zh-CN"), (pi_guide, "zh-CN")]
@@ -131,12 +132,13 @@ class ProjectSiteTest(unittest.TestCase):
                     self.assertGreater((output / example_dir / preview).stat().st_size, 0)
                     alternates = {"en": base + topic, "zh-CN": base + "zh/" + topic, "x-default": base + topic}
                     if part == pi_guide:
-                        self.assertIn(f"<title>在 Raspberry Pi 上安装 {brand} | {owner}</title>", source)
+                        self.assertIn(f"<title>在 Raspberry Pi 上安装 {brand} | 64 位 Raspberry Pi OS</title>", source)
                         self.assertIn(f"install-latest-release.sh --repo {identity['release_repository']} --check-only", source)
                         self.assertIn('df -h "$HOME"', source)
                         alternates = {}
                     elif not topic:
-                        self.assertIn(f"<title>{brand} by {owner} | ", source)
+                        self.assertTrue(page.title.startswith(f"{brand} | "))
+                        self.assertIn(owner, page.description)
                         self.assertLessEqual(
                             {"skills", "mcp", "rag", "media", "aipp", *skill_examples},
                             page.ids,
@@ -185,6 +187,17 @@ class ProjectSiteTest(unittest.TestCase):
                                     page.section_assets[section_id],
                                     example_images[section_id],
                                 )
+                        if topic == "mcp/":
+                            demo = "assets/examples/mcp-orders-demo.py"
+                            self.assertEqual(
+                                [link["href"] for link in page.links if "download" in link],
+                                ["../" * part.count("/") + demo],
+                            )
+                            self.assertEqual((output / demo).read_bytes(), (SOURCE / demo).read_bytes())
+                            self.assertEqual(
+                                page.section_assets["test"],
+                                [example_path + "mcp-setup.png", example_path + "mcp.png"],
+                            )
                         if topic == "rag/":
                             sample = "returns-handbook.md"
                             self.assertEqual(
@@ -224,6 +237,43 @@ class ProjectSiteTest(unittest.TestCase):
                 self.assertCountEqual([node.text for node in sitemap.findall(".//{*}loc")], [base + part for part, _ in pages])
                 for verification in (SOURCE / "verification").glob("google*.html"):
                     self.assertEqual((output / verification.name).read_bytes(), verification.read_bytes())
+
+    def test_downloadable_order_server_protocol(self):
+        calls = [
+            ("initialize", {"protocolVersion": "2025-11-25"}),
+            ("notifications/initialized", {}),
+            ("ping", {}),
+            ("tools/list", {}),
+            ("tools/call", {"name": "lookup_order", "arguments": {"order_id": 3}}),
+            ("tools/call", {"name": "find_order_by_tracking", "arguments": {"tracking_number": "7898047967"}}),
+            ("tools/call", {"name": "find_order_by_tracking", "arguments": {"tracking_number": "0425386197"}}),
+            ("tools/call", {"name": "lookup_order", "arguments": {"order_id": 9999}}),
+            ("tools/call", {"name": "lookup_order", "arguments": {"order_id": True}}),
+        ]
+        requests = []
+        for index, (method, params) in enumerate(calls):
+            request = {"jsonrpc": "2.0", "method": method, "params": params}
+            if not method.startswith("notifications/"):
+                request["id"] = index
+            requests.append(json.dumps(request))
+        response = subprocess.run(
+            [sys.executable, str(SOURCE / "assets/examples/mcp-orders-demo.py")],
+            input="\n".join(requests) + "\n", check=True, capture_output=True, text=True, timeout=10,
+        )
+        replies = [json.loads(line) for line in response.stdout.splitlines()]
+        self.assertEqual([reply["id"] for reply in replies], [0, 2, 3, 4, 5, 6, 7, 8])
+        self.assertTrue(all(reply["jsonrpc"] == "2.0" for reply in replies))
+        results = {reply["id"]: reply["result"] for reply in replies}
+        self.assertEqual(results[0]["protocolVersion"], "2025-11-25")
+        self.assertEqual(results[2], {})
+        self.assertEqual([tool["name"] for tool in results[3]["tools"]], ["lookup_order", "find_order_by_tracking"])
+        forward = results[4]["structuredContent"]
+        self.assertEqual(forward["tracking_number"], "7898047967")
+        self.assertEqual((forward["status"], forward["location"]), ("in_transit", "Hangzhou sorting center"))
+        self.assertEqual(results[5]["structuredContent"], forward)
+        self.assertEqual(results[6]["structuredContent"]["order_id"], 12)
+        self.assertFalse(results[7]["structuredContent"]["found"])
+        self.assertTrue(results[8]["isError"])
 
 
 if __name__ == "__main__":
