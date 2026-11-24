@@ -38,7 +38,8 @@ export async function selectMacOSBrowser({
         if (info.CFBundleIdentifier !== bundleId || info.CFBundleExecutable !== executableName
           || !/^[0-9]+$/u.test(major) || Number(major) < MINIMUM_CHROMIUM_MAJOR) continue;
         const requirement = `=anchor apple generic and identifier "${bundleId}" and certificate leaf[subject.OU] = "${team}"`;
-        await execute("/usr/bin/codesign", ["--verify", "--strict", "-R", requirement, app],
+        // Finder metadata is outside the signature. Check that symlinks stay sealed.
+        await execute("/usr/bin/codesign", ["--verify", "--strict=symlinks", "-R", requirement, app],
           { timeout: 5000 });
         return { executablePath, bundleId };
       } catch {

@@ -55,8 +55,9 @@ def select_macos_browser(
                     f'=anchor apple generic and identifier "{bundle_id}" '
                     f'and certificate leaf[subject.OU] = "{team}"'
                 )
+                # Finder metadata is outside the signature. Check that symlinks stay sealed.
                 subprocess.run(
-                    ["/usr/bin/codesign", "--verify", "--strict", "-R", requirement, str(app)],
+                    ["/usr/bin/codesign", "--verify", "--strict=symlinks", "-R", requirement, str(app)],
                     check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
                 )
                 return MacOSBrowser(str(executable), bundle_id)

@@ -1,6 +1,7 @@
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 
 
@@ -31,7 +32,8 @@ class MacOSSystemBrowserTest(unittest.TestCase):
         subprocess.run(["bash", "-n", str(launcher)], check=True)
         source = launcher.read_text()
         self.assertIn('exec "$executable" "$@"', source)
-        self.assertIn("/usr/bin/codesign --verify --strict", source)
+        self.assertIn("/usr/bin/codesign --verify --strict=symlinks -R", source)
+        self.assertNotIn("xattr", source)
         self.assertIn("--resolve-executable", source)
         for forbidden in ("--use-mock-keychain", "--password-store=basic", "--no-sandbox",
                           "security delete", "security set-key-partition-list", "Chrome for Testing"):
@@ -70,6 +72,60 @@ class MacOSSystemBrowserTest(unittest.TestCase):
                                  capture_output=True, text=True, timeout=30, check=True)
         self.assertTrue(version.stdout.strip())
 
+
+
+    @unittest.skipUnless(sys.platform == "darwin", "Requires native codesign and xattr")
+    def test_native_selectors_accept_signed_browser_with_finder_metadata(self):
+        launcher = ROOT / "scripts/macos-system-browser.sh"
+        selected = subprocess.run(
+            ["/bin/bash", str(launcher), "--resolve-executable"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if selected.returncode == 127:
+            self.skipTest("An installed vendor-signed browser is required")
+        self.assertEqual(selected.returncode, 0, selected.stderr)
+        source = Path(selected.stdout.strip()).parents[2]
+        with tempfile.TemporaryDirectory(prefix="browser-metadata-fixture-") as directory:
+            copy = Path(directory) / source.name
+            subprocess.run(
+                ["/usr/bin/ditto", "--norsrc", "--qtn", str(source), str(copy)],
+                timeout=90, check=True,
+            )
+            plist = copy / "Contents/Info.plist"
+            attr = "com.apple.FinderInfo"
+            subprocess.run(
+                ["/usr/bin/xattr", "-wx", attr, "01" * 32, str(plist)], check=True,
+            )
+            rejected = subprocess.run(
+                ["/usr/bin/codesign", "--verify", "--strict=sideband", str(copy)],
+                capture_output=True, text=True, timeout=30,
+            )
+            self.assertNotEqual(rejected.returncode, 0, rejected.stderr)
+            self.assertIn("Finder information", rejected.stderr)
+            expected = str(copy / Path(selected.stdout.strip()).relative_to(source))
+            python = subprocess.run(
+                [sys.executable, "-c",
+                 "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); "
+                 "from macos_browser_selection import select_macos_browser; "
+                 "browser=select_macos_browser(applications=(Path(sys.argv[2]),)); "
+                 "print(browser.executable if browser else '')",
+                 str(ROOT / "optional_skills/media_download/src/tool"), directory],
+                capture_output=True, text=True, timeout=30, check=True,
+            )
+            self.assertEqual(python.stdout.strip(), expected)
+            node = subprocess.run(
+                ["node", "--input-type=module", "-e",
+                 "import {pathToFileURL} from 'node:url'; "
+                 "const {selectMacOSBrowser}=await import(pathToFileURL(process.argv[1])); "
+                 "const browser=await selectMacOSBrowser({applications:[process.argv[2]]}); "
+                 "console.log(browser?.executablePath ?? '');",
+                 str(ROOT / "optional_skills/media_discovery/src/macos_browser_selection.mjs"),
+                 directory],
+                capture_output=True, text=True, timeout=30, check=True,
+            )
+            self.assertEqual(node.stdout.strip(), expected)
+            subprocess.run(["/usr/bin/xattr", "-p", attr, str(plist)],
+                           stdout=subprocess.DEVNULL, check=True)
 
 if __name__ == "__main__":
     unittest.main()
