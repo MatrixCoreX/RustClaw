@@ -1,11 +1,11 @@
 #![allow(dead_code)]
 
+#[path = "child_task_execution_receipts.rs"]
+mod execution_receipts;
 #[path = "child_task_result_contract.rs"]
 mod result_contract;
 #[path = "child_task_terminal_failure.rs"]
 mod terminal_failure;
-#[path = "child_task_execution_receipts.rs"]
-mod execution_receipts;
 use result_contract::validated_child_structured_result;
 pub(crate) use result_contract::{
     bounded_argument_schema_matches, bounded_argument_schema_supported,
