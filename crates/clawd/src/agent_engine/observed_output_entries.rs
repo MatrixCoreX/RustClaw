@@ -149,13 +149,12 @@ pub(in crate::agent_engine) fn structured_capability_observation(
 fn generic_capability_observation(
     result: &claw_core::capability_result::CapabilityResultEnvelope,
 ) -> Option<String> {
-    let mut data = crate::capability_result::explicit_model_observation(&result.data)
+    let explicit = crate::capability_result::explicit_model_observation(&result.data);
+    let mut data = explicit
         .map(|observation| {
             serde_json::json!({
                 "model_observation": compact_capability_observation_value(
-                    observation,
-                    0,
-                    MAX_EXPLICIT_MODEL_OBSERVATION_DEPTH,
+                    observation, 0, MAX_EXPLICIT_MODEL_OBSERVATION_DEPTH,
                 ),
             })
         })
@@ -174,6 +173,18 @@ fn generic_capability_observation(
         "effect": &result.effect,
         "verification": compact_capability_observation_value(&result.verification, 0, 6),
     });
+    let (mut projection, referenced) = if explicit.is_none() {
+        crate::prompt_projection::project_capability_evidence_from_source(
+            projection,
+            &serde_json::json!({"data":&result.data}),
+        )
+    } else {
+        (projection, false)
+    };
+    if referenced {
+        projection["field_reference_contract"] =
+            serde_json::json!(crate::prompt_projection::REFERENCE_CONTRACT);
+    }
     let serialized = serde_json::to_string(&projection).ok()?;
     let serialized = if serialized.chars().count() <= MAX_GENERIC_CAPABILITY_OBSERVATION_CHARS {
         serialized
@@ -692,3 +703,7 @@ pub(super) fn cross_turn_observed_output_entries(
 pub(crate) fn has_observed_answer_candidates(loop_state: &LoopState) -> bool {
     !loop_state.capability_results.is_empty() || !observed_output_entries(loop_state).is_empty()
 }
+
+#[cfg(test)]
+#[path = "observed_output_entries_projection_tests.rs"]
+mod projection_tests;

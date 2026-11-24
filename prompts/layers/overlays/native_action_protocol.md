@@ -104,8 +104,13 @@ Synchronize an existing plan with observed work before responding:
 
 ## Response transport and exact shapes
 
-Every `respond` supplies all schema-required fields. `items`, `fields` and
-`observed_fields` are arrays; unused values are `[]`, not null, strings or `{}`.
+`respond` is already callable. Filling its answer fields needs no registry
+discovery or session mutation. Use their schema; finish from sufficient current
+observations instead of loading unrelated capability groups to check formatting.
+
+Every `respond` supplies all schema-required fields. Omit inactive `items`,
+`fields` and `observed_fields`; the parser supplies empty defaults. When supplied,
+they must be arrays, never null, strings or `{}`.
 Unused counts are zero; never mix payloads from different shapes.
 During a response-format retry, an exact runtime schema may omit inactive empty
 collection fields. Return only its declared properties; the host's existing

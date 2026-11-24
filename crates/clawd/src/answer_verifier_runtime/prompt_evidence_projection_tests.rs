@@ -190,3 +190,25 @@ fn read_interval_evidence_keeps_selected_bounds_distinct_from_complete_file_size
     assert_eq!(fields["extra.returned_line_count"], &json!(21));
     assert_eq!(fields["extra.total_lines"], &json!(511));
 }
+
+#[test]
+fn whole_output_references_keep_the_verifier_evidence_identity_and_canonical_bytes() {
+    let body = json!({"excerpt":"observed line\n".repeat(120),"count":17});
+    let result =
+        CapabilityResultEnvelope::ok("fixture.read", None, json!({"extra":body,"output":body}));
+    let before = serde_json::to_value(&result).unwrap();
+    let identity = result.canonical_evidence_identity();
+    let projected = provider_safe_capability_result_evidence(&result);
+    assert_eq!(
+        projected["field_reference_contract"],
+        crate::prompt_projection::REFERENCE_CONTRACT
+    );
+    assert_eq!(
+        projected["result"]["data"]["output_reference"],
+        "/data/extra"
+    );
+    assert_eq!(projected["result"]["data"]["extra"], body);
+    assert_eq!(projected["evidence_id"], identity.evidence_id);
+    assert_eq!(projected["sha256"], identity.sha256);
+    assert_eq!(serde_json::to_value(&result).unwrap(), before);
+}

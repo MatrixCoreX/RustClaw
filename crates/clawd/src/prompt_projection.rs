@@ -2,6 +2,12 @@
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
+#[path = "prompt_projection_capability.rs"]
+mod capability_results;
+pub(crate) use capability_results::{
+    project_capability_evidence, project_capability_evidence_from_source, REFERENCE_CONTRACT,
+};
+
 pub(crate) const RECORD_ENCODING: &str = "ordered_object_runs_v1";
 const REPORT_ENCODING_KEY: &str = "host_record_arrays_encoding";
 

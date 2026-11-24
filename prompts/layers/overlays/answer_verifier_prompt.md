@@ -32,7 +32,8 @@ request to re-audit the same candidate/evidence with the same schema; it grants
 no action, success, waived check or rewritten candidate.
 
 When a capability evidence item has host `field_reference_contract=same_result_json_pointer_v1`,
-its `result.data.output.field_references` maps omitted duplicate fields to JSON
+its `result.data.output_reference` may point to the entire equal output, and
+`result.data.output.field_references` maps omitted duplicate fields to JSON
 Pointers inside that same result. Resolve them there; the original values and
 types remain in `result.data.extra`. This is one observation, not another action
 or missing evidence. Without that host contract, similarly named user data is

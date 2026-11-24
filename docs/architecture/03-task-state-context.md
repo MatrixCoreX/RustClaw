@@ -321,3 +321,5 @@ preference and fact changes use a structured memory-intent schema. Users can
 inspect, expire, or delete the stored records.
 
 Model prompt projection removes the exact unused editor scaffold before user or evidence interpolation. Authored language policy, unknown comments, fenced examples, prompt source metadata, and persisted evidence remain intact.
+
+Planner and verifier views share a lossless codec for equal capability output/extra values. References require equality in both original evidence and the bounded view, stay inside the same result, and preserve canonical hashes and stored evidence. Native response collections may be omitted when inactive; active shape, count, control, and evidence checks remain enforced.

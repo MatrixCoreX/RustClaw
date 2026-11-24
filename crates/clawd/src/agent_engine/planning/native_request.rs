@@ -53,11 +53,8 @@ pub(super) fn native_planner_request(
                 "conversation_relation",
                 "shape",
                 "content",
-                "items",
                 "exact_item_count",
                 "exact_visible_line_count",
-                "fields",
-                "observed_fields",
                 "exact_field_count"
             ],
             "properties": {
@@ -110,7 +107,7 @@ pub(super) fn native_planner_request(
                 "shape": {
                     "type": "string",
                     "enum": ["free_text", "list", "object", "observed_object"],
-                    "description": "free_text preserves content including plain newline-separated identifiers. list adds ordinal numbers to every item; use it only when numbered presentation is allowed. For bare payload lines use free_text, content with the exact lines, items=[], and exact_item_count=0."
+                    "description": "free_text preserves content including plain newline-separated identifiers. list adds ordinal numbers to every item; use it only when numbered presentation is allowed. For bare payload lines use free_text, content with the exact lines, omit inactive collections, and exact_item_count=0."
                 },
                 "content": {
                     "type": "string",
@@ -118,7 +115,7 @@ pub(super) fn native_planner_request(
                 },
                 "items": {
                     "type": "array",
-                    "description": "Always a JSON array. Use [] when shape is not list; never use {}, null, or an empty string.",
+                    "description": "When supplied, always a JSON array. Omit when shape is not list (default []); never use {}, null, or an empty string.",
                     "items": {"type": "string"},
                     "maxItems": MAX_NATIVE_RESPONSE_ITEMS
                 },
@@ -135,7 +132,7 @@ pub(super) fn native_planner_request(
                 },
                 "fields": {
                     "type": "array",
-                    "description": "Always a JSON array. Use [] unless shape=object; never use {} or null.",
+                    "description": "When supplied, always a JSON array. Omit unless shape=object (default []); never use {} or null.",
                     "items": {
                         "type": "object",
                         "required": ["name", "value_json"],
@@ -158,7 +155,7 @@ pub(super) fn native_planner_request(
                 },
                 "observed_fields": {
                     "type": "array",
-                    "description": "Always a JSON array; use [] unless shape=observed_object, never {} or null. observed_object delivers named JSON fields only; a lone scalar or date uses free_text.content. schema:current_loop_capability_result_field_references_v3; value_source=runtime_copy; success_roots=data; failure_roots=status,error; optional_step_id=exact_current_loop_provenance_step_id; omitted_or_null_step_id=latest_eligible_capability_result",
+                    "description": "When supplied, always a JSON array; omit unless shape=observed_object (default []), never {} or null. observed_object delivers named JSON fields only; a lone scalar or date uses free_text.content. schema:current_loop_capability_result_field_references_v3; value_source=runtime_copy; success_roots=data; failure_roots=status,error; optional_step_id=exact_current_loop_provenance_step_id; omitted_or_null_step_id=latest_eligible_capability_result",
                     "items": {
                         "type": "object",
                         "required": ["name", "capability", "path"],
@@ -202,7 +199,11 @@ pub(super) fn native_planner_request(
             },
             "additionalProperties": false
         }),
-        strict: true,
+        // This answer-only schema has optional, shape-dependent collections.
+        // Provider strict mode requires every declared property to be required;
+        // keep omission meaningful and enforce types/counts/control in the host.
+        // Capability/mutation tool definitions retain their own strict settings.
+        strict: false,
     });
     ModelTurnRequest {
         messages: vec![
@@ -216,3 +217,7 @@ pub(super) fn native_planner_request(
         metadata,
     }
 }
+
+#[cfg(test)]
+#[path = "native_respond_wire_tests.rs"]
+mod wire_tests;
