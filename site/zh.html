@@ -1,0 +1,59 @@
+<a class="skip" href="#main">跳到正文</a>
+<header class="wrap site-header">
+  <a class="brand" href="./"><img src="../assets/logo.svg" alt="" width="34" height="34"><span>$brand</span></a>
+  <nav aria-label="主导航">
+    <a href="#use-cases">使用示例</a>
+    <a href="#install">安装</a>
+    <a href="../" lang="en" hreflang="en">English</a>
+    <a class="source-link" href="$repo">GitHub</a>
+  </nav>
+</header>
+<main id="main" class="wrap">
+  <section class="hero" aria-labelledby="name">
+    <div>
+      <p class="byline"><a href="$profile">由 $owner 开发</a></p>
+      <h1 id="name">$brand <span>在自己的设备上运行 AI Agent</span></h1>
+      <p class="intro">在树莓派、Ubuntu 或 macOS 上部署自己的 AI Agent。通过 MCP 接入工具，用 RAG 查询自己的资料，在网页控制台里查看任务进度。</p>
+      <div class="actions">
+        <a class="button primary" href="#install">下载安装</a>
+        <a class="button secondary" href="$repo/blob/main/README.zh-CN.md">中文指南</a>
+      </div>
+    </div>
+    <figure class="preview">
+      <img src="../assets/console-demo.png" alt="$preview_alt" fetchpriority="high">
+      <figcaption>网页控制台中的订单查询示例，使用模拟数据。</figcaption>
+    </figure>
+  </section>
+  <section id="use-cases" aria-labelledby="use-heading">
+    <h2 id="use-heading">在同一个对话里查数据、找资料</h2>
+    <div class="use-cases">
+      <article>
+        <h3>用 MCP 查询业务数据</h3>
+        <p>连接本机或远程工具服务，并选择允许 Agent 调用的工具。</p>
+        <blockquote>「订单 3 到哪儿了？快递单号是多少？」</blockquote>
+        <a href="$repo/blob/main/README.zh-CN.md#项目概览">了解工具接入</a>
+      </article>
+      <article>
+        <h3>从知识库里找答案和出处</h3>
+        <p>导入手册、常见问题或操作流程。Agent 可以找出相关段落，并在回答里引用出处。</p>
+        <blockquote>「商品有质量问题，退货运费谁承担？请给出处。」</blockquote>
+        <a href="$repo/blob/main/README.zh-CN.md#知识库设计流程">设置知识库</a>
+      </article>
+    </div>
+  </section>
+  <section id="install" class="install" aria-labelledby="install-heading">
+    <div>
+      <h2 id="install-heading">安装到你的设备</h2>
+      <p>选好设备对应的签名安装包，再打开网页控制台配置模型、发送第一条消息。</p>
+      <ul class="platforms" aria-label="支持平台"><li>树莓派</li><li>Ubuntu</li><li>macOS</li></ul>
+    </div>
+    <div class="actions">
+      <a class="button primary" href="$repo/releases">下载安装包</a>
+      <a class="button secondary" href="$repo/blob/main/README.zh-CN.md#快速开始">快速开始</a>
+    </div>
+  </section>
+</main>
+<footer class="wrap footer">
+  <span>$brand · <a href="$profile">$owner</a></span>
+  <a href="$repo/blob/main/LICENSE">许可证</a>
+</footer>
