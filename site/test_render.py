@@ -55,17 +55,26 @@ class ProjectSiteTest(unittest.TestCase):
                     env=os.environ | {"APP_PRODUCT_IDENTITY_CONFIG": str(config)},
                     check=True,
                 )
-                for part, locale in (("", "en"), ("zh/", "zh-CN")):
+                guide = "zh/raspberry-pi-install/"
+                for part, locale in (("", "en"), ("zh/", "zh-CN"), (guide, "zh-CN")):
                     path = output / part / "index.html"
                     source = path.read_text(encoding="utf-8")
                     page = Page(source)
                     self.assertEqual(page.lang, locale)
                     self.assertEqual(page.headings, 1)
-                    self.assertIn(f"<title>{brand} by {owner} | ", source)
+                    if part == guide:
+                        self.assertIn(f"<title>在 Raspberry Pi 上安装 {brand} | {owner}</title>", source)
+                        self.assertIn(f"install-latest-release.sh --repo {identity['release_repository']} --check-only", source)
+                        self.assertIn('df -h "$HOME"', source)
+                        alternates = {}
+                    else:
+                        self.assertIn(f"<title>{brand} by {owner} | ", source)
+                        self.assertIn('href="' + (guide if not part else 'raspberry-pi-install/') + '"', source)
+                        alternates = {"en": base, "zh-CN": base + "zh/", "x-default": base}
                     self.assertEqual([link["href"] for link in page.links if link.get("rel") == "canonical"], [base + part])
                     self.assertEqual(
                         {link["hreflang"]: link["href"] for link in page.links if link.get("rel") == "alternate"},
-                        {"en": base, "zh-CN": base + "zh/", "x-default": base},
+                        alternates,
                     )
                     for link in page.links:
                         resolved = urlsplit(link["href"])
@@ -76,7 +85,7 @@ class ProjectSiteTest(unittest.TestCase):
                     for asset in page.assets:
                         self.assertGreater((path.parent / asset).stat().st_size, 0)
                 sitemap = ElementTree.parse(output / "sitemap.xml")
-                self.assertEqual([node.text for node in sitemap.findall(".//{*}loc")], [base, base + "zh/"])
+                self.assertEqual([node.text for node in sitemap.findall(".//{*}loc")], [base, base + "zh/", base + guide])
 
 
 if __name__ == "__main__":

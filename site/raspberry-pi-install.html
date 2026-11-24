@@ -1,0 +1,73 @@
+<a class="skip" href="#main">跳到正文</a>
+<header class="wrap site-header">
+  <a class="brand" href="../"><img src="../../assets/logo.svg" alt="" width="34" height="34"><span>$brand</span></a>
+  <nav aria-label="主导航"><a href="../">项目首页</a><a href="$repo/releases">安装包</a><a class="source-link" href="$repo">GitHub</a></nav>
+</header>
+<main id="main" class="wrap">
+  <article class="guide" aria-labelledby="guide-title">
+    <p class="byline"><a href="$profile">由 $owner 维护</a></p>
+    <h1 id="guide-title">在 Raspberry Pi 上安装 $brand</h1>
+    <p class="guide-intro">如果你的树莓派已经装好 64 位 Raspberry Pi OS，可以直接下载签名发布包。接下来会确认系统架构、运行官方安装脚本，再打开网页控制台发送第一条消息。</p>
+    <nav class="guide-nav" aria-label="本页目录">
+      <a href="#requirements">安装前检查</a>
+      <a href="#install">下载并安装</a>
+      <a href="#console">打开网页控制台</a>
+      <a href="#troubleshooting">常见问题</a>
+    </nav>
+
+    <section id="requirements" aria-labelledby="requirements-title">
+      <h2 id="requirements-title">安装前检查</h2>
+      <p>在树莓派上的终端运行以下命令。你也可以先用 SSH 登录树莓派，再在该会话中执行。</p>
+      <pre><code>uname -m
+getconf LONG_BIT
+python3 --version
+df -h "$$HOME"</code></pre>
+      <ul>
+        <li>前两行应显示 <code>aarch64</code> 和 <code>64</code>。若装的是 32 位系统，请使用 Raspberry Pi Imager 为兼容的机型选择 <strong>Raspberry Pi OS (64-bit)</strong>。</li>
+        <li>需要 Python 3.11 或更新版本，以及 Bash、curl、tar 和 OpenSSH 的 <code>ssh-keygen</code>。如果缺少 curl 或 <code>ssh-keygen</code>，可在 Raspberry Pi OS 中执行 <code>sudo apt update</code>，再执行 <code>sudo apt install ca-certificates curl openssh-client</code>。</li>
+        <li>检查最后一行的可用空间。以已核对的 <code>pi-aarch64-c785c9dc6a38</code> 发布为例，压缩包约 789 MiB，安装时还要留出解压和部署空间。</li>
+      </ul>
+      <p><a href="https://www.raspberrypi.com/documentation/computers/imager.html">Raspberry Pi Imager 官方使用说明</a></p>
+    </section>
+
+    <section id="install" aria-labelledby="install-title">
+      <h2 id="install-title">下载并安装</h2>
+      <p>把官方安装脚本下载到当前目录，再用 <code>--check-only</code> 查看脚本选中的版本。</p>
+      <pre><code>curl -fL -o install-latest-release.sh \
+  https://raw.githubusercontent.com/$release_repository/main/install-latest-release.sh
+bash install-latest-release.sh --repo $release_repository --check-only</code></pre>
+      <p>看到发行标签以 <code>pi-aarch64-</code> 开头后，运行安装命令。</p>
+      <pre><code>bash install-latest-release.sh --repo $release_repository</code></pre>
+      <p>脚本会选择适配当前系统架构的发布包，在安装前检查签名和校验信息。默认安装目录是 <code>~/agent-runtime</code>，服务会在安装后启动。安装结束后，检查运行状态。</p>
+      <pre><code>"$$HOME/.local/bin/agentctl" -status
+"$$HOME/.local/bin/agentctl" -health</code></pre>
+      <p><a href="$repo/releases">查看 GitHub 发布列表</a> · <a href="$repo/blob/main/docs/release_installation.zh-CN.md">发行安装、签名校验与更新说明</a></p>
+    </section>
+
+    <section id="console" aria-labelledby="console-title">
+      <h2 id="console-title">打开网页控制台</h2>
+      <p>在树莓派自己的浏览器中打开 <code>http://127.0.0.1:8788</code>。如果你从另一台电脑访问，并且已有树莓派的 SSH 登录权限，在<strong>那台电脑</strong>的终端运行以下命令，再在那台电脑的浏览器打开同一个地址。将示例中的用户名和 IP 换成你的实际值。</p>
+      <pre><code>ssh -N -L 8788:127.0.0.1:8788 YOUR_PI_USER@YOUR_PI_IP</code></pre>
+      <ol>
+        <li>首次初始化完成后，在树莓派上查看安装目录中的 <code>data/bootstrap-credentials.txt</code> 获取登录信息，并在账号管理里更改初始密码。</li>
+        <li>打开「大模型」，配置并保存一个可用的文本模型。需要 API Key 的模型请按页面提示填写并测试连接。</li>
+        <li>打开「Agent」，发送「请用一句话介绍你能做什么」。看到回复后，浏览器、后台服务和模型调用这条链路就跑通了。</li>
+      </ol>
+    </section>
+
+    <section id="troubleshooting" aria-labelledby="troubleshooting-title">
+      <h2 id="troubleshooting-title">常见问题</h2>
+      <dl>
+        <dt>脚本提示没有匹配的发布包</dt>
+        <dd>重新核对系统位数和架构，并在 GitHub Releases 查找 <code>pi-aarch64-</code> 标签。Pi 小屏组件有单独的包，完整服务应选 Pi ARM64 发布。</dd>
+        <dt>网页打不开</dt>
+        <dd>先运行上面的状态和健康检查，确认网页入口服务已启动。跨设备访问时，也检查 SSH 转发窗口是否仍在运行。</dd>
+        <dt>打开了控制台，但消息一直在等待</dt>
+        <dd>先在「大模型」确认模型可用，再打开「任务管理」看这一条任务是排队、运行中还是失败。</dd>
+      </dl>
+    </section>
+
+    <p class="guide-note">本指南的安装参数和默认端口已按项目安装脚本核对，并校验了上述 ARM64 发布的清单签名。设备上的安装结果以实际运行状态和健康检查为准。</p>
+  </article>
+</main>
+<footer class="wrap footer"><span>$brand · <a href="$profile">$owner</a></span><a href="$repo/blob/main/LICENSE">许可证</a></footer>

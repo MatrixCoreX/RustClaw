@@ -81,3 +81,17 @@ blockquote { margin: 1.1rem 0; padding: .55rem .8rem; border-inline-start: 3px s
   nav { flex-wrap: wrap; }
   .use-cases { grid-template-columns: 1fr; }
 }
+
+.platform-guide { grid-column: 1 / -1; justify-self: start; font-weight: 650; }
+.guide { max-width: 52rem; margin: clamp(2rem, 6vw, 4.5rem) auto; padding: 0; border: 0; background: transparent; }
+.guide h1 { font-size: clamp(1.95rem, 5vw, 3.65rem); letter-spacing: -.04em; }
+.guide h2 { font-size: clamp(1.4rem, 3vw, 2.05rem); }
+.guide .guide-intro { margin: 1.15rem 0; font-size: 1.12rem; }
+.guide-nav { flex-wrap: wrap; padding: .7rem 0 1rem; border-bottom: 1px solid var(--edge); }
+.guide section { margin-top: 2.35rem; }
+.guide :is(li, dd) { margin-bottom: .5rem; }
+.guide pre { overflow-x: auto; padding: 1rem; border: 1px solid var(--edge); border-radius: .65rem; background: var(--surface); }
+.guide code { font-family: ui-monospace, monospace; font-size: .94em; }
+.guide dt { font-weight: 700; }
+.guide dd { margin-inline-start: 0; color: var(--muted); }
+.guide .guide-note { margin-top: 1.75rem; padding: .85rem 1rem; border-inline-start: 3px solid var(--accent); background: var(--highlight); }
