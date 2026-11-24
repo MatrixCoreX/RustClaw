@@ -117,6 +117,7 @@ fn rejected_plan_scope_cannot_be_dropped_or_widened_before_enqueue() {
 #[test]
 fn scope_survives_checkpoint_without_restoring_lossy_plan_arguments() {
     let mut source = super::super::LoopState::new();
+    source.conversation_input_revision = 7;
     let state = crate::AppState::test_default_with_fixture_provider()
         .with_prompt_layers_installed()
         .with_real_skill_registry();
@@ -130,15 +131,16 @@ fn scope_survives_checkpoint_without_restoring_lossy_plan_arguments() {
         &mut loop_state,
         &json!({"agent_loop_resume_state":checkpoint}),
     );
+    loop_state.conversation_input_revision = 7;
     let mut restored = loop_state.subagent_scope_repairs;
     let mut retry = bounded_args();
     retry["children"][0]
         .as_object_mut()
         .unwrap()
         .remove("capability_argument_constraints");
-    assert_eq!(restored.admission_issues(&retry, 0, None).len(), 1);
+    assert_eq!(restored.admission_issues(&retry, 7, None).len(), 1);
     assert!(restored
-        .admission_issues(&bounded_args(), 0, None)
+        .admission_issues(&bounded_args(), 7, None)
         .is_empty());
 }
 
@@ -185,9 +187,18 @@ fn explicit_instruction_revision_starts_a_new_repair_scope() {
 
 #[test]
 fn malformed_checkpoint_fails_closed_and_never_silently_discards_scopes() {
-    let mut guard = ScopeRepairState::restore(&json!({"nodes":{"reader":[]}}), 7);
+    let mut loop_state = super::super::LoopState::new();
+    super::super::checkpoint_resume_state::restore_checkpoint_resume_state(
+        &mut loop_state,
+        &json!({"agent_loop_resume_state":{"schema_version":1,"stage":"planning",
+            "subagent_scope_repairs":{"nodes":{"reader":[]}}}}),
+    );
+    // Production restores the checkpoint before hydrating accepted inputs.
+    loop_state.conversation_input_revision = 7;
     assert_eq!(
-        guard.admission_issues(&bounded_args(), 7, None)[0]["reason"],
+        loop_state
+            .subagent_scope_repairs
+            .admission_issues(&bounded_args(), 7, None)[0]["reason"],
         "scope_repair_state_unavailable"
     );
 }

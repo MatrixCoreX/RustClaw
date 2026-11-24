@@ -21,7 +21,9 @@ pub(crate) struct ScopeRepairState {
 
 impl ScopeRepairState {
     fn for_revision(&mut self, revision: u64) {
-        if self.revision != revision {
+        // Input hydration may follow checkpoint restoration. An unavailable
+        // checkpoint must not become an empty grant when that revision arrives.
+        if !self.overflowed && self.revision != revision {
             *self = Self {
                 revision,
                 ..Self::default()
