@@ -69,7 +69,14 @@ fn contract(operations: impl IntoIterator<Item = Value>) -> Value {
             truncated |= managed.len() > MAX_DISPATCHES;
         }
         truncated |= dispatches.len() > MAX_DISPATCHES;
-        rows.push(json!({"step_id":step_id,"status":status,"dispatches":dispatches.into_iter()
+        // These flags describe one host-observed dispatch, never its semantic
+        // sufficiency. A failed diagnostic is still not a successful method.
+        let status_check_flags = match status {
+            "ok" => Some(json!({"method_observed":true,"blocked":false})),
+            "error" => Some(json!({"method_observed":false,"blocked":true})),
+            _ => None,
+        };
+        rows.push(json!({"step_id":step_id,"status":status,"status_check_flags":status_check_flags,"dispatches":dispatches.into_iter()
             .take(MAX_DISPATCHES).map(|(action_type, action_ref)| json!({"action_type":action_type,"action_ref":action_ref})).collect::<Vec<_>>()}));
     }
     let schema = crate::prompt_utils::PromptSchemaId::AnswerVerifier.schema_value();
@@ -79,6 +86,7 @@ fn contract(operations: impl IntoIterator<Item = Value>) -> Value {
         "evidence_scope":"current_task_executed_operations_only",
         "delegation_scope":"parent_dispatch_and_host_owned_child_results",
         "presentation_check_location":"verdict_not_operation_rows",
+        "result_observed_policy":"effective_request_and_cited_host_evidence_only",
         "operations":rows,
         "truncated":truncated,
     })

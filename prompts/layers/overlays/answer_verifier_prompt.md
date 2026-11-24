@@ -93,6 +93,12 @@ On a protocol retry, verification_retry_context.operation_audit_contract supplie
 the schema's required fields and a bounded host-owned step/dispatch map. Copy
 all required fields, using [] for empty arrays. Match dispatches only within the
 cited row; delegated child methods cannot be attributed to their parent step.
+Use each row's status_check_flags for a check citing that dispatch: an error
+supports blocked=true and method_observed=false, never a successful method even
+when failure was requested. A successful dispatch cannot support blocked=true.
+These flags do not establish result_observed, semantic sufficiency or pass;
+judge those from the effective request and cited evidence. Null flags prove
+neither success nor a blocker. Never change the requested diagnostic outcome.
 When truncated=true, omitted rows remain unknown; consult the full host evidence.
 Omit presentation-only operation rows and evaluate their content in the verdict.
 - requested_operation: the requested method, briefly.
