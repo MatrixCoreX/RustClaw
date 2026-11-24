@@ -58,14 +58,15 @@ fn rejected_extra_field_never_becomes_a_dispatchable_native_action() {
         name: "call_fixture_write".into(),
         arguments: json!({"path":"document/result.txt","content":"accepted\n","deliver_to_user":false}),
     };
-    let rejected = super::super::action_from_native_tool_call(&call, &groups, &schemas, None);
+    let rejected =
+        super::super::action_from_native_tool_call_with_schemas(&call, &groups, &schemas, None);
     assert!(matches!(rejected, Err(ref error) if error == "native_plan_args_schema_invalid"));
     call.arguments
         .as_object_mut()
         .unwrap()
         .remove("deliver_to_user");
     assert!(matches!(
-        super::super::action_from_native_tool_call(&call, &groups, &schemas, None),
+        super::super::action_from_native_tool_call_with_schemas(&call, &groups, &schemas, None),
         Ok(crate::AgentAction::CallCapability { .. })
     ));
 }
