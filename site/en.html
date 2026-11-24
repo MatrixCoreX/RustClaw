@@ -2,11 +2,9 @@
 <header class="wrap site-header">
   <a class="brand" href="./"><img src="assets/logo.svg" alt="" width="34" height="34"><span>$brand</span></a>
   <nav aria-label="Main navigation">
-    <a href="#skills">Skills</a>
-    <a href="#mcp">MCP</a>
-    <a href="#rag">Knowledge base</a>
-    <a href="#media">Media skills</a>
-    <a href="#aipp">AiAPP</a>
+    <a href="skills/">Skills</a>
+    <a href="mcp/">MCP</a>
+    <a href="rag/">Knowledge base</a>
     <a href="#install">Install</a>
     <a href="zh/" lang="zh-CN" hreflang="zh-CN">中文</a>
     <a class="source-link" href="$repo">GitHub</a>
@@ -17,114 +15,76 @@
     <div>
       <p class="byline"><a href="$profile">Built by $owner</a></p>
       <h1 id="name">$brand <span>Self-hosted AI agent</span></h1>
-      <p class="intro">Run an open-source AI agent on Raspberry Pi, Ubuntu, or macOS. Use skills to get work done, connect tools through MCP, and ask questions about your own documents from the web console.</p>
+      <p class="intro">Run an open-source AI agent on Raspberry Pi, Ubuntu, or macOS. Set up a model, upload files, and follow task progress in the web console. Connect Telegram, WeChat, or Feishu to send requests from your messaging app.</p>
+      <p class="intro">Ask the agent to summarize a PDF, check an order through MCP, or cite a returns policy from your RAG knowledge base. For media tasks, review collected posts and downloaded files in the skill’s companion AiAPP.</p>
       <div class="actions">
         <a class="button primary" href="#install">Install</a>
-        <a class="button secondary" href="$repo">View on GitHub</a>
+        <a class="button secondary" href="#use-cases">View guides</a>
       </div>
     </div>
     <figure class="preview" id="order-example">
       <a href="${examples}mcp.png"><img src="${examples}mcp.png" alt="$preview_alt" width="794" height="370" fetchpriority="high"></a>
-      <figcaption>MCP order lookup with sample data. <a href="#rag-example">Knowledge base example</a> · <a href="#media">Media examples</a></figcaption>
+      <figcaption>MCP order lookup with sample data. <a href="#rag-example">Knowledge base example</a> · <a href="#media">Skill examples</a></figcaption>
     </figure>
   </section>
   <section class="page-section" id="use-cases" aria-labelledby="use-heading">
-    <h2 id="use-heading">Agent skills, MCP tools, and RAG knowledge bases</h2>
+    <h2 id="use-heading">Guides for skills, MCP, and RAG</h2>
     <div class="capabilities">
-      <article class="capability" id="skills" aria-labelledby="skills-heading">
-        <div>
-          <h3 id="skills-heading">Use and install agent skills</h3>
-          <p>Skills give the agent ways to work with files, extract text from documents, and transcribe audio. You can describe what you want in chat and the agent can select an enabled skill for the task.</p>
-          <blockquote>“Read the attached PDF and list the action items and deadlines.”</blockquote>
-          <a href="#media">Try the media skills</a> · <a href="$repo#skills">Explore all skills</a>
+      <article class="skills-overview" id="skills" aria-labelledby="skills-heading">
+        <h3 id="skills-heading">Agent skills</h3>
+        <p>Enable skills to work with files, transcribe audio, or collect and download media through chat.</p>
+        <a href="skills/">Install and use skills</a>
+        <p class="skill-example-intro">Start these tasks in Agent chat. The screenshots show the skills’ companion views in AiAPP, where you can review the results.</p>
+        <div class="detail-grid skill-examples" id="media">
+          <section id="media-discovery" aria-labelledby="discovery-heading">
+            <h4 id="discovery-heading">Media Discovery</h4>
+            <p>Collect posts by topic from supported sites such as Xiaohongshu, Douyin, and Bilibili. A collection can keep the original captions, previews, source links, and engagement numbers available at the time. Run a single batch or ask the agent to start, pause, or stop an ongoing collection.</p>
+            <blockquote>“Search Xiaohongshu for camping gear. Collect one batch of up to five posts and keep their captions, previews, and source links.”</blockquote>
+            <a href="skills/#media-discovery">Try the Media Discovery example</a>
+            <figure class="example-shot">
+              <a href="${examples}media-discovery.png"><img src="${examples}media-discovery.png" alt="Media Discovery in AiAPP shows two sample camping posts with previews, captions, and engagement figures." width="1120" height="642" loading="lazy" decoding="async"></a>
+              <figcaption>The Media Discovery companion AiAPP shows sample collection results.</figcaption>
+            </figure>
+          </section>
+          <section id="media-download" aria-labelledby="download-heading">
+            <h4 id="download-heading">Media Download</h4>
+            <p>Send a supported post URL or paste its app share message. The skill saves the available original video or images and can return the original article text for supported posts. Larger image sets are delivered in a ZIP file.</p>
+            <blockquote>“Save the original images and any available article text from this Xiaohongshu post: [paste the share link].”</blockquote>
+            <a href="skills/#media-download">Try the Media Download example</a>
+            <figure class="example-shot">
+              <a href="${examples}media-download.png"><img src="${examples}media-download.png" alt="Media Download in AiAPP shows a completed sample task with image and text files alongside a failed task." width="1120" height="853" loading="lazy" decoding="async"></a>
+              <figcaption>The Media Download companion AiAPP shows sample tasks and output files.</figcaption>
+            </figure>
+          </section>
         </div>
-        <ol>
-          <li>On the dashboard, open <strong>Tools &amp; Skills</strong> to see which skills are installed and enabled.</li>
-          <li>For an optional skill, open <strong>Skill Store</strong>, check platform and dependency information, and install it.</li>
-          <li>Check that the skill is enabled, then try a specific request in <strong>Agent</strong> chat.</li>
-        </ol>
+        <section class="skill-companion" id="aipp" aria-labelledby="aipp-heading">
+          <h4 id="aipp-heading">AiAPP companion views for skills</h4>
+          <p>Skills can provide companion views in AiAPP. Admins can use them to filter collected posts, reopen the originals, and find files from previous downloads.</p>
+          <a href="skills/#aipp">See how AiAPP views are installed and how they access results</a>
+        </section>
       </article>
-      <article class="capability" id="mcp" aria-labelledby="mcp-heading">
-        <div>
-          <h3 id="mcp-heading">Connect external tools through MCP</h3>
-          <p>The Model Context Protocol (MCP) lets the agent call tools from other systems. Connect one or more tool servers to look up current records, such as order and shipping details.</p>
-          <blockquote>“Has order 3 shipped? Which carrier is handling it, and what’s the tracking number?”</blockquote>
-          <a href="$repo/blob/main/docs/architecture/02-security-execution.md">Read how MCP tool access is controlled</a>
-        </div>
-        <ol>
-          <li>In the admin console, open <strong>Models → External tool servers</strong> and add a server. Enter a local command and arguments for stdio, or a server URL for Streamable HTTP.</li>
-          <li>Review the connection, mark the server as trusted, and enable both the server and MCP tools. Enter the permitted names under <strong>Allowed tools</strong> and save.</li>
-          <li>If prompted, restart the service. Once the server shows <strong>Ready</strong>, select <strong>Test protocol</strong>, then try a lookup in Agent chat.</li>
-        </ol>
+      <article id="mcp" aria-labelledby="mcp-heading">
+        <h3 id="mcp-heading">MCP tools</h3>
+        <p>Connect tools from other systems to look up current records, such as shipping status and tracking numbers.</p>
+        <a href="mcp/">Connect and test MCP tools</a>
       </article>
-      <article class="capability" id="rag" aria-labelledby="rag-heading">
-        <div>
-          <h3 id="rag-heading">Search your documents with a RAG knowledge base</h3>
-          <p>Retrieval-augmented generation (RAG) lets the agent search your imported manuals, FAQs, and policies before it answers. Matched passages can be cited with their chapter, page, or other source location.</p>
-          <blockquote>“In the Returns Handbook, who pays return shipping for a defective item? Cite the policy.”</blockquote>
-          <a href="$repo#knowledge-base-design-flow">See the knowledge base import and search guide</a>
-          <figure class="example-shot" id="rag-example">
-            <a href="${examples}rag.png"><img src="${examples}rag.png" alt="Agent answers a return shipping question and cites section 3.2 of the sample Returns Handbook." width="794" height="317" loading="lazy" decoding="async"></a>
-            <figcaption>RAG answer with a citation to a sample policy.</figcaption>
-          </figure>
-        </div>
-        <ol>
-          <li>Open <strong>Memory → Knowledge base → Add material</strong> and give your library a name, such as <strong>Returns Handbook</strong>.</li>
-          <li>Enter file or folder paths the service can read, one per line, then select <strong>Start adding</strong>. Try Markdown, plain text, or a PDF with selectable text.</li>
-          <li>Once the import finishes, refresh the libraries and try <strong>Search material</strong>. In Agent chat, name the library and ask for a source.</li>
-        </ol>
+      <article id="rag" aria-labelledby="rag-heading">
+        <h3 id="rag-heading">RAG knowledge base</h3>
+        <p>Import manuals, FAQs, and policies that the agent can search and cite when answering a question.</p>
+        <a href="rag/">Import documents and ask for sources</a>
       </article>
     </div>
     <div class="workflow">
-      <h3>Try an order lookup and a policy check together</h3>
-      <p>With an order lookup tool connected and a returns handbook imported, you can ask for the current shipment status and the written return policy in a single message.</p>
-      <blockquote>“Check whether order 3 has shipped, then use the Returns Handbook to explain who pays return shipping if the item is defective. Cite the policy.”</blockquote>
+      <div>
+        <h3>Check an order and a return policy in one message</h3>
+        <p>Connect an order lookup tool and import a returns handbook to ask about shipping status and the written return policy together.</p>
+        <blockquote>“Check whether order 3 has shipped, then use the Returns Handbook to explain who pays return shipping if the item is defective. Cite the policy.”</blockquote>
+      </div>
+      <figure class="example-shot" id="rag-example">
+        <a href="${examples}rag.png"><img src="${examples}rag.png" alt="Agent answers a return shipping question and cites section 3.2 of the sample Returns Handbook." width="794" height="317" loading="lazy" decoding="async"></a>
+        <figcaption>Knowledge base answer with a citation to a sample policy.</figcaption>
+      </figure>
     </div>
-  </section>
-  <section class="page-section" id="media" aria-labelledby="media-heading">
-    <h2 id="media-heading">Media discovery and download</h2>
-    <p class="section-intro">Find both skills in <strong>Skill Store</strong>, where you can check installation status and required dependencies. Once the skill you want is enabled, try one of these prompts in <strong>Agent</strong> chat.</p>
-    <div class="detail-grid">
-      <article id="media-discovery" aria-labelledby="discovery-heading">
-        <h3 id="discovery-heading">Media Discovery</h3>
-        <p>Collect posts by topic from supported sites such as Xiaohongshu, Douyin, and Bilibili. A collection can keep the original captions, previews, source links, and engagement numbers available at the time. Run a single batch or ask the agent to start, pause, or stop an ongoing collection.</p>
-        <blockquote>“Search Xiaohongshu for camping gear. Collect one batch of up to five posts and keep their captions, previews, and source links.”</blockquote>
-        <a href="$repo/blob/main/docs/architecture/12-media-discovery.md">See how media discovery works</a>
-        <figure class="example-shot">
-          <a href="${examples}media-discovery.png"><img src="${examples}media-discovery.png" alt="Media Discovery in AiAPP shows two sample camping posts with previews, captions, and engagement figures." width="1120" height="642" loading="lazy" decoding="async"></a>
-          <figcaption>AiAPP collection view with sample posts.</figcaption>
-        </figure>
-      </article>
-      <article id="media-download" aria-labelledby="download-heading">
-        <h3 id="download-heading">Media Download</h3>
-        <p>Send a supported post URL or paste its app share message. The skill saves the available original video or images and can return the original article text for supported posts. Larger image sets are delivered in a ZIP file.</p>
-        <blockquote>“Save the original images and any available article text from this Xiaohongshu post: [paste the share link].”</blockquote>
-        <a href="$repo/blob/main/optional_skills/media_download/INTERFACE.md">See supported platforms and download formats</a>
-        <figure class="example-shot">
-          <a href="${examples}media-download.png"><img src="${examples}media-download.png" alt="Media Download in AiAPP shows a completed sample task with image and text files alongside a failed task." width="1120" height="853" loading="lazy" decoding="async"></a>
-          <figcaption>AiAPP download history with sample tasks and files.</figcaption>
-        </figure>
-      </article>
-    </div>
-  </section>
-  <section class="page-section" id="aipp" aria-labelledby="aipp-heading">
-    <h2 id="aipp-heading">AiAPP companion views for skills</h2>
-    <p class="section-intro">Admins can open companion views in <strong>AiAPP</strong> or add one for an enabled skill with <strong>Install app</strong>. In <strong>Media Discovery</strong>, filter by platform, preview posts, and open the originals. In <strong>Media Download</strong>, filter tasks by channel or status, see why a download failed, or retrieve the files.</p>
-    <dl class="aipp-design">
-      <div>
-        <dt>Declared by the skill</dt>
-        <dd>An optional <code>[aipp]</code> section in <code>skill.toml</code> describes the view. Access follows the associated skill’s version, enabled state, and permissions.</dd>
-      </div>
-      <div>
-        <dt>Data provided by the console</dt>
-        <dd>Built-in views use a versioned data contract. Media Discovery reads its own collection records. Media Download shows retained runs from Agent chat and connected messaging channels.</dd>
-      </div>
-      <div>
-        <dt>Isolated custom views</dt>
-        <dd>A skill can also ship its own static interface. It runs in a sandbox and can request only capabilities allowed by the host.</dd>
-      </div>
-    </dl>
-    <p class="detail-links"><a href="$repo/blob/main/docs/architecture/14-aipp-skill-companions.md">Read the AiAPP design</a> <a href="$repo/blob/main/docs/architecture/15-aipp-development-guide.md">Build a companion view</a></p>
   </section>
   <section id="install" class="install" aria-labelledby="install-heading">
     <div>

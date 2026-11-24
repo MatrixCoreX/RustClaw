@@ -1,0 +1,53 @@
+    <h1 id="guide-title">在 $brand 配置和测试 MCP 工具</h1>
+    <p class="guide-intro">MCP（模型上下文协议）让 Agent 调用其他系统提供的工具。接入订单查询后，可以让 Agent 从订单系统读取当前物流状态、快递公司和单号。</p>
+    <nav class="guide-nav" aria-label="本页目录">
+      <a href="#connect">添加服务器</a>
+      <a href="#permissions">设置工具权限</a>
+      <a href="#test">测试订单查询</a>
+      <a href="#troubleshooting">排查连接</a>
+    </nav>
+
+    <section id="connect">
+      <h2>添加本机或远程 MCP 服务器</h2>
+      <p>在管理控制台打开<strong>大模型 → 外部工具服务器 → 添加服务器</strong>。每个服务器取一个独立的名称，并按服务方提供的信息填写连接方式。</p>
+      <dl>
+        <dt>本机命令（stdio）</dt>
+        <dd>填写启动命令和参数，每行一个参数。命令在运行 Agent 的设备上启动，路径也要填写那台设备实际能访问的位置。</dd>
+        <dt>远程服务（Streamable HTTP）</dt>
+        <dd>填写完整 MCP 地址，例如 <code>https://tools.example.com/mcp</code>。服务需要认证时，选择对应的认证方式。凭据字段填写环境变量名，实际值设置在运行服务的主机环境里。</dd>
+      </dl>
+    </section>
+
+    <section id="permissions">
+      <h2>选择允许 Agent 调用的工具</h2>
+      <ol>
+        <li>核对服务器的地址或命令，确认自己管理或信任它后，勾选<strong>我信任此服务器</strong>。</li>
+        <li>在<strong>允许的工具</strong>中逐行填写服务端提供的准确工具名。用订单示例起步时，可以先填写服务提供的只读查询工具。</li>
+        <li>启用这个服务器和<strong>启用 MCP 工具</strong>总开关，点击<strong>保存 MCP 设置</strong>。如果提示需要重启，按提示重启服务。</li>
+      </ol>
+      <p><a href="$repo/blob/main/docs/architecture/02-security-execution.zh-CN.md">查看工具请求与权限的检查方式</a></p>
+    </section>
+
+    <section id="test">
+      <h2>测试连接，再查一笔订单</h2>
+      <p>服务器状态显示<strong>可用</strong>后，点击<strong>测试协议</strong>。确认工具列表有订单查询工具，再回到 <strong>Agent</strong> 聊天发送请求。</p>
+      <blockquote>「订单 3 到哪儿了？请告诉我快递单号。」</blockquote>
+      <p>把示例订单号换成测试系统里已有的订单。收到回复后，对照订单系统里的物流状态和单号。</p>
+      <figure class="example-shot">
+        <a href="${examples}mcp.png"><img src="${examples}mcp.png" alt="$preview_alt" width="794" height="370" loading="lazy" decoding="async"></a>
+        <figcaption>网页控制台中的订单查询示例，使用模拟数据。</figcaption>
+      </figure>
+    </section>
+
+    <section id="troubleshooting">
+      <h2>连接或工具不可用时检查什么</h2>
+      <dl>
+        <dt>服务器显示「等待重启」</dt>
+        <dd>重启 Agent 服务，然后在外部工具服务器页面刷新状态。</dd>
+        <dt>服务器显示「可用」，工具数量为 0</dt>
+        <dd>核对<strong>允许的工具</strong>里的名称是否和服务端提供的完全一致，确认每行一个名称。</dd>
+        <dt>测试协议失败</dt>
+        <dd>先检查 Agent 所在设备能否启动本机命令或访问远程地址。服务需要认证时，再检查运行环境能否读取对应的凭据环境变量。</dd>
+      </dl>
+      <p class="detail-links"><a href="../skills/">了解如何安装和使用技能</a> <a href="../rag/">搭配售后知识库查询规则</a></p>
+    </section>

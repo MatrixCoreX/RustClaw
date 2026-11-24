@@ -1,0 +1,50 @@
+    <h1 id="guide-title">导入和使用 $brand 的 RAG 知识库</h1>
+    <p class="guide-intro">RAG 是检索增强生成。把产品说明、常见问题或售后手册导入一个命名资料库后，Agent 可以先查相关段落，再根据原文回答并给出处。</p>
+    <nav class="guide-nav" aria-label="本页目录">
+      <a href="#prepare">准备文件</a>
+      <a href="#import">导入并验证</a>
+      <a href="#ask">提问和引用</a>
+      <a href="#troubleshooting">排查问题</a>
+    </nav>
+
+    <section id="prepare">
+      <h2>准备 Agent 服务能读取的文件</h2>
+      <p>第一次可以用一份较小的 Markdown、纯文本、能选中文字的 PDF，或 DOCX、XLSX、PPTX 等办公文档。扫描版 PDF 可以先做 OCR，再导入识别后的可检索文本。</p>
+      <p>文件需要放在 Agent 服务能访问的路径上。服务部署在另一台设备时，把资料放到那台设备或它能读取的挂载目录。相对路径以 Agent 服务的工作目录为起点。</p>
+      <p>想跟着示例试一遍，可以把下面两行保存为 <code>returns-handbook.md</code>，放到服务能读取的目录里。</p>
+      <pre class="guide-sample"><code>## 3.2 质量问题退货
+客服核实商品存在质量问题后，退货运费由商家承担。</code></pre>
+    </section>
+
+    <section id="import">
+      <h2>导入后检查文件是否能搜到</h2>
+      <ol>
+        <li>打开<strong>记忆管理 → 知识库 → 添加资料</strong>。资料库名称可以填<strong>售后手册</strong>，再逐行输入文件或文件夹路径。</li>
+        <li>点击<strong>开始添加</strong>，等待资料处理。如果页面提示<strong>继续未完成工作</strong>，按提示处理下一批。</li>
+        <li>点击<strong>刷新资料库</strong>，选择库名，用<strong>查看文档状态</strong>核对文件。接着在<strong>搜索资料</strong>里搜索原文中的关键词，比如「退货运费」，确认能命中片段和出处。</li>
+      </ol>
+    </section>
+
+    <section id="ask">
+      <h2>在 Agent 里指定资料库并要求给出处</h2>
+      <p>提问时写清库名和你要核实的规则，并请 Agent 给出处。根据文件格式，引用可能指向章节、页码、工作表或其他原文位置。</p>
+      <blockquote>「查一下《售后手册》，商品有质量问题时，退货运费谁承担？请给出处。」</blockquote>
+      <p>示例回答给出了对应的手册章节。可以打开原文核对责任人、适用条件和条款是否一致。</p>
+      <figure class="example-shot">
+        <a href="${examples}rag.png"><img src="${examples}rag.png" alt="$preview_alt" width="794" height="317" loading="lazy" decoding="async"></a>
+        <figcaption>根据示例售后手册回答并引用规则出处。</figcaption>
+      </figure>
+    </section>
+
+    <section id="troubleshooting">
+      <h2>找不到资料库或原文时</h2>
+      <dl>
+        <dt>列表里看不到刚导入的库</dt>
+        <dd>核对登录账号和控制台地址，再点<strong>刷新资料库</strong>。各台设备上的独立部署分别保存自己导入的资料。</dd>
+        <dt>文档存在，搜索却没有命中</dt>
+        <dd>先看文档状态和解析提示，再试原文中的词。扫描件可换成 OCR 识别后的可搜索版本。</dd>
+        <dt>源文件有新版本</dt>
+        <dd>在已记录的路径上更新文件，再用资料库重建功能重新处理来源。完成后查看文档状态。</dd>
+      </dl>
+      <p class="detail-links"><a href="$repo/blob/main/docs/architecture/17-rag-knowledge-retrieval.zh-CN.md">查看文件格式、索引与检索细节</a> <a href="../mcp/">接入 MCP 订单查询工具</a></p>
+    </section>

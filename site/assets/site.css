@@ -50,8 +50,9 @@ nav a:hover, .byline a:hover { text-decoration: underline; }
 h1, h2, h3 { text-wrap: balance; line-height: 1.13; }
 h1 { margin: 0; font-size: clamp(3.65rem, 7vw, 6.4rem); letter-spacing: -.075em; font-weight: 780; overflow-wrap: anywhere; }
 h1 span { display: block; margin-top: .4rem; font-size: clamp(1.35rem, 2.5vw, 2.05rem); letter-spacing: -.035em; font-weight: 675; }
-.intro { max-width: 36ch; margin: 1.15rem 0 1.45rem; color: var(--muted); font-size: 1.1rem; }
+.intro { max-width: 44ch; margin: 1rem 0; color: var(--muted); font-size: 1.08rem; }
 :lang(zh-CN) .intro { max-width: 28em; }
+.hero .actions { margin-top: 1.45rem; }
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: .7rem; }
 .button { display: inline-flex; justify-content: center; align-items: center; min-height: 2.8rem; border: 1px solid transparent; border-radius: .65rem; padding: .58rem 1rem; font-weight: 685; text-decoration: none; }
 .primary { background: var(--accent); color: var(--accent-ink); }
@@ -64,27 +65,22 @@ h1 span { display: block; margin-top: .4rem; font-size: clamp(1.35rem, 2.5vw, 2.
 .example-shot { margin: 1.1rem 0 0; }
 figcaption { margin: .52rem .2rem 0; font-size: .87rem; color: var(--muted); }
 .page-section { border-top: 1px solid var(--edge); padding: clamp(2rem, 5vw, 4rem) 0; }
-.section-intro { max-width: 74ch; margin: 0 0 1.15rem; color: var(--muted); }
 h2 { margin: 0 0 1rem; font-size: clamp(1.65rem, 3.6vw, 2.6rem); letter-spacing: -.04em; }
-.capabilities { display: grid; gap: 1rem; }
+.capabilities { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
 article { padding: clamp(1.1rem, 3vw, 1.8rem); border-radius: 1rem; border: 1px solid var(--edge); background: var(--surface); }
 article h3 { margin: 0; font-size: 1.28rem; }
 article p, .install p { color: var(--muted); margin: .6rem 0; }
+.skills-overview { grid-column: 1 / -1; }
+.skill-examples, .skill-companion { margin-top: 1.2rem; padding-top: 1.2rem; border-top: 1px solid var(--edge); }
+.skills-overview h4 { margin: 0; font-size: 1.1rem; }
+.skills-overview .skill-example-intro { margin-top: 1rem; }
 blockquote { margin: 1.1rem 0; padding: .55rem .8rem; border-inline-start: 3px solid var(--accent); background: var(--highlight); border-radius: 0 .4rem .4rem 0; }
-.capability { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: clamp(1rem, 4vw, 3rem); }
-.capability ol { margin: 0; padding-inline-start: 1.4rem; }
-.capability li + li { margin-top: .65rem; }
-.capability li::marker { color: var(--accent); font-weight: 700; }
-.workflow { margin-top: 1.6rem; max-width: 74ch; }
-.workflow h3 { margin-bottom: .55rem; }
+.workflow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; gap: clamp(1rem, 4vw, 3rem); margin-top: 2rem; }
+.workflow h3 { margin: 0 0 .55rem; }
 .workflow p { margin: 0; color: var(--muted); }
 .workflow blockquote { margin-bottom: 0; }
-.detail-grid, .aipp-design { display: grid; gap: 1rem; }
-.detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.aipp-design { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 1.2rem 0; }
-.aipp-design div { border-top: 1px solid var(--edge); padding-top: .8rem; }
-.aipp-design dt { font-weight: 700; }
-.aipp-design dd { margin: .3rem 0 0; color: var(--muted); }
+.workflow .example-shot { margin: 0; }
+.detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
 .detail-links { display: flex; flex-wrap: wrap; gap: .45rem 1.2rem; margin: 1.2rem 0 0; }
 .install { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 1rem; padding: clamp(1.25rem, 4vw, 2.4rem); border-radius: 1rem; background: var(--highlight); }
 .install h2 { margin: 0; }
@@ -92,12 +88,11 @@ blockquote { margin: 1.1rem 0; padding: .55rem .8rem; border-inline-start: 3px s
 .footer { padding: 1.6rem 0 2.1rem; font-size: .94rem; color: var(--muted); }
 @media (max-width: 55rem) {
   .hero { grid-template-columns: 1fr; }
-  .capability { grid-template-columns: 1fr; }
-  .aipp-design { grid-template-columns: 1fr; }
+  .workflow { grid-template-columns: 1fr; }
   .install { grid-template-columns: 1fr; }
 }
 @media (max-width: 42rem) {
-  .detail-grid { grid-template-columns: 1fr; }
+  .capabilities, .detail-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 36rem) {
   .wrap { width: calc(100% - 2rem); }
@@ -115,6 +110,7 @@ blockquote { margin: 1.1rem 0; padding: .55rem .8rem; border-inline-start: 3px s
 .guide section { margin-top: 2.35rem; }
 .guide :is(li, dd) { margin-bottom: .5rem; }
 .guide pre { overflow-x: auto; padding: 1rem; border: 1px solid var(--edge); border-radius: .65rem; background: var(--surface); }
+.guide .guide-sample { white-space: pre-wrap; overflow-wrap: anywhere; }
 .guide code { font-family: ui-monospace, monospace; font-size: .94em; }
 .guide dt { font-weight: 700; }
 .guide dd { margin-inline-start: 0; color: var(--muted); }

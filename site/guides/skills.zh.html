@@ -1,0 +1,67 @@
+    <h1 id="guide-title">安装和使用 $brand 的 Agent 技能</h1>
+    <p class="guide-intro">技能让 Agent 能处理文件、转写语音、采集帖子和下载媒体。启用技能后，在对话里说清楚输入是什么、希望拿到什么结果，Agent 就能按任务选择可用技能。</p>
+    <nav class="guide-nav" aria-label="本页目录">
+      <a href="#install">安装技能</a>
+      <a href="#media-discovery">媒体采集</a>
+      <a href="#media-download">媒体下载</a>
+      <a href="#aipp">AiAPP</a>
+      <a href="#troubleshooting">排查问题</a>
+    </nav>
+
+    <section id="install">
+      <h2>查看、安装和启用技能</h2>
+      <ol>
+        <li>在网页控制台首页打开<strong>工具技能</strong>，查看已经安装的技能和它们的启用状态。</li>
+        <li>需要新技能时，打开 <strong>Skill Store</strong>。先核对支持的平台和依赖项，再按需安装。</li>
+        <li>确认技能已启用，回到 <strong>Agent</strong> 聊天。比如上传一份 PDF，问「读一下这份文档，列出待跟进事项和截止日期」。</li>
+      </ol>
+    </section>
+
+    <section id="media-discovery">
+      <h2>按关键词采集媒体帖子</h2>
+      <p>启用<strong>媒体采集</strong>后，可以指定支持的平台、关键词和本批数量。采集结果可以保留预览、作者文案、来源链接和采集当时能读取到的互动数据。</p>
+      <blockquote>「在小红书搜索『露营装备』，只采一批，最多 5 条，保留作者文案、预览和来源链接。」</blockquote>
+      <p>打开 <strong>AiAPP → 媒体发现</strong>，可以按平台或内容类型筛选、预览结果和打开原帖。需要持续采集时，可以在 Agent 中提出开启、暂停或停止的请求。</p>
+      <figure class="example-shot">
+        <a href="${examples}media-discovery.png"><img src="${examples}media-discovery.png" alt="$preview_alt" width="1120" height="622" loading="lazy" decoding="async"></a>
+        <figcaption>媒体采集技能的配套 AiAPP「媒体发现」截图（演示数据）。</figcaption>
+      </figure>
+      <p><a href="$repo/blob/main/docs/architecture/12-media-discovery.zh-CN.md">查看媒体采集支持的平台和执行方式</a></p>
+    </section>
+
+    <section id="media-download">
+      <h2>从作品分享链接下载原图或视频</h2>
+      <p>启用<strong>媒体下载</strong>后，把支持平台的作品链接或完整分享文案发给 Agent。可以保存能获取到的原视频、原图，以及支持的图文作品正文。图片较多时会打包为 ZIP。</p>
+      <blockquote>「帮我保存这条小红书图文的原图和能获取到的正文：[粘贴分享链接]。」</blockquote>
+      <p>可以从 Agent 回复里下载文件，也可以到 <strong>AiAPP → 媒体下载</strong>查找已保留的任务和附件。记录覆盖 Agent 聊天和已接入的消息渠道。</p>
+      <figure class="example-shot">
+        <a href="${examples}media-download.png"><img src="${examples}media-download.png" alt="AiAPP 显示模拟下载任务、已保存的图片和正文，以及一条失败记录。" width="1120" height="833" loading="lazy" decoding="async"></a>
+        <figcaption>媒体下载技能的配套 AiAPP「媒体下载」截图（演示数据）。</figcaption>
+      </figure>
+      <p><a href="$repo/blob/main/optional_skills/media_download/INTERFACE.md">查看媒体下载支持的平台和交付格式</a></p>
+    </section>
+
+    <section id="aipp">
+      <h2>AiAPP 如何展示技能结果</h2>
+      <p>管理员可在 <strong>AiAPP</strong> 打开配套视图，或从<strong>安装应用</strong>为已启用的技能添加视图。媒体任务结束后，可以回这里筛选记录、查看来源或下载文件。</p>
+      <dl>
+        <dt>由技能包声明</dt>
+        <dd>技能在 <code>skill.toml</code> 的 <code>[aipp]</code> 段声明可选配套界面。应用访问取决于已安装的技能版本、启用状态和宿主授权。</dd>
+        <dt>控制台按版本化约定提供数据</dt>
+        <dd>媒体发现读取技能自己的采集记录。媒体下载展示保留下来的技能任务和结果附件。</dd>
+        <dt>自定义界面在沙箱运行</dt>
+        <dd>技能包可以随附静态界面。应用通过宿主的能力白名单发出请求，由宿主校验授权。</dd>
+      </dl>
+      <p class="detail-links"><a href="$repo/blob/main/docs/architecture/14-aipp-skill-companions.zh-CN.md">AiAPP 架构设计</a> <a href="$repo/blob/main/docs/architecture/15-aipp-development-guide.zh-CN.md">AiAPP 开发手册</a></p>
+    </section>
+
+    <section id="troubleshooting">
+      <h2>找不到技能或任务卡住时</h2>
+      <dl>
+        <dt>工具技能列表里找不到</dt>
+        <dd>到 Skill Store 检查安装状态、支持的平台和缺少的依赖。</dd>
+        <dt>Agent 一直在等待或任务失败</dt>
+        <dd>先到<strong>任务管理</strong>确认任务是在排队还是已失败。媒体任务可以按具体提示检查来源链接、浏览器依赖或平台登录状态。</dd>
+      </dl>
+      <p class="detail-links"><a href="../mcp/">通过 MCP 接入外部工具</a> <a href="../rag/">导入 RAG 知识库</a></p>
+    </section>
