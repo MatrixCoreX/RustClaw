@@ -53,10 +53,21 @@ pub(super) fn inactive_response_collection_repair(
             .as_object_mut()?
             .insert("enum".into(), json!([args.get(field)?.clone()]));
     }
-    projected
-        .get_mut("required")?
-        .as_array_mut()?
-        .retain(|field| field.as_str().is_none_or(|name| !inactive.contains(&name)));
+    let required = projected.get_mut("required")?.as_array_mut()?;
+    required.retain(|field| field.as_str().is_none_or(|name| !inactive.contains(&name)));
+    // The selected shape is pinned for this retry. Its active payload remains
+    // mandatory even though the initial multi-shape schema allows omission.
+    let active_collection = match shape {
+        "list" => Some("items"),
+        "object" => Some("fields"),
+        "observed_object" => Some("observed_fields"),
+        _ => None,
+    };
+    if let Some(field) = active_collection {
+        if !required.contains(&json!(field)) {
+            required.push(json!(field));
+        }
+    }
     Some((
         projected,
         json!({

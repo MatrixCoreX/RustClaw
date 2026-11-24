@@ -19,7 +19,15 @@ fn initial_native_request_requires_protocol_but_keeps_answer_and_clarification()
         .iter()
         .find(|tool| tool.name == NATIVE_RESPOND_TOOL)
         .expect("terminal response is available without domain capabilities");
-    assert!(respond.strict);
+    // This terminal-only schema has optional shape-dependent fields; host
+    // validation remains authoritative without provider strict-mode coercion.
+    assert!(!respond.strict);
+    for field in ["items", "fields", "observed_fields"] {
+        assert!(!respond.input_schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(field)));
+    }
     assert_eq!(
         respond.input_schema["properties"]["terminal_intent"]["enum"],
         json!(["answer", "clarify"]),
@@ -29,9 +37,8 @@ fn initial_native_request_requires_protocol_but_keeps_answer_and_clarification()
             "terminal_intent": intent,
             "conversation_relation": if intent == "clarify" { "clarify" } else { "continue_current" },
             "shape": "free_text",
-            "content": "Model-generated response", "items": [],
+            "content": "Model-generated response",
             "exact_item_count": 0, "exact_visible_line_count": 0,
-            "fields": [], "observed_fields": [],
             "exact_field_count": 0
         });
         if intent == "clarify" {

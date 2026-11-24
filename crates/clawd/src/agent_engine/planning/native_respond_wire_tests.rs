@@ -73,3 +73,39 @@ fn optional_wire_fields_do_not_relax_active_shapes_types_counts_or_control() {
         .remove("conversation_relation");
     assert!(action_from_native_respond_call(&call, None).is_err());
 }
+
+#[test]
+fn optional_terminal_arguments_do_not_relax_capability_tool_strictness() {
+    let capability = "filesystem.append_text".to_string();
+    let schemas = BTreeMap::from([(
+        capability.clone(),
+        json!({"type":"object","required":["path","content"],"properties":{
+            "path":{"type":"string"},"content":{"type":"string","minLength":1}
+        },"additionalProperties":false}),
+    )]);
+    let request = native_planner_request(
+        "system",
+        "user",
+        None,
+        &[capability],
+        &schemas,
+        &[],
+        &[],
+        &[],
+    );
+    let capabilities = request
+        .tools
+        .iter()
+        .filter(|tool| tool.name != NATIVE_RESPOND_TOOL)
+        .collect::<Vec<_>>();
+    assert!(!capabilities.is_empty());
+    assert!(capabilities.iter().all(|tool| tool.strict));
+    assert!(
+        !request
+            .tools
+            .iter()
+            .find(|tool| tool.name == NATIVE_RESPOND_TOOL)
+            .unwrap()
+            .strict
+    );
+}
