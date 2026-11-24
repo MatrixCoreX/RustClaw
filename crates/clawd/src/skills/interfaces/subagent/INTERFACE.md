@@ -71,6 +71,12 @@ explicit application.
   the range mode, and both inclusive bounds from the user scope. Rejected
   `subagent_argument_constraints_invalid` requests create no child; repair
   only the reported `field_issues` and resubmit without changing the scope.
+- Keep each logical `node_id` stable during repair. A valid typed argument
+  restriction from a rejected plan remains binding for that node in the current
+  instruction revision, including checkpoint/resume. Repair unrelated fields;
+  copy `required_constraint` exactly when admission reports
+  `prior_argument_scope_must_be_preserved`. Renaming the node to bypass a bound
+  is not a repair. A new explicit user instruction revision may amend the scope.
 - Parent summaries should present requested findings, evidence, child IDs and
   statuses. Keep internal budget receipts and call parameters in machine
   evidence unless requested; do not volunteer unsupported compliance claims.
@@ -169,6 +175,9 @@ explicit application.
   it. Invalid input returns bounded field-path diagnostics before any child
   is created. Existing bounded planner recovery may correct the parameters;
   it cannot coerce the schema, reset budgets or hide completed child failures.
+- `required=true` belongs on the child, never inside `result_contract`. Keep
+  objectives concise; put executable bounds in the typed grant rather than
+  repeating long instructions in every child.
 - `evidence_field` names a nonempty array of `step:<successful child step id>`
   references checked against the actual child journal. The complete machine
   result is limited to 32 KiB. A business field named `result` stays nested;

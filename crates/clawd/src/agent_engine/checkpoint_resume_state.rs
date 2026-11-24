@@ -79,6 +79,7 @@ pub(crate) fn build_checkpoint_resume_state(
         "last_output": loop_state.last_output,
         "history_compact": history_compact,
         "task_observations": task_observations,
+        "subagent_scope_repairs": loop_state.subagent_scope_repairs,
         "executed_step_provenance": executed_step_provenance,
         "latest_validation_result": loop_state.latest_validation_result,
         "delivery_messages": loop_state.delivery_messages,
@@ -127,6 +128,12 @@ pub(crate) fn restore_checkpoint_resume_state(
         .and_then(Value::as_str)
         .and_then(AgentCheckpointStage::from_machine_token)
         .unwrap_or(AgentCheckpointStage::Planning);
+    loop_state.subagent_scope_repairs = super::subagent_scope_repair::ScopeRepairState::restore(
+        resume_state
+            .get("subagent_scope_repairs")
+            .unwrap_or(&Value::Null),
+        loop_state.conversation_input_revision,
+    );
     loop_state.output_vars.insert(
         "agent_loop.resume_stage".to_string(),
         stage.as_str().to_string(),

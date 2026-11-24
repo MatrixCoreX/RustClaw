@@ -58,6 +58,7 @@ pub(crate) use skill_execution::validate_skill_output_contract;
 mod skill_action_docs;
 mod skill_quick_index;
 mod subagent_runtime;
+mod subagent_scope_repair;
 mod support;
 #[cfg(test)]
 pub(crate) use support::persist_agent_loop_clarification_checkpoint;
@@ -323,6 +324,7 @@ pub(crate) struct LoopState {
     pub(crate) task_lifecycle: Option<Value>,
     pub(crate) task_checkpoint: Option<Value>,
     pub(crate) task_observations: Vec<Value>,
+    pub(super) subagent_scope_repairs: subagent_scope_repair::ScopeRepairState,
     pub(crate) last_recipe_progress_phase: Option<crate::execution_recipe::ExecutionRecipePhase>,
     pub(crate) last_recipe_progress_scope:
         Option<crate::execution_recipe::ExecutionRecipeTargetScope>,

@@ -56,6 +56,10 @@ start_line and end_line in `required` alone is insufficient: bind the exact
 path, mode and both inclusive bounds. On `subagent_argument_constraints_invalid`,
 no child was created; fill the reported `field_issues`, preserve the user's
 scope and resubmit. Never bypass a rejection by dropping required bindings.
+Keep node_id stable during repair. Previously valid typed bounds remain binding
+for that node until an explicit new instruction revision. On
+prior_argument_scope_must_be_preserved, copy required_constraint exactly; repair
+the other fields instead of dropping the grant or renaming the node.
 Summaries should give requested findings, cited evidence and child IDs/statuses.
 A grant checks resolved skill arguments, including the registry-injected `action`.
 A closed schema must declare its exact action value (for example `action.enum=["write_text"]`

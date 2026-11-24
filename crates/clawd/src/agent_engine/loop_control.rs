@@ -1640,6 +1640,13 @@ async fn run_agent_round(
             );
         }
     }
+    if plan_verifier_rejection_is_repairable(&prepared_round.verify_result) {
+        super::subagent_scope_repair::remember_rejected_plan(
+            state,
+            loop_state,
+            &prepared_round.plan_result,
+        );
+    }
     if let Some(outcome) = recover_plan_verifier_rejection(
         loop_state,
         &prepared_round.plan_result,

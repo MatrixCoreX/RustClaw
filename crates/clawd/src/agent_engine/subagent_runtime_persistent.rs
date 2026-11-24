@@ -158,6 +158,23 @@ fn schedule_child_task_specs(
             }
         };
     }
+    let scope_issues = loop_state.subagent_scope_repairs.admission_issues(
+        args,
+        loop_state.conversation_input_revision,
+        Some(state),
+    );
+    if !scope_issues.is_empty() {
+        let signal = super::SUBAGENT_STOP_SIGNAL_INVALID_ARGUMENT_CONSTRAINTS;
+        record_persistent_schedule_error(loop_state, global_step, step_in_round, signal, None);
+        loop_state.task_observations.push(json!({"schema_version":1,
+            "owner_layer":"subagent_runtime","status":"rejected","error_code":signal,
+            "message_key":"subagent.admission_rejected","retryable":true,
+            "side_effect_applied":false,"recovery_action":"replan_arguments",
+            "field_issues":scope_issues,"failure_phase":"pre_dispatch","provider_called":false,
+            "global_step":global_step,"step_in_round":step_in_round,"round_no":loop_state.round_no}));
+        return Err(signal);
+    }
+    super::super::subagent_scope_repair::remember_args(state, loop_state, args);
     let mut specs = match child_specs(task, args, config, force_readonly).and_then(|specs| {
         if specs.iter().any(|spec| spec.scope.get("capability_argument_constraints").is_some_and(|value|
             !super::super::skill_execution::child_task_execution_policy::registry_argument_constraints_issues(state, value).is_empty())) {

@@ -409,6 +409,14 @@ fn subagent_native_schemas_bind_roles_from_runtime_policy() {
         group.capability_argument_schemas["agent.subagent"]["properties"]["role"]["enum"],
         Value::Array(expected.clone())
     );
+    for capability in ["agent.subagent", "agent.subagent_persistent"] {
+        let properties = &group.capability_argument_schemas[capability]["properties"];
+        assert_eq!(
+            properties["capability_argument_constraints"]["type"],
+            "array"
+        );
+        assert_eq!(properties["node_id"]["type"], "string");
+    }
     assert_eq!(
         group.capability_argument_schemas["agent.subagent_batch"]["properties"]["children"]
             ["items"]["properties"]["role"]["enum"],
