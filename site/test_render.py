@@ -9,7 +9,7 @@ import sys
 from tempfile import TemporaryDirectory
 import tomllib
 import unittest
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 from xml.etree import ElementTree
 
 
@@ -35,6 +35,8 @@ class Page(HTMLParser):
         self.section_assets = {}
         self.ids = set()
         self.in_title = False
+        self.in_structured_data = False
+        self.structured_data = ""
         self.feed(source)
 
     def handle_starttag(self, tag, attrs):
@@ -56,6 +58,8 @@ class Page(HTMLParser):
             self.headings += 1
         if tag == "title":
             self.in_title = True
+        if tag == "script" and attributes.get("type") == "application/ld+json":
+            self.in_structured_data = True
         if tag == "html":
             self.lang = attributes["lang"]
         if tag == "meta" and attributes.get("name") == "description":
@@ -74,10 +78,14 @@ class Page(HTMLParser):
             self.open_sections.pop()
         if tag == "title":
             self.in_title = False
+        if tag == "script":
+            self.in_structured_data = False
 
     def handle_data(self, data):
         if self.in_title:
             self.title += data
+        if self.in_structured_data:
+            self.structured_data += data
 
 
 class ProjectSiteTest(unittest.TestCase):
@@ -95,7 +103,7 @@ class ProjectSiteTest(unittest.TestCase):
                     env=os.environ | {"APP_PRODUCT_IDENTITY_CONFIG": str(config)},
                     check=True,
                 )
-                pi_guide = "zh/raspberry-pi-install/"
+                pi_guide = "raspberry-pi-install/"
                 media_examples = ("media-discovery", "media-download")
                 skill_examples = (*media_examples, "weather", "speech-transcription")
                 example_sections = ("mcp", "rag", *skill_examples)
@@ -103,12 +111,15 @@ class ProjectSiteTest(unittest.TestCase):
                     "skills/": {"install", "aipp", "troubleshooting", *skill_examples},
                     "mcp/": {"connect", "demo", "permissions", "test", "troubleshooting"},
                     "rag/": {"prepare", "import", "ask", "test", "troubleshooting"},
+                    "order-support/": {"setup", "ask", "verify", "troubleshooting"},
+                    pi_guide: {"requirements", "install", "console", "troubleshooting"},
                 }
-                pages = [("", "en"), ("zh/", "zh-CN"), (pi_guide, "zh-CN")]
+                pages = [("", "en"), ("zh/", "zh-CN")]
                 for topic in topic_sections:
                     pages.extend(((topic, "en"), ("zh/" + topic, "zh-CN")))
                 titles = set()
                 descriptions = set()
+                sitemap_images = {}
                 for part, locale in pages:
                     path = output / part / "index.html"
                     source = path.read_text(encoding="utf-8")
@@ -122,7 +133,30 @@ class ProjectSiteTest(unittest.TestCase):
                     titles.add(page.title)
                     descriptions.add(page.description)
                     topic = part.removeprefix("zh/")
-                    preview = {"skills/": "media-discovery.png", "rag/": "rag.png"}.get(topic, "mcp.png")
+                    canonical = base + part
+                    metadata = json.loads(page.structured_data)
+                    self.assertEqual(metadata["@context"], "https://schema.org")
+                    if topic:
+                        self.assertEqual(metadata["@type"], "BreadcrumbList")
+                        trail = metadata["itemListElement"]
+                        self.assertEqual([item["position"] for item in trail], [1, 2])
+                        self.assertEqual(trail[0]["name"], brand)
+                        self.assertEqual(trail[0]["item"], base + ("zh/" if locale == "zh-CN" else ""))
+                        self.assertTrue(trail[1]["name"])
+                        self.assertEqual(trail[1]["item"], canonical)
+                    else:
+                        repository = f"https://github.com/{owner}/{repo}"
+                        self.assertEqual(metadata["@type"], "SoftwareSourceCode")
+                        self.assertEqual(metadata["codeRepository"], repository)
+                        self.assertEqual(metadata["name"], brand)
+                        self.assertEqual(metadata["url"], base)
+                        self.assertEqual(metadata["license"], repository + "/blob/main/LICENSE")
+                    sitemap_images[canonical] = {
+                        urljoin(canonical, src) for src in page.assets if "assets/examples/" in src
+                    }
+                    preview = {
+                        "skills/": "media-discovery.png", "rag/": "rag.png", pi_guide: "pi-first-task.png",
+                    }.get(topic, "mcp.png")
                     example_dir = f"assets/examples/{locale.split('-')[0]}/"
                     example_path = "../" * part.count("/") + example_dir
                     example_images = {section: [f"{example_path}{section}.png"] for section in example_sections}
@@ -131,13 +165,15 @@ class ProjectSiteTest(unittest.TestCase):
                     self.assertEqual(page.preview_image, base + example_dir + preview)
                     self.assertGreater((output / example_dir / preview).stat().st_size, 0)
                     alternates = {"en": base + topic, "zh-CN": base + "zh/" + topic, "x-default": base + topic}
-                    if part == pi_guide:
-                        self.assertIn(f"<title>在 Raspberry Pi 上安装 {brand} | 64 位 Raspberry Pi OS</title>", source)
+                    if topic == pi_guide:
+                        self.assertLessEqual(topic_sections[topic], page.ids)
+                        self.assertIn("Raspberry Pi", page.title)
                         self.assertIn(f"install-latest-release.sh --repo {identity['release_repository']} --check-only", source)
                         self.assertIn('df -h "$HOME"', source)
-                        alternates = {}
+                        self.assertEqual(page.section_assets["console"], [example_path + "pi-first-task.png"])
                     elif not topic:
-                        self.assertTrue(page.title.startswith(f"{brand} | "))
+                        self.assertTrue(page.title.startswith(brand))
+                        self.assertIn(owner, page.title)
                         self.assertIn(owner, page.description)
                         self.assertLessEqual(
                             {"skills", "mcp", "rag", "media", "aipp", *skill_examples},
@@ -158,7 +194,7 @@ class ProjectSiteTest(unittest.TestCase):
                         self.assertEqual(
                             {link["data-platform"]: link["href"] for link in page.links if "data-platform" in link},
                             {
-                                "pi": pi_guide if locale == "en" else "raspberry-pi-install/",
+                                "pi": pi_guide,
                                 "ubuntu": guide_url + "#ubuntu",
                                 "macos": guide_url + "#macos",
                             },
@@ -178,7 +214,6 @@ class ProjectSiteTest(unittest.TestCase):
                         hrefs = {link["href"] for link in page.links}
                         self.assertLessEqual(set(topic_sections), hrefs)
                         self.assertLessEqual({f"skills/#{name}" for name in skill_examples}, hrefs)
-                        self.assertIn(pi_guide if not part else "raspberry-pi-install/", hrefs)
                     else:
                         self.assertLessEqual(topic_sections[topic], page.ids)
                         if topic == "skills/":
@@ -210,12 +245,17 @@ class ProjectSiteTest(unittest.TestCase):
                             )
                             self.assertEqual(page.section_assets["import"], [example_path + "rag-import.png"])
                             self.assertEqual(page.section_assets["ask"], [example_path + "rag.png"])
+                        if topic == "order-support/":
+                            self.assertEqual(
+                                page.section_assets["verify"], [example_path + "mcp.png", example_path + "rag.png"],
+                            )
+                    if topic:
                         other_locale = "zh-CN" if locale == "en" else "en"
                         switches = [link for link in page.links if link.get("lang") == other_locale]
                         self.assertEqual(len(switches), 1)
                         other_path = topic if other_locale == "en" else "zh/" + topic
                         self.assertEqual((path.parent / switches[0]["href"]).resolve(), (output / other_path).resolve())
-                    self.assertEqual([link["href"] for link in page.links if link.get("rel") == "canonical"], [base + part])
+                    self.assertEqual([link["href"] for link in page.links if link.get("rel") == "canonical"], [canonical])
                     self.assertEqual(
                         {link["hreflang"]: link["href"] for link in page.links if link.get("rel") == "alternate"},
                         alternates,
@@ -234,7 +274,16 @@ class ProjectSiteTest(unittest.TestCase):
                     for asset in page.assets:
                         self.assertGreater((path.parent / asset).stat().st_size, 0)
                 sitemap = ElementTree.parse(output / "sitemap.xml")
-                self.assertCountEqual([node.text for node in sitemap.findall(".//{*}loc")], [base + part for part, _ in pages])
+                entries = sitemap.findall("{*}url")
+                self.assertCountEqual(
+                    [entry.findtext("{*}loc") for entry in entries], [base + part for part, _ in pages],
+                )
+                image_namespace = "http://www.google.com/schemas/sitemap-image/1.1"
+                for entry in entries:
+                    self.assertCountEqual(
+                        [node.text for node in entry.findall("image:image/image:loc", {"image": image_namespace})],
+                        sitemap_images[entry.findtext("{*}loc")],
+                    )
                 for verification in (SOURCE / "verification").glob("google*.html"):
                     self.assertEqual((output / verification.name).read_bytes(), verification.read_bytes())
 

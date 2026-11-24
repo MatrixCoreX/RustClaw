@@ -15,7 +15,7 @@
     <div>
       <p class="byline"><a href="$profile">由 $owner 开发</a></p>
       <h1 id="name">$brand <span>自托管 AI Agent</span></h1>
-      <p class="intro">在树莓派、Ubuntu 或 macOS 上运行开源 AI Agent。你可以在网页控制台配置模型、上传文件和查看任务进度，也可以绑定 Telegram、微信或飞书，在常用的聊天软件里发起任务。</p>
+      <p class="intro">在树莓派、Ubuntu 或 macOS 上运行用 Rust 编写的 AI Agent。你可以在网页控制台配置模型、上传文件和查看任务进度，也可以绑定 Telegram、微信或飞书，在常用的聊天软件里发起任务。</p>
       <p class="intro">比如，发一份 PDF 请 Agent 提炼要点，用 MCP 查订单物流，或从 RAG 知识库找出售后条款并给出处。采集或下载的媒体结果，可以在技能配套的 AiAPP 里回看。</p>
       <div class="actions">
         <a class="button primary" href="#install">下载安装</a>
@@ -36,7 +36,7 @@
             <p>按关键词从小红书、抖音、哔哩哔哩等支持的平台收集帖子，保留作者文案、预览、来源链接和采集时能读取到的互动数据。可以只采一批，也可以在 Agent 里开启、暂停或停止持续采集。</p>
             <blockquote>「在小红书和抖音各采集一条关于露营装备的帖子，保留作者文案、预览和来源链接。」</blockquote>
             <div class="detail-links"><a href="skills/#media-discovery">试用媒体采集</a></div>
-            <div class="media-steps">
+            <div class="example-pair">
               <figure class="example-shot">
                 <a href="${examples}media-discovery-agent.png"><img src="${examples}media-discovery-agent.png" alt="Agent 对话中发起露营装备采集，并收到小红书和抖音各一条帖子的回复。" width="714" height="261" loading="lazy" decoding="async"></a>
                 <figcaption><strong>Agent</strong> · 发起采集，确认保存了两条帖子。</figcaption>
@@ -52,7 +52,7 @@
             <p>把支持平台的作品链接或完整分享文案发给 Agent，就可以保存能获取到的原视频或原图。支持的图文作品还可以一并保存原文，图片较多时会打成 ZIP 文件。</p>
             <blockquote>「保存这条露营图文的原图和正文：[粘贴小红书分享链接]。」</blockquote>
             <div class="detail-links"><a href="skills/#media-download">试用媒体下载</a></div>
-            <div class="media-steps">
+            <div class="example-pair">
               <figure class="example-shot">
                 <a href="${examples}media-download-agent.png"><img src="${examples}media-download-agent.png" alt="Agent 对话中提交一条露营图文的下载请求，回复附有两张原图和一份正文。" width="714" height="307" loading="lazy" decoding="async"></a>
                 <figcaption><strong>Agent</strong> · 发送图文分享链接，从回复中下载原图和正文。</figcaption>
@@ -117,7 +117,10 @@
         <div>
           <p>导入产品说明、常见问题和售后手册，让 Agent 搜索原文并在回答中给出处。</p>
           <blockquote>「查一下《售后手册》，商品有质量问题时谁承担退货运费？请给出规则出处。」</blockquote>
-          <div class="detail-links"><a href="rag/#prepare">导入文件到 RAG 知识库并核对出处</a></div>
+          <div class="detail-links">
+            <a href="rag/#prepare">导入文件到 RAG 知识库并核对出处</a>
+            <a href="order-support/">用 MCP 和 RAG 完成订单售后问答</a>
+          </div>
         </div>
         <figure class="example-shot" id="rag-example">
           <a href="${examples}rag.png"><img src="${examples}rag.png" alt="Agent 回答退货运费由谁承担，并引用示例《售后手册》第 3.2 节。" width="794" height="317" loading="lazy" decoding="async"></a>
@@ -148,5 +151,5 @@
 </main>
 <footer class="wrap footer">
   <span>$brand · <a href="$profile">$owner</a></span>
-  <a href="$repo/blob/main/LICENSE">许可证</a>
+  <a href="$repo/blob/main/LICENSE.zh-CN.md">非商业源码可用许可</a>
 </footer>

@@ -15,7 +15,7 @@
     <div>
       <p class="byline"><a href="$profile">Built by $owner</a></p>
       <h1 id="name">$brand <span>Self-hosted AI agent</span></h1>
-      <p class="intro">Run an open-source AI agent on Raspberry Pi, Ubuntu, or macOS. Set up a model, upload files, and follow task progress in the web console. Connect Telegram, WeChat, or Feishu to send requests from your messaging app.</p>
+      <p class="intro">Run this Rust-based AI agent on Raspberry Pi, Ubuntu, or macOS. Set up a model, upload files, and follow tasks in the web console. Connect Telegram, WeChat, or Feishu to send requests from your messaging app.</p>
       <p class="intro">Ask the agent to summarize a PDF, check an order through MCP, or cite a returns policy from your RAG knowledge base. For media tasks, review collected posts and downloaded files in the skill’s companion AiAPP.</p>
       <div class="actions">
         <a class="button primary" href="#install">Install</a>
@@ -36,7 +36,7 @@
             <p>Collect posts by topic from supported sites such as Xiaohongshu, Douyin, and Bilibili. A collection can keep the original captions, previews, source links, and engagement numbers available at the time. Run a single batch or ask the agent to start, pause, or stop an ongoing collection.</p>
             <blockquote>“Collect one post about camping gear from Xiaohongshu and one from Douyin. Keep the captions, previews, and source links.”</blockquote>
             <div class="detail-links"><a href="skills/#media-discovery">Try the Media Discovery example</a></div>
-            <div class="media-steps">
+            <div class="example-pair">
               <figure class="example-shot">
                 <a href="${examples}media-discovery-agent.png"><img src="${examples}media-discovery-agent.png" alt="Agent chat shows a camping gear collection request and a reply listing one post from each platform." width="714" height="281" loading="lazy" decoding="async"></a>
                 <figcaption><strong>Agent</strong> · Start the collection and see which two posts were saved.</figcaption>
@@ -52,7 +52,7 @@
             <p>Send a supported post URL or paste its app share message. The skill saves the available original video or images and can return the original article text for supported posts. Larger image sets are delivered in a ZIP file.</p>
             <blockquote>“Save the original photos and article from this camping post: [paste the Xiaohongshu share link].”</blockquote>
             <div class="detail-links"><a href="skills/#media-download">Try the Media Download example</a></div>
-            <div class="media-steps">
+            <div class="example-pair">
               <figure class="example-shot">
                 <a href="${examples}media-download-agent.png"><img src="${examples}media-download-agent.png" alt="Agent chat shows a request to download a camping post and a reply with two original photos and a text file." width="714" height="330" loading="lazy" decoding="async"></a>
                 <figcaption><strong>Agent</strong> · Send a post’s share link and download the photos and text from the reply.</figcaption>
@@ -117,7 +117,10 @@
         <div>
           <p>Import manuals, FAQs, and policies that the agent can search and cite when answering a question.</p>
           <blockquote>“Check the Returns Handbook. Who pays return shipping if the item is defective? Cite the policy.”</blockquote>
-          <div class="detail-links"><a href="rag/#prepare">Import a document into a RAG knowledge base</a></div>
+          <div class="detail-links">
+            <a href="rag/#prepare">Import a document into a RAG knowledge base</a>
+            <a href="order-support/">Combine MCP and RAG for order support</a>
+          </div>
         </div>
         <figure class="example-shot" id="rag-example">
           <a href="${examples}rag.png"><img src="${examples}rag.png" alt="Agent answers a return shipping question and cites section 3.2 of the sample Returns Handbook." width="794" height="317" loading="lazy" decoding="async"></a>
@@ -139,7 +142,7 @@
       <label for="install-macos">macOS</label>
       <div class="actions platform-actions">
         <a class="button primary" href="$repo/releases">Download a signed release</a>
-        <a class="button secondary" data-platform="pi" href="zh/raspberry-pi-install/" hreflang="zh-CN">Raspberry Pi guide (Chinese)</a>
+        <a class="button secondary" data-platform="pi" href="raspberry-pi-install/">Raspberry Pi installation guide</a>
         <a class="button secondary" data-platform="ubuntu" href="$repo/blob/main/docs/release_installation.md#ubuntu">Ubuntu installation guide</a>
         <a class="button secondary" data-platform="macos" href="$repo/blob/main/docs/release_installation.md#macos">macOS installation guide</a>
       </div>
@@ -148,5 +151,5 @@
 </main>
 <footer class="wrap footer">
   <span>$brand by <a href="$profile">$owner</a></span>
-  <a href="$repo/blob/main/LICENSE">License</a>
+  <a href="$repo/blob/main/LICENSE">Non-commercial source-available license</a>
 </footer>
