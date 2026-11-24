@@ -163,17 +163,15 @@ impl GenerationFixture {
         let initial = super::settings::resolve_task_memory_settings(fixture.state(), &task)
             .unwrap()
             .expect("fresh fixture identity");
-        assert!(
-            !initial.generate_memory,
-            "new-install opt-in remains required"
-        );
+        assert!(initial.use_memory && initial.generate_memory);
+        assert_eq!(initial.generate_source, "release_default");
         let actor = crate::resolve_auth_identity_by_key(fixture.state(), &fixture.key)
             .unwrap()
             .expect("authenticated fixture actor");
         {
             let db = fixture.state().core.db.get().unwrap();
-            // Make the same explicit, revision-checked account choice as the UI;
-            // do not override the global new-install default or managed policy.
+            // Establish an explicit account revision for the worker tests that
+            // change settings while a job is queued or running.
             let choice = super::settings::update_memory_settings(
                 &db,
                 &actor,
@@ -189,7 +187,7 @@ impl GenerationFixture {
                 },
                 fixture.state().policy.memory.long_term_enabled,
             )
-            .expect("normal authenticated memory opt-in");
+            .expect("normal authenticated memory settings update");
             assert!(choice.use_memory && choice.generate_memory);
         }
         let settings = super::settings::resolve_task_memory_settings(fixture.state(), &task)

@@ -30,7 +30,8 @@ for browser in chrome edge; do
     [[ "$major" =~ ^[0-9]+$ ]] && (( 10#$major >= 120 )) || continue
     # An unprefixed codesign requirement is interpreted as a filename.
     requirement="=anchor apple generic and identifier \"$bundle_id\" and certificate leaf[subject.OU] = \"$team\""
-    /usr/bin/codesign --verify --strict -R "$requirement" "$app" 2>/dev/null || continue
+    # Finder metadata is outside the signature. Validate sealed symlink targets.
+    /usr/bin/codesign --verify --strict=symlinks -R "$requirement" "$app" 2>/dev/null || continue
     if [[ "${1:-}" == --resolve-executable ]]; then
       printf '%s\n' "$executable"
       exit 0
