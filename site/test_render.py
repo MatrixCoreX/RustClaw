@@ -11,6 +11,7 @@ import tomllib
 import unittest
 from urllib.parse import urljoin, urlsplit
 from xml.etree import ElementTree
+from zipfile import ZipFile
 
 
 SOURCE = Path(__file__).resolve().parent
@@ -110,7 +111,7 @@ class ProjectSiteTest(unittest.TestCase):
                 topic_sections = {
                     "skills/": {"install", "aipp", "troubleshooting", *skill_examples},
                     "mcp/": {"connect", "demo", "permissions", "test", "troubleshooting"},
-                    "rag/": {"prepare", "import", "ask", "test", "troubleshooting"},
+                    "rag/": {"prepare", "import", "ask", "test", "scenarios", "troubleshooting"},
                     "order-support/": {"setup", "ask", "verify", "troubleshooting"},
                     pi_guide: {"requirements", "install", "console", "troubleshooting"},
                 }
@@ -214,6 +215,7 @@ class ProjectSiteTest(unittest.TestCase):
                         hrefs = {link["href"] for link in page.links}
                         self.assertLessEqual(set(topic_sections), hrefs)
                         self.assertLessEqual({f"skills/#{name}" for name in skill_examples}, hrefs)
+                        self.assertIn("rag/#scenarios", hrefs)
                     else:
                         self.assertLessEqual(topic_sections[topic], page.ids)
                         if topic == "skills/":
@@ -235,14 +237,27 @@ class ProjectSiteTest(unittest.TestCase):
                             )
                         if topic == "rag/":
                             sample = "returns-handbook.md"
+                            archive_path = "assets/examples/rag-scenarios.zip"
+                            scenario_path = SOURCE / "assets/examples/rag-scenarios"
                             self.assertEqual(
                                 [link["href"] for link in page.links if "download" in link],
-                                [example_path + sample],
+                                [example_path + sample, "../" * part.count("/") + archive_path],
                             )
                             self.assertEqual(
                                 (output / example_dir / sample).read_bytes(),
                                 (SOURCE / example_dir / sample).read_bytes(),
                             )
+                            sources = sorted(scenario_path.glob("*.md"))
+                            self.assertEqual(len(sources), 8)
+                            with ZipFile(output / archive_path) as archive:
+                                self.assertCountEqual(
+                                    [member.filename for member in archive.infolist() if not member.is_dir()],
+                                    [f"rag-scenarios/{source.name}" for source in sources],
+                                )
+                                for source in sources:
+                                    self.assertEqual(
+                                        archive.read(f"rag-scenarios/{source.name}"), source.read_bytes(),
+                                    )
                             self.assertEqual(page.section_assets["import"], [example_path + "rag-import.png"])
                             self.assertEqual(page.section_assets["ask"], [example_path + "rag.png"])
                         if topic == "order-support/":
@@ -251,7 +266,10 @@ class ProjectSiteTest(unittest.TestCase):
                             )
                     if topic:
                         other_locale = "zh-CN" if locale == "en" else "en"
-                        switches = [link for link in page.links if link.get("lang") == other_locale]
+                        switches = [
+                            link for link in page.links
+                            if link.get("lang") == other_locale and link.get("hreflang") == other_locale
+                        ]
                         self.assertEqual(len(switches), 1)
                         other_path = topic if other_locale == "en" else "zh/" + topic
                         self.assertEqual((path.parent / switches[0]["href"]).resolve(), (output / other_path).resolve())

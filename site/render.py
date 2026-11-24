@@ -128,13 +128,13 @@ def build(output: Path):
         ),
         (
             "guides/rag.en.html", "en", "rag/", "RAG knowledge base", f"{brand} RAG Knowledge Base Guide | Import and Cite Files",
-            f"Import PDF, Markdown, or Office files into a {brand} RAG knowledge base. Download a sample handbook and verify retrieval, citations, and missing information.",
+            f"Import PDF, Markdown, or Office files into a {brand} RAG knowledge base. Download seven examples covering product questions, warehouse procedures, and MCP order lookup.",
             "Agent cites a section of the sample Returns Handbook in a return shipping answer.",
             "rag.png",
         ),
         (
             "guides/rag.zh.html", "zh-CN", "zh/rag/", "RAG 知识库", f"{brand} RAG 知识库指南 | 导入 PDF、Word 与 Markdown",
-            f"在 {brand} 的记忆管理导入 PDF、Word 或 Markdown，检索原文并让 Agent 引用出处。配有可下载的售后手册和三道验证题。",
+            f"在 {brand} 的记忆管理导入 PDF、Word 或 Markdown 并核对引用。下载七个 RAG 案例，体验商品导购、发货流程、文档对比和 MCP 订单查询。",
             "Agent 回答退货运费由谁承担，并引用示例《售后手册》第 3.2 节。",
             "rag.png",
         ),
@@ -205,7 +205,9 @@ def build(output: Path):
     assets.mkdir(exist_ok=True)
     for name in ("site.css", "console-demo.png"):
         shutil.copyfile(SOURCE / "assets" / name, assets / name)
-    shutil.copytree(SOURCE / "assets" / "examples", assets / "examples", dirs_exist_ok=True)
+    examples = assets / "examples"
+    shutil.copytree(SOURCE / "assets" / "examples", examples, dirs_exist_ok=True)
+    shutil.make_archive(str(examples / "rag-scenarios"), "zip", root_dir=examples, base_dir="rag-scenarios")
     shutil.copyfile(REPOSITORY_ROOT / "UI/public/app-logo.svg", assets / "logo.svg")
     for verification in (SOURCE / "verification").glob("google*.html"):
         shutil.copyfile(verification, output / verification.name)

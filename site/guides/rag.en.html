@@ -5,6 +5,7 @@
       <a href="#import">Import and verify</a>
       <a href="#ask">Ask for sources</a>
       <a href="#test">Try three questions</a>
+      <a href="#scenarios">Seven tested examples</a>
       <a href="#troubleshooting">Troubleshooting</a>
     </nav>
 
@@ -56,6 +57,59 @@
           <strong>Ask for a detail the handbook does not cover</strong>
           <blockquote>“How many days after the warehouse receives a return must the refund be issued? Answer using only the Returns Handbook.”</blockquote>
           <p>The reply should say the handbook does not specify a refund deadline.</p>
+        </li>
+      </ol>
+    </section>
+
+    <section id="scenarios">
+      <h2>Seven RAG examples, from product questions to order tracking</h2>
+      <p>Download and extract the eight Chinese Markdown files. Copy the folder to a location the agent service can read, then add the folder under <strong>Memory → Knowledge base</strong>. Enter <strong lang="zh-CN">RAG 场景示例</strong> as the library name and use <strong>Refresh libraries</strong> to check that all eight files appear.</p>
+      <div class="actions"><a class="button secondary" href="${assets}examples/rag-scenarios.zip" download>Download eight sample documents (ZIP, Chinese)</a></div>
+      <p>Use a fresh chat for each case. Ask the agent to search <strong lang="zh-CN">RAG 场景示例</strong> and cite its sources. Set up the sample order MCP server for the seventh case. Products, promotions, warehouse procedures, and orders use demo data. The prompts below are English translations. <a href="../zh/rag/#scenarios" lang="zh-CN">查看测试用的中文提问</a></p>
+      <p>The summaries below come from local tests in Chinese. We checked retrieval records and cited documents for all seven replies, and also checked the order response from MCP.</p>
+      <ol>
+        <li>
+          <h3>Product advice · Compare two headset models</h3>
+          <blockquote>How do Qingzhou Models A and B differ? Which can connect to a phone and a computer at the same time?</blockquote>
+          <p>Model B connects to two Bluetooth devices and lasts about 8 hours per charge or 32 hours with the case. Model A connects to one device and lasts about 6 hours per charge or 24 hours with the case.</p>
+          <p class="detail-links"><a href="${assets}examples/rag-scenarios/01-商品导购-轻舟耳机规格表.md">Qingzhou headset specifications</a></p>
+        </li>
+        <li>
+          <h3>Promotions · Check which discounts stack</h3>
+          <blockquote>Can I combine the Summer Weekend sale discount and the store coupon? Which items are excluded?</blockquote>
+          <p>Apply the store coupon first, then check whether the remaining eligible subtotal meets the platform discount threshold. Preorder deposits, digital gift cards, and clearance items are excluded.</p>
+          <p class="detail-links"><a href="${assets}examples/rag-scenarios/02-活动运营-夏日周末专场.md">Summer Weekend sale rules</a></p>
+        </li>
+        <li>
+          <h3>Warehouse shipping · Turn packing instructions into a checklist</h3>
+          <blockquote>Find the glassware packing procedure in <span lang="zh-CN">RAG 场景示例</span>. Turn the documented inspection and packing steps into a checklist and give the source filename.</blockquote>
+          <p>Check the order and inspect each glass. Wrap each in two layers of bubble wrap, separate the glasses with dividers, and leave at least 3 cm for cushioning in a double-wall carton. H-tape the box, mark it fragile, and verify the order and tracking numbers before dispatch.</p>
+          <p class="detail-links"><a href="${assets}examples/rag-scenarios/03-仓库发货-玻璃杯打包SOP.md">Glassware packing procedure</a></p>
+        </li>
+        <li>
+          <h3>Onboarding · Publish a first product listing</h3>
+          <blockquote>I’m new to store operations. What do I need for my first product listing? Put the steps in order.</blockquote>
+          <p>Gather the product details, SKU, prices, inventory, and images. Draft the listing and set shipping terms, have a supervisor review it, then publish and test the buyer-facing listing and cart.</p>
+          <p class="detail-links"><a href="${assets}examples/rag-scenarios/04-新员工培训-首次上架流程.md">Store operations onboarding guide</a></p>
+        </li>
+        <li>
+          <h3>Troubleshooting · Open the Raspberry Pi console</h3>
+          <blockquote>Use <code>kb.search</code> to look up what to check when the Raspberry Pi web console won’t open. Search <span lang="zh-CN">RAG 场景示例</span>. List the first three steps in order, including the commands, local address, LAN checks, and source filename.</blockquote>
+          <p>Check service status and health on the Pi, then try the local default port, 8788. If that works on the Pi, check its LAN address, listen settings, and firewall.</p>
+          <p class="detail-links"><a href="${assets}examples/rag-scenarios/05-安装排障-树莓派网页打不开.md">Raspberry Pi console troubleshooting example</a></p>
+        </li>
+        <li>
+          <h3>Document revisions · Compare two shipping procedures</h3>
+          <blockquote>What changed between Qinghe warehouse shipping procedures v1.0 and v2.0 for cutoff times, order checks, and exceptions? Cite both documents.</blockquote>
+          <p>The cutoff moved from 16:00 to 15:30. Barcode scans replaced paper checklists. Staff now open an exception ticket immediately and hold the affected order, replacing the end-of-shift email.</p>
+          <p class="detail-links"><a href="${assets}examples/rag-scenarios/06a-文档对比-青禾发货流程-v1.0.md">Previous procedure v1.0</a> <a href="${assets}examples/rag-scenarios/06b-文档对比-青禾发货流程-v2.0.md">Current procedure v2.0</a></p>
+        </li>
+        <li>
+          <h3>MCP and RAG · Track an order and check its packing slip</h3>
+          <blockquote>Use the MCP tool <code>get_order_status</code> to check the status and tracking number for order 3. Then search its packing slip in <span lang="zh-CN">RAG 场景示例</span> and tell me whether it needs fragile packing. Cite the document.</blockquote>
+          <p>The local MCP demo returned order 3 in transit with tracking number <code>7898047967</code>. The indexed packing slip calls for F2 fragile handling for two ceramic mugs, with individual wrapping, cushioning around the handles, and a divider.</p>
+          <p>With the MCP server available on this site, use <code>lookup_order</code> in the prompt. Both demos use the same sample status and tracking number for order 3.</p>
+          <p class="detail-links"><a href="${assets}examples/rag-scenarios/07-MCP联动-订单3装箱单与易碎品规则.md">Order 3 packing slip</a> <a href="../mcp/#demo">Set up the MCP order demo</a></p>
         </li>
       </ol>
     </section>

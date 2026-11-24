@@ -5,6 +5,7 @@
       <a href="#import">导入并验证</a>
       <a href="#ask">提问和引用</a>
       <a href="#test">三道测试题</a>
+      <a href="#scenarios">七个实测案例</a>
       <a href="#troubleshooting">排查问题</a>
     </nav>
 
@@ -56,6 +57,59 @@
           <strong>问手册没有写的细节</strong>
           <blockquote>「仓库签收退货后，几天内发起退款？只根据《售后手册》回答。」</blockquote>
           <p>预期说明这份手册未规定具体退款时限。</p>
+        </li>
+      </ol>
+    </section>
+
+    <section id="scenarios">
+      <h2>从商品导购到订单物流的 7 个 RAG 案例</h2>
+      <p>下载并解压 8 份中文 Markdown 文档，把文件夹放到 Agent 服务能读取的位置。在<strong>记忆管理 → 知识库</strong>添加该文件夹，资料库名称填<strong>RAG 场景示例</strong>。导入完成后点<strong>刷新资料库</strong>，核对 8 份文档。</p>
+      <div class="actions"><a class="button secondary" href="${assets}examples/rag-scenarios.zip" download>下载 8 份演示文档（ZIP）</a></div>
+      <p>每个案例各开一个新对话。对题目中未写明资料库的问法，在开头加上「请查『RAG 场景示例』，并给出出处。」第七个案例需要先接入订单演示 MCP。商品、活动、仓库和订单数据均为演示。</p>
+      <p>以下是本机中文对话的实测摘要。七条回复均核对了知识库检索记录和引用文档，订单案例还核对了 MCP 的查询结果。</p>
+      <ol>
+        <li>
+          <h3>商品导购 · 对比耳机规格</h3>
+          <blockquote>轻舟耳机 A 款和 B 款有什么区别？哪款支持同时连接手机和电脑？</blockquote>
+          <p>B 款支持双设备蓝牙连接，单次约 8 小时，配充电盒约 32 小时。A 款连一台设备，单次约 6 小时，配充电盒约 24 小时。</p>
+          <p class="detail-links"><a href="${assets}examples/rag-scenarios/01-商品导购-轻舟耳机规格表.md">轻舟耳机规格表</a></p>
+        </li>
+        <li>
+          <h3>活动运营 · 核对优惠叠加条件</h3>
+          <blockquote>夏日周末专场的满减和店铺券能叠加吗？哪些商品参加不了？</blockquote>
+          <p>可以叠加。先扣店铺券，再判断是否达到平台满减门槛。预售定金、数字礼品卡和标记为清仓的商品均排除。</p>
+          <p class="detail-links"><a href="${assets}examples/rag-scenarios/02-活动运营-夏日周末专场.md">夏日周末专场规则</a></p>
+        </li>
+        <li>
+          <h3>仓库发货 · 把打包流程变成清单</h3>
+          <blockquote>请查「RAG 场景示例」里的《玻璃杯打包 SOP》，把原文写明的发货前质检和打包步骤整理成逐项勾选的清单，文末写出来源文件名。</blockquote>
+          <p>先对单和检查杯口、杯身、杯底。每只包两层气泡膜，同箱用隔板分开，五层瓦楞外箱四周留至少 3 厘米缓冲。工字形封箱、贴易碎标签，核对订单号和运单号后出库。</p>
+          <p class="detail-links"><a href="${assets}examples/rag-scenarios/03-仓库发货-玻璃杯打包SOP.md">玻璃杯打包 SOP</a></p>
+        </li>
+        <li>
+          <h3>新人培训 · 首次上架商品</h3>
+          <blockquote>我是新来的运营，第一次上架商品要准备什么？按顺序告诉我。</blockquote>
+          <p>准备标题、类目、SKU、价格、库存和图片，再建草稿并填好运费与发货时效。主管复核通过后发布，最后从买家端测试规格切换、运费和购物车。</p>
+          <p class="detail-links"><a href="${assets}examples/rag-scenarios/04-新员工培训-首次上架流程.md">电商运营新人手册</a></p>
+        </li>
+        <li>
+          <h3>安装排障 · 树莓派网页打不开</h3>
+          <blockquote>请调用 <code>kb.search</code>，在「RAG 场景示例」检索「树莓派装好后网页打不开，先检查哪些项目」。根据返回的片段列出前三个检查步骤，写出检查命令、本机地址、局域网检查项和来源文件名。</blockquote>
+          <p>先在树莓派检查服务状态和健康状态，再从本机测试默认端口 8788。本机正常时，再检查局域网地址、监听范围和防火墙。</p>
+          <p class="detail-links"><a href="${assets}examples/rag-scenarios/05-安装排障-树莓派网页打不开.md">树莓派控制台排障示例</a></p>
+        </li>
+        <li>
+          <h3>版本对比 · 查清发货流程改了什么</h3>
+          <blockquote>青禾仓发货流程 v1.0 和 v2.0 的截单、核对、异常交接有什么变化？请引用两份文档。</blockquote>
+          <p>截单从 16:00 提前到 15:30。纸质单据核对改为扫描订单和商品条码。异常由收工前汇总邮件改为立即提工单，并暂停受影响的订单出库。</p>
+          <p class="detail-links"><a href="${assets}examples/rag-scenarios/06a-文档对比-青禾发货流程-v1.0.md">历史版 v1.0</a> <a href="${assets}examples/rag-scenarios/06b-文档对比-青禾发货流程-v2.0.md">现行版 v2.0</a></p>
+        </li>
+        <li>
+          <h3>MCP 与 RAG 联动 · 订单物流和易碎品装箱</h3>
+          <blockquote>请用 MCP 的 <code>get_order_status</code> 查询订单 3 的当前状态和快递单号，再检索「RAG 场景示例」中的订单 3 装箱单，告诉我这单是否要按易碎品打包并给出文档出处。</blockquote>
+          <p>本机演示的 MCP 查询返回订单 3 运输中，快递单号为 <code>7898047967</code>。知识库的装箱单列出两只雾白陶瓷马克杯，包装级别为 F2 易碎品，要求单独包裹、保护杯把并用隔板分开。</p>
+          <p>使用本网站提供的 MCP 演示时，把问题里的工具名换成 <code>lookup_order</code>。两套示例对订单 3 使用相同的模拟物流状态和快递单号。</p>
+          <p class="detail-links"><a href="${assets}examples/rag-scenarios/07-MCP联动-订单3装箱单与易碎品规则.md">订单 3 装箱单</a> <a href="../mcp/#demo">接入订单查询 MCP</a></p>
         </li>
       </ol>
     </section>
