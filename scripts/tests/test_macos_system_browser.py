@@ -91,10 +91,9 @@ class MacOSSystemBrowserTest(unittest.TestCase):
                 ["/usr/bin/ditto", "--norsrc", "--qtn", str(source), str(copy)],
                 timeout=90, check=True,
             )
-            plist = copy / "Contents/Info.plist"
             attr = "com.apple.FinderInfo"
             subprocess.run(
-                ["/usr/bin/xattr", "-wx", attr, "01" * 32, str(plist)], check=True,
+                ["/usr/bin/xattr", "-wx", attr, "01" * 32, str(copy)], check=True,
             )
             rejected = subprocess.run(
                 ["/usr/bin/codesign", "--verify", "--strict=sideband", str(copy)],
@@ -124,7 +123,7 @@ class MacOSSystemBrowserTest(unittest.TestCase):
                 capture_output=True, text=True, timeout=30, check=True,
             )
             self.assertEqual(node.stdout.strip(), expected)
-            subprocess.run(["/usr/bin/xattr", "-p", attr, str(plist)],
+            subprocess.run(["/usr/bin/xattr", "-p", attr, str(copy)],
                            stdout=subprocess.DEVNULL, check=True)
 
 if __name__ == "__main__":
