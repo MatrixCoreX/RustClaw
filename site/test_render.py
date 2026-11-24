@@ -119,7 +119,7 @@ class ProjectSiteTest(unittest.TestCase):
                         self.assertCountEqual(
                             [asset for asset in page.assets if "assets/examples/" in asset],
                             ["../" * part.count("/") + example_dir + name for name in (
-                                "mcp.png", "rag.png", "media-discovery.png", "media-download.png",
+                                "mcp.png", "rag.png", "media-discovery.png", "media-download.png", "crypto.png",
                             )],
                         )
                         hrefs = {link["href"] for link in page.links}
@@ -128,6 +128,8 @@ class ProjectSiteTest(unittest.TestCase):
                         self.assertIn(pi_guide if not part else "raspberry-pi-install/", hrefs)
                     else:
                         self.assertLessEqual(topic_sections[topic], page.ids)
+                        if topic == "skills/":
+                            self.assertIn("../" * part.count("/") + example_dir + "crypto.png", page.assets)
                         other_locale = "zh-CN" if locale == "en" else "en"
                         switches = [link for link in page.links if link.get("lang") == other_locale]
                         self.assertEqual(len(switches), 1)
