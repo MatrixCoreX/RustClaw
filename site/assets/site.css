@@ -59,7 +59,9 @@ h1 span { display: block; margin-top: .4rem; font-size: clamp(1.35rem, 2.5vw, 2.
 .secondary { border-color: var(--edge); color: var(--ink); background: var(--surface); }
 .secondary:hover { border-color: var(--muted); }
 .preview { margin: 0; padding: .7rem; border: 1px solid var(--edge); border-radius: 1.1rem; background: var(--surface); box-shadow: var(--shadow); }
-.preview img { display: block; width: 100%; height: auto; aspect-ratio: 794 / 540; object-fit: contain; border-radius: .65rem; background: #253036; }
+.preview > a, .example-shot > a { display: block; border-radius: .65rem; cursor: zoom-in; }
+.preview img, .example-shot img { display: block; width: 100%; height: auto; border-radius: .65rem; background: #253036; }
+.example-shot { margin: 1.1rem 0 0; }
 figcaption { margin: .52rem .2rem 0; font-size: .87rem; color: var(--muted); }
 .page-section { border-top: 1px solid var(--edge); padding: clamp(2rem, 5vw, 4rem) 0; }
 .section-intro { max-width: 74ch; margin: 0 0 1.15rem; color: var(--muted); }

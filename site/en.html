@@ -23,9 +23,9 @@
         <a class="button secondary" href="$repo">View on GitHub</a>
       </div>
     </div>
-    <figure class="preview">
-      <img src="assets/console-demo.png" alt="$preview_alt" width="794" height="540" fetchpriority="high">
-      <figcaption>Web console showing an order lookup with sample data.</figcaption>
+    <figure class="preview" id="order-example">
+      <a href="${examples}mcp.png"><img src="${examples}mcp.png" alt="$preview_alt" width="794" height="370" fetchpriority="high"></a>
+      <figcaption>MCP order lookup with sample data. <a href="#rag-example">Knowledge base example</a> · <a href="#media">Media examples</a></figcaption>
     </figure>
   </section>
   <section class="page-section" id="use-cases" aria-labelledby="use-heading">
@@ -63,6 +63,10 @@
           <p>Retrieval-augmented generation (RAG) lets the agent search your imported manuals, FAQs, and policies before it answers. Matched passages can be cited with their chapter, page, or other source location.</p>
           <blockquote>“In the Returns Handbook, who pays return shipping for a defective item? Cite the policy.”</blockquote>
           <a href="$repo#knowledge-base-design-flow">See the knowledge base import and search guide</a>
+          <figure class="example-shot" id="rag-example">
+            <a href="${examples}rag.png"><img src="${examples}rag.png" alt="Agent answers a return shipping question and cites section 3.2 of the sample Returns Handbook." width="794" height="317" loading="lazy" decoding="async"></a>
+            <figcaption>RAG answer with a citation to a sample policy.</figcaption>
+          </figure>
         </div>
         <ol>
           <li>Open <strong>Memory → Knowledge base → Add material</strong> and give your library a name, such as <strong>Returns Handbook</strong>.</li>
@@ -86,12 +90,20 @@
         <p>Collect posts by topic from supported sites such as Xiaohongshu, Douyin, and Bilibili. A collection can keep the original captions, previews, source links, and engagement numbers available at the time. Run a single batch or ask the agent to start, pause, or stop an ongoing collection.</p>
         <blockquote>“Search Xiaohongshu for camping gear. Collect one batch of up to five posts and keep their captions, previews, and source links.”</blockquote>
         <a href="$repo/blob/main/docs/architecture/12-media-discovery.md">See how media discovery works</a>
+        <figure class="example-shot">
+          <a href="${examples}media-discovery.png"><img src="${examples}media-discovery.png" alt="Media Discovery in AiAPP shows two sample camping posts with previews, captions, and engagement figures." width="1120" height="642" loading="lazy" decoding="async"></a>
+          <figcaption>AiAPP collection view with sample posts.</figcaption>
+        </figure>
       </article>
       <article id="media-download" aria-labelledby="download-heading">
         <h3 id="download-heading">Media Download</h3>
         <p>Send a supported post URL or paste its app share message. The skill saves the available original video or images and can return the original article text for supported posts. Larger image sets are delivered in a ZIP file.</p>
         <blockquote>“Save the original images and any available article text from this Xiaohongshu post: [paste the share link].”</blockquote>
         <a href="$repo/blob/main/optional_skills/media_download/INTERFACE.md">See supported platforms and download formats</a>
+        <figure class="example-shot">
+          <a href="${examples}media-download.png"><img src="${examples}media-download.png" alt="Media Download in AiAPP shows a completed sample task with image and text files alongside a failed task." width="1120" height="853" loading="lazy" decoding="async"></a>
+          <figcaption>AiAPP download history with sample tasks and files.</figcaption>
+        </figure>
       </article>
     </div>
   </section>

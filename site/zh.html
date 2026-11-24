@@ -23,9 +23,9 @@
         <a class="button secondary" href="$repo/blob/main/README.zh-CN.md">中文指南</a>
       </div>
     </div>
-    <figure class="preview">
-      <img src="../assets/console-demo.png" alt="$preview_alt" width="794" height="540" fetchpriority="high">
-      <figcaption>网页控制台中的订单查询示例，使用模拟数据。</figcaption>
+    <figure class="preview" id="order-example">
+      <a href="${examples}mcp.png"><img src="${examples}mcp.png" alt="$preview_alt" width="794" height="370" fetchpriority="high"></a>
+      <figcaption>MCP 订单查询（演示数据）。<a href="#rag-example">知识库示例</a> · <a href="#media">媒体技能示例</a></figcaption>
     </figure>
   </section>
   <section class="page-section" id="use-cases" aria-labelledby="use-heading">
@@ -63,6 +63,10 @@
           <p>RAG 是检索增强生成。导入运营手册、常见问题或售后流程后，Agent 可以先找相关段落，再根据资料回答问题，并引用对应的章节、页码等位置。</p>
           <blockquote>「查一下《售后手册》，商品有质量问题时，退货运费谁承担？请给出处。」</blockquote>
           <a href="$repo/blob/main/README.zh-CN.md#知识库设计流程">查看知识库导入和搜索指南</a>
+          <figure class="example-shot" id="rag-example">
+            <a href="${examples}rag.png"><img src="${examples}rag.png" alt="Agent 回答退货运费由谁承担，并引用示例《售后手册》第 3.2 节。" width="794" height="317" loading="lazy" decoding="async"></a>
+            <figcaption>RAG 知识库问答，附上示例规则出处。</figcaption>
+          </figure>
         </div>
         <ol>
           <li>打开<strong>记忆管理 → 知识库 → 添加资料</strong>，给资料库起个容易记住的名字，比如<strong>售后手册</strong>。</li>
@@ -86,12 +90,20 @@
         <p>按关键词从小红书、抖音、哔哩哔哩等支持的平台收集帖子，保留作者文案、预览、来源链接和采集时能读取到的互动数据。可以只采一批，也可以在 Agent 里开启、暂停或停止持续采集。</p>
         <blockquote>「在小红书搜索『露营装备』，只采一批，最多 5 条，保留作者文案、预览和来源链接。」</blockquote>
         <a href="$repo/blob/main/docs/architecture/12-media-discovery.zh-CN.md">了解媒体采集的方式和结果</a>
+        <figure class="example-shot">
+          <a href="${examples}media-discovery.png"><img src="${examples}media-discovery.png" alt="AiAPP 媒体发现中展示两条露营帖子示例，含预览、文案和互动数据。" width="1120" height="622" loading="lazy" decoding="async"></a>
+          <figcaption>AiAPP 的媒体采集结果（演示数据）。</figcaption>
+        </figure>
       </article>
       <article id="media-download" aria-labelledby="download-heading">
         <h3 id="download-heading">媒体下载</h3>
         <p>把支持平台的作品链接或完整分享文案发给 Agent，就可以保存能获取到的原视频或原图。支持的图文作品还可以一并保存原文，图片较多时会打成 ZIP 文件。</p>
         <blockquote>「帮我保存这条小红书图文的原图和能获取到的正文：[粘贴分享链接]。」</blockquote>
         <a href="$repo/blob/main/optional_skills/media_download/INTERFACE.md">查看支持的平台和交付格式</a>
+        <figure class="example-shot">
+          <a href="${examples}media-download.png"><img src="${examples}media-download.png" alt="AiAPP 媒体下载页面展示已完成任务的原图和正文，以及一条失败记录。" width="1120" height="833" loading="lazy" decoding="async"></a>
+          <figcaption>AiAPP 的下载任务和文件列表（演示数据）。</figcaption>
+        </figure>
       </article>
     </div>
   </section>

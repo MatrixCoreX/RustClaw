@@ -58,13 +58,17 @@ def build(output: Path):
     )
     urls = Element("urlset", {"xmlns": "http://www.sitemaps.org/schemas/sitemap/0.9"})
     for template, lang, directory, title, description, preview_alt in pages:
+        assets_path = "../" * directory.count("/") + "assets/"
+        example_path = f"examples/{lang.split('-')[0]}/"
         local = shared | {
             "lang": lang,
             "title": title,
             "canonical": site + directory,
             "description": description,
             "preview_alt": preview_alt,
-            "assets": "../" * directory.count("/") + "assets/",
+            "preview_image": site + "assets/" + example_path + "mcp.png",
+            "assets": assets_path,
+            "examples": assets_path + example_path,
         }
         values = {key: escape(value, quote=True) for key, value in local.items()}
         body = Template((SOURCE / template).read_text(encoding="utf-8"))
@@ -81,6 +85,7 @@ def build(output: Path):
     assets.mkdir(exist_ok=True)
     for name in ("site.css", "console-demo.png"):
         shutil.copyfile(SOURCE / "assets" / name, assets / name)
+    shutil.copytree(SOURCE / "assets" / "examples", assets / "examples", dirs_exist_ok=True)
     shutil.copyfile(REPOSITORY_ROOT / "UI/public/app-logo.svg", assets / "logo.svg")
     for verification in (SOURCE / "verification").glob("google*.html"):
         shutil.copyfile(verification, output / verification.name)

@@ -22,6 +22,7 @@ class Page(HTMLParser):
         self.headings = 0
         self.lang = None
         self.description = ""
+        self.preview_image = ""
         self.links = []
         self.assets = []
         self.ids = set()
@@ -37,6 +38,8 @@ class Page(HTMLParser):
             self.lang = attributes["lang"]
         if tag == "meta" and attributes.get("name") == "description":
             self.description = attributes["content"]
+        if tag == "meta" and attributes.get("property") == "og:image":
+            self.preview_image = attributes["content"]
         if tag in ("link", "a"):
             self.links.append(attributes)
         if tag == "img":
@@ -65,6 +68,8 @@ class ProjectSiteTest(unittest.TestCase):
                     page = Page(source)
                     self.assertEqual(page.lang, locale)
                     self.assertEqual(page.headings, 1)
+                    example_dir = f"assets/examples/{locale.split('-')[0]}/"
+                    self.assertEqual(page.preview_image, base + example_dir + "mcp.png")
                     if part == guide:
                         self.assertIn(f"<title>在 Raspberry Pi 上安装 {brand} | {owner}</title>", source)
                         self.assertIn(f"install-latest-release.sh --repo {identity['release_repository']} --check-only", source)
@@ -78,6 +83,12 @@ class ProjectSiteTest(unittest.TestCase):
                         self.assertIn("MCP", page.description)
                         self.assertIn("RAG", page.description)
                         self.assertIn("AiAPP", page.description)
+                        self.assertEqual(
+                            [asset for asset in page.assets if "assets/examples/" in asset],
+                            ["../" * part.count("/") + example_dir + name for name in (
+                                "mcp.png", "rag.png", "media-discovery.png", "media-download.png",
+                            )],
+                        )
                         self.assertIn('href="' + (guide if not part else 'raspberry-pi-install/') + '"', source)
                         alternates = {"en": base, "zh-CN": base + "zh/", "x-default": base}
                     self.assertEqual([link["href"] for link in page.links if link.get("rel") == "canonical"], [base + part])
