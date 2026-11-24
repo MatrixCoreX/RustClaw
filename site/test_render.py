@@ -101,7 +101,7 @@ class ProjectSiteTest(unittest.TestCase):
                 topic_sections = {
                     "skills/": {"install", "aipp", "troubleshooting", *skill_examples},
                     "mcp/": {"connect", "permissions", "test", "troubleshooting"},
-                    "rag/": {"prepare", "import", "ask", "troubleshooting"},
+                    "rag/": {"prepare", "import", "ask", "test", "troubleshooting"},
                 }
                 pages = [("", "en"), ("zh/", "zh-CN"), (pi_guide, "zh-CN")]
                 for topic in topic_sections:
@@ -185,6 +185,18 @@ class ProjectSiteTest(unittest.TestCase):
                                     page.section_assets[section_id],
                                     example_images[section_id],
                                 )
+                        if topic == "rag/":
+                            sample = "returns-handbook.md"
+                            self.assertEqual(
+                                [link["href"] for link in page.links if "download" in link],
+                                [example_path + sample],
+                            )
+                            self.assertEqual(
+                                (output / example_dir / sample).read_bytes(),
+                                (SOURCE / example_dir / sample).read_bytes(),
+                            )
+                            self.assertEqual(page.section_assets["import"], [example_path + "rag-import.png"])
+                            self.assertEqual(page.section_assets["ask"], [example_path + "rag.png"])
                         other_locale = "zh-CN" if locale == "en" else "en"
                         switches = [link for link in page.links if link.get("lang") == other_locale]
                         self.assertEqual(len(switches), 1)

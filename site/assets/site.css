@@ -111,7 +111,6 @@ blockquote { margin: 1.1rem 0; padding: .55rem .8rem; border-inline-start: 3px s
 .guide section { margin-top: 2.35rem; }
 .guide :is(li, dd) { margin-bottom: .5rem; }
 .guide pre { overflow-x: auto; padding: 1rem; border: 1px solid var(--edge); border-radius: .65rem; background: var(--surface); }
-.guide .guide-sample { white-space: pre-wrap; overflow-wrap: anywhere; }
 .guide code { font-family: ui-monospace, monospace; font-size: .94em; }
 .guide dt { font-weight: 700; }
 .guide dd { margin-inline-start: 0; color: var(--muted); }

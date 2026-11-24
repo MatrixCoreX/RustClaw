@@ -80,13 +80,13 @@ def build(output: Path):
         ),
         (
             "guides/rag.en.html", "en", "rag/", f"{brand} RAG Knowledge Base | Import Documents and Cite Sources",
-            f"Import documents into a {brand} RAG knowledge base, check that the text is searchable, and ask questions with citations to the source.",
+            f"Download a sample handbook, import it into a {brand} RAG knowledge base, and try three questions to verify answers and citations.",
             "Agent cites a section of the sample Returns Handbook in a return shipping answer.",
             "rag.png",
         ),
         (
             "guides/rag.zh.html", "zh-CN", "zh/rag/", f"{brand} RAG 知识库指南 | 导入文档与引用出处",
-            f"在 {brand} 创建 RAG 知识库，导入可读文件并验证检索。用售后手册示例学习如何指定资料库并要求 Agent 给出处。",
+            f"下载演示售后手册，在 {brand} 的记忆管理中导入并搜索原文，再用三道题验证 Agent 回答和引用出处。",
             "Agent 回答退货运费由谁承担，并引用示例《售后手册》第 3.2 节。",
             "rag.png",
         ),

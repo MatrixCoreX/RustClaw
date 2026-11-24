@@ -1,50 +1,76 @@
     <h1 id="guide-title">Import and query a $brand RAG knowledge base</h1>
-    <p class="guide-intro">Retrieval-augmented generation (RAG) lets the agent search your imported documents when answering. A returns handbook, a product manual, or an FAQ can become a named library that you can search again later.</p>
+    <p class="guide-intro">Import product manuals, FAQs, and procedures in <strong>Memory → Knowledge base</strong>. Retrieval-augmented generation (RAG) lets the agent find relevant passages and cite them in replies. Long-term memory, also on the Memory page, stores details from conversations such as preferences and facts.</p>
     <nav class="guide-nav" aria-label="On this page">
       <a href="#prepare">Prepare files</a>
       <a href="#import">Import and verify</a>
       <a href="#ask">Ask for sources</a>
+      <a href="#test">Try three questions</a>
       <a href="#troubleshooting">Troubleshooting</a>
     </nav>
 
     <section id="prepare">
-      <h2>Prepare documents that the agent service can read</h2>
-      <p>Start with a small text or Markdown file, a PDF with selectable text, or an Office document such as DOCX, XLSX, or PPTX. For scanned PDFs, run OCR first and import the resulting searchable text.</p>
-      <p>Use paths the agent service can read on its host. For a remote deployment, put the files on that device or in a folder mounted there. Relative paths are resolved from the agent service's working directory.</p>
-      <p>To try the walkthrough, save this sample policy as <code>returns-handbook.md</code> in a folder the service can read.</p>
-      <pre class="guide-sample"><code>## 3.2 Defective-item returns
-If customer support confirms a product defect, the seller covers return shipping.</code></pre>
+      <h2>Download a sample or prepare your own files</h2>
+      <p>The sample Returns Handbook includes instructions for requesting a return and a rule about who pays return shipping for defective items.</p>
+      <div class="actions"><a class="button secondary" href="${examples}returns-handbook.md" download>Download the sample Returns Handbook (Markdown)</a></div>
+      <p>You can also import text, Markdown, PDFs with selectable text, and Office documents such as DOCX, XLSX, and PPTX. For a scanned PDF, run OCR first and import the searchable copy.</p>
+      <p>Put the file where the agent service can read it. For a remote deployment, copy it to that device or to a folder mounted there that the service is allowed to read. Relative paths are resolved from the agent’s workspace.</p>
     </section>
 
     <section id="import">
-      <h2>Import a named library and verify the contents</h2>
+      <h2>Import the file and search for a passage</h2>
       <ol>
-        <li>Open <strong>Memory → Knowledge base → Add material</strong>. Set the library name to <strong>Returns Handbook</strong> and enter a file or folder path on each line.</li>
-        <li>Select <strong>Start adding</strong>. Wait for processing, and use the continuation button if the console offers to resume unfinished work.</li>
-        <li>Select <strong>Refresh libraries</strong>, choose the library, and check its document status. In <strong>Search material</strong>, search a phrase that appears in the file to verify a matching passage and its source.</li>
+        <li>Open <strong>Memory → Knowledge base → Add material</strong>. Enter <strong>Returns Handbook</strong> as the library name. If you saved the sample in the workspace’s <code>docs</code> folder, enter <code>docs/returns-handbook.md</code> as the path. Enter one file or folder path per line when adding multiple sources.</li>
+        <li>Select <strong>Start adding</strong> and wait for processing. If <strong>Continue unfinished work</strong> appears, use it to process the next batch before refreshing the library list.</li>
+        <li>Select <strong>Refresh libraries</strong>, choose the library, and use <strong>View document status</strong> to check that the file is listed. Under <strong>Search material</strong>, search for <strong>return shipping</strong> and check that the excerpt mentions the seller covering it.</li>
       </ol>
-    </section>
-
-    <section id="ask">
-      <h2>Ask a question and request a citation</h2>
-      <p>In <strong>Agent</strong> chat, name the library, ask a specific question, and request the source. A result can cite a chapter, page, or another location that the imported file provides.</p>
-      <blockquote>“In the Returns Handbook, who pays return shipping for a defective item? Cite the policy.”</blockquote>
-      <p>The sample reply cites the handbook section that supports the answer. Open the cited passage and check that it contains the same conditions and rule.</p>
       <figure class="example-shot">
-        <a href="${examples}rag.png"><img src="${examples}rag.png" alt="$preview_alt" width="794" height="317" loading="lazy" decoding="async"></a>
-        <figcaption>Question and citation from a sample returns policy.</figcaption>
+        <a href="${examples}rag-import.png"><img src="${examples}rag-import.png" alt="The Knowledge base panel shows the Returns Handbook, its file, and a search result for return shipping." width="1280" height="961" loading="lazy" decoding="async"></a>
+        <figcaption>Import and search for the original passage in Memory → Knowledge base (demo data).</figcaption>
       </figure>
     </section>
 
+    <section id="ask">
+      <h2>Ask in Agent chat and verify the source</h2>
+      <p>Name the library in your first question and ask for a citation. When the library is clear from the current conversation, you can ask a follow-up directly. If several libraries could contain the answer, name the one you want the agent to search.</p>
+      <figure class="example-shot">
+        <a href="${examples}rag.png"><img src="${examples}rag.png" alt="$preview_alt" width="794" height="317" loading="lazy" decoding="async"></a>
+        <figcaption>The Agent reply cites section 3.2 of the sample Returns Handbook.</figcaption>
+      </figure>
+      <p>A citation may include a section, page, or worksheet, depending on the document. Use that location or find the passage in <strong>Search material</strong> to verify both the rule and the conditions under which it applies.</p>
+    </section>
+
+    <section id="test">
+      <h2>Try three questions with the sample handbook</h2>
+      <ol>
+        <li>
+          <strong>Find a stated rule</strong>
+          <blockquote>“In the Returns Handbook, who pays return shipping for a defective item? Cite the policy.”</blockquote>
+          <p>The reply should say the seller pays once customer support confirms the defect and cite section 3.2.</p>
+        </li>
+        <li>
+          <strong>Ask the same thing in different words</strong>
+          <blockquote>“Support has confirmed the item is defective. Do I need to pay the courier to send it back? Please cite the Returns Handbook.”</blockquote>
+          <p>The reply should find the same section and preserve the condition that support has confirmed the defect.</p>
+        </li>
+        <li>
+          <strong>Ask for a detail the handbook does not cover</strong>
+          <blockquote>“How many days after the warehouse receives a return must the refund be issued? Answer using only the Returns Handbook.”</blockquote>
+          <p>The reply should say the handbook does not specify a refund deadline.</p>
+        </li>
+      </ol>
+    </section>
+
     <section id="troubleshooting">
-      <h2>When a library or passage is missing</h2>
+      <h2>When an import stalls or a passage is missing</h2>
       <dl>
+        <dt>The task is queued or processing</dt>
+        <dd>Queued means the task is waiting to start. Working means the current batch is running. If it takes longer than expected, use the task ID shown in the panel to check its status in Tasks. If the panel offers <strong>Continue unfinished work</strong>, finish the remaining batches before refreshing libraries.</dd>
         <dt>The library is missing from the list</dt>
-        <dd>Check that you're signed in to the same account and deployment used for the import, then refresh the libraries. Each deployment stores its own imported documents.</dd>
+        <dd>Check that you’re signed in to the same account and deployment used for the import, then select <strong>Refresh libraries</strong>. Each deployment stores its own imported documents.</dd>
         <dt>The search finds no matching passage</dt>
-        <dd>Verify the document status, search for a phrase from the original, and check parsing warnings. For a scanned file, use a searchable copy.</dd>
+        <dd>Check <strong>View document status</strong> and search for words from the original. Open <strong>Diagnostics</strong> for skipped-file or parsing details. Check the path and permissions on the service host, or use a searchable copy of a scanned PDF.</dd>
         <dt>The source file has changed</dt>
-        <dd>Keep the updated file at its recorded path and use the library rebuild action to process that source again. Check the document status after the rebuild.</dd>
+        <dd>Run <strong>Add material</strong> again with the same library name and file path to update that file. To process all recorded sources again, select <strong>Rebuild library index</strong>. Check the document status and repeat your search afterward.</dd>
       </dl>
       <p class="detail-links"><a href="$repo/blob/main/docs/architecture/17-rag-knowledge-retrieval.md">File formats, indexing, and retrieval</a> <a href="../mcp/">Connect an MCP order lookup tool</a></p>
     </section>

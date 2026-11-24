@@ -1,50 +1,76 @@
     <h1 id="guide-title">导入和使用 $brand 的 RAG 知识库</h1>
-    <p class="guide-intro">RAG 是检索增强生成。把产品说明、常见问题或售后手册导入一个命名资料库后，Agent 可以先查相关段落，再根据原文回答并给出处。</p>
+    <p class="guide-intro">在<strong>记忆管理 → 知识库</strong>导入产品说明、常见问题或业务流程。RAG（检索增强生成）让 Agent 能检索相关段落，再根据原文回答并给出处。同一页面里的长期记忆用于保存对话中形成的偏好和事实。</p>
     <nav class="guide-nav" aria-label="本页目录">
       <a href="#prepare">准备文件</a>
       <a href="#import">导入并验证</a>
       <a href="#ask">提问和引用</a>
+      <a href="#test">三道测试题</a>
       <a href="#troubleshooting">排查问题</a>
     </nav>
 
     <section id="prepare">
-      <h2>准备 Agent 服务能读取的文件</h2>
-      <p>第一次可以用一份较小的 Markdown、纯文本、能选中文字的 PDF，或 DOCX、XLSX、PPTX 等办公文档。扫描版 PDF 可以先做 OCR，再导入识别后的可检索文本。</p>
-      <p>文件需要放在 Agent 服务能访问的路径上。服务部署在另一台设备时，把资料放到那台设备或它能读取的挂载目录。相对路径以 Agent 服务的工作目录为起点。</p>
-      <p>想跟着示例试一遍，可以把下面两行保存为 <code>returns-handbook.md</code>，放到服务能读取的目录里。</p>
-      <pre class="guide-sample"><code>## 3.2 质量问题退货
-客服核实商品存在质量问题后，退货运费由商家承担。</code></pre>
+      <h2>下载演示手册或准备自己的资料</h2>
+      <p>演示《售后手册》写明了申请退货要提供的信息，以及商品有质量问题时的退货运费规则。</p>
+      <div class="actions"><a class="button secondary" href="${examples}returns-handbook.md" download>下载演示《售后手册》（Markdown）</a></div>
+      <p>也可以导入纯文本、Markdown、能选中文字的 PDF，以及 DOCX、XLSX、PPTX 等办公文档。扫描版 PDF 可以先做 OCR，再导入识别后的可搜索版本。</p>
+      <p>把文件放到 Agent 服务有权限读取的位置。服务部署在另一台设备时，先把文件放到服务端或它能读取的挂载目录。相对路径以 Agent 的工作区为基准。</p>
     </section>
 
     <section id="import">
-      <h2>导入后检查文件是否能搜到</h2>
+      <h2>导入文件并搜索一段原文</h2>
       <ol>
-        <li>打开<strong>记忆管理 → 知识库 → 添加资料</strong>。资料库名称可以填<strong>售后手册</strong>，再逐行输入文件或文件夹路径。</li>
-        <li>点击<strong>开始添加</strong>，等待资料处理。如果页面提示<strong>继续未完成工作</strong>，按提示处理下一批。</li>
-        <li>点击<strong>刷新资料库</strong>，选择库名，用<strong>查看文档状态</strong>核对文件。接着在<strong>搜索资料</strong>里搜索原文中的关键词，比如「退货运费」，确认能命中片段和出处。</li>
+        <li>打开<strong>记忆管理 → 知识库 → 添加资料</strong>，资料库名称填<strong>售后手册</strong>。如果把演示文件放在工作区的 <code>docs</code> 子目录，路径就填 <code>docs/returns-handbook.md</code>。添加多份资料时，每行填一个文件或文件夹路径。</li>
+        <li>点击<strong>开始添加</strong>，等待处理。出现<strong>继续未完成工作</strong>时，先处理后续批次，再刷新资料库列表。</li>
+        <li>点击<strong>刷新资料库</strong>，选中刚才的库，用<strong>查看文档状态</strong>确认文件已列出。然后在<strong>搜索资料</strong>中查「退货运费」，确认命中的原文写明由商家承担。</li>
       </ol>
-    </section>
-
-    <section id="ask">
-      <h2>在 Agent 里指定资料库并要求给出处</h2>
-      <p>提问时写清库名和你要核实的规则，并请 Agent 给出处。根据文件格式，引用可能指向章节、页码、工作表或其他原文位置。</p>
-      <blockquote>「查一下《售后手册》，商品有质量问题时，退货运费谁承担？请给出处。」</blockquote>
-      <p>示例回答给出了对应的手册章节。可以打开原文核对责任人、适用条件和条款是否一致。</p>
       <figure class="example-shot">
-        <a href="${examples}rag.png"><img src="${examples}rag.png" alt="$preview_alt" width="794" height="317" loading="lazy" decoding="async"></a>
-        <figcaption>根据示例售后手册回答并引用规则出处。</figcaption>
+        <a href="${examples}rag-import.png"><img src="${examples}rag-import.png" alt="记忆管理的知识库面板显示售后手册、导入的文件和退货运费原文。" width="1280" height="941" loading="lazy" decoding="async"></a>
+        <figcaption>在「记忆管理 → 知识库」中导入售后手册并搜到原文（演示数据）。</figcaption>
       </figure>
     </section>
 
+    <section id="ask">
+      <h2>在 Agent 对话里提问并核对出处</h2>
+      <p>第一次提问时写出资料库名称，并请 Agent 给出处。同一段对话里已经明确在查哪个库，可以直接追问。多个资料库都可能相关时，写明要查的库名。</p>
+      <figure class="example-shot">
+        <a href="${examples}rag.png"><img src="${examples}rag.png" alt="$preview_alt" width="794" height="317" loading="lazy" decoding="async"></a>
+        <figcaption>Agent 根据演示《售后手册》第 3.2 节回答退货运费问题。</figcaption>
+      </figure>
+      <p>引用可以包含章节、页码或工作表，具体取决于文件格式。根据引用位置查阅原文，也可以回到<strong>搜索资料</strong>查相应段落，核对条款的适用条件和结论。</p>
+    </section>
+
+    <section id="test">
+      <h2>用三道题验证售后手册的检索效果</h2>
+      <ol>
+        <li>
+          <strong>查明确写出的规则</strong>
+          <blockquote>「查《售后手册》。商品有质量问题时，退货运费谁承担？请给出处。」</blockquote>
+          <p>预期能答出客服核实质量问题后由商家承担退货运费，并引用第 3.2 节。</p>
+        </li>
+        <li>
+          <strong>换一种说法再问</strong>
+          <blockquote>「客服已经确认商品有质量问题，寄回去的快递费需要我出吗？请引用《售后手册》。」</blockquote>
+          <p>预期仍能找到第 3.2 节，并保留「客服已核实」这个条件。</p>
+        </li>
+        <li>
+          <strong>问手册没有写的细节</strong>
+          <blockquote>「仓库签收退货后，几天内发起退款？只根据《售后手册》回答。」</blockquote>
+          <p>预期说明这份手册未规定具体退款时限。</p>
+        </li>
+      </ol>
+    </section>
+
     <section id="troubleshooting">
-      <h2>找不到资料库或原文时</h2>
+      <h2>导入卡住、找不到资料或需要更新时</h2>
       <dl>
+        <dt>一直显示排队中或处理中</dt>
+        <dd>排队中表示任务正在等待执行，处理中表示当前批次正在运行。等待时间较长时，可用面板显示的任务编号到「任务管理」核对状态。出现<strong>继续未完成工作</strong>时，处理完剩余批次再刷新资料库。</dd>
         <dt>列表里看不到刚导入的库</dt>
-        <dd>核对登录账号和控制台地址，再点<strong>刷新资料库</strong>。各台设备上的独立部署分别保存自己导入的资料。</dd>
+        <dd>核对登录账号和控制台地址，再点<strong>刷新资料库</strong>。每台设备上的独立部署分别保存自己导入的资料。</dd>
         <dt>文档存在，搜索却没有命中</dt>
-        <dd>先看文档状态和解析提示，再试原文中的词。扫描件可换成 OCR 识别后的可搜索版本。</dd>
+        <dd>先点击<strong>查看文档状态</strong>确认文件已列出，再试原文中的词。展开<strong>诊断信息</strong>查看文件是否被跳过或有解析提示，核对服务端路径和权限。扫描件可以换成 OCR 处理后的可搜索版本。</dd>
         <dt>源文件有新版本</dt>
-        <dd>在已记录的路径上更新文件，再用资料库重建功能重新处理来源。完成后查看文档状态。</dd>
+        <dd>用相同的资料库名称和文件路径再次<strong>添加资料</strong>，就能更新这份文件。需要重新处理库里记录的全部来源时，点击<strong>重建资料库索引</strong>。完成后再查看文档状态，并重复搜索验证。</dd>
       </dl>
       <p class="detail-links"><a href="$repo/blob/main/docs/architecture/17-rag-knowledge-retrieval.zh-CN.md">查看文件格式、索引与检索细节</a> <a href="../mcp/">接入 MCP 订单查询工具</a></p>
     </section>
