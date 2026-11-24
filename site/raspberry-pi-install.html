@@ -23,7 +23,7 @@ getconf LONG_BIT
 python3 --version
 df -h "$$HOME"</code></pre>
       <ul>
-        <li>前两行应显示 <code>aarch64</code> 和 <code>64</code>。若装的是 32 位系统，请使用 Raspberry Pi Imager 为兼容的机型选择 <strong>Raspberry Pi OS (64-bit)</strong>。</li>
+        <li>前两行应显示 <code>aarch64</code> 和 <code>64</code>。若装的是 32 位系统，可以用 Raspberry Pi Imager 将 <strong>Raspberry Pi OS (64-bit)</strong> 写到另一张存储卡，再用它启动兼容的树莓派。</li>
         <li>需要 Python 3.11 或更新版本，以及 Bash、curl、tar 和 OpenSSH 的 <code>ssh-keygen</code>。如果缺少 curl 或 <code>ssh-keygen</code>，可在 Raspberry Pi OS 中执行 <code>sudo apt update</code>，再执行 <code>sudo apt install ca-certificates curl openssh-client</code>。</li>
         <li>检查最后一行的可用空间。以已核对的 <code>pi-aarch64-c785c9dc6a38</code> 发布为例，压缩包约 789 MiB，安装时还要留出解压和部署空间。</li>
       </ul>
@@ -46,8 +46,8 @@ bash install-latest-release.sh --repo $release_repository --check-only</code></p
 
     <section id="console" aria-labelledby="console-title">
       <h2 id="console-title">打开网页控制台</h2>
-      <p>在树莓派自己的浏览器中打开 <code>http://127.0.0.1:8788</code>。如果你从另一台电脑访问，并且已有树莓派的 SSH 登录权限，在<strong>那台电脑</strong>的终端运行以下命令，再在那台电脑的浏览器打开同一个地址。将示例中的用户名和 IP 换成你的实际值。</p>
-      <pre><code>ssh -N -L 8788:127.0.0.1:8788 YOUR_PI_USER@YOUR_PI_IP</code></pre>
+      <p>在树莓派自己的浏览器中打开 <code>http://127.0.0.1:8788</code>。如果你从另一台电脑访问，并且已有树莓派的 SSH 登录权限，在<strong>那台电脑</strong>的终端运行以下命令，再在那台电脑的浏览器打开 <code>http://127.0.0.1:18888</code>。将示例中的用户名和 IP 换成你的实际值。</p>
+      <pre><code>ssh -N -L 18888:127.0.0.1:8788 YOUR_PI_USER@YOUR_PI_IP</code></pre>
       <ol>
         <li>首次初始化完成后，在树莓派上查看安装目录中的 <code>data/bootstrap-credentials.txt</code> 获取登录信息，并在账号管理里更改初始密码。</li>
         <li>打开「大模型」，配置并保存一个可用的文本模型。需要 API Key 的模型请按页面提示填写并测试连接。</li>
