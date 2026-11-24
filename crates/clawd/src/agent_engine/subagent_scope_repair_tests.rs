@@ -48,6 +48,7 @@ fn task() -> crate::ClaimedTask {
 fn rejected_plan_scope_cannot_be_dropped_or_widened_before_enqueue() {
     let state = crate::AppState::test_default_with_fixture_provider()
         .with_seeded_db_schema()
+        .with_prompt_layers_installed()
         .with_real_skill_registry();
     let task = task();
     for replacement in [None, Some(json!([1, 2]))] {
@@ -116,7 +117,9 @@ fn rejected_plan_scope_cannot_be_dropped_or_widened_before_enqueue() {
 #[test]
 fn scope_survives_checkpoint_without_restoring_lossy_plan_arguments() {
     let mut source = super::super::LoopState::new();
-    let state = crate::AppState::test_default_with_fixture_provider().with_real_skill_registry();
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
     remember_rejected_plan(&state, &mut source, &plan(bounded_args()));
     let checkpoint = super::super::checkpoint_resume_state::build_checkpoint_resume_state(
         &source,
@@ -154,7 +157,9 @@ fn repeated_invalid_proposals_cannot_replace_the_first_valid_scope() {
 #[test]
 fn ordinary_business_fields_and_malformed_scopes_do_not_create_repair_authority() {
     let mut loop_state = super::super::LoopState::new();
-    let state = crate::AppState::test_default_with_fixture_provider().with_real_skill_registry();
+    let state = crate::AppState::test_default_with_fixture_provider()
+        .with_prompt_layers_installed()
+        .with_real_skill_registry();
     let mut ordinary = plan(bounded_args());
     ordinary.steps[0].skill = "fixture.inspect".into();
     remember_rejected_plan(&state, &mut loop_state, &ordinary);
