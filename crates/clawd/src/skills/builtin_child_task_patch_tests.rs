@@ -185,6 +185,87 @@ fn missing_child_task_exposes_bounded_pre_dispatch_replan_contract() {
 }
 
 #[test]
+fn mismatched_child_patch_reference_replans_without_applying_or_cleaning_up() {
+    let fixture = ChildPatchFixture::new("reference-repair");
+    let primary_before = fs::read(fixture._repo.path.join("README.md")).expect("read primary");
+    let artifact_before = fs::read(&fixture.artifact_path).expect("read artifact");
+    let child_before = stored_result_json(&fixture.state, &fixture.child_task_id);
+
+    for action in [
+        "review_child_patch",
+        "apply_child_patch",
+        "reject_child_patch",
+    ] {
+        for requested in [
+            fixture
+                .patch_ref
+                .trim_start_matches("child_worktree_patch:"),
+            "child_worktree_patch:sha256:incorrect",
+        ] {
+            let args = json!({
+                "action": action,
+                "child_task_id": fixture.child_task_id,
+                "patch_ref": requested,
+            });
+            let error = execute_child_task_patch(
+                &fixture.state,
+                Some(&fixture.parent),
+                args.as_object().expect("patch arguments"),
+            )
+            .expect_err("a mismatched reference must remain rejected");
+            let parsed = crate::skills::parse_structured_skill_error(&error)
+                .expect("structured reference error");
+            assert_eq!(parsed.error_code, "child_patch_ref_mismatch");
+            let extra = parsed.extra.expect("reference recovery metadata");
+            assert_eq!(extra["retryable"], true);
+            assert_eq!(extra["side_effect_applied"], false);
+            assert_eq!(extra["failure_phase"], "pre_dispatch");
+            assert_eq!(extra["recovery_action"], "replan_arguments");
+            assert_eq!(extra["details"]["requested_patch_ref"], requested);
+            assert_eq!(extra["details"]["expected_patch_ref"], fixture.patch_ref);
+            assert_eq!(extra["details"]["child_task_id"], fixture.child_task_id);
+            assert!(crate::skills::structured_skill_error_requests_replan(
+                &error
+            ));
+            assert_eq!(
+                fs::read(fixture._repo.path.join("README.md")).expect("read primary"),
+                primary_before
+            );
+            assert_eq!(
+                fs::read(&fixture.artifact_path).expect("read artifact"),
+                artifact_before
+            );
+            assert_eq!(
+                stored_result_json(&fixture.state, &fixture.child_task_id),
+                child_before
+            );
+            assert!(fixture.worktree_root.exists());
+        }
+    }
+    let review = fixture
+        .run("review_child_patch")
+        .expect("correct reference works");
+    assert_eq!(review["patch_ref"], fixture.patch_ref);
+}
+
+#[test]
+fn child_patch_reference_repair_does_not_relax_artifact_integrity() {
+    let fixture = ChildPatchFixture::new("reference-integrity");
+    fs::write(&fixture.artifact_path, b"tampered artifact").expect("tamper artifact");
+    let error = fixture
+        .run("review_child_patch")
+        .expect_err("tampered artifact denied");
+    let parsed =
+        crate::skills::parse_structured_skill_error(&error).expect("structured artifact error");
+    assert_ne!(parsed.error_code, "child_patch_ref_mismatch");
+    assert!(!crate::skills::structured_skill_error_requests_replan(
+        &error
+    ));
+    assert_ne!(parsed.extra.expect("artifact metadata")["retryable"], true);
+    assert!(fixture.worktree_root.exists());
+}
+
+#[test]
 fn parent_reviews_then_applies_child_patch_with_checkpoint_and_cleanup() {
     let fixture = ChildPatchFixture::new("apply");
 
@@ -551,6 +632,10 @@ fn unrelated_parent_cannot_review_or_decide_child_patch() {
     .expect_err("unrelated parent must be denied");
 
     assert!(error.contains("child_patch_parent_mismatch"));
+    assert!(!error.contains(&fixture.patch_ref));
+    assert!(!crate::skills::structured_skill_error_requests_replan(
+        &error
+    ));
     assert!(fixture.worktree_root.exists());
     assert!(fixture.artifact_path.exists());
 }

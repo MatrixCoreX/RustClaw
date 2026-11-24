@@ -275,9 +275,19 @@ fn validate_optional_patch_ref(
         .and_then(Value::as_str)
         != Some(requested)
     {
-        return Err(child_patch_error(
+        return Err(child_patch_error_with_extra(
             "child_patch_ref_mismatch",
-            json!({"requested_patch_ref": requested}),
+            json!({
+                "requested_patch_ref": requested,
+                "expected_patch_ref": record.patch_artifact.get("patch_ref"),
+                "child_task_id": record.child_task_id,
+            }),
+            Some(json!({
+                "retryable": true,
+                "side_effect_applied": false,
+                "failure_phase": "pre_dispatch",
+                "recovery_action": "replan_arguments",
+            })),
         ));
     }
     Ok(())
