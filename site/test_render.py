@@ -20,6 +20,10 @@ class Page(HTMLParser):
     def __init__(self, source):
         super().__init__()
         self.headings = 0
+        self.section_labels = {}
+        self.section_headings = set()
+        self.platform_options = []
+        self.platform_labels = set()
         self.lang = None
         self.description = ""
         self.title = ""
@@ -34,6 +38,14 @@ class Page(HTMLParser):
         attributes = dict(attrs)
         if "id" in attributes:
             self.ids.add(attributes["id"])
+        if tag == "section" and "id" in attributes:
+            self.section_labels[attributes["id"]] = attributes.get("aria-labelledby")
+        if tag == "h2" and "id" in attributes:
+            self.section_headings.add(attributes["id"])
+        if tag == "input" and attributes.get("name") == "install-platform":
+            self.platform_options.append(attributes)
+        if tag == "label" and "for" in attributes:
+            self.platform_labels.add(attributes["for"])
         if tag == "h1":
             self.headings += 1
         if tag == "title":
@@ -113,6 +125,29 @@ class ProjectSiteTest(unittest.TestCase):
                             {"skills", "mcp", "rag", "media", "media-discovery", "media-download", "crypto", "aipp"},
                             page.ids,
                         )
+                        for section_id in ("skills", "mcp", "rag"):
+                            self.assertIn(page.section_labels[section_id], page.section_headings)
+                        option_ids = [option["id"] for option in page.platform_options]
+                        self.assertEqual(option_ids, ["install-pi", "install-ubuntu", "install-macos"])
+                        self.assertEqual(page.platform_labels, set(option_ids))
+                        self.assertTrue(all(option["type"] == "radio" for option in page.platform_options))
+                        self.assertEqual(
+                            [option["id"] for option in page.platform_options if "checked" in option],
+                            ["install-pi"],
+                        )
+                        doc = "release_installation.md" if locale == "en" else "release_installation.zh-CN.md"
+                        guide_url = f"https://github.com/{owner}/{repo}/blob/main/docs/{doc}"
+                        self.assertEqual(
+                            {link["data-platform"]: link["href"] for link in page.links if "data-platform" in link},
+                            {
+                                "pi": pi_guide if locale == "en" else "raspberry-pi-install/",
+                                "ubuntu": guide_url + "#ubuntu",
+                                "macos": guide_url + "#macos",
+                            },
+                        )
+                        documentation = (SOURCE.parent / "docs" / doc).read_text(encoding="utf-8")
+                        self.assertIn("\n### Ubuntu\n", documentation)
+                        self.assertIn("\n### macOS\n", documentation)
                         self.assertIn("MCP", page.description)
                         self.assertIn("RAG", page.description)
                         self.assertIn("AiAPP", page.description)

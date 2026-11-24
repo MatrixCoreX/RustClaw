@@ -27,17 +27,16 @@
       <figcaption>MCP 订单查询（演示数据）。<a href="#rag-example">知识库示例</a> · <a href="#skills">技能示例</a></figcaption>
     </figure>
   </section>
-  <section class="page-section" id="use-cases" aria-labelledby="use-heading">
-    <h2 id="use-heading">技能、MCP 与 RAG 使用指南</h2>
-    <div class="capabilities">
-      <article class="skills-overview" id="skills" aria-labelledby="skills-heading">
-        <h3 id="skills-heading">Agent 技能</h3>
+  <div id="use-cases">
+    <section class="page-section" id="skills" aria-labelledby="skills-heading">
+      <h2 id="skills-heading">Agent 技能</h2>
+      <article class="skills-overview">
         <p>启用技能后，可以用聊天指令处理文件、转写语音、采集和下载媒体，也能查询加密货币行情。</p>
         <a href="skills/">安装和使用技能</a>
         <p class="skill-example-intro">在 Agent 聊天里发起媒体采集和下载任务。下面两张截图来自媒体技能的配套 AiAPP，用于查看任务结果。</p>
         <div class="detail-grid skill-examples" id="media">
           <section id="media-discovery" aria-labelledby="discovery-heading">
-            <h4 id="discovery-heading">媒体采集</h4>
+            <h3 id="discovery-heading">媒体采集</h3>
             <p>按关键词从小红书、抖音、哔哩哔哩等支持的平台收集帖子，保留作者文案、预览、来源链接和采集时能读取到的互动数据。可以只采一批，也可以在 Agent 里开启、暂停或停止持续采集。</p>
             <blockquote>「在小红书搜索『露营装备』，只采一批，最多 5 条，保留作者文案、预览和来源链接。」</blockquote>
             <a href="skills/#media-discovery">试用媒体采集</a>
@@ -47,7 +46,7 @@
             </figure>
           </section>
           <section id="media-download" aria-labelledby="download-heading">
-            <h4 id="download-heading">媒体下载</h4>
+            <h3 id="download-heading">媒体下载</h3>
             <p>把支持平台的作品链接或完整分享文案发给 Agent，就可以保存能获取到的原视频或原图。支持的图文作品还可以一并保存原文，图片较多时会打成 ZIP 文件。</p>
             <blockquote>「帮我保存这条小红书图文的原图和能获取到的正文：[粘贴分享链接]。」</blockquote>
             <a href="skills/#media-download">试用媒体下载</a>
@@ -59,7 +58,7 @@
         </div>
         <section class="workflow" id="crypto" aria-labelledby="crypto-heading">
           <div>
-            <h4 id="crypto-heading">加密货币行情</h4>
+            <h3 id="crypto-heading">加密货币行情</h3>
             <p>在 Agent 聊天里用 <code>crypto</code> 技能查询公开行情。</p>
             <blockquote>「帮我查询比特币（BTC）的最新美元报价，并注明数据来源和查询时间。」</blockquote>
             <div class="detail-links"><a href="skills/#crypto">试用加密货币行情查询</a></div>
@@ -70,45 +69,56 @@
           </figure>
         </section>
         <section id="aipp" aria-labelledby="aipp-heading">
-          <h4 id="aipp-heading">AiAPP 技能配套界面</h4>
+          <h3 id="aipp-heading">AiAPP 技能配套界面</h3>
           <p>技能可以在 AiAPP 提供配套界面。管理员可以在里面筛选采集记录、打开原帖，也能回看下载任务和提取的附件。</p>
           <a href="skills/#aipp">了解 AiAPP 安装入口和界面设计</a>
         </section>
       </article>
-      <article id="mcp" aria-labelledby="mcp-heading">
-        <h3 id="mcp-heading">MCP 工具</h3>
+    </section>
+    <section class="page-section" id="mcp" aria-labelledby="mcp-heading">
+      <h2 id="mcp-heading">MCP 工具</h2>
+      <article>
         <p>连接外部系统提供的工具，让 Agent 查询订单物流、快递单号等实时业务数据。</p>
-        <a href="mcp/">配置和测试 MCP 工具</a>
+        <blockquote>「查一下订单 3 是否发货，并告诉我快递单号。」</blockquote>
+        <div class="detail-links">
+          <a href="mcp/">配置和测试 MCP 工具</a>
+          <a href="#order-example">查看订单查询示例</a>
+        </div>
       </article>
-      <article id="rag" aria-labelledby="rag-heading">
-        <h3 id="rag-heading">RAG 知识库</h3>
-        <p>导入产品说明、常见问题和售后手册，让 Agent 搜索原文并在回答中给出处。</p>
-        <a href="rag/">导入资料并提问</a>
-      </article>
-    </div>
-    <div class="workflow">
-      <div>
-        <h3>在同一条消息里查订单和售后规则</h3>
-        <p>接好订单查询工具并导入售后手册后，一条消息就可以同时查当前物流状态和书面退货规则。</p>
-        <blockquote>「查一下订单 3 是否发货，再根据《售后手册》说明商品有质量问题时谁承担退货运费，并给出规则出处。」</blockquote>
+    </section>
+    <section class="page-section" id="rag" aria-labelledby="rag-heading">
+      <h2 id="rag-heading">RAG 知识库</h2>
+      <div class="workflow">
+        <div>
+          <p>导入产品说明、常见问题和售后手册，让 Agent 搜索原文并在回答中给出处。</p>
+          <blockquote>「查一下《售后手册》，商品有质量问题时谁承担退货运费？请给出规则出处。」</blockquote>
+          <div class="detail-links"><a href="rag/">导入资料并提问</a></div>
+        </div>
+        <figure class="example-shot" id="rag-example">
+          <a href="${examples}rag.png"><img src="${examples}rag.png" alt="Agent 回答退货运费由谁承担，并引用示例《售后手册》第 3.2 节。" width="794" height="317" loading="lazy" decoding="async"></a>
+          <figcaption>RAG 知识库问答，附上示例规则出处。</figcaption>
+        </figure>
       </div>
-      <figure class="example-shot" id="rag-example">
-        <a href="${examples}rag.png"><img src="${examples}rag.png" alt="Agent 回答退货运费由谁承担，并引用示例《售后手册》第 3.2 节。" width="794" height="317" loading="lazy" decoding="async"></a>
-        <figcaption>RAG 知识库问答，附上示例规则出处。</figcaption>
-      </figure>
-    </div>
-  </section>
+    </section>
+  </div>
   <section id="install" class="install" aria-labelledby="install-heading">
-    <div>
-      <h2 id="install-heading">安装到你的设备</h2>
-      <p>选好设备对应的签名安装包，再打开网页控制台配置模型、发送第一条消息。</p>
-      <ul class="platforms" aria-label="支持平台"><li>树莓派</li><li>Ubuntu</li><li>macOS</li></ul>
-    </div>
-    <div class="actions">
-      <a class="button primary" href="$repo/releases">下载安装包</a>
-      <a class="button secondary" href="$repo/blob/main/README.zh-CN.md#快速开始">快速开始</a>
-    </div>
-    <a class="platform-guide" href="raspberry-pi-install/">在 Raspberry Pi 上安装 $brand</a>
+    <h2 id="install-heading">安装到你的设备</h2>
+    <p>选择设备查看对应的安装说明。安装后打开网页控制台配置模型，就可以发送第一条消息。</p>
+    <fieldset class="platform-picker">
+      <legend>设备平台</legend>
+      <input type="radio" id="install-pi" name="install-platform" checked>
+      <label for="install-pi">树莓派</label>
+      <input type="radio" id="install-ubuntu" name="install-platform">
+      <label for="install-ubuntu">Ubuntu</label>
+      <input type="radio" id="install-macos" name="install-platform">
+      <label for="install-macos">macOS</label>
+      <div class="actions platform-actions">
+        <a class="button primary" href="$repo/releases">下载签名安装包</a>
+        <a class="button secondary" data-platform="pi" href="raspberry-pi-install/">树莓派安装说明</a>
+        <a class="button secondary" data-platform="ubuntu" href="$repo/blob/main/docs/release_installation.zh-CN.md#ubuntu">Ubuntu 安装说明</a>
+        <a class="button secondary" data-platform="macos" href="$repo/blob/main/docs/release_installation.zh-CN.md#macos">macOS 安装说明</a>
+      </div>
+    </fieldset>
   </section>
 </main>
 <footer class="wrap footer">

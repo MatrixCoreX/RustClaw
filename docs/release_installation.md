@@ -33,6 +33,24 @@ or install a substitute on the device. A system/configured native library can
 still be used; without one, chip operations report the existing unavailable
 status and non-hardware features remain available.
 
+## Platform notes
+
+### Ubuntu
+
+On an Ubuntu PC or server, check the architecture with `uname -m`. For
+`x86_64`, use the signed `ubuntu-x86_64-` release. Run the
+[first installation command](#first-installation) to let the installer select
+that package and register systemd startup. Open the console on the Ubuntu
+machine to finish setup.
+
+### macOS
+
+Use the `macos-aarch64-` release for Apple silicon (`uname -m` reports
+`arm64`) or `macos-x86_64-` for Intel. Run the
+[first installation command](#first-installation) from Terminal. The installer
+selects the correct package and registers a LaunchAgent for the current account.
+Open the console on the Mac to finish setup.
+
 ## First Installation
 
 Download `install-latest-release.sh` from the trusted release repository, then run
