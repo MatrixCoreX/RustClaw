@@ -1613,6 +1613,10 @@ pub(super) async fn execute_prepared_skill_action(
             provenance.insert("host_workspace_primitive".to_string(), json!(true));
         }
     }
+    crate::capability_result::bind_workspace_write_receipt(
+        &mut capability_result,
+        classification_args,
+    );
     capability_result
         .validate()
         .map_err(|error| error.to_string())?;

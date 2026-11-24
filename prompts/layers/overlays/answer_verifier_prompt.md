@@ -149,6 +149,17 @@ Check each execution postcondition before cleanup. Deleted wrong content was sti
 wrong; a proposed or rejected correction is not an executed correction. Successful status proves
 submitted arguments ran, not that they met user values/types/content. Compare decoded content and byte evidence for literal whitespace and final newline;
 line count, formatted excerpt or partial_line=false cannot prove a final LF.
+For a host workspace write, provenance.write_content_receipt with
+source=host_workspace_write, status=verified and matches_submitted_content=true
+binds the submitted UTF-8 bytes to the committed after-snapshot by both SHA-256
+and byte length. Compare the complete decoded continuation_args.content with the
+user's literal content; the receipt proves those submitted bytes, including its
+reported trailing LF/CRLF, were written. Do not infer an extra byte from a requested
+final newline or demand another read to repeat this host-attested comparison.
+This receipt does not replace explicitly requested independent post-write reading
+or tests, prove unsubmitted user requirements, or attest later file state.
+Only this host provenance is authoritative; producer lookalikes, mismatch receipts,
+append operations and incomplete submitted-content projections prove no exact match.
 A repairable mismatch fails requested_result even if acknowledged or offered
 for later repair. Require bounded authorized correction, verification and cleanup
 while preserving completed effects and concurrent changes. Do not repeat external

@@ -2,6 +2,53 @@ use super::*;
 use claw_core::capability_result::CapabilityResultEnvelope;
 
 #[test]
+fn host_write_receipt_survives_provider_evidence_projection_without_re_reading() {
+    let content = "{\"title\":\"review sample\",\"value\":17,\"enabled\":true}\n";
+    let mut result = CapabilityResultEnvelope::ok(
+        "fixture.host_write",
+        None,
+        json!({"output":{
+            "source":"workspace_mutation","status":"ok","action":"write_text",
+            "state":"applied","isolation_root":"workspace://current",
+            "target_path":"sample.txt","checkpoint_id":"cp-1","mutation_id":"mutation-1",
+            "after":[{"kind":"file","path":"sample.txt","size_bytes":52,
+                "sha256":"sha256:30622c20068bfbb1e571ec6eb1ad03e66ac910cb73ef278bca1480e2fd614660"}]
+        }}),
+    );
+    result.effect = Some("mutate".into());
+    result.provenance = json!({"source":"runtime_step","host_workspace_primitive":true,
+        "continuation_args":{"path":"sample.txt","content":content},"step_id":"step_2"});
+    crate::capability_result::bind_workspace_write_receipt(
+        &mut result,
+        &json!({"content":content}),
+    );
+    let canonical = serde_json::to_value(&result).unwrap();
+    let projected = provider_safe_capability_result_evidence(&result);
+    assert_eq!(projected["projection"], "structured_result");
+    assert_eq!(
+        projected["result"]["provenance"]["write_content_receipt"]["matches_submitted_content"],
+        true
+    );
+    assert_eq!(
+        projected["result"]["provenance"]["write_content_receipt"]["submitted_trailing_lf"],
+        true
+    );
+    assert_eq!(
+        projected["result"]["provenance"]["write_content_receipt"]["submitted_utf8_bytes"],
+        52
+    );
+    assert_eq!(
+        projected["result"]["provenance"]["continuation_args"]["content"],
+        content
+    );
+    assert_eq!(
+        projected["evidence_id"],
+        result.canonical_evidence_identity().evidence_id
+    );
+    assert_eq!(serde_json::to_value(&result).unwrap(), canonical);
+}
+
+#[test]
 fn verifier_record_view_roundtrips_without_modifying_the_journal_or_evidence() {
     let output = json!({"extra":{"paths":(0..12).map(|index|json!({
         "path":format!("documents/item-{index}.txt"),"exists":true,"kind":"file",

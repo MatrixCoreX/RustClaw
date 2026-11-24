@@ -7,6 +7,10 @@ use serde_json::{json, Map as JsonMap, Value};
 use sha2::{Digest, Sha256};
 use std::io::Read;
 
+#[path = "capability_result_write_receipt.rs"]
+mod write_receipt;
+pub(crate) use write_receipt::bind_workspace_write_receipt;
+
 #[cfg(test)]
 pub(crate) fn successful_execution_envelope(
     capability: &str,
