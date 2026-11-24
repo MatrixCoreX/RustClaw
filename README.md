@@ -1,18 +1,22 @@
 # Agent Runtime
 
-Chinese version: `README.zh-CN.md`
+Agent Runtime is a self-hosted AI agent platform written in Rust for Raspberry Pi, Ubuntu, and macOS. Use the web console or a connected messaging app to ask questions, work with files, and follow tasks as they run.
 
-Agent Runtime is a self-hosted platform for using an Agent from a browser or a messaging app. Ask a question, hand it a file, or give it a task, then follow the work from the same conversation. The Rust service `clawd` runs tools and skills, keeps task history, and manages memory and scheduling. An authenticated `user_key` ties work to the same account across bound channels.
+Connect external tools through the Model Context Protocol (MCP) and import your own documents into a retrieval-augmented generation (RAG) knowledge base. The agent can use a connected tool to look up a current order or cite your support handbook when answering a policy question.
+
+[Quick start](#quick-start) · [Knowledge base setup](#knowledge-base-design-flow) · [简体中文](README.zh-CN.md)
 
 <!-- ai-learning-stage: foundations -->
 - Host free-space admission and growth estimates, supervised jobs, typed memory failures, model-reviewed unchanged-summary reuse, incremental encrypted backups with retry recovery, and restart-safe log retention: [operations protection](docs/runtime_operations_protection.md).
 
 ## Overview
 
-The browser console covers everyday work such as setting up a model, following tasks, managing knowledge, and checking the health of the device. Bound messaging channels use the same runtime, so the tools available to your account follow you across those entry points.
+The browser console covers model setup, task history, knowledge base management, and device health. The Rust service `clawd` runs tools and skills and manages memory and scheduling. An authenticated `user_key` ties work to the same account across bound channels.
 
 Current repository highlights:
 
+- **MCP tool connections.** In **Models → External tool servers**, connect a local stdio server or a remote Streamable HTTP server and choose which tools the agent can call.
+- **RAG knowledge bases.** Import manuals, FAQs, or runbooks from **Memory → Knowledge base**. The agent can retrieve relevant passages and cite their sources.
 - multi-channel entry points: Telegram, WeChat, Feishu, Lark, WhatsApp Cloud, WhatsApp Web, and the browser UI through `webd`, with optional nginx/TLS
 - task runtime and HTTP API in `clawd`
 - shared skill dispatch with in-process builtins, external adapters, and runner subprocesses through `skill-runner`
