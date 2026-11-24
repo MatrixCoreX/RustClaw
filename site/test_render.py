@@ -21,6 +21,7 @@ class Page(HTMLParser):
         super().__init__()
         self.headings = 0
         self.lang = None
+        self.description = ""
         self.links = []
         self.assets = []
         self.ids = set()
@@ -34,6 +35,8 @@ class Page(HTMLParser):
             self.headings += 1
         if tag == "html":
             self.lang = attributes["lang"]
+        if tag == "meta" and attributes.get("name") == "description":
+            self.description = attributes["content"]
         if tag in ("link", "a"):
             self.links.append(attributes)
         if tag == "img":
@@ -69,6 +72,9 @@ class ProjectSiteTest(unittest.TestCase):
                         alternates = {}
                     else:
                         self.assertIn(f"<title>{brand} by {owner} | ", source)
+                        self.assertLessEqual({"skills", "mcp", "rag"}, page.ids)
+                        self.assertIn("MCP", page.description)
+                        self.assertIn("RAG", page.description)
                         self.assertIn('href="' + (guide if not part else 'raspberry-pi-install/') + '"', source)
                         alternates = {"en": base, "zh-CN": base + "zh/", "x-default": base}
                     self.assertEqual([link["href"] for link in page.links if link.get("rel") == "canonical"], [base + part])

@@ -36,13 +36,13 @@ def build(output: Path):
     page = Template((SOURCE / "page.html").read_text(encoding="utf-8"))
     pages = [
         (
-            "en.html", "en", "", f"{brand} by {owner} | Self-hosted AI Agent",
-            f"{brand} by {owner} is a self-hosted AI agent for Raspberry Pi, Ubuntu, and macOS, with MCP tools, RAG knowledge bases, and a web console.",
+            "en.html", "en", "", f"{brand} by {owner} | Self-hosted AI Agent with MCP & RAG",
+            f"{brand} by {owner} is a self-hosted AI agent for Raspberry Pi, Ubuntu, and macOS. Run skills, connect MCP servers, and search your documents with RAG.",
             "Agent chat showing the status, location, and tracking number of a sample order.",
         ),
         (
-            "zh.html", "zh-CN", "zh/", f"{brand} by {owner} | 自托管 AI Agent",
-            f"{brand} 是 {owner} 开发的自托管 AI Agent，支持 MCP 工具、RAG 知识库与网页控制台，可部署在树莓派、Ubuntu 和 macOS 上。",
+            "zh.html", "zh-CN", "zh/", f"{brand} by {owner} | 自托管 AI Agent · MCP 工具与 RAG 知识库",
+            f"{brand} 是 {owner} 开发的开源自托管 AI Agent，可运行在树莓派、Ubuntu 和 macOS，支持技能安装、MCP 工具接入和带出处的 RAG 知识库问答。",
             "Agent 对话窗口展示模拟订单的状态、物流位置和快递单号。",
         ),
         (
