@@ -22,10 +22,6 @@
         <a class="button secondary" href="#use-cases">View guides</a>
       </div>
     </div>
-    <figure class="preview" id="order-example">
-      <a href="${examples}mcp.png"><img src="${examples}mcp.png" alt="$preview_alt" width="794" height="370" fetchpriority="high"></a>
-      <figcaption>MCP order lookup with sample data. <a href="#rag-example">Knowledge base example</a> · <a href="#skills">Skill examples</a></figcaption>
-    </figure>
   </section>
   <div id="use-cases">
     <section class="page-section" id="skills" aria-labelledby="skills-heading">
@@ -34,22 +30,26 @@
         <p>Enable skills to work with files, transcribe audio, collect and download media, or check cryptocurrency prices through chat.</p>
         <a href="skills/">Install and use skills</a>
         <p class="skill-example-intro">Start media collection and downloads in Agent chat. The screenshots show the media skills’ companion AiAPP views, where you can review the results.</p>
-        <div class="detail-grid skill-examples" id="media">
-          <section id="media-discovery" aria-labelledby="discovery-heading">
-            <h3 id="discovery-heading">Media Discovery</h3>
-            <p>Collect posts by topic from supported sites such as Xiaohongshu, Douyin, and Bilibili. A collection can keep the original captions, previews, source links, and engagement numbers available at the time. Run a single batch or ask the agent to start, pause, or stop an ongoing collection.</p>
-            <blockquote>“Search Xiaohongshu for camping gear. Collect one batch of up to five posts and keep their captions, previews, and source links.”</blockquote>
-            <a href="skills/#media-discovery">Try the Media Discovery example</a>
+        <div class="skill-examples" id="media">
+          <section class="workflow" id="media-discovery" aria-labelledby="discovery-heading">
+            <div>
+              <h3 id="discovery-heading">Media Discovery skill</h3>
+              <p>Collect posts by topic from supported sites such as Xiaohongshu, Douyin, and Bilibili. A collection can keep the original captions, previews, source links, and engagement numbers available at the time. Run a single batch or ask the agent to start, pause, or stop an ongoing collection.</p>
+              <blockquote>“Search Xiaohongshu for camping gear. Collect one batch of up to five posts and keep their captions, previews, and source links.”</blockquote>
+              <div class="detail-links"><a href="skills/#media-discovery">Try the Media Discovery example</a></div>
+            </div>
             <figure class="example-shot">
               <a href="${examples}media-discovery.png"><img src="${examples}media-discovery.png" alt="Media Discovery in AiAPP shows two sample camping posts with previews, captions, and engagement figures." width="1120" height="642" loading="lazy" decoding="async"></a>
               <figcaption>The Media Discovery companion AiAPP shows sample collection results.</figcaption>
             </figure>
           </section>
-          <section id="media-download" aria-labelledby="download-heading">
-            <h3 id="download-heading">Media Download</h3>
-            <p>Send a supported post URL or paste its app share message. The skill saves the available original video or images and can return the original article text for supported posts. Larger image sets are delivered in a ZIP file.</p>
-            <blockquote>“Save the original images and any available article text from this Xiaohongshu post: [paste the share link].”</blockquote>
-            <a href="skills/#media-download">Try the Media Download example</a>
+          <section class="workflow" id="media-download" aria-labelledby="download-heading">
+            <div>
+              <h3 id="download-heading">Media Download skill</h3>
+              <p>Send a supported post URL or paste its app share message. The skill saves the available original video or images and can return the original article text for supported posts. Larger image sets are delivered in a ZIP file.</p>
+              <blockquote>“Save the original images and any available article text from this Xiaohongshu post: [paste the share link].”</blockquote>
+              <div class="detail-links"><a href="skills/#media-download">Try the Media Download example</a></div>
+            </div>
             <figure class="example-shot">
               <a href="${examples}media-download.png"><img src="${examples}media-download.png" alt="Media Download in AiAPP shows a completed sample task with image and text files alongside a failed task." width="1120" height="853" loading="lazy" decoding="async"></a>
               <figcaption>The Media Download companion AiAPP shows sample tasks and output files.</figcaption>
@@ -58,7 +58,7 @@
         </div>
         <section class="workflow" id="crypto" aria-labelledby="crypto-heading">
           <div>
-            <h3 id="crypto-heading">Cryptocurrency quotes</h3>
+            <h3 id="crypto-heading">Cryptocurrency quote skill</h3>
             <p>Use the <code>crypto</code> skill to look up a public market quote in Agent chat.</p>
             <blockquote>“Look up the latest USD price for Bitcoin (BTC). Include the data source and the time of the query.”</blockquote>
             <div class="detail-links"><a href="skills/#crypto">Try the cryptocurrency quote example</a></div>
@@ -77,14 +77,19 @@
     </section>
     <section class="page-section" id="mcp" aria-labelledby="mcp-heading">
       <h2 id="mcp-heading">MCP tools</h2>
-      <article>
-        <p>Connect tools from other systems to look up current records, such as shipping status and tracking numbers.</p>
-        <blockquote>“Look up order 3. Has it shipped, and what is the tracking number?”</blockquote>
-        <div class="detail-links">
-          <a href="mcp/">Connect and test MCP tools</a>
-          <a href="#order-example">See the order lookup example</a>
+      <div class="workflow">
+        <div>
+          <p>Connect tools from other systems to look up current records, such as shipping status and tracking numbers.</p>
+          <blockquote>“Where is order 3? What is the tracking number?”</blockquote>
+          <div class="detail-links">
+            <a href="mcp/">Connect and test MCP tools</a>
+          </div>
         </div>
-      </article>
+        <figure class="example-shot" id="order-example">
+          <a href="${examples}mcp.png"><img src="${examples}mcp.png" alt="$preview_alt" width="794" height="370" loading="lazy" decoding="async"></a>
+          <figcaption>MCP order lookup in Agent chat with sample data.</figcaption>
+        </figure>
+      </div>
     </section>
     <section class="page-section" id="rag" aria-labelledby="rag-heading">
       <h2 id="rag-heading">RAG knowledge base</h2>

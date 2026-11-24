@@ -10,7 +10,6 @@
   --accent-ink: #fffaf5;
   --accent-hover: #842d18;
   --focus: #2b6661;
-  --shadow: 0 22px 65px #1d303226;
   font: 100%/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 @media (prefers-color-scheme: dark) {
@@ -25,7 +24,6 @@
     --accent-ink: #2e1711;
     --accent-hover: #ffd0bc;
     --focus: #91d1c6;
-    --shadow: 0 24px 65px #080d0e76;
   }
 }
 * { box-sizing: border-box; }
@@ -44,24 +42,23 @@ nav { display: flex; align-items: center; gap: clamp(.75rem, 3vw, 1.7rem); }
 nav a { color: var(--ink); font-size: .92rem; text-decoration: none; }
 nav a:hover, .byline a:hover { text-decoration: underline; }
 .source-link { font-weight: 650; }
-.hero { display: grid; grid-template-columns: 1fr 1.16fr; align-items: center; gap: clamp(2rem, 6vw, 4.5rem); padding-block: clamp(3rem, 8vw, 6.6rem); }
+.hero { max-width: 48rem; margin-inline: auto; padding-block: clamp(3rem, 8vw, 6rem); text-align: center; }
 .byline { margin: 0 0 .65rem; font-size: .94rem; font-weight: 640; }
 .byline a { color: var(--muted); text-decoration: none; }
 h1, h2, h3 { text-wrap: balance; line-height: 1.13; }
 h1 { margin: 0; font-size: clamp(3.65rem, 7vw, 6.4rem); letter-spacing: -.075em; font-weight: 780; overflow-wrap: anywhere; }
 h1 span { display: block; margin-top: .4rem; font-size: clamp(1.35rem, 2.5vw, 2.05rem); letter-spacing: -.035em; font-weight: 675; }
-.intro { max-width: 44ch; margin: 1rem 0; color: var(--muted); font-size: 1.08rem; }
-:lang(zh-CN) .intro { max-width: 28em; }
-.hero .actions { margin-top: 1.45rem; }
+.intro { max-width: 64ch; margin: 1rem auto; color: var(--muted); font-size: 1.08rem; }
+:lang(zh-CN) .intro { max-width: 34em; }
+.hero .actions { justify-content: center; margin-top: 1.45rem; }
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: .7rem; }
 .button { display: inline-flex; justify-content: center; align-items: center; min-height: 2.8rem; border: 1px solid transparent; border-radius: .65rem; padding: .58rem 1rem; font-weight: 685; text-decoration: none; }
 .primary { background: var(--accent); color: var(--accent-ink); }
 .primary:hover { background: var(--accent-hover); }
 .secondary { border-color: var(--edge); color: var(--ink); background: var(--surface); }
 .secondary:hover { border-color: var(--muted); }
-.preview { margin: 0; padding: .7rem; border: 1px solid var(--edge); border-radius: 1.1rem; background: var(--surface); box-shadow: var(--shadow); }
-.preview > a, .example-shot > a { display: block; border-radius: .65rem; cursor: zoom-in; }
-.preview img, .example-shot img { display: block; width: 100%; height: auto; border-radius: .65rem; background: #253036; }
+.example-shot > a { display: block; border-radius: .65rem; cursor: zoom-in; }
+.example-shot img { display: block; width: 100%; height: auto; border-radius: .65rem; background: #253036; }
 .example-shot { margin: 1.1rem 0 0; }
 figcaption { margin: .52rem .2rem 0; font-size: .87rem; color: var(--muted); }
 .page-section { border-top: 1px solid var(--edge); padding: clamp(2rem, 5vw, 4rem) 0; }
@@ -72,13 +69,14 @@ article p, .install p { color: var(--muted); margin: .6rem 0; }
 .skill-examples, .skills-overview > section { margin-top: 1.2rem; padding-top: 1.2rem; border-top: 1px solid var(--edge); }
 .skills-overview h3 { margin: 0; font-size: 1.1rem; }
 .skills-overview .skill-example-intro { margin-top: 1rem; }
+.skill-examples > .workflow:first-child { margin-top: 0; }
+.skill-examples > .workflow + .workflow { padding-top: 1.2rem; border-top: 1px solid var(--edge); }
 blockquote { margin: 1.1rem 0; padding: .55rem .8rem; border-inline-start: 3px solid var(--accent); background: var(--highlight); border-radius: 0 .4rem .4rem 0; }
 .workflow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; gap: clamp(1rem, 4vw, 3rem); margin-top: 2rem; }
 .workflow h3 { margin: 0 0 .55rem; }
 .workflow p { margin: 0; color: var(--muted); }
 .workflow blockquote { margin-bottom: 0; }
 .workflow .example-shot { margin: 0; }
-.detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
 .detail-links { display: flex; flex-wrap: wrap; gap: .45rem 1.2rem; margin: 1.2rem 0 0; }
 .install { padding: clamp(1.25rem, 4vw, 2.4rem); border-radius: 1rem; background: var(--highlight); }
 .install h2 { margin: 0; }
@@ -95,11 +93,7 @@ blockquote { margin: 1.1rem 0; padding: .55rem .8rem; border-inline-start: 3px s
 #install-macos:checked ~ .platform-actions [data-platform="macos"] { display: inline-flex; }
 .footer { padding: 1.6rem 0 2.1rem; font-size: .94rem; color: var(--muted); }
 @media (max-width: 55rem) {
-  .hero { grid-template-columns: 1fr; }
   .workflow { grid-template-columns: 1fr; }
-}
-@media (max-width: 42rem) {
-  .detail-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 36rem) {
   .wrap { width: calc(100% - 2rem); }

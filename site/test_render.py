@@ -30,6 +30,8 @@ class Page(HTMLParser):
         self.preview_image = ""
         self.links = []
         self.assets = []
+        self.open_sections = []
+        self.section_assets = {}
         self.ids = set()
         self.in_title = False
         self.feed(source)
@@ -38,8 +40,11 @@ class Page(HTMLParser):
         attributes = dict(attrs)
         if "id" in attributes:
             self.ids.add(attributes["id"])
-        if tag == "section" and "id" in attributes:
-            self.section_labels[attributes["id"]] = attributes.get("aria-labelledby")
+        if tag == "section":
+            section_id = attributes.get("id")
+            self.open_sections.append(section_id)
+            if section_id:
+                self.section_labels[section_id] = attributes.get("aria-labelledby")
         if tag == "h2" and "id" in attributes:
             self.section_headings.add(attributes["id"])
         if tag == "input" and attributes.get("name") == "install-platform":
@@ -60,8 +65,12 @@ class Page(HTMLParser):
             self.links.append(attributes)
         if tag == "img":
             self.assets.append(attributes["src"])
+            if self.open_sections and self.open_sections[-1]:
+                self.section_assets.setdefault(self.open_sections[-1], []).append(attributes["src"])
 
     def handle_endtag(self, tag):
+        if tag == "section":
+            self.open_sections.pop()
         if tag == "title":
             self.in_title = False
 
@@ -157,6 +166,11 @@ class ProjectSiteTest(unittest.TestCase):
                                 "mcp.png", "rag.png", "media-discovery.png", "media-download.png", "crypto.png",
                             )],
                         )
+                        for section_id in ("mcp", "rag", "media-discovery", "media-download", "crypto"):
+                            self.assertEqual(
+                                page.section_assets[section_id],
+                                ["../" * part.count("/") + example_dir + section_id + ".png"],
+                            )
                         hrefs = {link["href"] for link in page.links}
                         self.assertLessEqual(set(topic_sections), hrefs)
                         self.assertIn("skills/#crypto", hrefs)
