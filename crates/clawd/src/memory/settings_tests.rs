@@ -39,7 +39,7 @@ fn setup() -> (Connection, AuthIdentity) {
 }
 
 #[test]
-fn empty_install_starts_disabled_until_an_authenticated_choice() {
+fn empty_install_uses_the_release_memory_default() {
     let db = Connection::open_in_memory().expect("new install settings db");
     db.execute_batch(crate::INIT_SQL).expect("base schema");
     db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)
@@ -67,8 +67,54 @@ fn empty_install_starts_disabled_until_an_authenticated_choice() {
         .expect("bootstrap principal");
     let effective = resolve_principal_memory_settings(&db, &principal_id, true)
         .expect("new install effective settings");
-    assert!(!effective.use_memory);
-    assert!(!effective.generate_memory);
+    assert!(effective.use_memory);
+    assert!(effective.generate_memory);
+    assert_eq!(effective.use_source, "release_default");
+    assert_eq!(effective.generate_source, "release_default");
+
+    let disabled = resolve_principal_memory_settings(&db, &principal_id, false)
+        .expect("explicitly disabled release defaults");
+    assert!(!disabled.use_memory);
+    assert!(!disabled.generate_memory);
+}
+
+#[test]
+fn upgrade_removes_only_the_untouched_first_install_memory_override() {
+    for administrator_override in [false, true] {
+        let (db, actor) = setup();
+        db.execute(
+            "DELETE FROM runtime_schema_migrations
+             WHERE migration_id = '034_memory_release_defaults_v1'",
+            [],
+        )
+        .expect("simulate a database from the previous release");
+        db.execute(
+            "UPDATE memory_onboarding_state SET installation_class = 'new_install'
+             WHERE singleton_id = 1",
+            [],
+        )
+        .expect("previous first-install state");
+        db.execute(
+            "INSERT INTO memory_runtime_settings (
+                setting_key, setting_scope, use_mode, generate_mode,
+                external_context_policy, managed_deny_use, managed_deny_generate,
+                revision, policy_digest, updated_at, updated_by_principal_id
+             ) VALUES (
+                'admin:default', 'admin', 'disabled', 'disabled', 'inherit', 0, 0,
+                1, 'onboarding-pending-v1', '1', ?1
+             )",
+            [administrator_override.then_some(actor.principal_id.as_str())],
+        )
+        .expect("legacy admin default");
+
+        for _ in 0..2 {
+            crate::repo::auth::ensure_principal_identity_schema(&db).expect("migrate settings");
+            let effective = resolve_principal_memory_settings(&db, &actor.principal_id, true)
+                .expect("effective settings after migration");
+            assert_eq!(effective.use_memory, !administrator_override);
+            assert_eq!(effective.generate_memory, !administrator_override);
+        }
+    }
 }
 
 #[test]

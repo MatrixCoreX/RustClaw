@@ -1,0 +1,80 @@
+    <h1 id="guide-title">Install and use $brand agent skills</h1>
+    <p class="guide-intro">Skills give the agent ways to work with files, transcribe audio, collect or download media, and look up public market quotes. Once a skill is enabled, describe the result you want in Agent chat. The agent can select an available skill that matches the request.</p>
+    <nav class="guide-nav" aria-label="On this page">
+      <a href="#install">Install a skill</a>
+      <a href="#media-discovery">Media Discovery</a>
+      <a href="#media-download">Media Download</a>
+      <a href="#crypto">Crypto quotes</a>
+      <a href="#aipp">AiAPP</a>
+      <a href="#troubleshooting">Troubleshooting</a>
+    </nav>
+
+    <section id="install">
+      <h2>Find, install, and enable a skill</h2>
+      <ol>
+        <li>On the web console dashboard, open <strong>Tools &amp; Skills</strong> to see installed skills and their enabled status.</li>
+        <li>For an optional skill, open <strong>Skill Store</strong>. Check that it supports your platform and review the listed dependencies before installing it.</li>
+        <li>Confirm that the skill is enabled. In <strong>Agent</strong>, describe the input and the output you want. For a document skill, attach a PDF and ask for a short list of action items and deadlines.</li>
+      </ol>
+    </section>
+
+    <section id="media-discovery">
+      <h2>Collect posts by topic</h2>
+      <p>With <strong>Media Discovery</strong> enabled, name a supported platform, a topic, and a limit for your first batch. The results can include previews, author captions, source links, and engagement counts available at collection time.</p>
+      <blockquote>“Search Xiaohongshu for camping gear. Collect one batch of up to five posts and keep their captions, previews, and source links.”</blockquote>
+      <p>Open <strong>AiAPP → Media Discovery</strong> to filter by platform or content type, preview a post, or open the source. You can also ask the agent to start, pause, or stop an ongoing collection.</p>
+      <figure class="example-shot">
+        <a href="${examples}media-discovery.png"><img src="${examples}media-discovery.png" alt="$preview_alt" width="1120" height="642" loading="lazy" decoding="async"></a>
+        <figcaption>Screenshot of the Media Discovery skill’s companion AiAPP, with sample collection results.</figcaption>
+      </figure>
+      <p><a href="$repo/blob/main/docs/architecture/12-media-discovery.md">Media Discovery platforms and collection behavior</a></p>
+    </section>
+
+    <section id="media-download">
+      <h2>Download media from a shared post</h2>
+      <p>With <strong>Media Download</strong> enabled, paste a supported post URL or the full message copied from the platform's share menu. The skill can save available original videos or images, along with the original text for supported article posts. Larger image sets are delivered as a ZIP.</p>
+      <blockquote>“Save the original images and any available article text from this Xiaohongshu post: [paste the share link].”</blockquote>
+      <p>Download the files from the Agent result, or go to <strong>AiAPP → Media Download</strong> to review retained tasks and their files. The history includes tasks run in Agent chat and through connected messaging channels.</p>
+      <figure class="example-shot">
+        <a href="${examples}media-download.png"><img src="${examples}media-download.png" alt="AiAPP lists sample downloads, saved image and text files, and a failed task." width="1120" height="853" loading="lazy" decoding="async"></a>
+        <figcaption>Screenshot of the Media Download skill’s companion AiAPP, with sample tasks and files.</figcaption>
+      </figure>
+      <p><a href="$repo/blob/main/optional_skills/media_download/INTERFACE.md">Media Download platforms and output formats</a></p>
+    </section>
+
+    <section id="crypto">
+      <h2>Look up Bitcoin with the crypto skill</h2>
+      <p>Find the <code>crypto</code> skill in <strong>Skill Store</strong>, install and enable it, then send this request in <strong>Agent</strong> chat.</p>
+      <blockquote>“Look up the latest USD price for Bitcoin (BTC). Include the data source and the time of the query.”</blockquote>
+      <p>The skill fetches a public quote. The reply can show the USD price, the source that provided it, and the time the query completed.</p>
+      <figure class="example-shot">
+        <a href="${examples}crypto.png"><img src="${examples}crypto.png" alt="Agent chat shows a sample Bitcoin price in USD, a simulated data source, and the query time." width="794" height="339" loading="lazy" decoding="async"></a>
+        <figcaption>Bitcoin quote in Agent chat with demo data.</figcaption>
+      </figure>
+      <p><a href="$repo/blob/main/optional_skills/crypto/INTERFACE.md#actions">See the crypto skill’s quote options</a></p>
+    </section>
+
+    <section id="aipp">
+      <h2>How AiAPP companion views work</h2>
+      <p>Admins can open a companion view from <strong>AiAPP</strong>, or select <strong>Install app</strong> to add a view for an enabled skill. The media views make it easier to find a post or file after the conversation ends.</p>
+      <dl>
+        <dt>Declared by the skill</dt>
+        <dd>A skill can provide an optional <code>[aipp]</code> declaration in <code>skill.toml</code>. Access follows the installed skill version, enabled state, and granted permissions.</dd>
+        <dt>Data provided by the console</dt>
+        <dd>Built-in views use a versioned data contract. Media Discovery reads the skill's collection records. Media Download reads retained task results for that skill.</dd>
+        <dt>Custom views run in isolation</dt>
+        <dd>A skill package can include its own static interface. It runs in a sandbox and requests capabilities through the host's allowlist.</dd>
+      </dl>
+      <p class="detail-links"><a href="$repo/blob/main/docs/architecture/14-aipp-skill-companions.md">AiAPP architecture</a> <a href="$repo/blob/main/docs/architecture/15-aipp-development-guide.md">AiAPP development guide</a></p>
+    </section>
+
+    <section id="troubleshooting">
+      <h2>When a skill is missing or the task gets stuck</h2>
+      <dl>
+        <dt>The skill is missing from Tools &amp; Skills</dt>
+        <dd>Check its installation status, platform support, and dependencies in Skill Store.</dd>
+        <dt>The agent is still waiting or the task failed</dt>
+        <dd>Open <strong>Task Management</strong> to distinguish queued work from a failure. For media tasks, use the reported reason to check the source link, browser dependencies, or a required platform sign-in.</dd>
+      </dl>
+      <p class="detail-links"><a href="../mcp/">Connect external tools through MCP</a> <a href="../rag/">Import a RAG knowledge base</a></p>
+    </section>

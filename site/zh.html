@@ -2,9 +2,9 @@
 <header class="wrap site-header">
   <a class="brand" href="./"><img src="../assets/logo.svg" alt="" width="34" height="34"><span>$brand</span></a>
   <nav aria-label="主导航">
-    <a href="#skills">技能</a>
-    <a href="#mcp">MCP</a>
-    <a href="#rag">知识库</a>
+    <a href="skills/">技能</a>
+    <a href="mcp/">MCP</a>
+    <a href="rag/">知识库</a>
     <a href="#install">安装</a>
     <a href="../" lang="en" hreflang="en">English</a>
     <a class="source-link" href="$repo">GitHub</a>
@@ -15,77 +15,110 @@
     <div>
       <p class="byline"><a href="$profile">由 $owner 开发</a></p>
       <h1 id="name">$brand <span>自托管 AI Agent</span></h1>
-      <p class="intro">在树莓派、Ubuntu 或 macOS 上运行开源 AI Agent。在网页控制台里用技能处理任务，通过 MCP 查询业务数据，也能从 RAG 知识库里查自己的资料。</p>
+      <p class="intro">在树莓派、Ubuntu 或 macOS 上运行开源 AI Agent。你可以在网页控制台配置模型、上传文件和查看任务进度，也可以绑定 Telegram、微信或飞书，在常用的聊天软件里发起任务。</p>
+      <p class="intro">比如，发一份 PDF 请 Agent 提炼要点，用 MCP 查订单物流，或从 RAG 知识库找出售后条款并给出处。采集或下载的媒体结果，可以在技能配套的 AiAPP 里回看。</p>
       <div class="actions">
         <a class="button primary" href="#install">下载安装</a>
-        <a class="button secondary" href="$repo/blob/main/README.zh-CN.md">中文指南</a>
+        <a class="button secondary" href="#use-cases">查看使用指南</a>
       </div>
     </div>
-    <figure class="preview">
-      <img src="../assets/console-demo.png" alt="$preview_alt" width="794" height="540" fetchpriority="high">
-      <figcaption>网页控制台中的订单查询示例，使用模拟数据。</figcaption>
+    <figure class="preview" id="order-example">
+      <a href="${examples}mcp.png"><img src="${examples}mcp.png" alt="$preview_alt" width="794" height="370" fetchpriority="high"></a>
+      <figcaption>MCP 订单查询（演示数据）。<a href="#rag-example">知识库示例</a> · <a href="#skills">技能示例</a></figcaption>
     </figure>
   </section>
-  <section id="use-cases" aria-labelledby="use-heading">
-    <h2 id="use-heading">Agent 技能、MCP 工具与 RAG 知识库</h2>
-    <div class="capabilities">
-      <article class="capability" id="skills" aria-labelledby="skills-heading">
-        <div>
-          <h3 id="skills-heading">使用和安装 Agent 技能</h3>
-          <p>技能让 Agent 能处理文件、提取文档内容或转写语音。你可以在聊天里直接描述想要的结果，Agent 会根据任务选择可用的技能。</p>
-          <blockquote>「读一下我上传的 PDF，列出需要跟进的事项和截止日期。」</blockquote>
-          <a href="$repo/blob/main/README.zh-CN.md#技能体系">了解内置技能和按需安装的技能</a>
+  <div id="use-cases">
+    <section class="page-section" id="skills" aria-labelledby="skills-heading">
+      <h2 id="skills-heading">Agent 技能</h2>
+      <article class="skills-overview">
+        <p>启用技能后，可以用聊天指令处理文件、转写语音、采集和下载媒体，也能查询加密货币行情。</p>
+        <a href="skills/">安装和使用技能</a>
+        <p class="skill-example-intro">在 Agent 聊天里发起媒体采集和下载任务。下面两张截图来自媒体技能的配套 AiAPP，用于查看任务结果。</p>
+        <div class="detail-grid skill-examples" id="media">
+          <section id="media-discovery" aria-labelledby="discovery-heading">
+            <h3 id="discovery-heading">媒体采集</h3>
+            <p>按关键词从小红书、抖音、哔哩哔哩等支持的平台收集帖子，保留作者文案、预览、来源链接和采集时能读取到的互动数据。可以只采一批，也可以在 Agent 里开启、暂停或停止持续采集。</p>
+            <blockquote>「在小红书搜索『露营装备』，只采一批，最多 5 条，保留作者文案、预览和来源链接。」</blockquote>
+            <a href="skills/#media-discovery">试用媒体采集</a>
+            <figure class="example-shot">
+              <a href="${examples}media-discovery.png"><img src="${examples}media-discovery.png" alt="AiAPP 媒体发现中展示两条露营帖子示例，含预览、文案和互动数据。" width="1120" height="622" loading="lazy" decoding="async"></a>
+              <figcaption>媒体采集技能的配套 AiAPP「媒体发现」截图（演示数据）。</figcaption>
+            </figure>
+          </section>
+          <section id="media-download" aria-labelledby="download-heading">
+            <h3 id="download-heading">媒体下载</h3>
+            <p>把支持平台的作品链接或完整分享文案发给 Agent，就可以保存能获取到的原视频或原图。支持的图文作品还可以一并保存原文，图片较多时会打成 ZIP 文件。</p>
+            <blockquote>「帮我保存这条小红书图文的原图和能获取到的正文：[粘贴分享链接]。」</blockquote>
+            <a href="skills/#media-download">试用媒体下载</a>
+            <figure class="example-shot">
+              <a href="${examples}media-download.png"><img src="${examples}media-download.png" alt="AiAPP 媒体下载页面展示已完成任务的原图和正文，以及一条失败记录。" width="1120" height="833" loading="lazy" decoding="async"></a>
+              <figcaption>媒体下载技能的配套 AiAPP「媒体下载」截图（演示数据）。</figcaption>
+            </figure>
+          </section>
         </div>
-        <ol>
-          <li>在首页打开<strong>工具技能</strong>，查看已安装技能及其启用状态。</li>
-          <li>需要更多能力时，打开 <strong>Skill Store</strong>，查看技能支持的平台和依赖，再按需安装。</li>
-          <li>确认技能已启用，然后在 <strong>Agent</strong> 聊天里发一句具体的请求。</li>
-        </ol>
+        <section class="workflow" id="crypto" aria-labelledby="crypto-heading">
+          <div>
+            <h3 id="crypto-heading">加密货币行情</h3>
+            <p>在 Agent 聊天里用 <code>crypto</code> 技能查询公开行情。</p>
+            <blockquote>「帮我查询比特币（BTC）的最新美元报价，并注明数据来源和查询时间。」</blockquote>
+            <div class="detail-links"><a href="skills/#crypto">试用加密货币行情查询</a></div>
+          </div>
+          <figure class="example-shot">
+            <a href="${examples}crypto.png"><img src="${examples}crypto.png" alt="Agent 对话显示比特币的示例美元报价、模拟数据来源和查询时间。" width="794" height="339" loading="lazy" decoding="async"></a>
+            <figcaption>Agent 对话中的比特币报价示例（演示数据）。</figcaption>
+          </figure>
+        </section>
+        <section id="aipp" aria-labelledby="aipp-heading">
+          <h3 id="aipp-heading">AiAPP 技能配套界面</h3>
+          <p>技能可以在 AiAPP 提供配套界面。管理员可以在里面筛选采集记录、打开原帖，也能回看下载任务和提取的附件。</p>
+          <a href="skills/#aipp">了解 AiAPP 安装入口和界面设计</a>
+        </section>
       </article>
-      <article class="capability" id="mcp" aria-labelledby="mcp-heading">
-        <div>
-          <h3 id="mcp-heading">通过 MCP 接入外部工具</h3>
-          <p>MCP（模型上下文协议）让 Agent 调用其他系统提供的工具。你可以连接一个或多个工具服务器，查询订单状态、物流等实时业务数据。</p>
-          <blockquote>「订单 3 发货了吗？是哪家快递，单号是多少？」</blockquote>
-          <a href="$repo/blob/main/docs/architecture/02-security-execution.zh-CN.md">了解 MCP 工具的权限控制</a>
+    </section>
+    <section class="page-section" id="mcp" aria-labelledby="mcp-heading">
+      <h2 id="mcp-heading">MCP 工具</h2>
+      <article>
+        <p>连接外部系统提供的工具，让 Agent 查询订单物流、快递单号等实时业务数据。</p>
+        <blockquote>「查一下订单 3 是否发货，并告诉我快递单号。」</blockquote>
+        <div class="detail-links">
+          <a href="mcp/">配置和测试 MCP 工具</a>
+          <a href="#order-example">查看订单查询示例</a>
         </div>
-        <ol>
-          <li>在管理控制台打开<strong>大模型 → 外部工具服务器</strong>，点击<strong>添加服务器</strong>。本机 stdio 服务填写启动命令和参数，远程 Streamable HTTP 服务填写地址。</li>
-          <li>核对连接信息，信任并启用该服务器，打开 MCP 总开关。在<strong>允许的工具</strong>里填写工具名称，再保存 MCP 设置。</li>
-          <li>如果页面提示需要重启，按提示重启服务。状态显示<strong>可用</strong>后，点击<strong>测试协议</strong>，再到 Agent 聊天去查一笔订单。</li>
-        </ol>
       </article>
-      <article class="capability" id="rag" aria-labelledby="rag-heading">
+    </section>
+    <section class="page-section" id="rag" aria-labelledby="rag-heading">
+      <h2 id="rag-heading">RAG 知识库</h2>
+      <div class="workflow">
         <div>
-          <h3 id="rag-heading">用 RAG 知识库查询自己的资料</h3>
-          <p>RAG 是检索增强生成。导入运营手册、常见问题或售后流程后，Agent 可以先找相关段落，再根据资料回答问题，并引用对应的章节、页码等位置。</p>
-          <blockquote>「查一下《售后手册》，商品有质量问题时，退货运费谁承担？请给出处。」</blockquote>
-          <a href="$repo/blob/main/README.zh-CN.md#知识库设计流程">查看知识库导入和搜索指南</a>
+          <p>导入产品说明、常见问题和售后手册，让 Agent 搜索原文并在回答中给出处。</p>
+          <blockquote>「查一下《售后手册》，商品有质量问题时谁承担退货运费？请给出规则出处。」</blockquote>
+          <div class="detail-links"><a href="rag/">导入资料并提问</a></div>
         </div>
-        <ol>
-          <li>打开<strong>记忆管理 → 知识库 → 添加资料</strong>，给资料库起个容易记住的名字，比如<strong>售后手册</strong>。</li>
-          <li>逐行填写 Agent 服务能读取的文件或文件夹路径，再点<strong>开始添加</strong>。可以先试 Markdown、纯文本或可以选中文字的 PDF。</li>
-          <li>导入完成后刷新资料库，先用<strong>搜索资料</strong>检查能否找到原文。之后在 Agent 聊天里带上库名提问，并要求给出处。</li>
-        </ol>
-      </article>
-    </div>
-    <div class="workflow">
-      <h3>在同一条消息里查订单和售后规则</h3>
-      <p>接好订单查询工具并导入售后手册后，一条消息就可以同时查当前物流状态和书面退货规则。</p>
-      <blockquote>「查一下订单 3 是否发货，再根据《售后手册》说明商品有质量问题时谁承担退货运费，并给出规则出处。」</blockquote>
-    </div>
-  </section>
+        <figure class="example-shot" id="rag-example">
+          <a href="${examples}rag.png"><img src="${examples}rag.png" alt="Agent 回答退货运费由谁承担，并引用示例《售后手册》第 3.2 节。" width="794" height="317" loading="lazy" decoding="async"></a>
+          <figcaption>RAG 知识库问答，附上示例规则出处。</figcaption>
+        </figure>
+      </div>
+    </section>
+  </div>
   <section id="install" class="install" aria-labelledby="install-heading">
-    <div>
-      <h2 id="install-heading">安装到你的设备</h2>
-      <p>选好设备对应的签名安装包，再打开网页控制台配置模型、发送第一条消息。</p>
-      <ul class="platforms" aria-label="支持平台"><li>树莓派</li><li>Ubuntu</li><li>macOS</li></ul>
-    </div>
-    <div class="actions">
-      <a class="button primary" href="$repo/releases">下载安装包</a>
-      <a class="button secondary" href="$repo/blob/main/README.zh-CN.md#快速开始">快速开始</a>
-    </div>
-    <a class="platform-guide" href="raspberry-pi-install/">在 Raspberry Pi 上安装 $brand</a>
+    <h2 id="install-heading">安装到你的设备</h2>
+    <p>选择设备查看对应的安装说明。安装后打开网页控制台配置模型，就可以发送第一条消息。</p>
+    <fieldset class="platform-picker">
+      <legend>设备平台</legend>
+      <input type="radio" id="install-pi" name="install-platform" checked>
+      <label for="install-pi">树莓派</label>
+      <input type="radio" id="install-ubuntu" name="install-platform">
+      <label for="install-ubuntu">Ubuntu</label>
+      <input type="radio" id="install-macos" name="install-platform">
+      <label for="install-macos">macOS</label>
+      <div class="actions platform-actions">
+        <a class="button primary" href="$repo/releases">下载签名安装包</a>
+        <a class="button secondary" data-platform="pi" href="raspberry-pi-install/">树莓派安装说明</a>
+        <a class="button secondary" data-platform="ubuntu" href="$repo/blob/main/docs/release_installation.zh-CN.md#ubuntu">Ubuntu 安装说明</a>
+        <a class="button secondary" data-platform="macos" href="$repo/blob/main/docs/release_installation.zh-CN.md#macos">macOS 安装说明</a>
+      </div>
+    </fieldset>
   </section>
 </main>
 <footer class="wrap footer">

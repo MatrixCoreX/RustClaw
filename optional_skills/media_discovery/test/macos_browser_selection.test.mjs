@@ -38,6 +38,7 @@ test("signed system Chrome wins without launching a browser or reading personal 
   assert.equal(result.executablePath, "/fixtures/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
   assert.deepEqual(calls.map(call => call.program),
     ["/usr/bin/plutil", "/usr/bin/plutil", "/usr/bin/plutil", "/usr/bin/codesign"]);
+  assert.deepEqual(calls[3].args.slice(0, 3), ["--verify", "--strict=symlinks", "-R"]);
   assert.match(calls[3].args[3], /EQHXZ8M8AV/u);
   assert.ok(calls[3].args[3].startsWith("=anchor apple generic and identifier "));
   assert.equal(calls[3].settings.timeout, 5000);

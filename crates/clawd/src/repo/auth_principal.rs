@@ -5,6 +5,9 @@ use std::collections::HashSet;
 const PRINCIPAL_MIGRATION_ID: &str = "008_memory_context_identity_settings_v1";
 const PRINCIPAL_SCHEMA_SQL: &str =
     include_str!("../../../../migrations/008_memory_context_identity_settings.sql");
+const MEMORY_RELEASE_DEFAULTS_MIGRATION_ID: &str = "034_memory_release_defaults_v1";
+const MEMORY_RELEASE_DEFAULTS_SQL: &str =
+    include_str!("../../../../migrations/034_memory_release_defaults.sql");
 
 pub(crate) fn credential_digest(user_key: &str) -> String {
     let normalized = super::normalize_user_key(user_key);
@@ -14,11 +17,8 @@ pub(crate) fn credential_digest(user_key: &str) -> String {
     format!("sha256:{:x}", digest.finalize())
 }
 
-fn schema_digest() -> String {
-    format!(
-        "sha256:{:x}",
-        Sha256::digest(PRINCIPAL_SCHEMA_SQL.as_bytes())
-    )
+fn schema_digest(sql: &str) -> String {
+    format!("sha256:{:x}", Sha256::digest(sql.as_bytes()))
 }
 
 pub(crate) fn ensure_principal_identity_schema(db: &Connection) -> anyhow::Result<()> {
@@ -28,7 +28,7 @@ pub(crate) fn ensure_principal_identity_schema(db: &Connection) -> anyhow::Resul
 /// Check readiness without migrating or scanning other credentials.
 pub(crate) fn require_principal_identity_schema(db: &Connection) -> anyhow::Result<()> {
     let applied = migration_digest(db, PRINCIPAL_MIGRATION_ID)?;
-    let expected = schema_digest();
+    let expected = schema_digest(PRINCIPAL_SCHEMA_SQL);
     anyhow::ensure!(
         applied.as_deref() == Some(expected.as_str()),
         "principal_identity_schema_unavailable"
@@ -56,7 +56,7 @@ fn ensure_identity_schema_in_transaction(db: &Connection) -> anyhow::Result<()> 
     let applied_digest = migration_digest(db, PRINCIPAL_MIGRATION_ID)?;
     if let Some(applied_digest) = applied_digest.as_ref() {
         anyhow::ensure!(
-            applied_digest == &schema_digest(),
+            applied_digest == &schema_digest(PRINCIPAL_SCHEMA_SQL),
             "runtime_schema_migration_digest_mismatch:{PRINCIPAL_MIGRATION_ID}"
         );
     }
@@ -80,9 +80,35 @@ fn ensure_identity_schema_in_transaction(db: &Connection) -> anyhow::Result<()> 
             "INSERT INTO runtime_schema_migrations (migration_id, schema_digest, applied_at)
              VALUES (?1, ?2, ?3)
              ON CONFLICT(migration_id) DO NOTHING",
-            params![PRINCIPAL_MIGRATION_ID, schema_digest(), crate::now_ts()],
+            params![
+                PRINCIPAL_MIGRATION_ID,
+                schema_digest(PRINCIPAL_SCHEMA_SQL),
+                crate::now_ts()
+            ],
         )?;
     }
+    restore_release_memory_defaults(db)
+}
+
+fn restore_release_memory_defaults(db: &Connection) -> anyhow::Result<()> {
+    let expected_digest = schema_digest(MEMORY_RELEASE_DEFAULTS_SQL);
+    if let Some(applied_digest) = migration_digest(db, MEMORY_RELEASE_DEFAULTS_MIGRATION_ID)? {
+        anyhow::ensure!(
+            applied_digest == expected_digest,
+            "runtime_schema_migration_digest_mismatch:{MEMORY_RELEASE_DEFAULTS_MIGRATION_ID}"
+        );
+        return Ok(());
+    }
+    db.execute_batch(MEMORY_RELEASE_DEFAULTS_SQL)?;
+    db.execute(
+        "INSERT INTO runtime_schema_migrations (migration_id, schema_digest, applied_at)
+         VALUES (?1, ?2, ?3)",
+        params![
+            MEMORY_RELEASE_DEFAULTS_MIGRATION_ID,
+            expected_digest,
+            crate::now_ts()
+        ],
+    )?;
     Ok(())
 }
 
@@ -133,19 +159,6 @@ fn seed_memory_onboarding_state(db: &Connection) -> anyhow::Result<()> {
             now
         ],
     )?;
-    if !is_upgrade {
-        db.execute(
-            "INSERT INTO memory_runtime_settings (
-                setting_key, setting_scope, use_mode, generate_mode,
-                external_context_policy, managed_deny_use, managed_deny_generate,
-                revision, policy_digest, updated_at, updated_by_principal_id
-             ) VALUES (
-                'admin:default', 'admin', 'disabled', 'disabled', 'inherit', 0, 0,
-                1, 'onboarding-pending-v1', ?1, NULL
-             ) ON CONFLICT(setting_key) DO NOTHING",
-            [now],
-        )?;
-    }
     Ok(())
 }
 
