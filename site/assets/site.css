@@ -1,0 +1,105 @@
+:root {
+  color-scheme: light dark;
+  --bg: #fbf8f3;
+  --ink: #202c30;
+  --muted: #515f61;
+  --edge: #d8d9d3;
+  --surface: #fffdf9;
+  --highlight: #f3ede4;
+  --accent: #a53b20;
+  --accent-ink: #fffaf5;
+  --accent-hover: #842d18;
+  --focus: #2b6661;
+  --shadow: 0 22px 65px #1d303226;
+  font: 100%/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #172023;
+    --ink: #f4ede3;
+    --muted: #b9c5c1;
+    --edge: #3e4b4a;
+    --surface: #202b2d;
+    --highlight: #263334;
+    --accent: #f5a589;
+    --accent-ink: #2e1711;
+    --accent-hover: #ffd0bc;
+    --focus: #91d1c6;
+    --shadow: 0 24px 65px #080d0e76;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); }
+a { color: var(--accent); text-underline-offset: .22em; }
+a:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
+a:hover { text-decoration-thickness: .13em; }
+.wrap { width: min(100% - 3rem, 74rem); margin-inline: auto; }
+.skip { position: absolute; left: 1rem; top: 1rem; z-index: 1; background: var(--surface); padding: .7rem 1rem; }
+.skip:not(:focus) { clip-path: inset(50%); }
+.site-header, .footer { display: flex; align-items: center; justify-content: space-between; gap: .9rem; }
+.site-header { min-height: 4.75rem; border-bottom: 1px solid var(--edge); }
+.brand { display: inline-flex; align-items: center; gap: .55rem; font-weight: 760; color: var(--ink); text-decoration: none; }
+nav { display: flex; align-items: center; gap: clamp(.75rem, 3vw, 1.7rem); }
+nav a { color: var(--ink); font-size: .92rem; text-decoration: none; }
+nav a:hover, .byline a:hover { text-decoration: underline; }
+.source-link { font-weight: 650; }
+.hero { display: grid; grid-template-columns: 1fr 1.16fr; align-items: center; gap: clamp(2rem, 6vw, 4.5rem); padding-block: clamp(3rem, 8vw, 6.6rem); }
+.byline { margin: 0 0 .65rem; font-size: .94rem; font-weight: 640; }
+.byline a { color: var(--muted); text-decoration: none; }
+h1, h2, h3 { text-wrap: balance; line-height: 1.13; }
+h1 { margin: 0; font-size: clamp(3.65rem, 7vw, 6.4rem); letter-spacing: -.075em; font-weight: 780; overflow-wrap: anywhere; }
+h1 span { display: block; margin-top: .4rem; font-size: clamp(1.35rem, 2.5vw, 2.05rem); letter-spacing: -.035em; font-weight: 675; }
+.intro { max-width: 36ch; margin: 1.15rem 0 1.45rem; color: var(--muted); font-size: 1.1rem; }
+:lang(zh-CN) .intro { max-width: 28em; }
+.actions { display: flex; align-items: center; flex-wrap: wrap; gap: .7rem; }
+.button { display: inline-flex; justify-content: center; align-items: center; min-height: 2.8rem; border: 1px solid transparent; border-radius: .65rem; padding: .58rem 1rem; font-weight: 685; text-decoration: none; }
+.primary { background: var(--accent); color: var(--accent-ink); }
+.primary:hover { background: var(--accent-hover); }
+.secondary { border-color: var(--edge); color: var(--ink); background: var(--surface); }
+.secondary:hover { border-color: var(--muted); }
+.preview { margin: 0; padding: .7rem; border: 1px solid var(--edge); border-radius: 1.1rem; background: var(--surface); box-shadow: var(--shadow); }
+.preview img { display: block; width: 100%; height: auto; aspect-ratio: 794 / 540; object-fit: contain; border-radius: .65rem; background: #253036; }
+figcaption { margin: .52rem .2rem 0; font-size: .87rem; color: var(--muted); }
+#use-cases { border-top: 1px solid var(--edge); padding: clamp(2rem, 5vw, 4rem) 0; }
+h2 { margin: 0 0 1rem; font-size: clamp(1.65rem, 3.6vw, 2.6rem); letter-spacing: -.04em; }
+.capabilities { display: grid; gap: 1rem; }
+article { padding: clamp(1.1rem, 3vw, 1.8rem); border-radius: 1rem; border: 1px solid var(--edge); background: var(--surface); }
+article h3 { margin: 0; font-size: 1.28rem; }
+article p, .install p { color: var(--muted); margin: .6rem 0; }
+blockquote { margin: 1.1rem 0; padding: .55rem .8rem; border-inline-start: 3px solid var(--accent); background: var(--highlight); border-radius: 0 .4rem .4rem 0; }
+.capability { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: clamp(1rem, 4vw, 3rem); }
+.capability ol { margin: 0; padding-inline-start: 1.4rem; }
+.capability li + li { margin-top: .65rem; }
+.capability li::marker { color: var(--accent); font-weight: 700; }
+.workflow { margin-top: 1.6rem; max-width: 74ch; }
+.workflow h3 { margin-bottom: .55rem; }
+.workflow p { margin: 0; color: var(--muted); }
+.workflow blockquote { margin-bottom: 0; }
+.install { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 1rem; padding: clamp(1.25rem, 4vw, 2.4rem); border-radius: 1rem; background: var(--highlight); }
+.install h2 { margin: 0; }
+.platforms { display: flex; flex-wrap: wrap; gap: .35rem 1.2rem; padding: 0; margin: .75rem 0 0; list-style: none; font-size: .95rem; font-weight: 650; }
+.footer { padding: 1.6rem 0 2.1rem; font-size: .94rem; color: var(--muted); }
+@media (max-width: 55rem) {
+  .hero { grid-template-columns: 1fr; }
+  .capability { grid-template-columns: 1fr; }
+  .install { grid-template-columns: 1fr; }
+}
+@media (max-width: 36rem) {
+  .wrap { width: calc(100% - 2rem); }
+  .site-header { align-items: flex-start; flex-direction: column; padding: .75rem 0; gap: .5rem; }
+  nav { flex-wrap: wrap; }
+}
+
+.platform-guide { grid-column: 1 / -1; justify-self: start; font-weight: 650; }
+.guide { max-width: 52rem; margin: clamp(2rem, 6vw, 4.5rem) auto; padding: 0; border: 0; background: transparent; }
+.guide h1 { font-size: clamp(1.95rem, 5vw, 3.65rem); letter-spacing: -.04em; }
+.guide h2 { font-size: clamp(1.4rem, 3vw, 2.05rem); }
+.guide .guide-intro { margin: 1.15rem 0; font-size: 1.12rem; }
+.guide-nav { flex-wrap: wrap; padding: .7rem 0 1rem; border-bottom: 1px solid var(--edge); }
+.guide section { margin-top: 2.35rem; }
+.guide :is(li, dd) { margin-bottom: .5rem; }
+.guide pre { overflow-x: auto; padding: 1rem; border: 1px solid var(--edge); border-radius: .65rem; background: var(--surface); }
+.guide code { font-family: ui-monospace, monospace; font-size: .94em; }
+.guide dt { font-weight: 700; }
+.guide dd { margin-inline-start: 0; color: var(--muted); }
+.guide .guide-note { margin-top: 1.75rem; padding: .85rem 1rem; border-inline-start: 3px solid var(--accent); background: var(--highlight); }

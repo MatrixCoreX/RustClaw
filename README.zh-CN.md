@@ -1,18 +1,22 @@
 # Agent Runtime
 
-英文版：`README.md`
+Agent Runtime 是用 Rust 编写的自托管 AI Agent 平台，可以部署在树莓派（Raspberry Pi）、Ubuntu 和 macOS 上。你可以在浏览器控制台或已绑定的消息应用里提问、发送文件、安排任务，并查看进度和结果。
 
-Agent Runtime 是一套可以部署在自己设备上的 Agent 平台。你可以在浏览器或消息应用里提问、发文件、安排任务，再回到同一段对话查看进度和结果。后台 Rust 服务 `clawd` 负责执行工具与技能、记录任务，以及管理记忆和调度。绑定渠道后，系统通过已认证的 `user_key` 识别同一账号。
+通过 MCP（模型上下文协议）接入外部工具，通过 RAG（检索增强生成）让 Agent 查阅你导入的知识库。比如，Agent 可以调用工具查订单状态，也可以从售后手册里找规则并给出处。
+
+[快速开始](#快速开始) · [知识库使用步骤](#知识库设计流程) · [English](README.md)
 
 <!-- ai-learning-stage: foundations -->
 - 磁盘写入保护与增长预测、后台任务监督、记忆错误分类、模型审核后的未变化摘要复用、增量加密备份与失败补跑、重启日志留存：[运行保护说明](docs/runtime_operations_protection.md)。
 
 ## 项目概览
 
-配置模型、跟进任务、管理知识库和查看设备状态，都可以在浏览器控制台里完成。绑定消息渠道后，你也可以在平时使用的聊天应用里继续使用同一套 Agent 能力。
+浏览器控制台可以配置模型、跟进任务、管理知识库和查看设备状态。后台 Rust 服务 `clawd` 负责执行工具与技能、记录任务，以及管理记忆和调度。绑定消息渠道后，系统通过已认证的 `user_key` 识别同一账号。
 
 当前仓库的主要能力包括：
 
+- **MCP 工具接入。** 打开「大模型 → 外部工具服务器」，可以连接本机 stdio 或远程 Streamable HTTP 服务，并指定 Agent 可以调用哪些工具。
+- **RAG 知识库。** 在「记忆管理 → 知识库」导入手册、常见问题或操作流程。Agent 可以检索相关段落并给出出处。
 - 多通道接入：Telegram、微信、飞书、Lark、WhatsApp Cloud、WhatsApp Web，以及统一通过 `webd` 进入的浏览器 UI；nginx/TLS 可选
 - 由 `clawd` 提供任务运行时、HTTP API、路由、记忆和调度
 - 共享技能调度层，支持进程内 builtin、external adapter，以及通过 `skill-runner` 拉起的 runner 子进程

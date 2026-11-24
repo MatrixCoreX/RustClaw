@@ -1,0 +1,94 @@
+<a class="skip" href="#main">Skip to content</a>
+<header class="wrap site-header">
+  <a class="brand" href="./"><img src="assets/logo.svg" alt="" width="34" height="34"><span>$brand</span></a>
+  <nav aria-label="Main navigation">
+    <a href="#skills">Skills</a>
+    <a href="#mcp">MCP</a>
+    <a href="#rag">Knowledge base</a>
+    <a href="#install">Install</a>
+    <a href="zh/" lang="zh-CN" hreflang="zh-CN">中文</a>
+    <a class="source-link" href="$repo">GitHub</a>
+  </nav>
+</header>
+<main id="main" class="wrap">
+  <section class="hero" aria-labelledby="name">
+    <div>
+      <p class="byline"><a href="$profile">Built by $owner</a></p>
+      <h1 id="name">$brand <span>Self-hosted AI agent</span></h1>
+      <p class="intro">Run an open-source AI agent on Raspberry Pi, Ubuntu, or macOS. Use skills to get work done, connect tools through MCP, and ask questions about your own documents from the web console.</p>
+      <div class="actions">
+        <a class="button primary" href="#install">Install</a>
+        <a class="button secondary" href="$repo">View on GitHub</a>
+      </div>
+    </div>
+    <figure class="preview">
+      <img src="assets/console-demo.png" alt="$preview_alt" width="794" height="540" fetchpriority="high">
+      <figcaption>Web console showing an order lookup with sample data.</figcaption>
+    </figure>
+  </section>
+  <section id="use-cases" aria-labelledby="use-heading">
+    <h2 id="use-heading">Agent skills, MCP tools, and RAG knowledge bases</h2>
+    <div class="capabilities">
+      <article class="capability" id="skills" aria-labelledby="skills-heading">
+        <div>
+          <h3 id="skills-heading">Use and install agent skills</h3>
+          <p>Skills give the agent ways to work with files, extract text from documents, and transcribe audio. You can describe what you want in chat and the agent can select an enabled skill for the task.</p>
+          <blockquote>“Read the attached PDF and list the action items and deadlines.”</blockquote>
+          <a href="$repo#skills">Explore built-in and optional skills</a>
+        </div>
+        <ol>
+          <li>On the dashboard, open <strong>Tools &amp; Skills</strong> to see which skills are installed and enabled.</li>
+          <li>For an optional skill, open <strong>Skill Store</strong>, check platform and dependency information, and install it.</li>
+          <li>Check that the skill is enabled, then try a specific request in <strong>Agent</strong> chat.</li>
+        </ol>
+      </article>
+      <article class="capability" id="mcp" aria-labelledby="mcp-heading">
+        <div>
+          <h3 id="mcp-heading">Connect external tools through MCP</h3>
+          <p>The Model Context Protocol (MCP) lets the agent call tools from other systems. Connect one or more tool servers to look up current records, such as order and shipping details.</p>
+          <blockquote>“Has order 3 shipped? Which carrier is handling it, and what’s the tracking number?”</blockquote>
+          <a href="$repo/blob/main/docs/architecture/02-security-execution.md">Read how MCP tool access is controlled</a>
+        </div>
+        <ol>
+          <li>In the admin console, open <strong>Models → External tool servers</strong> and add a server. Enter a local command and arguments for stdio, or a server URL for Streamable HTTP.</li>
+          <li>Review the connection, mark the server as trusted, and enable both the server and MCP tools. Enter the permitted names under <strong>Allowed tools</strong> and save.</li>
+          <li>If prompted, restart the service. Once the server shows <strong>Ready</strong>, select <strong>Test protocol</strong>, then try a lookup in Agent chat.</li>
+        </ol>
+      </article>
+      <article class="capability" id="rag" aria-labelledby="rag-heading">
+        <div>
+          <h3 id="rag-heading">Search your documents with a RAG knowledge base</h3>
+          <p>Retrieval-augmented generation (RAG) lets the agent search your imported manuals, FAQs, and policies before it answers. Matched passages can be cited with their chapter, page, or other source location.</p>
+          <blockquote>“In the Returns Handbook, who pays return shipping for a defective item? Cite the policy.”</blockquote>
+          <a href="$repo#knowledge-base-design-flow">See the knowledge base import and search guide</a>
+        </div>
+        <ol>
+          <li>Open <strong>Memory → Knowledge base → Add material</strong> and give your library a name, such as <strong>Returns Handbook</strong>.</li>
+          <li>Enter file or folder paths the service can read, one per line, then select <strong>Start adding</strong>. Try Markdown, plain text, or a PDF with selectable text.</li>
+          <li>Once the import finishes, refresh the libraries and try <strong>Search material</strong>. In Agent chat, name the library and ask for a source.</li>
+        </ol>
+      </article>
+    </div>
+    <div class="workflow">
+      <h3>Try an order lookup and a policy check together</h3>
+      <p>With an order lookup tool connected and a returns handbook imported, you can ask for the current shipment status and the written return policy in a single message.</p>
+      <blockquote>“Check whether order 3 has shipped, then use the Returns Handbook to explain who pays return shipping if the item is defective. Cite the policy.”</blockquote>
+    </div>
+  </section>
+  <section id="install" class="install" aria-labelledby="install-heading">
+    <div>
+      <h2 id="install-heading">Install on your device</h2>
+      <p>Choose the signed package for your platform, then open the web console to set up a model and send your first message.</p>
+      <ul class="platforms" aria-label="Supported platforms"><li>Raspberry Pi</li><li>Ubuntu</li><li>macOS</li></ul>
+    </div>
+    <div class="actions">
+      <a class="button primary" href="$repo/releases">Download a release</a>
+      <a class="button secondary" href="$repo/blob/main/docs/release_installation.md">Installation guide</a>
+    </div>
+    <a class="platform-guide" href="zh/raspberry-pi-install/" hreflang="zh-CN">Raspberry Pi installation guide (中文)</a>
+  </section>
+</main>
+<footer class="wrap footer">
+  <span>$brand by <a href="$profile">$owner</a></span>
+  <a href="$repo/blob/main/LICENSE">License</a>
+</footer>

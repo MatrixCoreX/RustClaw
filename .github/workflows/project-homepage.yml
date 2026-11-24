@@ -1,0 +1,62 @@
+name: Project homepage
+
+on:
+  push:
+    branches:
+      - main
+      - 'docs/project-homepage-*'
+    paths:
+      - '.github/workflows/project-homepage.yml'
+      - 'site/**'
+      - 'configs/product_identity.toml'
+      - 'scripts/product_identity.sh'
+      - 'scripts/product_identity_tests.sh'
+      - 'scripts/fixtures/product_identity/**'
+      - 'UI/public/app-logo.svg'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Verify project site and product identity
+        run: |
+          python3 site/test_render.py
+          python3 scripts/check_product_identity_coupling.py --self-test
+          python3 scripts/check_product_identity_coupling.py
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: UI/package-lock.json
+      - name: Verify both product identities in the console build
+        run: |
+          npm ci --ignore-scripts --prefix UI
+          bash scripts/product_identity_tests.sh --with-ui
+      - name: Render the public site
+        run: python3 site/render.py "$RUNNER_TEMP/project-site"
+      - name: Stage the checked site
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: ${{ runner.temp }}/project-site
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: github-pages
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publish the verified site
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
