@@ -96,7 +96,7 @@ class ProjectSiteTest(unittest.TestCase):
                 )
                 pi_guide = "zh/raspberry-pi-install/"
                 topic_sections = {
-                    "skills/": {"install", "media-discovery", "media-download", "crypto", "aipp", "troubleshooting"},
+                    "skills/": {"install", "media-discovery", "media-download", "weather", "aipp", "troubleshooting"},
                     "mcp/": {"connect", "permissions", "test", "troubleshooting"},
                     "rag/": {"prepare", "import", "ask", "troubleshooting"},
                 }
@@ -131,7 +131,7 @@ class ProjectSiteTest(unittest.TestCase):
                     elif not topic:
                         self.assertIn(f"<title>{brand} by {owner} | ", source)
                         self.assertLessEqual(
-                            {"skills", "mcp", "rag", "media", "media-discovery", "media-download", "crypto", "aipp"},
+                            {"skills", "mcp", "rag", "media", "media-discovery", "media-download", "weather", "aipp"},
                             page.ids,
                         )
                         for section_id in ("skills", "mcp", "rag"):
@@ -163,22 +163,22 @@ class ProjectSiteTest(unittest.TestCase):
                         self.assertCountEqual(
                             [asset for asset in page.assets if "assets/examples/" in asset],
                             ["../" * part.count("/") + example_dir + name for name in (
-                                "mcp.png", "rag.png", "media-discovery.png", "media-download.png", "crypto.png",
+                                "mcp.png", "rag.png", "media-discovery.png", "media-download.png", "weather.png",
                             )],
                         )
-                        for section_id in ("mcp", "rag", "media-discovery", "media-download", "crypto"):
+                        for section_id in ("mcp", "rag", "media-discovery", "media-download", "weather"):
                             self.assertEqual(
                                 page.section_assets[section_id],
                                 ["../" * part.count("/") + example_dir + section_id + ".png"],
                             )
                         hrefs = {link["href"] for link in page.links}
                         self.assertLessEqual(set(topic_sections), hrefs)
-                        self.assertIn("skills/#crypto", hrefs)
+                        self.assertIn("skills/#weather", hrefs)
                         self.assertIn(pi_guide if not part else "raspberry-pi-install/", hrefs)
                     else:
                         self.assertLessEqual(topic_sections[topic], page.ids)
                         if topic == "skills/":
-                            self.assertIn("../" * part.count("/") + example_dir + "crypto.png", page.assets)
+                            self.assertIn("../" * part.count("/") + example_dir + "weather.png", page.assets)
                         other_locale = "zh-CN" if locale == "en" else "en"
                         switches = [link for link in page.links if link.get("lang") == other_locale]
                         self.assertEqual(len(switches), 1)

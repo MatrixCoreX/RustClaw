@@ -56,13 +56,13 @@ def build(output: Path):
         ),
         (
             "guides/skills.en.html", "en", "skills/", f"{brand} Agent Skills | Install and Use Skills",
-            f"Use {brand} agent skills to collect posts, download media, and check Bitcoin prices. See how to review media results in AiAPP.",
+            f"Use {brand} agent skills to collect posts, download media, and check daily weather forecasts. See how to review media results in AiAPP.",
             "The Media Discovery view shows two sample posts, their previews, and links to the sources.",
             "media-discovery.png",
         ),
         (
             "guides/skills.zh.html", "zh-CN", "zh/skills/", f"{brand} Agent 技能安装与使用指南",
-            f"在 {brand} 安装并启用 Agent 技能，用自然语言采集帖子、下载媒体和查询比特币行情，并在 AiAPP 查看媒体结果。",
+            f"在 {brand} 安装并启用 Agent 技能，用自然语言采集帖子、下载媒体和查询天气预报，并在 AiAPP 查看媒体结果。",
             "AiAPP 媒体发现展示两条采集记录、预览和来源入口。",
             "media-discovery.png",
         ),

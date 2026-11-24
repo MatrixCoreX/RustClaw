@@ -1,10 +1,10 @@
     <h1 id="guide-title">Install and use $brand agent skills</h1>
-    <p class="guide-intro">Skills give the agent ways to work with files, transcribe audio, collect or download media, and look up public market quotes. Once a skill is enabled, describe the result you want in Agent chat. The agent can select an available skill that matches the request.</p>
+    <p class="guide-intro">Skills give the agent ways to work with files, transcribe audio, collect or download media, and check weather forecasts. Once a skill is enabled, describe the result you want in Agent chat. The agent can select an available skill that matches the request.</p>
     <nav class="guide-nav" aria-label="On this page">
       <a href="#install">Install a skill</a>
       <a href="#media-discovery">Media Discovery skill</a>
       <a href="#media-download">Media Download skill</a>
-      <a href="#crypto">Cryptocurrency quote skill</a>
+      <a href="#weather">Weather forecast skill</a>
       <a href="#aipp">AiAPP</a>
       <a href="#troubleshooting">Troubleshooting</a>
     </nav>
@@ -42,16 +42,16 @@
       <p><a href="$repo/blob/main/optional_skills/media_download/INTERFACE.md">Media Download platforms and output formats</a></p>
     </section>
 
-    <section id="crypto">
-      <h2>Cryptocurrency quote skill</h2>
-      <p>Find the <code>crypto</code> skill in <strong>Skill Store</strong>, install and enable it, then send this request in <strong>Agent</strong> chat.</p>
-      <blockquote>“Look up the latest USD price for Bitcoin (BTC). Include the data source and the time of the query.”</blockquote>
-      <p>The skill fetches a public quote. The reply can show the USD price, the source that provided it, and the time the query completed.</p>
+    <section id="weather">
+      <h2>Weather forecast skill</h2>
+      <p>Find the <code>weather</code> skill in <strong>Skill Store</strong>, install and enable it, then send this request in <strong>Agent</strong> chat.</p>
+      <blockquote>“What’s the weather in Hangzhou for the next three days? List the conditions, low, and high for each day.”</blockquote>
+      <p>The skill uses Open-Meteo and needs no weather API key. Give the agent a city for current conditions or add the number of days for a daily forecast.</p>
       <figure class="example-shot">
-        <a href="${examples}crypto.png"><img src="${examples}crypto.png" alt="Agent chat shows a sample Bitcoin price in USD, a simulated data source, and the query time." width="794" height="339" loading="lazy" decoding="async"></a>
-        <figcaption>Bitcoin quote in Agent chat with demo data.</figcaption>
+        <a href="${examples}weather.png"><img src="${examples}weather.png" alt="Agent chat shows three days of weather conditions and daily lows and highs for Hangzhou." width="714" height="310" loading="lazy" decoding="async"></a>
+        <figcaption>Three-day forecast for Hangzhou in Agent chat (demo data).</figcaption>
       </figure>
-      <p><a href="$repo/blob/main/optional_skills/crypto/INTERFACE.md#actions">See the crypto skill’s quote options</a></p>
+      <p><a href="$repo/blob/main/optional_skills/weather/INTERFACE.md#actions">See the weather skill’s query options</a></p>
     </section>
 
     <section id="aipp">
