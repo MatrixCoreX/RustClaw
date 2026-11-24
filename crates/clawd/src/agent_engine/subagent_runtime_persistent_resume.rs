@@ -235,7 +235,7 @@ fn child_structured_result_observation(merge: &Value) -> Option<Value> {
         .iter()
         .filter_map(|node| {
             let result = node.pointer("/runtime/child_task_result")?;
-            Some(json!({
+            let mut observation = json!({
                 "child_task_id": node.get("child_task_id"),
                 "role": node.get("role"),
                 "status": result.get("status"),
@@ -251,7 +251,11 @@ fn child_structured_result_observation(merge: &Value) -> Option<Value> {
                 "budget_consumed": result.get("budget_consumed"),
                 "permission_profile": result.get("permission_profile"),
                 "result": result.get("structured_result"),
-            }))
+            });
+            if let Some(receipts) = result.get("execution_receipts") {
+                observation["execution_receipts"] = receipts.clone();
+            }
+            Some(observation)
         })
         .collect::<Vec<_>>();
     (!results.is_empty()).then(|| {
@@ -352,3 +356,7 @@ fn terminal_execution_state(node: &Value) -> bool {
         Some("succeeded" | "failed" | "cancelled" | "timed_out")
     )
 }
+
+#[cfg(test)]
+#[path = "subagent_runtime_persistent_resume_tests.rs"]
+mod tests;
