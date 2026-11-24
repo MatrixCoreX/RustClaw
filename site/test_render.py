@@ -86,6 +86,8 @@ class ProjectSiteTest(unittest.TestCase):
                         self.assertGreater((path.parent / asset).stat().st_size, 0)
                 sitemap = ElementTree.parse(output / "sitemap.xml")
                 self.assertEqual([node.text for node in sitemap.findall(".//{*}loc")], [base, base + "zh/", base + guide])
+                for verification in (SOURCE / "verification").glob("google*.html"):
+                    self.assertEqual((output / verification.name).read_bytes(), verification.read_bytes())
 
 
 if __name__ == "__main__":

@@ -82,6 +82,8 @@ def build(output: Path):
     for name in ("site.css", "console-demo.png"):
         shutil.copyfile(SOURCE / "assets" / name, assets / name)
     shutil.copyfile(REPOSITORY_ROOT / "UI/public/app-logo.svg", assets / "logo.svg")
+    for verification in (SOURCE / "verification").glob("google*.html"):
+        shutil.copyfile(verification, output / verification.name)
 
 
 if __name__ == "__main__":
