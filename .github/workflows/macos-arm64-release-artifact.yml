@@ -226,6 +226,7 @@ jobs:
       - name: Test memory defaults on fresh and upgraded installations
         run: |
           cargo test --locked -p clawd --bin clawd memory::settings::tests:: -- --nocapture
+          cargo test --locked -p clawd --bin clawd memory::quota::tests:: -- --nocapture
 
       - name: Test Release installation boundaries
         run: python3 -m unittest discover -s scripts/tests -p 'test_release*.py'

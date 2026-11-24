@@ -16,16 +16,17 @@ fn fresh_identity_after_initialized_empty_startup_receives_defaults_atomically()
         )
         .unwrap();
     assert_eq!(kind, "new_identity");
-    let settings = crate::memory::settings::resolve_principal_memory_settings(
-        &db,
-        &owner,
-        state.policy.memory.long_term_enabled,
-    )
-    .unwrap();
-    assert!(
-        !settings.generate_memory,
-        "default quota is not consent to generate memory"
-    );
+    for release_default in [false, true] {
+        let settings = crate::memory::settings::resolve_principal_memory_settings(
+            &db,
+            &owner,
+            release_default,
+        )
+        .unwrap();
+        assert_eq!(settings.use_memory, release_default);
+        assert_eq!(settings.generate_memory, release_default);
+        assert_eq!(settings.generate_source, "release_default");
+    }
 }
 
 #[test]
