@@ -71,7 +71,7 @@ article { padding: clamp(1.1rem, 3vw, 1.8rem); border-radius: 1rem; border: 1px 
 article h3 { margin: 0; font-size: 1.28rem; }
 article p, .install p { color: var(--muted); margin: .6rem 0; }
 .skills-overview { grid-column: 1 / -1; }
-.skill-examples, .skill-companion { margin-top: 1.2rem; padding-top: 1.2rem; border-top: 1px solid var(--edge); }
+.skill-examples, .skills-overview > section { margin-top: 1.2rem; padding-top: 1.2rem; border-top: 1px solid var(--edge); }
 .skills-overview h4 { margin: 0; font-size: 1.1rem; }
 .skills-overview .skill-example-intro { margin-top: 1rem; }
 blockquote { margin: 1.1rem 0; padding: .55rem .8rem; border-inline-start: 3px solid var(--accent); background: var(--highlight); border-radius: 0 .4rem .4rem 0; }

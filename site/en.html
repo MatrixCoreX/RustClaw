@@ -24,7 +24,7 @@
     </div>
     <figure class="preview" id="order-example">
       <a href="${examples}mcp.png"><img src="${examples}mcp.png" alt="$preview_alt" width="794" height="370" fetchpriority="high"></a>
-      <figcaption>MCP order lookup with sample data. <a href="#rag-example">Knowledge base example</a> · <a href="#media">Skill examples</a></figcaption>
+      <figcaption>MCP order lookup with sample data. <a href="#rag-example">Knowledge base example</a> · <a href="#skills">Skill examples</a></figcaption>
     </figure>
   </section>
   <section class="page-section" id="use-cases" aria-labelledby="use-heading">
@@ -32,9 +32,9 @@
     <div class="capabilities">
       <article class="skills-overview" id="skills" aria-labelledby="skills-heading">
         <h3 id="skills-heading">Agent skills</h3>
-        <p>Enable skills to work with files, transcribe audio, or collect and download media through chat.</p>
+        <p>Enable skills to work with files, transcribe audio, collect and download media, or check cryptocurrency prices through chat.</p>
         <a href="skills/">Install and use skills</a>
-        <p class="skill-example-intro">Start these tasks in Agent chat. The screenshots show the skills’ companion views in AiAPP, where you can review the results.</p>
+        <p class="skill-example-intro">Start media collection and downloads in Agent chat. The screenshots show the media skills’ companion AiAPP views, where you can review the results.</p>
         <div class="detail-grid skill-examples" id="media">
           <section id="media-discovery" aria-labelledby="discovery-heading">
             <h4 id="discovery-heading">Media Discovery</h4>
@@ -57,7 +57,13 @@
             </figure>
           </section>
         </div>
-        <section class="skill-companion" id="aipp" aria-labelledby="aipp-heading">
+        <section id="crypto" aria-labelledby="crypto-heading">
+          <h4 id="crypto-heading">Cryptocurrency quotes</h4>
+          <p>Use the <code>crypto</code> skill to look up a public market quote in Agent chat.</p>
+          <blockquote>“Look up the latest USD price for Bitcoin (BTC). Include the data source and the time of the query.”</blockquote>
+          <a href="skills/#crypto">Try the cryptocurrency quote example</a>
+        </section>
+        <section id="aipp" aria-labelledby="aipp-heading">
           <h4 id="aipp-heading">AiAPP companion views for skills</h4>
           <p>Skills can provide companion views in AiAPP. Admins can use them to filter collected posts, reopen the originals, and find files from previous downloads.</p>
           <a href="skills/#aipp">See how AiAPP views are installed and how they access results</a>

@@ -75,7 +75,7 @@ class ProjectSiteTest(unittest.TestCase):
                 )
                 pi_guide = "zh/raspberry-pi-install/"
                 topic_sections = {
-                    "skills/": {"install", "media-discovery", "media-download", "aipp", "troubleshooting"},
+                    "skills/": {"install", "media-discovery", "media-download", "crypto", "aipp", "troubleshooting"},
                     "mcp/": {"connect", "permissions", "test", "troubleshooting"},
                     "rag/": {"prepare", "import", "ask", "troubleshooting"},
                 }
@@ -110,7 +110,8 @@ class ProjectSiteTest(unittest.TestCase):
                     elif not topic:
                         self.assertIn(f"<title>{brand} by {owner} | ", source)
                         self.assertLessEqual(
-                            {"skills", "mcp", "rag", "media", "media-discovery", "media-download", "aipp"}, page.ids,
+                            {"skills", "mcp", "rag", "media", "media-discovery", "media-download", "crypto", "aipp"},
+                            page.ids,
                         )
                         self.assertIn("MCP", page.description)
                         self.assertIn("RAG", page.description)
@@ -123,6 +124,7 @@ class ProjectSiteTest(unittest.TestCase):
                         )
                         hrefs = {link["href"] for link in page.links}
                         self.assertLessEqual(set(topic_sections), hrefs)
+                        self.assertIn("skills/#crypto", hrefs)
                         self.assertIn(pi_guide if not part else "raspberry-pi-install/", hrefs)
                     else:
                         self.assertLessEqual(topic_sections[topic], page.ids)

@@ -24,7 +24,7 @@
     </div>
     <figure class="preview" id="order-example">
       <a href="${examples}mcp.png"><img src="${examples}mcp.png" alt="$preview_alt" width="794" height="370" fetchpriority="high"></a>
-      <figcaption>MCP 订单查询（演示数据）。<a href="#rag-example">知识库示例</a> · <a href="#media">技能示例</a></figcaption>
+      <figcaption>MCP 订单查询（演示数据）。<a href="#rag-example">知识库示例</a> · <a href="#skills">技能示例</a></figcaption>
     </figure>
   </section>
   <section class="page-section" id="use-cases" aria-labelledby="use-heading">
@@ -32,9 +32,9 @@
     <div class="capabilities">
       <article class="skills-overview" id="skills" aria-labelledby="skills-heading">
         <h3 id="skills-heading">Agent 技能</h3>
-        <p>启用技能后，可以用聊天指令处理文件、转写语音、采集帖子或下载媒体。</p>
+        <p>启用技能后，可以用聊天指令处理文件、转写语音、采集和下载媒体，也能查询加密货币行情。</p>
         <a href="skills/">安装和使用技能</a>
-        <p class="skill-example-intro">在 Agent 聊天里发起这两种任务。下面的截图来自技能配套的 AiAPP，那里可以查看采集和下载结果。</p>
+        <p class="skill-example-intro">在 Agent 聊天里发起媒体采集和下载任务。下面两张截图来自媒体技能的配套 AiAPP，用于查看任务结果。</p>
         <div class="detail-grid skill-examples" id="media">
           <section id="media-discovery" aria-labelledby="discovery-heading">
             <h4 id="discovery-heading">媒体采集</h4>
@@ -57,7 +57,13 @@
             </figure>
           </section>
         </div>
-        <section class="skill-companion" id="aipp" aria-labelledby="aipp-heading">
+        <section id="crypto" aria-labelledby="crypto-heading">
+          <h4 id="crypto-heading">加密货币行情</h4>
+          <p>在 Agent 聊天里用 <code>crypto</code> 技能查询公开行情。</p>
+          <blockquote>「帮我查询比特币（BTC）的最新美元报价，并注明数据来源和查询时间。」</blockquote>
+          <a href="skills/#crypto">试用加密货币行情查询</a>
+        </section>
+        <section id="aipp" aria-labelledby="aipp-heading">
           <h4 id="aipp-heading">AiAPP 技能配套界面</h4>
           <p>技能可以在 AiAPP 提供配套界面。管理员可以在里面筛选采集记录、打开原帖，也能回看下载任务和提取的附件。</p>
           <a href="skills/#aipp">了解 AiAPP 安装入口和界面设计</a>

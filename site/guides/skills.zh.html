@@ -1,9 +1,10 @@
     <h1 id="guide-title">安装和使用 $brand 的 Agent 技能</h1>
-    <p class="guide-intro">技能让 Agent 能处理文件、转写语音、采集帖子和下载媒体。启用技能后，在对话里说清楚输入是什么、希望拿到什么结果，Agent 就能按任务选择可用技能。</p>
+    <p class="guide-intro">技能让 Agent 能处理文件、转写语音、采集和下载媒体，也能查询公开行情。启用技能后，在对话里说清楚输入是什么、希望拿到什么结果，Agent 就能按任务选择可用技能。</p>
     <nav class="guide-nav" aria-label="本页目录">
       <a href="#install">安装技能</a>
       <a href="#media-discovery">媒体采集</a>
       <a href="#media-download">媒体下载</a>
+      <a href="#crypto">加密货币行情</a>
       <a href="#aipp">AiAPP</a>
       <a href="#troubleshooting">排查问题</a>
     </nav>
@@ -39,6 +40,14 @@
         <figcaption>媒体下载技能的配套 AiAPP「媒体下载」截图（演示数据）。</figcaption>
       </figure>
       <p><a href="$repo/blob/main/optional_skills/media_download/INTERFACE.md">查看媒体下载支持的平台和交付格式</a></p>
+    </section>
+
+    <section id="crypto">
+      <h2>用加密货币技能查比特币行情</h2>
+      <p>在 <strong>Skill Store</strong> 找到 <code>crypto</code> 技能，安装并启用后，回到 <strong>Agent</strong> 聊天发送这条请求。</p>
+      <blockquote>「帮我查询比特币（BTC）的最新美元报价，并注明数据来源和查询时间。」</blockquote>
+      <p>技能会查询公开行情。回复可以列出美元报价、提供该报价的数据源，以及本次查询完成的时间。</p>
+      <p><a href="$repo/blob/main/optional_skills/crypto/INTERFACE.md#actions">查看加密货币技能的行情查询选项</a></p>
     </section>
 
     <section id="aipp">

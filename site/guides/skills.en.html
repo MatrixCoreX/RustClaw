@@ -1,9 +1,10 @@
     <h1 id="guide-title">Install and use $brand agent skills</h1>
-    <p class="guide-intro">Skills give the agent ways to work with files, transcribe audio, and collect or download media. Once a skill is enabled, describe the result you want in Agent chat. The agent can select an available skill that matches the request.</p>
+    <p class="guide-intro">Skills give the agent ways to work with files, transcribe audio, collect or download media, and look up public market quotes. Once a skill is enabled, describe the result you want in Agent chat. The agent can select an available skill that matches the request.</p>
     <nav class="guide-nav" aria-label="On this page">
       <a href="#install">Install a skill</a>
       <a href="#media-discovery">Media Discovery</a>
       <a href="#media-download">Media Download</a>
+      <a href="#crypto">Crypto quotes</a>
       <a href="#aipp">AiAPP</a>
       <a href="#troubleshooting">Troubleshooting</a>
     </nav>
@@ -39,6 +40,14 @@
         <figcaption>Screenshot of the Media Download skill’s companion AiAPP, with sample tasks and files.</figcaption>
       </figure>
       <p><a href="$repo/blob/main/optional_skills/media_download/INTERFACE.md">Media Download platforms and output formats</a></p>
+    </section>
+
+    <section id="crypto">
+      <h2>Look up Bitcoin with the crypto skill</h2>
+      <p>Find the <code>crypto</code> skill in <strong>Skill Store</strong>, install and enable it, then send this request in <strong>Agent</strong> chat.</p>
+      <blockquote>“Look up the latest USD price for Bitcoin (BTC). Include the data source and the time of the query.”</blockquote>
+      <p>The skill fetches a public quote. The reply can show the USD price, the source that provided it, and the time the query completed.</p>
+      <p><a href="$repo/blob/main/optional_skills/crypto/INTERFACE.md#actions">See the crypto skill’s quote options</a></p>
     </section>
 
     <section id="aipp">
