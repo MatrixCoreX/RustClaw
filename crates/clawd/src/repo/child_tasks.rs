@@ -4,6 +4,8 @@
 mod result_contract;
 #[path = "child_task_terminal_failure.rs"]
 mod terminal_failure;
+#[path = "child_task_execution_receipts.rs"]
+mod execution_receipts;
 use result_contract::validated_child_structured_result;
 pub(crate) use result_contract::{
     bounded_argument_schema_matches, bounded_argument_schema_supported,
@@ -1075,6 +1077,9 @@ fn child_task_result_projection(status: &str, payload: &Value, result_json: &Val
     if let (Some(object), Some(structured_result)) = (projection.as_object_mut(), structured_result)
     {
         object.insert("structured_result".to_string(), structured_result);
+    }
+    if let Some(receipts) = execution_receipts::project(child_task_id, result_json) {
+        projection["execution_receipts"] = receipts;
     }
     projection
 }

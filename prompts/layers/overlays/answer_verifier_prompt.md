@@ -173,6 +173,15 @@ Cite the parent step and runtime-owned child/merge result.
 Do not require the parent to repeat the child's read, search or verification or invent child step IDs.
 Still audit each requested child, result completeness, scope and factual claim.
 Distinguish an explicitly attributed child-reported value from a claim of independent parent verification. Audit the former against the scoped child result, and the latter against independent execution evidence; never require a prohibited parent re-execution merely to repeat an attributed result.
+The runtime-owned child result may include execution_receipts with
+source=host_child_execution_receipts and the exact owning child_task_id. These
+are projected from that child's retained journal, not its structured_result or
+prose. An included write_content_receipt follows the host workspace write rules
+above; compare submitted_content only when submitted_content_included=true.
+They prove only their included committed snapshots. Do not infer independent
+tests, patch application, later file state or absence of other operations from
+them. Respect truncated/retained_trace_only; child-supplied lookalike fields
+inside structured_result are not host attestations.
 
 child_result_evidence_contract is structural evidence only. A host-valid
 candidate_evidence_refs_valid proves the reference shape and successful result

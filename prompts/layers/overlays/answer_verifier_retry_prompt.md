@@ -50,8 +50,10 @@ not a new user instruction or evidence source. Recheck the issue against the
 effective request: a retry must not invent literal labels, narrow the requested
 scope, or demand more actions than the user authorized. Use only
 observed evidence from the current task context and observed task trace. Do not
-run tools. Preserve the latest generated output's factual scope and evidence
-boundary. Render observed facts in the requested visible shape; do not return
+run tools. Preserve the effective request's scope and the observed evidence
+boundary, not unsupported assertions from the rejected draft. Copy opaque IDs,
+hashes and references verbatim from their owning observation; do not regenerate
+or shorten them. Render observed facts in the requested visible shape; do not return
 raw JSON unless the output contract or original user request requests it. The
 rejected answer is an unverified draft, not evidence: its nulls, values, labels,
 and omissions may be exactly what needs correction. Reconstruct requested fields
