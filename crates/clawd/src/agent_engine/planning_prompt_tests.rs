@@ -400,9 +400,9 @@ fn drafting_prompts_apply_explicit_replacements_without_unrelated_file_lookup() 
     ] {
         let prompt =
             std::fs::read_to_string(overlays.join(relative_path)).expect("read planner overlay");
-        assert!(prompt.contains("Old-to-new corrections"), "{relative_path}");
+        assert!(prompt.contains("old-to-new correction"), "{relative_path}");
         assert!(prompt.contains("old value is absent"), "{relative_path}");
-        assert!(prompt.contains("alias mutations"), "{relative_path}");
+        assert!(prompt.contains("session alias"), "{relative_path}");
         assert!(
             prompt.contains("unfinished file mutation"),
             "{relative_path}"
@@ -411,7 +411,7 @@ fn drafting_prompts_apply_explicit_replacements_without_unrelated_file_lookup() 
 
     let response = std::fs::read_to_string(overlays.join("chat_response_prompt.md"))
         .expect("read chat response overlay");
-    assert!(response.contains("Old-to-new corrections"));
+    assert!(response.contains("old-to-new correction"));
     assert!(response.contains("standalone correction with no active draft"));
 
     let verifier = std::fs::read_to_string(overlays.join("answer_verifier_prompt.md"))
