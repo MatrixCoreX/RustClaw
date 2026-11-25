@@ -1,6 +1,8 @@
-# Agent Runtime
+# RustClaw by MatrixCoreX
 
-Agent Runtime is a self-hosted AI agent platform written in Rust for Raspberry Pi, Ubuntu, and macOS. Use the web console or a connected messaging app to ask questions, work with files, and follow tasks as they run.
+A self-hosted AI agent platform written in Rust for Raspberry Pi, Ubuntu, and macOS. Use the web console or a connected messaging app to ask questions, work with files, and follow tasks as they run.
+
+[Official website](https://rustclaw.matrixai.one/) · [Raspberry Pi installation](https://rustclaw.matrixai.one/raspberry-pi-install/) · [MCP setup](https://rustclaw.matrixai.one/mcp/) · [RAG guide](https://rustclaw.matrixai.one/rag/)
 
 Connect external tools through the Model Context Protocol (MCP) and import your own documents into a retrieval-augmented generation (RAG) knowledge base. The agent can use a connected tool to look up a current order or cite your support handbook when answering a policy question.
 
