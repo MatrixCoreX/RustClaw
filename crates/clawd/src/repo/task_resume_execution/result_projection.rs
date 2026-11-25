@@ -1015,8 +1015,16 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
     } else {
         updated_result_json
     };
-    let memory_turn =
-        crate::memory::resumed_turn::prepare(state, &task, db_status, &terminal_result)?;
+    let memory_turn = crate::memory::resumed_turn::prepare(
+        state,
+        &task,
+        db_status,
+        &terminal_result,
+        projection_payload
+            .get("answer_is_llm_reply")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    )?;
     let db = state
         .core
         .db

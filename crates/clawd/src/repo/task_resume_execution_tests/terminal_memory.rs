@@ -13,6 +13,7 @@ fn fixture() -> Fixture {
     f.state_mut().policy.memory.long_term_enabled = true;
     f.state_mut().policy.memory.enable_preference_extraction = true;
     f.state_mut().policy.memory.llm_preference_fallback_enabled = true;
+    f.state_mut().policy.memory.mark_llm_reply_in_short_term = true;
     f
 }
 
@@ -66,6 +67,7 @@ fn claim(f: &Fixture, outcome: &str) -> Value {
         "result_projection_state":if outcome=="seeded_loop_completed" {
             "project_seeded_loop_completed"
         } else {"project_seeded_loop_failed"},
+        "answer_is_llm_reply":true,
         "final_result_json":{"text":"The component is declared on line 9."},
         "error_code":"fixture_provider_unavailable","message_key":"fixture.provider_unavailable"})
 }
@@ -140,7 +142,10 @@ fn recovered_success_commits_owned_memory_sources_and_jobs_exactly_once() {
             f.principal.clone()
         )
     );
-    assert!(rows[1].1.ends_with("The component is declared on line 9."));
+    assert_eq!(
+        rows[1].1,
+        "[LLM_REPLY] The component is declared on line 9."
+    );
     assert_eq!(rows[1].2, f.principal);
 }
 
@@ -154,6 +159,15 @@ fn memory_write_failure_rolls_back_completion_and_can_retry_without_duplicate_so
     assert_eq!(
         stored_task_status_error_result(f.state(), TASK).0,
         "running"
+    );
+    let waiting = stored_task_status_error_result(f.state(), TASK).2;
+    assert_eq!(
+        waiting["task_lifecycle"]["resume_executor_dispatch_result"]["executor_result_status"],
+        "seeded_loop_completed"
+    );
+    assert_eq!(
+        waiting["task_checkpoint"]["completed_side_effect_refs"],
+        json!(["write_file:tmp/report.txt"])
     );
     assert_eq!(
         counts(&f),
@@ -226,4 +240,32 @@ fn recovered_success_respects_explicit_generation_opt_out() {
     }
     assert!(project(&f, &payload).unwrap());
     assert_eq!(counts(&f).2, 0);
+}
+
+#[test]
+fn recovered_memory_requires_host_attestation_before_marking_a_model_reply() {
+    for flag in [Some(false), None] {
+        let f = fixture();
+        let mut payload = claim(&f, "seeded_loop_completed");
+        if let Some(value) = flag {
+            payload["answer_is_llm_reply"] = json!(value);
+        } else {
+            payload
+                .as_object_mut()
+                .unwrap()
+                .remove("answer_is_llm_reply");
+        }
+        assert!(project(&f, &payload).unwrap());
+        let db = f.state().core.db.get().unwrap();
+        let text: String = db
+            .query_row(
+                "SELECT content FROM memories WHERE role='assistant'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(text, "The component is declared on line 9.");
+        drop(db);
+        assert_eq!(counts(&f), (2, 2, 2));
+    }
 }

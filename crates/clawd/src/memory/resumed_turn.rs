@@ -18,6 +18,7 @@ pub(crate) fn prepare(
     task: &ClaimedTask,
     status: &str,
     result: &Value,
+    is_llm_reply: bool,
 ) -> anyhow::Result<Option<PreparedTurn>> {
     if status != "succeeded" || task.kind != "ask" {
         return Ok(None);
@@ -51,7 +52,7 @@ pub(crate) fn prepare(
     }
     let source = crate::finalize::assistant_memory_source_text(answer, &messages);
     let assistant = (!source.trim().is_empty()).then(|| {
-        if state.policy.memory.mark_llm_reply_in_short_term {
+        if is_llm_reply && state.policy.memory.mark_llm_reply_in_short_term {
             format!("{}{source}", super::LLM_SHORT_TERM_MEMORY_PREFIX)
         } else {
             source

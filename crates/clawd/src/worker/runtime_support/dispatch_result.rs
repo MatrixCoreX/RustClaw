@@ -715,6 +715,7 @@ pub(crate) fn seeded_agent_loop_terminal_dispatch_result_payload(
                 );
                 return Some(payload);
             }
+            let answer_is_llm_reply = answer.is_llm_reply;
             let final_result_json = ask_reply_final_result_json(answer);
             let result_status = if deferred {
                 "seeded_loop_deferred"
@@ -723,6 +724,10 @@ pub(crate) fn seeded_agent_loop_terminal_dispatch_result_payload(
             };
             let mut payload = seeded_agent_loop_base_payload(claimed, result_status);
             let obj = payload.as_object_mut()?;
+            obj.insert(
+                "answer_is_llm_reply".to_string(),
+                json!(answer_is_llm_reply),
+            );
             if deferred {
                 let lifecycle = crate::task_lifecycle::task_query_lifecycle_projection(
                     "running",

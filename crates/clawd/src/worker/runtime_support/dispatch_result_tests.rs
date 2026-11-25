@@ -69,6 +69,29 @@ fn seeded_claimed_dispatch() -> crate::repo::ClaimedDispatchedPausedCheckpointRe
     }
 }
 
+#[test]
+fn seeded_terminal_payload_preserves_host_reply_origin_without_changing_the_answer() {
+    let claimed = seeded_claimed_dispatch();
+    for is_llm in [true, false] {
+        let reply = if is_llm {
+            crate::AskReply::llm("Observed result".into())
+        } else {
+            crate::AskReply::non_llm("Observed result".into())
+        };
+        let result = super::dispatch_result::seeded_agent_loop_terminal_dispatch_result_payload(
+            &claimed,
+            Ok(reply),
+        )
+        .unwrap();
+        assert_eq!(result["answer_is_llm_reply"], is_llm);
+        assert_eq!(
+            result["final_result_json"],
+            json!({"text":"Observed result"})
+        );
+        assert!(result.get("text").is_none());
+    }
+}
+
 fn async_poll_claimed_dispatch(
     expires_at: Option<i64>,
 ) -> crate::repo::ClaimedDispatchedPausedCheckpointResumeExecution {
