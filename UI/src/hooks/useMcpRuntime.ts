@@ -153,7 +153,7 @@ export function useMcpRuntime({ apiFetch, t }: UseMcpRuntimeParams) {
   const addMcpServer = () => {
     setMcpDraft((current) => ({
       ...current,
-      servers: [...current.servers, newMcpServerDraft(current.servers)],
+      servers: [newMcpServerDraft(current.servers), ...current.servers],
     }));
     setMcpSaveMessage(null);
   };
