@@ -4,6 +4,7 @@ schema_version = 1
 display_name = "RustClaw"
 release_artifact_id = "rustclaw"
 release_repository = "MatrixCoreX/RustClaw"
+public_site_url = "https://rustclaw.matrixai.one/"
 small_screen_splash_image = "app-splash-480x320.png"
 
 terminal_banner = '''

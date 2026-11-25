@@ -3,6 +3,7 @@ schema_version = 1
 display_name = "RustPanda"
 release_artifact_id = "rustpanda"
 release_repository = "example/rustpanda"
+public_site_url = "https://docs.example.test/"
 small_screen_splash_image = "rustpanda-splash.png"
 
 terminal_banner = '''

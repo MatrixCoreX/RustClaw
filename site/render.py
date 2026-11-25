@@ -6,6 +6,7 @@ from html import escape
 from html.parser import HTMLParser
 import json
 from pathlib import Path
+import re
 import shutil
 from string import Template
 import subprocess
@@ -34,7 +35,7 @@ class PageImages(HTMLParser):
 def structured_data(page: dict[str, str], breadcrumb: str | None) -> str:
     data = {"@context": "https://schema.org"}
     if breadcrumb is None:
-        data |= {
+        source = {
             "@type": "SoftwareSourceCode",
             "@id": page["site"] + "#source-code",
             "name": page["brand"],
@@ -43,6 +44,17 @@ def structured_data(page: dict[str, str], breadcrumb: str | None) -> str:
             "programmingLanguage": "Rust",
             "license": page["repo"] + "/blob/main/LICENSE",
         }
+        data["@graph"] = [
+            {
+                "@type": "WebSite",
+                "@id": page["site"] + "#website",
+                "name": page["brand"],
+                "url": page["site"],
+                "about": {"@id": source["@id"]},
+                "inLanguage": ["en", "zh-CN"],
+            },
+            source,
+        ]
     else:
         home = page["site"] if page["lang"] == "en" else page["site"] + "zh/"
         data |= {
@@ -59,18 +71,23 @@ def read_product_identity():
     identity = subprocess.check_output(
         [
             "bash", "-c",
-            r'source "$1" && printf "%s\0%s" "$APP_DISPLAY_NAME" "$APP_RELEASE_REPOSITORY"',
+            r'source "$1" && printf "%s\0%s\0%s" "$APP_DISPLAY_NAME" "$APP_RELEASE_REPOSITORY" "$(product_identity_config_value public_site_url)"',
             "_", str(REPOSITORY_ROOT / "scripts/product_identity.sh"),
         ],
         text=True,
     )
-    return identity.split("\0", 1)
+    return identity.split("\0", 2)
 
 
 def build(output: Path):
-    brand, release_repository = read_product_identity()
+    brand, release_repository, public_site_url = read_product_identity()
     owner, repository = release_repository.split("/", 1)
     site = f"https://{owner.lower()}.github.io/{repository}/"
+    if public_site_url:
+        label = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+        if not re.fullmatch(rf"https://(?:{label}\.)+{label}/?", public_site_url):
+            raise ValueError("public_site_url must be the HTTPS root of a lowercase domain")
+        site = public_site_url.rstrip("/") + "/"
     github = f"https://github.com/{release_repository}"
     shared = {"brand": brand, "owner": owner, "site": site, "repo": github,
               "release_repository": release_repository, "profile": f"https://github.com/{owner}"}
@@ -201,6 +218,7 @@ def build(output: Path):
                 SubElement(image, f"{{{IMAGE_NAMESPACE}}}loc").text = url
 
     ElementTree(urls).write(output / "sitemap.xml", encoding="utf-8", xml_declaration=True)
+    (output / "robots.txt").write_text(f"User-agent: *\nAllow: /\nSitemap: {site}sitemap.xml\n", encoding="utf-8")
     assets = output / "assets"
     assets.mkdir(exist_ok=True)
     for name in ("site.css", "console-demo.png"):

@@ -98,7 +98,7 @@ class ProjectSiteTest(unittest.TestCase):
                 identity = tomllib.loads(config.read_text(encoding="utf-8"))
                 brand = identity["display_name"]
                 owner, repo = identity["release_repository"].split("/")
-                base = f"https://{owner.lower()}.github.io/{repo}/"
+                base = identity.get("public_site_url", f"https://{owner.lower()}.github.io/{repo}/").rstrip("/") + "/"
                 subprocess.run(
                     [sys.executable, str(SOURCE / "render.py"), directory],
                     env=os.environ | {"APP_PRODUCT_IDENTITY_CONFIG": str(config)},
@@ -147,11 +147,15 @@ class ProjectSiteTest(unittest.TestCase):
                         self.assertEqual(trail[1]["item"], canonical)
                     else:
                         repository = f"https://github.com/{owner}/{repo}"
-                        self.assertEqual(metadata["@type"], "SoftwareSourceCode")
-                        self.assertEqual(metadata["codeRepository"], repository)
-                        self.assertEqual(metadata["name"], brand)
-                        self.assertEqual(metadata["url"], base)
-                        self.assertEqual(metadata["license"], repository + "/blob/main/LICENSE")
+                        nodes = {node["@type"]: node for node in metadata["@graph"]}
+                        self.assertEqual(set(nodes), {"WebSite", "SoftwareSourceCode"})
+                        self.assertEqual(nodes["WebSite"]["name"], brand)
+                        self.assertEqual(nodes["WebSite"]["url"], base)
+                        self.assertEqual(nodes["WebSite"]["about"]["@id"], nodes["SoftwareSourceCode"]["@id"])
+                        self.assertEqual(nodes["SoftwareSourceCode"]["codeRepository"], repository)
+                        self.assertEqual(nodes["SoftwareSourceCode"]["name"], brand)
+                        self.assertEqual(nodes["SoftwareSourceCode"]["url"], base)
+                        self.assertEqual(nodes["SoftwareSourceCode"]["license"], repository + "/blob/main/LICENSE")
                     sitemap_images[canonical] = {
                         urljoin(canonical, src) for src in page.assets if "assets/examples/" in src
                     }
@@ -292,6 +296,7 @@ class ProjectSiteTest(unittest.TestCase):
                     for asset in page.assets:
                         self.assertGreater((path.parent / asset).stat().st_size, 0)
                 sitemap = ElementTree.parse(output / "sitemap.xml")
+                self.assertIn(f"Sitemap: {base}sitemap.xml\n", (output / "robots.txt").read_text())
                 entries = sitemap.findall("{*}url")
                 self.assertCountEqual(
                     [entry.findtext("{*}loc") for entry in entries], [base + part for part, _ in pages],
