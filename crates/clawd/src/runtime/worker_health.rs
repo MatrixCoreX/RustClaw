@@ -12,6 +12,7 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 pub(crate) struct WorkerMonitor {
+    pub(crate) name: String,
     pub(crate) alive: AtomicBool,
     pub(crate) stalled: AtomicBool,
     pub(crate) restarts: AtomicU64,
@@ -24,7 +25,12 @@ pub(crate) struct WorkerMonitor {
 
 impl WorkerMonitor {
     pub(crate) fn new() -> Arc<Self> {
+        Self::named("foreground".into())
+    }
+
+    pub(crate) fn named(name: String) -> Arc<Self> {
         Arc::new(Self {
+            name,
             alive: AtomicBool::new(false),
             stalled: AtomicBool::new(false),
             restarts: AtomicU64::new(0),
@@ -98,7 +104,7 @@ pub(crate) struct WorkerSupervision {
 
 impl WorkerSupervision {
     pub(crate) fn register_background(&self, name: String) -> Arc<WorkerMonitor> {
-        let monitor = WorkerMonitor::new();
+        let monitor = WorkerMonitor::named(name.clone());
         locked(&self.background).insert(name, monitor.clone());
         monitor
     }

@@ -1,6 +1,9 @@
 use super::*;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 
+#[path = "worker_tick_diagnostics_tests.rs"]
+mod diagnostics;
+
 async fn wait_for(mut condition: impl FnMut() -> bool) {
     tokio::time::timeout(Duration::from_secs(4), async {
         while !condition() {

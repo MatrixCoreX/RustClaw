@@ -18,6 +18,33 @@ pub(super) fn current_monitor() -> Option<Arc<WorkerMonitor>> {
     CURRENT_WORKER.try_with(Arc::clone).ok()
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct TickErrorDetail {
+    pub(super) error_code: &'static str,
+    pub(super) sqlite_extended_code: Option<i32>,
+}
+
+pub(super) fn tick_error_detail(error: &anyhow::Error) -> TickErrorDetail {
+    for cause in error.chain() {
+        if let Some(rusqlite::Error::SqliteFailure(sqlite, _)) =
+            cause.downcast_ref::<rusqlite::Error>()
+        {
+            return TickErrorDetail {
+                error_code: match sqlite.code {
+                    rusqlite::ErrorCode::DatabaseBusy => "background_database_busy",
+                    rusqlite::ErrorCode::DatabaseLocked => "background_database_locked",
+                    _ => "background_sqlite_failed",
+                },
+                sqlite_extended_code: Some(sqlite.extended_code),
+            };
+        }
+    }
+    TickErrorDetail {
+        error_code: "background_tick_failed",
+        sqlite_extended_code: None,
+    }
+}
+
 struct AbortOnDrop(JoinHandle<anyhow::Result<()>>);
 impl Drop for AbortOnDrop {
     fn drop(&mut self) {
@@ -52,6 +79,7 @@ where
         let mut failures = 0_u32;
         loop {
             monitor.begin_tick();
+            let tick_started_at = std::time::Instant::now();
             let work = work.clone();
             let mut child = AbortOnDrop(tokio::spawn(
                 CURRENT_WORKER.scope(monitor.clone(), async move { work().await }),
@@ -68,7 +96,7 @@ where
                             monitor.stalled.store(true, Ordering::Release);
                             child.0.abort();
                             abort_requested = true;
-                            tracing::warn!(event = "worker_tick_stalled", "worker tick cancellation requested after lost progress");
+                            tracing::warn!(event = "worker_tick_stalled", worker = %monitor.name, "worker tick cancellation requested after lost progress");
                         }
                     }
                 }
@@ -89,13 +117,22 @@ where
                 }
                 Ok(Err(error)) => {
                     failures = failures.saturating_add(1);
+                    let detail = tick_error_detail(&error);
                     *monitor
                         .last_error_code
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                        Some("background_tick_failed".into());
+                        Some(detail.error_code.into());
                     monitor.alive.store(false, Ordering::Release);
-                    tracing::error!(event = "worker_tick_failed", %error, "supervised worker tick failed");
+                    tracing::error!(
+                        event = "worker_tick_failed",
+                        worker = %monitor.name,
+                        elapsed_ms = tick_started_at.elapsed().as_millis(),
+                        error_code = detail.error_code,
+                        sqlite_extended_code = detail.sqlite_extended_code,
+                        %error,
+                        "supervised worker tick failed"
+                    );
                 }
                 Err(error) => {
                     failures = failures.saturating_add(1);
@@ -114,6 +151,7 @@ where
                     monitor.alive.store(false, Ordering::Release);
                     tracing::warn!(
                         event = "worker_tick_restarting",
+                        worker = %monitor.name,
                         panicked = error.is_panic(),
                         cancelled = error.is_cancelled(),
                         "restarting supervised worker after execution future ended"

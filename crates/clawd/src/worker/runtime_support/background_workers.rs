@@ -88,9 +88,12 @@ pub(crate) fn spawn_worker(state: AppState, poll_interval_ms: u64, concurrency: 
         poll_interval_ms.max(10)
     );
     let monitors = (0..worker_count)
-        .map(|_| crate::runtime::worker_health::WorkerMonitor::new())
+        .map(|index| {
+            crate::runtime::worker_health::WorkerMonitor::named(format!("task_worker:{index}"))
+        })
         .collect::<Vec<_>>();
-    let recovery = crate::runtime::worker_health::WorkerMonitor::new();
+    let recovery =
+        crate::runtime::worker_health::WorkerMonitor::named("stale_task_recovery".into());
     state
         .worker
         .supervision
@@ -217,13 +220,28 @@ pub(super) async fn run_blocking_tick<T: Send + 'static>(
     })
     .await
     .map_err(|error| anyhow!("background_tick_join_failed stage={stage} error={error}"))?;
-    tracing::debug!(
-        stage,
-        queue_ms,
-        execution_ms,
-        success = result.is_ok(),
-        "background_tick_completed"
-    );
+    if let Err(error) = &result {
+        let detail = super::worker_supervision::tick_error_detail(error);
+        tracing::warn!(
+            event = "background_tick_failed",
+            stage,
+            queue_ms,
+            execution_ms,
+            error_code = detail.error_code,
+            sqlite_extended_code = detail.sqlite_extended_code,
+            "background operation failed"
+        );
+    } else if queue_ms >= 1_000 || execution_ms >= 1_000 {
+        tracing::warn!(
+            event = "background_tick_slow",
+            stage,
+            queue_ms,
+            execution_ms,
+            "background operation exceeded latency threshold"
+        );
+    } else {
+        tracing::debug!(stage, queue_ms, execution_ms, "background_tick_completed");
+    }
     result
 }
 
@@ -863,7 +881,9 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
     }
     if crate::task_journal_archive::enabled(&db)? {
         if let Err(error) = crate::task_journal_archive::compact_batch(
-            &mut db, 32, now.saturating_sub(86_400).saturating_mul(1000),
+            &mut db,
+            32,
+            now.saturating_sub(86_400).saturating_mul(1000),
         ) {
             warn!(error = %error, "task_journal_archive_compaction_failed");
         }
