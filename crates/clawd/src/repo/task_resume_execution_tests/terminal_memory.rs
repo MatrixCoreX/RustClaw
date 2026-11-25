@@ -18,16 +18,34 @@ fn fixture() -> Fixture {
 }
 
 fn claim(f: &Fixture, outcome: &str) -> Value {
-    let seed = terminal_projection_seed(
+    claim_with_executor(
+        f,
+        outcome,
+        (
+            "executing_planner_resume",
+            "run_seeded_agent_loop",
+            "seeded_loop_requires_provider_window",
+            "ready_to_run_seeded_agent_loop",
+        ),
+    )
+}
+
+fn claim_with_executor(f: &Fixture, outcome: &str, executor: (&str, &str, &str, &str)) -> Value {
+    let (executor_state, executor_action, executor_status, dispatch_state) = executor;
+    let mut seed = terminal_projection_seed(
         TASK,
         CHECKPOINT,
-        "executing_planner_resume",
-        "run_seeded_agent_loop",
-        "seeded_loop_requires_provider_window",
-        "ready_to_run_seeded_agent_loop",
+        executor_state,
+        executor_action,
+        executor_status,
+        dispatch_state,
         outcome,
         NOW,
     );
+    if executor_action != "run_seeded_agent_loop" {
+        seed["text"] = json!("Existing visible reply");
+        seed["messages"] = json!(["Existing visible reply"]);
+    }
     {
         let db = f.state().core.db.get().unwrap();
         db.execute(
@@ -50,10 +68,10 @@ fn claim(f: &Fixture, outcome: &str) -> Value {
         f.state(),
         TASK,
         CHECKPOINT,
-        "executing_planner_resume",
-        "run_seeded_agent_loop",
-        "seeded_loop_requires_provider_window",
-        "ready_to_run_seeded_agent_loop",
+        executor_state,
+        executor_action,
+        executor_status,
+        dispatch_state,
         outcome,
         NOW + 1,
         20,
@@ -61,12 +79,15 @@ fn claim(f: &Fixture, outcome: &str) -> Value {
     .unwrap()
     .expect("real projection claim");
     json!({"schema_version":1,"task_id":TASK,"checkpoint_id":CHECKPOINT,
-        "executor_state":"executing_planner_resume","executor_action":"run_seeded_agent_loop",
-        "executor_status":"seeded_loop_requires_provider_window",
-        "dispatch_state":"ready_to_run_seeded_agent_loop","executor_result_status":outcome,
-        "result_projection_state":if outcome=="seeded_loop_completed" {
-            "project_seeded_loop_completed"
-        } else {"project_seeded_loop_failed"},
+        "executor_state":executor_state,"executor_action":executor_action,
+        "executor_status":executor_status,
+        "dispatch_state":dispatch_state,"executor_result_status":outcome,
+        "result_projection_state":match outcome {
+            "seeded_loop_completed" => "project_seeded_loop_completed",
+            "async_poll_completed" => "project_async_poll_completed",
+            "finalize_completed" => "project_finalize_completed",
+            _ => "project_seeded_loop_failed",
+        },
         "answer_is_llm_reply":true,
         "final_result_json":{"text":"The component is declared on line 9."},
         "error_code":"fixture_provider_unavailable","message_key":"fixture.provider_unavailable"})
@@ -78,10 +99,10 @@ fn project(f: &Fixture, payload: &Value) -> anyhow::Result<bool> {
         CLAIM_ATTEMPT,
         TASK,
         CHECKPOINT,
-        "executing_planner_resume",
-        "run_seeded_agent_loop",
-        "seeded_loop_requires_provider_window",
-        "ready_to_run_seeded_agent_loop",
+        payload["executor_state"].as_str().unwrap(),
+        payload["executor_action"].as_str().unwrap(),
+        payload["executor_status"].as_str().unwrap(),
+        payload["dispatch_state"].as_str().unwrap(),
         payload["executor_result_status"].as_str().unwrap(),
         payload,
         NOW + 2,
@@ -267,5 +288,37 @@ fn recovered_memory_requires_host_attestation_before_marking_a_model_reply() {
         assert_eq!(text, "The component is declared on line 9.");
         drop(db);
         assert_eq!(counts(&f), (2, 2, 2));
+    }
+}
+
+#[test]
+fn tool_terminal_projection_does_not_generate_another_ask_turn() {
+    for (outcome, executor) in [
+        (
+            "async_poll_completed",
+            (
+                "executing_async_poll",
+                "poll_async_job",
+                "async_poll_adapter_pending",
+                "ready_to_poll_async_job",
+            ),
+        ),
+        (
+            "finalize_completed",
+            (
+                "executing_finalize",
+                "verify_and_finalize",
+                "checkpoint_finalize_executor_pending",
+                "ready_to_verify_and_finalize",
+            ),
+        ),
+    ] {
+        let f = fixture();
+        let payload = claim_with_executor(&f, outcome, executor);
+        assert!(project(&f, &payload).unwrap());
+        let (status, _, result) = stored_task_status_error_result(f.state(), TASK);
+        assert_eq!(status, "succeeded");
+        assert_eq!(result["text"], "Existing visible reply");
+        assert_eq!(counts(&f), (0, 0, 0));
     }
 }
