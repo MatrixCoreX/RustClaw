@@ -1,8 +1,8 @@
-# Reviewed against official API documentation on 2026-09-14.
+# MiniMax safety wrapper reviewed against official API documentation on 2026-11-26.
 # This is the sole built-in rule source; also embedded for standalone distributions.
 # Rules are provider-scoped. See configs/llm_provider_errors.md for precedence.
 schema_version = 1
-revision = "2026-09-14.1"
+revision = "2026-11-26.1"
 code_paths = ["/error/code", "/code", "/base_resp/status_code", "/status_code", "/error/status", "/status", "/error/type", "/type"]
 success_codes = ["0", "200", "OK", "Success"]
 
@@ -15,12 +15,12 @@ success_codes = ["0", "200", "OK", "Success"]
 id = "minimax"
 hosts = ["minimaxi.com", "minimaxi.chat", "minimax.io", "minimax.chat", "minimax.cn"]
 provider_names = ["vendor-minimax", "minimax"]
-sources = ["https://platform.minimax.cn/docs/api-reference/errorcode"]
+sources = ["https://platform.minimax.io/docs/api-reference/errorcode"]
 failure_code_paths = ["/base_resp/status_code"]
 # Observed Anthropic-compatible wrapper carries the numeric code as a suffix.
 # Only extract a final ASCII '(digits)', never match translated error prose.
 message_code_paths = ["/error/message"]
-message_code_http_statuses = [429]
+message_code_http_statuses = [422, 429]
 [[profiles.rules]]
 id = "balance_or_token_plan"
 class = "quota_exhausted"

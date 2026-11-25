@@ -61,10 +61,13 @@ Moonshot、火山方舟、Mistral 的候选文档在本轮检索中未取得可�
   `failure_code_paths` 上出现非成功值时进入；模型正文、工具参数里的 error 不算供应商错误。
 - `failure_code_paths` 的空值不表示失败；成功码取该 profile 的 `success_codes`，未设置时
   取根级 success_codes（内置为 `0`、`200`、`OK`、`Success`）。供应商变更成功码也只需改配置。
-- MiniMax 的 Anthropic 兼容响应实测把 2056 放在 `error.message` 末尾。
+- MiniMax 的兼容响应实测把 2056、1026/1027 放在 `error.message` 末尾。
   `message_code_paths` 仅提取末尾 ASCII `(数字)`，且只在指定供应商的错误 envelope 及
-  `message_code_http_statuses` 声明的状态内生效（本例 429），防止普通参数错误回显被误判。
+  `message_code_http_statuses` 声明的状态内生效（422、429），防止普通参数错误回显被误判。
   这是数字码的封装适配，不是中英文关键字判断；明确的结构化业务码优先。
+  422 流错误中的 1026/1027 按 `safety` 分类，保留不可重试状态，丢弃未完成输出。
+  错误码依据 [MiniMax 官方文档](https://platform.minimax.io/docs/api-reference/errorcode)，
+  2026-11-26 对照实际流错误验证。
 - `http_status_paths` 显式声明哪些数值字段真的是 HTTP 状态，供 HTTP 200 错误/流帧使用。
   不把任何服务商业务数字码自动当 HTTP 状态码。OpenRouter 声明 `/error/code`。
 - 不知道的新错误保留原始证据并使用 HTTP 兜底，不猜测自然语言。401/403/413/普通 4xx

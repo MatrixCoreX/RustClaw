@@ -241,6 +241,27 @@ async fn stream_error_after_text_is_not_accepted_as_success() {
 }
 
 #[tokio::test]
+async fn minimax_content_rejection_discards_partial_stream_without_retry() {
+    let body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
+        "data: {\"type\":\"error\",\"error\":{\"http_code\":\"422\",",
+        "\"type\":\"unprocessable_entity_error\",\"message\":\"opaque (1027)\"}}\n\n"
+    );
+    let server = server(StatusCode::OK, HeaderMap::new(), body.into()).await;
+    let provider = runtime("vendor-minimax", "openai_compat", &server.url);
+    let error =
+        call_model_turn_with_retry(provider, &request(true), &ChatRequestHints::default(), None)
+            .await
+            .unwrap_err();
+    assert_eq!(error.kind, ProviderErrorKind::ProviderNonRetryableBusiness);
+    assert_eq!(error.attempts, 1);
+    assert!(!error.retryable);
+    assert!(error.message.contains(":minimax:safety:"));
+    assert!(error.raw_response.unwrap().contains("1027"));
+    assert_eq!(server.calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn successful_http_and_streaming_protocols_still_work() {
     for (protocol, body) in [
         (

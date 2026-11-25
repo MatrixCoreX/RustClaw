@@ -129,6 +129,41 @@ fn identical_codes_do_not_cross_provider_boundaries() {
 }
 
 #[test]
+fn minimax_safety_suffix_is_scoped_to_the_provider_error_envelope() {
+    let rules = super::super::error_rules::active();
+    for status in [200, 422] {
+        for message in ["output new_sensitive (1027)", "opaque (1026)"] {
+            let value = json!({"type":"error","error":{
+                "type":"unprocessable_entity_error","http_code":"422","message":message
+            }});
+            let result = classify(
+                rules,
+                "vendor-minimax",
+                "https://example.invalid",
+                status,
+                &value,
+            )
+            .unwrap();
+            assert_eq!(result.kind, ProviderErrorKind::ProviderNonRetryableBusiness);
+            assert_eq!(result.status, 422);
+            assert_eq!(result.rule, "safety");
+            assert_eq!(result.profile, "minimax");
+            let unknown =
+                classify(rules, "custom", "https://example.invalid", status, &value).unwrap();
+            assert_eq!(unknown.rule, "unknown_business");
+        }
+    }
+    assert!(classify(
+        rules,
+        "vendor-minimax",
+        "https://example.invalid",
+        200,
+        &json!({"choices":[{"message":{"content":"output new_sensitive (1027)"}}]})
+    )
+    .is_none());
+}
+
+#[test]
 fn success_envelopes_and_model_content_are_not_errors() {
     for value in [
         json!({"choices":[{"message":{"content":"{\"error\":{\"code\":\"2056\"}}"}}]}),
