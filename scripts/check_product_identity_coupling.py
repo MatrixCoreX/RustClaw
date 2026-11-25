@@ -11,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 LEGACY_LITERAL = re.compile(r"rustclaw", re.IGNORECASE)
+PUBLIC_SITE_LINK = re.compile(r"(?<=\]\()https://rustclaw\.matrixai\.one/(?:[a-z0-9-]+/)*(?=\))")
 COUPLED_SYMBOL = re.compile(
     r"\b(?:fn|struct|enum|type|mod|let|static|const)\s+[A-Za-z0-9_]*rustclaw",
     re.IGNORECASE,
@@ -70,6 +71,11 @@ def is_code_file(relative: Path) -> bool:
 
 
 def classify(relative: str, line: str) -> str | None:
+    if relative in {"README.md", "README.zh-CN.md"}:
+        # These are public repository entry points for the MatrixCoreX project.
+        if line == "# RustClaw by MatrixCoreX":
+            return None
+        line = PUBLIC_SITE_LINK.sub("", line)
     if not LEGACY_LITERAL.search(line):
         return None
     return "unclassified"
@@ -138,6 +144,11 @@ def run_inventory() -> int:
 
 
 def self_test() -> int:
+    official_link = "[Guide](https://rustclaw.matrixai.one/zh/mcp/)"
+    assert classify("README.md", "# RustClaw by MatrixCoreX") is None
+    assert classify("README.zh-CN.md", official_link) is None
+    assert classify("README.md", official_link + " rustclaw-service") == "unclassified"
+    assert classify("docs/setup.md", official_link) == "unclassified"
     assert classify("crates/demo/src/main.rs", "fn rustclaw_start() {}") == "unclassified"
     assert (
         classify(

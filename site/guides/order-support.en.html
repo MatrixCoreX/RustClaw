@@ -1,0 +1,53 @@
+    <h1 id="guide-title">Answer order support questions with MCP and RAG in $brand</h1>
+    <p class="guide-intro">A customer can ask where an order is and who pays to return a defective item in the same message. This walkthrough connects a sample order server and a returns handbook, then checks that one Agent reply can use both sources.</p>
+    <nav class="guide-nav" aria-label="On this page">
+      <a href="#setup">Set up both sources</a>
+      <a href="#ask">Send one support question</a>
+      <a href="#verify">Verify the answer</a>
+      <a href="#troubleshooting">Troubleshoot missing results</a>
+    </nav>
+
+    <section id="setup">
+      <h2>Connect sample orders and import a returns handbook</h2>
+      <ol>
+        <li><a href="../mcp/#demo">Set up the read-only MCP order server</a>. Look up order <code>3</code> and verify that it is in transit with tracking number <code>7898047967</code>.</li>
+        <li><a href="../rag/#prepare">Download and import the sample Returns Handbook</a>. Name the library <strong>Returns Handbook</strong>. In <strong>Memory → Knowledge base</strong>, search for <strong>return shipping</strong> and check that the passage from section 3.2 appears.</li>
+      </ol>
+    </section>
+
+    <section id="ask">
+      <h2>Ask about shipping status and the return policy together</h2>
+      <p>Send the following message in Agent chat. The prompt supplies the condition that support has confirmed the defect. The order server supplies the shipping record, and the handbook supplies the return shipping rule.</p>
+      <blockquote>“Where is order 3, and what is its tracking number? If customer support has confirmed a defect, who pays to send the item back? Use the Returns Handbook for the policy and cite its section.”</blockquote>
+    </section>
+
+    <section id="verify">
+      <h2>Verify the shipment and the policy citation</h2>
+      <dl>
+        <dt>Shipment</dt>
+        <dd>Order 3 is in transit at the Hangzhou sorting center with tracking number <code>7898047967</code>.</dd>
+        <dt>Return shipping</dt>
+        <dd>The seller pays for return shipping once support confirms the defect, as stated in Returns Handbook, section 3.2, “Defective-item returns.”</dd>
+      </dl>
+      <div class="example-pair">
+        <figure class="example-shot">
+          <a href="${examples}mcp.png"><img src="${examples}mcp.png" alt="The sample MCP lookup returns the location of order 3 and tracking number 7898047967." width="794" height="370" loading="lazy" decoding="async"></a>
+          <figcaption>Separate MCP order lookup example (demo data).</figcaption>
+        </figure>
+        <figure class="example-shot">
+          <a href="${examples}rag.png"><img src="${examples}rag.png" alt="The RAG reply cites section 3.2 of the Returns Handbook for the seller’s return shipping responsibility." width="794" height="317" loading="lazy" decoding="async"></a>
+          <figcaption>Separate RAG policy lookup example (demo data).</figcaption>
+        </figure>
+      </div>
+      <p>For a follow-up, ask “According to the Returns Handbook, how many days after the warehouse receives a return must the refund be issued?” The sample handbook omits that deadline, so the reply should say the handbook does not specify it.</p>
+    </section>
+
+    <section id="troubleshooting">
+      <h2>When the reply covers only one part of the question</h2>
+      <dl>
+        <dt>The reply cites a policy and leaves out the shipment</dt>
+        <dd>Run the <a href="../mcp/#test">MCP connection and tool checks</a>, then look up order 3 on its own to verify the order tool is available.</dd>
+        <dt>The reply gives a shipment and leaves out the citation</dt>
+        <dd>Follow the <a href="../rag/#import">knowledge base import and search steps</a>. Confirm the library name, search for <strong>return shipping</strong>, and ask the agent to include the document name and section.</dd>
+      </dl>
+    </section>

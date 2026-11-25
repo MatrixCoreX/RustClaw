@@ -15,57 +15,77 @@
     <div>
       <p class="byline"><a href="$profile">由 $owner 开发</a></p>
       <h1 id="name">$brand <span>自托管 AI Agent</span></h1>
-      <p class="intro">在树莓派、Ubuntu 或 macOS 上运行开源 AI Agent。你可以在网页控制台配置模型、上传文件和查看任务进度，也可以绑定 Telegram、微信或飞书，在常用的聊天软件里发起任务。</p>
+      <p class="intro">在树莓派、Ubuntu 或 macOS 上运行用 Rust 编写的 AI Agent。你可以在网页控制台配置模型、上传文件和查看任务进度，也可以绑定 Telegram、微信或飞书，在常用的聊天软件里发起任务。</p>
       <p class="intro">比如，发一份 PDF 请 Agent 提炼要点，用 MCP 查订单物流，或从 RAG 知识库找出售后条款并给出处。采集或下载的媒体结果，可以在技能配套的 AiAPP 里回看。</p>
       <div class="actions">
         <a class="button primary" href="#install">下载安装</a>
         <a class="button secondary" href="#use-cases">查看使用指南</a>
       </div>
     </div>
-    <figure class="preview" id="order-example">
-      <a href="${examples}mcp.png"><img src="${examples}mcp.png" alt="$preview_alt" width="794" height="370" fetchpriority="high"></a>
-      <figcaption>MCP 订单查询（演示数据）。<a href="#rag-example">知识库示例</a> · <a href="#skills">技能示例</a></figcaption>
-    </figure>
   </section>
   <div id="use-cases">
     <section class="page-section" id="skills" aria-labelledby="skills-heading">
       <h2 id="skills-heading">Agent 技能</h2>
       <article class="skills-overview">
-        <p>启用技能后，可以用聊天指令处理文件、转写语音、采集和下载媒体，也能查询加密货币行情。</p>
-        <a href="skills/">安装和使用技能</a>
-        <p class="skill-example-intro">在 Agent 聊天里发起媒体采集和下载任务。下面两张截图来自媒体技能的配套 AiAPP，用于查看任务结果。</p>
-        <div class="detail-grid skill-examples" id="media">
+        <p>启用技能后，可以用聊天指令处理文件、转写语音、采集和下载媒体，也能查看当前天气和逐日预报。</p>
+        <a href="skills/#install">在 Skill Store 安装 Agent 技能</a>
+        <p class="skill-example-intro">在 Agent 对话里发起任务，完成后到对应技能的配套 AiAPP 查看结果。以下截图使用演示数据。</p>
+        <div class="skill-examples" id="media">
           <section id="media-discovery" aria-labelledby="discovery-heading">
-            <h3 id="discovery-heading">媒体采集</h3>
+            <h3 id="discovery-heading">媒体采集技能</h3>
             <p>按关键词从小红书、抖音、哔哩哔哩等支持的平台收集帖子，保留作者文案、预览、来源链接和采集时能读取到的互动数据。可以只采一批，也可以在 Agent 里开启、暂停或停止持续采集。</p>
-            <blockquote>「在小红书搜索『露营装备』，只采一批，最多 5 条，保留作者文案、预览和来源链接。」</blockquote>
-            <a href="skills/#media-discovery">试用媒体采集</a>
-            <figure class="example-shot">
-              <a href="${examples}media-discovery.png"><img src="${examples}media-discovery.png" alt="AiAPP 媒体发现中展示两条露营帖子示例，含预览、文案和互动数据。" width="1120" height="622" loading="lazy" decoding="async"></a>
-              <figcaption>媒体采集技能的配套 AiAPP「媒体发现」截图（演示数据）。</figcaption>
-            </figure>
+            <blockquote>「在小红书和抖音各采集一条关于露营装备的帖子，保留作者文案、预览和来源链接。」</blockquote>
+            <div class="detail-links"><a href="skills/#media-discovery">试用媒体采集</a></div>
+            <div class="example-pair">
+              <figure class="example-shot">
+                <a href="${examples}media-discovery-agent.png"><img src="${examples}media-discovery-agent.png" alt="Agent 对话中发起露营装备采集，并收到小红书和抖音各一条帖子的回复。" width="714" height="261" loading="lazy" decoding="async"></a>
+                <figcaption><strong>Agent</strong> · 发起采集，确认保存了两条帖子。</figcaption>
+              </figure>
+              <figure class="example-shot">
+                <a href="${examples}media-discovery.png"><img src="${examples}media-discovery.png" alt="AiAPP「媒体发现」显示两条露营帖子及其预览、文案和来源入口。" width="1120" height="622" loading="lazy" decoding="async"></a>
+                <figcaption><strong>AiAPP</strong> · 在「媒体发现」查看帖子预览、作者文案和来源。</figcaption>
+              </figure>
+            </div>
           </section>
           <section id="media-download" aria-labelledby="download-heading">
-            <h3 id="download-heading">媒体下载</h3>
+            <h3 id="download-heading">媒体下载技能</h3>
             <p>把支持平台的作品链接或完整分享文案发给 Agent，就可以保存能获取到的原视频或原图。支持的图文作品还可以一并保存原文，图片较多时会打成 ZIP 文件。</p>
-            <blockquote>「帮我保存这条小红书图文的原图和能获取到的正文：[粘贴分享链接]。」</blockquote>
-            <a href="skills/#media-download">试用媒体下载</a>
-            <figure class="example-shot">
-              <a href="${examples}media-download.png"><img src="${examples}media-download.png" alt="AiAPP 媒体下载页面展示已完成任务的原图和正文，以及一条失败记录。" width="1120" height="833" loading="lazy" decoding="async"></a>
-              <figcaption>媒体下载技能的配套 AiAPP「媒体下载」截图（演示数据）。</figcaption>
-            </figure>
+            <blockquote>「保存这条露营图文的原图和正文：[粘贴小红书分享链接]。」</blockquote>
+            <div class="detail-links"><a href="skills/#media-download">试用媒体下载</a></div>
+            <div class="example-pair">
+              <figure class="example-shot">
+                <a href="${examples}media-download-agent.png"><img src="${examples}media-download-agent.png" alt="Agent 对话中提交一条露营图文的下载请求，回复附有两张原图和一份正文。" width="714" height="307" loading="lazy" decoding="async"></a>
+                <figcaption><strong>Agent</strong> · 发送图文分享链接，从回复中下载原图和正文。</figcaption>
+              </figure>
+              <figure class="example-shot">
+                <a href="${examples}media-download.png"><img src="${examples}media-download.png" alt="AiAPP「媒体下载」显示一条已完成的任务，包含两张原图和一份正文文件。" width="702" height="943" loading="lazy" decoding="async"></a>
+                <figcaption><strong>AiAPP</strong> · 在「媒体下载」找到这条已完成的任务和生成文件。</figcaption>
+              </figure>
+            </div>
           </section>
         </div>
-        <section class="workflow" id="crypto" aria-labelledby="crypto-heading">
+        <section class="workflow" id="weather" aria-labelledby="weather-heading">
           <div>
-            <h3 id="crypto-heading">加密货币行情</h3>
-            <p>在 Agent 聊天里用 <code>crypto</code> 技能查询公开行情。</p>
-            <blockquote>「帮我查询比特币（BTC）的最新美元报价，并注明数据来源和查询时间。」</blockquote>
-            <div class="detail-links"><a href="skills/#crypto">试用加密货币行情查询</a></div>
+            <h3 id="weather-heading">天气查询技能</h3>
+            <p>在 Agent 聊天里说出城市和想查的天数，就能查看当地天气和每天的最低、最高气温。</p>
+            <blockquote>「帮我查杭州未来三天的天气，按天列出天气状况、最低和最高气温。」</blockquote>
+            <div class="detail-links"><a href="skills/#weather">试用天气查询</a></div>
           </div>
           <figure class="example-shot">
-            <a href="${examples}crypto.png"><img src="${examples}crypto.png" alt="Agent 对话显示比特币的示例美元报价、模拟数据来源和查询时间。" width="794" height="339" loading="lazy" decoding="async"></a>
-            <figcaption>Agent 对话中的比特币报价示例（演示数据）。</figcaption>
+            <a href="${examples}weather.png"><img src="${examples}weather.png" alt="Agent 对话展示杭州三天的天气状况、最低气温和最高气温。" width="714" height="290" loading="lazy" decoding="async"></a>
+            <figcaption>Agent 对话中的杭州三天天气预报（演示数据）。</figcaption>
+          </figure>
+        </section>
+        <section class="workflow" id="speech-transcription" aria-labelledby="speech-transcription-heading">
+          <div>
+            <h3 id="speech-transcription-heading">语音转写技能</h3>
+            <p>在 Agent 聊天里上传会议录音。转写完成后，可以直接阅读全文，也可以下载 TXT 文件留存。</p>
+            <blockquote>「把我上传的会议录音 meeting.wav 转成文字，回复里贴上全文，再给我一个 TXT 文件。」</blockquote>
+            <div class="detail-links"><a href="skills/#speech-transcription">试用语音转写</a></div>
+          </div>
+          <figure class="example-shot">
+            <a href="${examples}speech-transcription.png"><img src="${examples}speech-transcription.png" alt="Agent 对话展示会议录音的转写全文和 transcript.txt 下载按钮。" width="714" height="289" loading="lazy" decoding="async"></a>
+            <figcaption>Agent 对话中的会议转写和 TXT 下载（演示数据）。</figcaption>
           </figure>
         </section>
         <section id="aipp" aria-labelledby="aipp-heading">
@@ -77,22 +97,31 @@
     </section>
     <section class="page-section" id="mcp" aria-labelledby="mcp-heading">
       <h2 id="mcp-heading">MCP 工具</h2>
-      <article>
-        <p>连接外部系统提供的工具，让 Agent 查询订单物流、快递单号等实时业务数据。</p>
-        <blockquote>「查一下订单 3 是否发货，并告诉我快递单号。」</blockquote>
-        <div class="detail-links">
-          <a href="mcp/">配置和测试 MCP 工具</a>
-          <a href="#order-example">查看订单查询示例</a>
+      <div class="workflow">
+        <div>
+          <p>连接外部系统提供的工具，让 Agent 查询订单物流、快递单号等实时业务数据。</p>
+          <blockquote>「订单 3 到哪儿了？请告诉我快递单号。」</blockquote>
+          <div class="detail-links">
+            <a href="mcp/#demo">配置 MCP 工具并试查订单</a>
+          </div>
         </div>
-      </article>
+        <figure class="example-shot" id="order-example">
+          <a href="${examples}mcp.png"><img src="${examples}mcp.png" alt="$preview_alt" width="794" height="370" loading="lazy" decoding="async"></a>
+          <figcaption>Agent 对话中的 MCP 订单物流查询（演示数据）。</figcaption>
+        </figure>
+      </div>
     </section>
     <section class="page-section" id="rag" aria-labelledby="rag-heading">
       <h2 id="rag-heading">RAG 知识库</h2>
       <div class="workflow">
         <div>
-          <p>导入产品说明、常见问题和售后手册，让 Agent 搜索原文并在回答中给出处。</p>
+          <p>导入产品规格、运营规则、培训手册和排障指南，让 Agent 搜索原文并在回答中给出处。</p>
           <blockquote>「查一下《售后手册》，商品有质量问题时谁承担退货运费？请给出规则出处。」</blockquote>
-          <div class="detail-links"><a href="rag/">导入资料并提问</a></div>
+          <div class="detail-links">
+            <a href="rag/#prepare">导入文件到 RAG 知识库并核对出处</a>
+            <a href="rag/#scenarios">试用 7 个 RAG 知识库案例</a>
+            <a href="order-support/">用 MCP 和 RAG 完成订单售后问答</a>
+          </div>
         </div>
         <figure class="example-shot" id="rag-example">
           <a href="${examples}rag.png"><img src="${examples}rag.png" alt="Agent 回答退货运费由谁承担，并引用示例《售后手册》第 3.2 节。" width="794" height="317" loading="lazy" decoding="async"></a>
@@ -123,5 +152,5 @@
 </main>
 <footer class="wrap footer">
   <span>$brand · <a href="$profile">$owner</a></span>
-  <a href="$repo/blob/main/LICENSE">许可证</a>
+  <a href="$repo/blob/main/LICENSE.zh-CN.md">非商业源码可用许可</a>
 </footer>

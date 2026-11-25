@@ -1,53 +1,85 @@
-    <h1 id="guide-title">在 $brand 配置和测试 MCP 工具</h1>
-    <p class="guide-intro">MCP（模型上下文协议）让 Agent 调用其他系统提供的工具。接入订单查询后，可以让 Agent 从订单系统读取当前物流状态、快递公司和单号。</p>
+    <h1 id="guide-title">在 $brand 配置 MCP 服务器并测试订单查询</h1>
+    <p class="guide-intro">MCP（模型上下文协议）让 Agent 调用其他系统提供的工具。可以接入本机 stdio 命令或远程 Streamable HTTP 服务。第一次使用，可以下载下面的订单演示服务，试着按订单号查物流，再用快递单号反查订单。</p>
     <nav class="guide-nav" aria-label="本页目录">
       <a href="#connect">添加服务器</a>
+      <a href="#demo">下载并填写示例</a>
       <a href="#permissions">设置工具权限</a>
-      <a href="#test">测试订单查询</a>
-      <a href="#troubleshooting">排查连接</a>
+      <a href="#test">测试连接和查询</a>
+      <a href="#troubleshooting">排查问题</a>
     </nav>
 
     <section id="connect">
       <h2>添加本机或远程 MCP 服务器</h2>
-      <p>在管理控制台打开<strong>大模型 → 外部工具服务器 → 添加服务器</strong>。每个服务器取一个独立的名称，并按服务方提供的信息填写连接方式。</p>
+      <p>用管理员账号登录控制台，打开<strong>大模型 → 外部工具服务器 → 添加服务器</strong>。可以添加多台服务器。每台服务器使用独立名称，分别设置连接方式、启用状态和允许的工具。</p>
       <dl>
         <dt>本机命令（stdio）</dt>
-        <dd>填写启动命令和参数，每行一个参数。命令在运行 Agent 的设备上启动，路径也要填写那台设备实际能访问的位置。</dd>
+        <dd>分别填写启动命令和命令参数，每行一个参数。命令由运行 Agent 的设备启动，程序和路径都要在那台设备上可访问。</dd>
         <dt>远程服务（Streamable HTTP）</dt>
-        <dd>填写完整 MCP 地址，例如 <code>https://tools.example.com/mcp</code>。服务需要认证时，选择对应的认证方式。凭据字段填写环境变量名，实际值设置在运行服务的主机环境里。</dd>
+        <dd>在<strong>连接方式</strong>中选择 <strong>HTTP</strong>，填写服务方提供的完整 MCP 地址，例如 <code>https://tools.example.com/mcp</code>。认证方式按服务方要求选择，支持 Bearer Token 或 OAuth 客户端凭据。表单填写环境变量名，例如 <code>ORDER_MCP_TOKEN</code>，变量值配置在 Agent 服务的运行环境中。</dd>
       </dl>
     </section>
 
+    <section id="demo">
+      <h2>用本地 Python 示例接入订单查询</h2>
+      <p>这个只读示例使用 Python 3 标准库，查询固定的模拟订单。把下载的文件放到运行 Agent 的设备上，然后按下表填写服务器设置。</p>
+      <div class="actions"><a class="button secondary" href="${assets}examples/mcp-orders-demo.py" download>下载订单演示服务（Python）</a></div>
+      <table class="setup-fields">
+        <thead><tr><th scope="col">表单字段</th><th scope="col">填写内容</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">服务器名称</th><td><code>orders_demo</code></td></tr>
+          <tr><th scope="row">连接方式</th><td>本机命令 (stdio)</td></tr>
+          <tr><th scope="row">启动命令</th><td><code>python3</code>。服务找不到命令时，填该设备上 Python 3 可执行文件的完整路径。</td></tr>
+          <tr><th scope="row">命令参数</th><td>单独一行填写脚本的完整路径，例如 <code>/home/agent/mcp-orders-demo.py</code>。把示例路径换成实际位置。</td></tr>
+          <tr><th scope="row">允许的工具</th><td><code>lookup_order</code><br><code>find_order_by_tracking</code></td></tr>
+        </tbody>
+      </table>
+    </section>
+
     <section id="permissions">
-      <h2>选择允许 Agent 调用的工具</h2>
+      <h2>信任服务器并启用允许的工具</h2>
       <ol>
-        <li>核对服务器的地址或命令，确认自己管理或信任它后，勾选<strong>我信任此服务器</strong>。</li>
-        <li>在<strong>允许的工具</strong>中逐行填写服务端提供的准确工具名。用订单示例起步时，可以先填写服务提供的只读查询工具。</li>
-        <li>启用这个服务器和<strong>启用 MCP 工具</strong>总开关，点击<strong>保存 MCP 设置</strong>。如果提示需要重启，按提示重启服务。</li>
+        <li>核对命令或地址，确认服务器由你管理或来自可信来源后，勾选<strong>我信任此服务器</strong>。</li>
+        <li>在<strong>允许的工具</strong>里每行填一个准确的工具名称。填写上面的两个查询工具即可完成订单演示。</li>
+        <li>打开<strong>启用此服务器</strong>和<strong>启用 MCP 工具</strong>，点击<strong>保存 MCP 设置</strong>。重启 Agent 服务，然后点<strong>刷新状态</strong>。</li>
       </ol>
-      <p><a href="$repo/blob/main/docs/architecture/02-security-execution.zh-CN.md">查看工具请求与权限的检查方式</a></p>
+      <p><a href="$repo/blob/main/docs/architecture/02-security-execution.zh-CN.md">查看工具请求与权限检查</a></p>
     </section>
 
     <section id="test">
-      <h2>测试连接，再查一笔订单</h2>
-      <p>服务器状态显示<strong>可用</strong>后，点击<strong>测试协议</strong>。确认工具列表有订单查询工具，再回到 <strong>Agent</strong> 聊天发送请求。</p>
+      <h2>检查连接、工具列表和订单结果</h2>
+      <ol>
+        <li>看到服务器状态变为<strong>可用</strong>后，点击<strong>测试协议</strong>，确认显示<strong>连接正常</strong>。</li>
+        <li>检查<strong>工具数量</strong>和下方的名称。这个示例应显示两个已开放的订单查询工具。</li>
+        <li>回到 <strong>Agent</strong> 对话，用自然语言查询已知订单。Agent 可以从已开放的工具中选择。若界面要求确认，核对工具和查询参数后按提示操作。</li>
+      </ol>
+      <figure class="example-shot">
+        <a href="${examples}mcp-setup.png"><img src="${examples}mcp-setup.png" alt="外部工具服务器中已启用订单演示服务，可用工具有两个，测试显示连接正常。" width="1280" height="748" loading="lazy" decoding="async"></a>
+        <figcaption>控制台里的订单演示服务器配置和连接测试（演示数据）。</figcaption>
+      </figure>
+      <h3>两句可直接复制的查询</h3>
       <blockquote>「订单 3 到哪儿了？请告诉我快递单号。」</blockquote>
-      <p>把示例订单号换成测试系统里已有的订单。收到回复后，对照订单系统里的物流状态和单号。</p>
+      <p>订单 3 正在运输，当前在杭州转运中心，快递单号是 <code>7898047967</code>。</p>
+      <blockquote>「快递单号 7898047967 对应哪个订单？」</blockquote>
+      <p>单号应对应订单 <strong>3</strong>。示例里的物流位置和送达日期都是固定的模拟数据。</p>
       <figure class="example-shot">
         <a href="${examples}mcp.png"><img src="${examples}mcp.png" alt="$preview_alt" width="794" height="370" loading="lazy" decoding="async"></a>
-        <figcaption>网页控制台中的订单查询示例，使用模拟数据。</figcaption>
+        <figcaption>Agent 对话中的订单 3 物流查询（演示数据）。</figcaption>
       </figure>
     </section>
 
     <section id="troubleshooting">
-      <h2>连接或工具不可用时检查什么</h2>
+      <h2>连接不上或 Agent 没查到订单时</h2>
       <dl>
-        <dt>服务器显示「等待重启」</dt>
-        <dd>重启 Agent 服务，然后在外部工具服务器页面刷新状态。</dd>
-        <dt>服务器显示「可用」，工具数量为 0</dt>
-        <dd>核对<strong>允许的工具</strong>里的名称是否和服务端提供的完全一致，确认每行一个名称。</dd>
-        <dt>测试协议失败</dt>
-        <dd>先检查 Agent 所在设备能否启动本机命令或访问远程地址。服务需要认证时，再检查运行环境能否读取对应的凭据环境变量。</dd>
+        <dt>找不到「外部工具服务器」</dt>
+        <dd>用管理员账号登录，在「大模型」页面向下找到 MCP 配置区。</dd>
+        <dt>「测试协议」按钮是灰色的</dt>
+        <dd>显示「等待保存」时先保存，显示「等待重启」时重启服务，再刷新状态。服务器达到「可用」后可以测试。</dd>
+        <dt>服务器可用，工具数量为 0</dt>
+        <dd>白名单留空时，开放的工具为 0。按服务方提供的准确名称逐行填写允许的工具，保存后重启并刷新状态。</dd>
+        <dt>连接正常，Agent 没查到订单</dt>
+        <dd>先确认工具列表里有对应的查询工具。使用示例订单 3 或单号 <code>7898047967</code> 复测，核对回复里的订单号和单号。</dd>
+        <dt>服务器显示「需要处理」</dt>
+        <dd>本机连接先检查服务进程能否找到启动命令并读取脚本。远程连接先检查服务主机能否访问 MCP 地址，以及运行环境是否已设置需要的凭据变量。</dd>
       </dl>
-      <p class="detail-links"><a href="../skills/">了解如何安装和使用技能</a> <a href="../rag/">搭配售后知识库查询规则</a></p>
+      <p class="detail-links"><a href="../order-support/">用 MCP 查物流并引用 RAG 售后条款</a> <a href="../rag/#prepare">导入售后规则到 RAG 知识库</a></p>
     </section>

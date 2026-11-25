@@ -1,0 +1,66 @@
+    <p class="byline"><a href="$profile">Maintained by $owner</a></p>
+    <h1 id="guide-title">Install $brand on Raspberry Pi</h1>
+    <p class="guide-intro">Install the signed ARM64 release on 64-bit Raspberry Pi OS, open the web console, and send your first message to the agent.</p>
+    <nav class="guide-nav" aria-label="On this page">
+      <a href="#requirements">Check requirements</a>
+      <a href="#install">Download and install</a>
+      <a href="#console">Open the web console</a>
+      <a href="#troubleshooting">Troubleshooting</a>
+    </nav>
+
+    <section id="requirements">
+      <h2>Check Raspberry Pi OS, Python, and disk space</h2>
+      <p>Run these commands in a terminal on the Pi, either locally or in an SSH session.</p>
+      <pre><code>uname -m
+getconf LONG_BIT
+python3 --version
+df -h "$$HOME"</code></pre>
+      <ul>
+        <li>The first two commands should return <code>aarch64</code> and <code>64</code>. If your system is 32-bit, use Raspberry Pi Imager to write Raspberry Pi OS (64-bit) to another card for a compatible Pi.</li>
+        <li>The installer needs Python 3.11 or later, Bash, curl, tar, and OpenSSH’s <code>ssh-keygen</code>. If curl or <code>ssh-keygen</code> is missing on Raspberry Pi OS, run <code>sudo apt update</code> and <code>sudo apt install ca-certificates curl openssh-client</code>.</li>
+        <li>Check the free space on the last line. Leave room for the downloaded package, its extracted files, and the installed copy.</li>
+      </ul>
+      <p><a href="https://www.raspberrypi.com/documentation/computers/imager.html">Raspberry Pi Imager documentation</a></p>
+    </section>
+
+    <section id="install">
+      <h2>Install the signed Pi ARM64 release</h2>
+      <p>Download the project’s installer. Run it with <code>--check-only</code> to see the selected release before installing.</p>
+      <pre><code>curl -fL -o install-latest-release.sh \
+  https://raw.githubusercontent.com/$release_repository/main/install-latest-release.sh
+bash install-latest-release.sh --repo $release_repository --check-only</code></pre>
+      <p>Once the release tag starts with <code>pi-aarch64-</code>, run the installer.</p>
+      <pre><code>bash install-latest-release.sh --repo $release_repository</code></pre>
+      <p>The installer checks the package signature and checksums. It installs to <code>~/agent-runtime</code> by default and starts the services. Verify them with these checks.</p>
+      <pre><code>"$$HOME/.local/bin/agentctl" -status
+"$$HOME/.local/bin/agentctl" -health</code></pre>
+      <p class="detail-links"><a href="$repo/releases">View signed releases on GitHub</a> <a href="$repo/blob/main/docs/release_installation.md">Release installation and signature verification</a></p>
+    </section>
+
+    <section id="console">
+      <h2>Open the web console and send a first message</h2>
+      <p>On the Raspberry Pi, open <code>http://127.0.0.1:8788</code> in your browser. To connect from another computer with SSH access to the Pi, run this command on that computer. Replace the user and address with your own, then open <code>http://127.0.0.1:18888</code> there.</p>
+      <pre><code>ssh -N -L 18888:127.0.0.1:8788 YOUR_PI_USER@YOUR_PI_IP</code></pre>
+      <ol>
+        <li>After the first startup, find the initial sign-in details in <code>data/bootstrap-credentials.txt</code> inside the install directory. Change the initial password in account management.</li>
+        <li>Open <strong>Models</strong> and save a usable text model. If it requires an API key, enter it in the console and test the connection.</li>
+        <li>Open <strong>Agent</strong> and ask “What can you help me do in one sentence?” A reply confirms that the console, background service, and model can communicate.</li>
+      </ol>
+      <figure class="example-shot">
+        <a href="${examples}pi-first-task.png"><img src="${examples}pi-first-task.png" alt="Agent chat shows the first question and a short reply after setting up the web console." width="714" height="198" loading="lazy" decoding="async"></a>
+        <figcaption>First message in the web console (demo conversation).</figcaption>
+      </figure>
+      <p class="detail-links"><a href="../skills/#install">Install agent skills</a> <a href="../mcp/#demo">Connect the local MCP order demo</a> <a href="../rag/#prepare">Import a RAG knowledge base</a></p>
+    </section>
+
+    <section id="troubleshooting">
+      <h2>Troubleshoot the release, console, or first task</h2>
+      <dl>
+        <dt>The installer finds no matching release</dt>
+        <dd>Check the operating system bitness and architecture, then look for a <code>pi-aarch64-</code> tag in GitHub Releases. The small-screen component is packaged separately from the full Pi ARM64 service.</dd>
+        <dt>The web console won’t open</dt>
+        <dd>Run the status and health commands above. If you are using another computer, check that the SSH forwarding session is still open.</dd>
+        <dt>The console opens and the message remains queued</dt>
+        <dd>Verify the model in <strong>Models</strong>, then use <strong>Tasks</strong> to see whether the request is queued, running, or failed.</dd>
+      </dl>
+    </section>

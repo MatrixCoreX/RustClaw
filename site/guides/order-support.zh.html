@@ -1,0 +1,53 @@
+    <h1 id="guide-title">用 $brand 的 MCP 与 RAG 回答订单售后问题</h1>
+    <p class="guide-intro">客户常在同一条消息里问两件事，比如订单现在在哪、商品有质量问题时谁承担退货运费。这个演示把订单服务和售后手册接入同一个 Agent，再用一次提问核对物流结果与手册出处。</p>
+    <nav class="guide-nav" aria-label="本页目录">
+      <a href="#setup">准备两种来源</a>
+      <a href="#ask">发送一条售后问题</a>
+      <a href="#verify">核对答案</a>
+      <a href="#troubleshooting">排查漏查</a>
+    </nav>
+
+    <section id="setup">
+      <h2>接入模拟订单，导入演示售后手册</h2>
+      <ol>
+        <li><a href="../mcp/#demo">配置只读 MCP 订单服务</a>。先查订单 <code>3</code>，确认物流状态是在运输，单号为 <code>7898047967</code>。</li>
+        <li><a href="../rag/#prepare">下载并导入演示《售后手册》</a>。把库名设为<strong>售后手册</strong>，在「记忆管理 → 知识库」搜索「退货运费」，确认能找到第 3.2 节的原文。</li>
+      </ol>
+    </section>
+
+    <section id="ask">
+      <h2>用一句话同时查询订单和退货规则</h2>
+      <p>在 Agent 对话里发下面这条消息。「客服已核实」是这次演示给出的条件。物流状态由订单服务提供，退货运费规则来自手册。</p>
+      <blockquote>「帮我查一下订单 3 现在到哪儿了，给我快递单号。如果客服已确认商品有质量问题，寄回去的运费谁承担？请查《售后手册》并注明章节。」</blockquote>
+    </section>
+
+    <section id="verify">
+      <h2>分别核对物流结果和政策出处</h2>
+      <dl>
+        <dt>订单物流</dt>
+        <dd>订单 3 正在运输，当前在杭州转运中心，快递单号为 <code>7898047967</code>。</dd>
+        <dt>退货运费</dt>
+        <dd>客服核实商品有质量问题后，由商家承担退货运费，出处是《售后手册》第 3.2 节「质量问题退货」。</dd>
+      </dl>
+      <div class="example-pair">
+        <figure class="example-shot">
+          <a href="${examples}mcp.png"><img src="${examples}mcp.png" alt="MCP 查询返回订单 3 的物流位置和快递单号 7898047967。" width="794" height="370" loading="lazy" decoding="async"></a>
+          <figcaption>MCP 订单查询示例（演示数据）。</figcaption>
+        </figure>
+        <figure class="example-shot">
+          <a href="${examples}rag.png"><img src="${examples}rag.png" alt="RAG 问答引用售后手册第 3.2 节，指出商家承担退货运费。" width="794" height="317" loading="lazy" decoding="async"></a>
+          <figcaption>RAG 售后规则问答示例（演示数据）。</figcaption>
+        </figure>
+      </div>
+      <p>还可以追问「只根据《售后手册》，仓库签收后几天内发起退款？」演示手册没有规定这一时限，回答应说明资料未提及。</p>
+    </section>
+
+    <section id="troubleshooting">
+      <h2>Agent 只回答了其中一部分怎么办</h2>
+      <dl>
+        <dt>有售后规则，缺订单结果</dt>
+        <dd>先完成 <a href="../mcp/#test">MCP 连接与工具测试</a>，再单独查订单 3，确认查询工具可用。</dd>
+        <dt>有订单结果，缺手册出处</dt>
+        <dd>打开 <a href="../rag/#import">知识库导入与检索步骤</a>，核对库名，确认搜索能命中「退货运费」。再请 Agent 写出文件名和章节。</dd>
+      </dl>
+    </section>

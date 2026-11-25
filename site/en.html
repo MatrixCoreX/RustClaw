@@ -15,57 +15,77 @@
     <div>
       <p class="byline"><a href="$profile">Built by $owner</a></p>
       <h1 id="name">$brand <span>Self-hosted AI agent</span></h1>
-      <p class="intro">Run an open-source AI agent on Raspberry Pi, Ubuntu, or macOS. Set up a model, upload files, and follow task progress in the web console. Connect Telegram, WeChat, or Feishu to send requests from your messaging app.</p>
+      <p class="intro">Run this Rust-based AI agent on Raspberry Pi, Ubuntu, or macOS. Set up a model, upload files, and follow tasks in the web console. Connect Telegram, WeChat, or Feishu to send requests from your messaging app.</p>
       <p class="intro">Ask the agent to summarize a PDF, check an order through MCP, or cite a returns policy from your RAG knowledge base. For media tasks, review collected posts and downloaded files in the skill’s companion AiAPP.</p>
       <div class="actions">
         <a class="button primary" href="#install">Install</a>
         <a class="button secondary" href="#use-cases">View guides</a>
       </div>
     </div>
-    <figure class="preview" id="order-example">
-      <a href="${examples}mcp.png"><img src="${examples}mcp.png" alt="$preview_alt" width="794" height="370" fetchpriority="high"></a>
-      <figcaption>MCP order lookup with sample data. <a href="#rag-example">Knowledge base example</a> · <a href="#skills">Skill examples</a></figcaption>
-    </figure>
   </section>
   <div id="use-cases">
     <section class="page-section" id="skills" aria-labelledby="skills-heading">
       <h2 id="skills-heading">Agent skills</h2>
       <article class="skills-overview">
-        <p>Enable skills to work with files, transcribe audio, collect and download media, or check cryptocurrency prices through chat.</p>
-        <a href="skills/">Install and use skills</a>
-        <p class="skill-example-intro">Start media collection and downloads in Agent chat. The screenshots show the media skills’ companion AiAPP views, where you can review the results.</p>
-        <div class="detail-grid skill-examples" id="media">
+        <p>Enable skills to work with files, transcribe audio, collect and download media, or check current weather and daily forecasts through chat.</p>
+        <a href="skills/#install">Install agent skills from Skill Store</a>
+        <p class="skill-example-intro">Start each task in Agent chat, then open the skill’s companion AiAPP to review the results. The screenshots use demo data.</p>
+        <div class="skill-examples" id="media">
           <section id="media-discovery" aria-labelledby="discovery-heading">
-            <h3 id="discovery-heading">Media Discovery</h3>
+            <h3 id="discovery-heading">Media Discovery skill</h3>
             <p>Collect posts by topic from supported sites such as Xiaohongshu, Douyin, and Bilibili. A collection can keep the original captions, previews, source links, and engagement numbers available at the time. Run a single batch or ask the agent to start, pause, or stop an ongoing collection.</p>
-            <blockquote>“Search Xiaohongshu for camping gear. Collect one batch of up to five posts and keep their captions, previews, and source links.”</blockquote>
-            <a href="skills/#media-discovery">Try the Media Discovery example</a>
-            <figure class="example-shot">
-              <a href="${examples}media-discovery.png"><img src="${examples}media-discovery.png" alt="Media Discovery in AiAPP shows two sample camping posts with previews, captions, and engagement figures." width="1120" height="642" loading="lazy" decoding="async"></a>
-              <figcaption>The Media Discovery companion AiAPP shows sample collection results.</figcaption>
-            </figure>
+            <blockquote>“Collect one post about camping gear from Xiaohongshu and one from Douyin. Keep the captions, previews, and source links.”</blockquote>
+            <div class="detail-links"><a href="skills/#media-discovery">Try the Media Discovery example</a></div>
+            <div class="example-pair">
+              <figure class="example-shot">
+                <a href="${examples}media-discovery-agent.png"><img src="${examples}media-discovery-agent.png" alt="Agent chat shows a camping gear collection request and a reply listing one post from each platform." width="714" height="281" loading="lazy" decoding="async"></a>
+                <figcaption><strong>Agent</strong> · Start the collection and see which two posts were saved.</figcaption>
+              </figure>
+              <figure class="example-shot">
+                <a href="${examples}media-discovery.png"><img src="${examples}media-discovery.png" alt="The Media Discovery AiAPP shows two sample camping posts with previews, captions, and source links." width="1120" height="642" loading="lazy" decoding="async"></a>
+                <figcaption><strong>AiAPP</strong> · Open Media Discovery to see the previews, captions, and source links.</figcaption>
+              </figure>
+            </div>
           </section>
           <section id="media-download" aria-labelledby="download-heading">
-            <h3 id="download-heading">Media Download</h3>
+            <h3 id="download-heading">Media Download skill</h3>
             <p>Send a supported post URL or paste its app share message. The skill saves the available original video or images and can return the original article text for supported posts. Larger image sets are delivered in a ZIP file.</p>
-            <blockquote>“Save the original images and any available article text from this Xiaohongshu post: [paste the share link].”</blockquote>
-            <a href="skills/#media-download">Try the Media Download example</a>
-            <figure class="example-shot">
-              <a href="${examples}media-download.png"><img src="${examples}media-download.png" alt="Media Download in AiAPP shows a completed sample task with image and text files alongside a failed task." width="1120" height="853" loading="lazy" decoding="async"></a>
-              <figcaption>The Media Download companion AiAPP shows sample tasks and output files.</figcaption>
-            </figure>
+            <blockquote>“Save the original photos and article from this camping post: [paste the Xiaohongshu share link].”</blockquote>
+            <div class="detail-links"><a href="skills/#media-download">Try the Media Download example</a></div>
+            <div class="example-pair">
+              <figure class="example-shot">
+                <a href="${examples}media-download-agent.png"><img src="${examples}media-download-agent.png" alt="Agent chat shows a request to download a camping post and a reply with two original photos and a text file." width="714" height="330" loading="lazy" decoding="async"></a>
+                <figcaption><strong>Agent</strong> · Send a post’s share link and download the photos and text from the reply.</figcaption>
+              </figure>
+              <figure class="example-shot">
+                <a href="${examples}media-download.png"><img src="${examples}media-download.png" alt="The Media Download AiAPP shows one completed task with two original photos and the article text file." width="702" height="943" loading="lazy" decoding="async"></a>
+                <figcaption><strong>AiAPP</strong> · Open Media Download to find the completed task and its files.</figcaption>
+              </figure>
+            </div>
           </section>
         </div>
-        <section class="workflow" id="crypto" aria-labelledby="crypto-heading">
+        <section class="workflow" id="weather" aria-labelledby="weather-heading">
           <div>
-            <h3 id="crypto-heading">Cryptocurrency quotes</h3>
-            <p>Use the <code>crypto</code> skill to look up a public market quote in Agent chat.</p>
-            <blockquote>“Look up the latest USD price for Bitcoin (BTC). Include the data source and the time of the query.”</blockquote>
-            <div class="detail-links"><a href="skills/#crypto">Try the cryptocurrency quote example</a></div>
+            <h3 id="weather-heading">Weather forecast skill</h3>
+            <p>Tell the agent a city and how many days to check. It can return the conditions and daily lows and highs.</p>
+            <blockquote>“What’s the weather in Hangzhou for the next three days? List the conditions, low, and high for each day.”</blockquote>
+            <div class="detail-links"><a href="skills/#weather">Try the weather forecast example</a></div>
           </div>
           <figure class="example-shot">
-            <a href="${examples}crypto.png"><img src="${examples}crypto.png" alt="Agent chat shows a sample Bitcoin price in USD, a simulated data source, and the query time." width="794" height="339" loading="lazy" decoding="async"></a>
-            <figcaption>Bitcoin quote in Agent chat with demo data.</figcaption>
+            <a href="${examples}weather.png"><img src="${examples}weather.png" alt="Agent chat shows three days of weather conditions and daily lows and highs for Hangzhou." width="714" height="310" loading="lazy" decoding="async"></a>
+            <figcaption>Three-day forecast for Hangzhou in Agent chat (demo data).</figcaption>
+          </figure>
+        </section>
+        <section class="workflow" id="speech-transcription" aria-labelledby="speech-transcription-heading">
+          <div>
+            <h3 id="speech-transcription-heading">Speech transcription skill</h3>
+            <p>Upload a meeting recording in Agent chat. Read the full transcript in the reply or download it as a TXT file.</p>
+            <blockquote>“Transcribe the meeting recording I uploaded, meeting.wav. Paste the full transcript here and attach a TXT file.”</blockquote>
+            <div class="detail-links"><a href="skills/#speech-transcription">Try the speech transcription example</a></div>
+          </div>
+          <figure class="example-shot">
+            <a href="${examples}speech-transcription.png"><img src="${examples}speech-transcription.png" alt="Agent chat shows the text of a meeting recording and a transcript.txt download." width="714" height="331" loading="lazy" decoding="async"></a>
+            <figcaption>Meeting transcript and TXT download in Agent chat (demo data).</figcaption>
           </figure>
         </section>
         <section id="aipp" aria-labelledby="aipp-heading">
@@ -77,14 +97,19 @@
     </section>
     <section class="page-section" id="mcp" aria-labelledby="mcp-heading">
       <h2 id="mcp-heading">MCP tools</h2>
-      <article>
-        <p>Connect tools from other systems to look up current records, such as shipping status and tracking numbers.</p>
-        <blockquote>“Look up order 3. Has it shipped, and what is the tracking number?”</blockquote>
-        <div class="detail-links">
-          <a href="mcp/">Connect and test MCP tools</a>
-          <a href="#order-example">See the order lookup example</a>
+      <div class="workflow">
+        <div>
+          <p>Connect tools from other systems to look up current records, such as shipping status and tracking numbers.</p>
+          <blockquote>“Where is order 3? What is the tracking number?”</blockquote>
+          <div class="detail-links">
+            <a href="mcp/#demo">Set up MCP tools with the order lookup demo</a>
+          </div>
         </div>
-      </article>
+        <figure class="example-shot" id="order-example">
+          <a href="${examples}mcp.png"><img src="${examples}mcp.png" alt="$preview_alt" width="794" height="370" loading="lazy" decoding="async"></a>
+          <figcaption>MCP order lookup in Agent chat with sample data.</figcaption>
+        </figure>
+      </div>
     </section>
     <section class="page-section" id="rag" aria-labelledby="rag-heading">
       <h2 id="rag-heading">RAG knowledge base</h2>
@@ -92,7 +117,11 @@
         <div>
           <p>Import manuals, FAQs, and policies that the agent can search and cite when answering a question.</p>
           <blockquote>“Check the Returns Handbook. Who pays return shipping if the item is defective? Cite the policy.”</blockquote>
-          <div class="detail-links"><a href="rag/">Import documents and ask for sources</a></div>
+          <div class="detail-links">
+            <a href="rag/#prepare">Import a document into a RAG knowledge base</a>
+            <a href="rag/#scenarios">Try seven RAG knowledge base examples</a>
+            <a href="order-support/">Combine MCP and RAG for order support</a>
+          </div>
         </div>
         <figure class="example-shot" id="rag-example">
           <a href="${examples}rag.png"><img src="${examples}rag.png" alt="Agent answers a return shipping question and cites section 3.2 of the sample Returns Handbook." width="794" height="317" loading="lazy" decoding="async"></a>
@@ -114,7 +143,7 @@
       <label for="install-macos">macOS</label>
       <div class="actions platform-actions">
         <a class="button primary" href="$repo/releases">Download a signed release</a>
-        <a class="button secondary" data-platform="pi" href="zh/raspberry-pi-install/" hreflang="zh-CN">Raspberry Pi guide (Chinese)</a>
+        <a class="button secondary" data-platform="pi" href="raspberry-pi-install/">Raspberry Pi installation guide</a>
         <a class="button secondary" data-platform="ubuntu" href="$repo/blob/main/docs/release_installation.md#ubuntu">Ubuntu installation guide</a>
         <a class="button secondary" data-platform="macos" href="$repo/blob/main/docs/release_installation.md#macos">macOS installation guide</a>
       </div>
@@ -123,5 +152,5 @@
 </main>
 <footer class="wrap footer">
   <span>$brand by <a href="$profile">$owner</a></span>
-  <a href="$repo/blob/main/LICENSE">License</a>
+  <a href="$repo/blob/main/LICENSE">Non-commercial source-available license</a>
 </footer>

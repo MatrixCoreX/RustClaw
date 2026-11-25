@@ -1,6 +1,7 @@
 """Exercise the site entry point with both repository product identity fixtures."""
 
 from html.parser import HTMLParser
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -8,8 +9,9 @@ import sys
 from tempfile import TemporaryDirectory
 import tomllib
 import unittest
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 from xml.etree import ElementTree
+from zipfile import ZipFile
 
 
 SOURCE = Path(__file__).resolve().parent
@@ -30,16 +32,23 @@ class Page(HTMLParser):
         self.preview_image = ""
         self.links = []
         self.assets = []
+        self.open_sections = []
+        self.section_assets = {}
         self.ids = set()
         self.in_title = False
+        self.in_structured_data = False
+        self.structured_data = ""
         self.feed(source)
 
     def handle_starttag(self, tag, attrs):
         attributes = dict(attrs)
         if "id" in attributes:
             self.ids.add(attributes["id"])
-        if tag == "section" and "id" in attributes:
-            self.section_labels[attributes["id"]] = attributes.get("aria-labelledby")
+        if tag == "section":
+            section_id = attributes.get("id")
+            self.open_sections.append(section_id)
+            if section_id:
+                self.section_labels[section_id] = attributes.get("aria-labelledby")
         if tag == "h2" and "id" in attributes:
             self.section_headings.add(attributes["id"])
         if tag == "input" and attributes.get("name") == "install-platform":
@@ -50,6 +59,8 @@ class Page(HTMLParser):
             self.headings += 1
         if tag == "title":
             self.in_title = True
+        if tag == "script" and attributes.get("type") == "application/ld+json":
+            self.in_structured_data = True
         if tag == "html":
             self.lang = attributes["lang"]
         if tag == "meta" and attributes.get("name") == "description":
@@ -60,14 +71,22 @@ class Page(HTMLParser):
             self.links.append(attributes)
         if tag == "img":
             self.assets.append(attributes["src"])
+            if self.open_sections and self.open_sections[-1]:
+                self.section_assets.setdefault(self.open_sections[-1], []).append(attributes["src"])
 
     def handle_endtag(self, tag):
+        if tag == "section":
+            self.open_sections.pop()
         if tag == "title":
             self.in_title = False
+        if tag == "script":
+            self.in_structured_data = False
 
     def handle_data(self, data):
         if self.in_title:
             self.title += data
+        if self.in_structured_data:
+            self.structured_data += data
 
 
 class ProjectSiteTest(unittest.TestCase):
@@ -79,23 +98,29 @@ class ProjectSiteTest(unittest.TestCase):
                 identity = tomllib.loads(config.read_text(encoding="utf-8"))
                 brand = identity["display_name"]
                 owner, repo = identity["release_repository"].split("/")
-                base = f"https://{owner.lower()}.github.io/{repo}/"
+                base = identity.get("public_site_url", f"https://{owner.lower()}.github.io/{repo}/").rstrip("/") + "/"
                 subprocess.run(
                     [sys.executable, str(SOURCE / "render.py"), directory],
                     env=os.environ | {"APP_PRODUCT_IDENTITY_CONFIG": str(config)},
                     check=True,
                 )
-                pi_guide = "zh/raspberry-pi-install/"
+                pi_guide = "raspberry-pi-install/"
+                media_examples = ("media-discovery", "media-download")
+                skill_examples = (*media_examples, "weather", "speech-transcription")
+                example_sections = ("mcp", "rag", *skill_examples)
                 topic_sections = {
-                    "skills/": {"install", "media-discovery", "media-download", "crypto", "aipp", "troubleshooting"},
-                    "mcp/": {"connect", "permissions", "test", "troubleshooting"},
-                    "rag/": {"prepare", "import", "ask", "troubleshooting"},
+                    "skills/": {"install", "aipp", "troubleshooting", *skill_examples},
+                    "mcp/": {"connect", "demo", "permissions", "test", "troubleshooting"},
+                    "rag/": {"prepare", "import", "ask", "test", "scenarios", "troubleshooting"},
+                    "order-support/": {"setup", "ask", "verify", "troubleshooting"},
+                    pi_guide: {"requirements", "install", "console", "troubleshooting"},
                 }
-                pages = [("", "en"), ("zh/", "zh-CN"), (pi_guide, "zh-CN")]
+                pages = [("", "en"), ("zh/", "zh-CN")]
                 for topic in topic_sections:
                     pages.extend(((topic, "en"), ("zh/" + topic, "zh-CN")))
                 titles = set()
                 descriptions = set()
+                sitemap_images = {}
                 for part, locale in pages:
                     path = output / part / "index.html"
                     source = path.read_text(encoding="utf-8")
@@ -109,20 +134,54 @@ class ProjectSiteTest(unittest.TestCase):
                     titles.add(page.title)
                     descriptions.add(page.description)
                     topic = part.removeprefix("zh/")
-                    preview = {"skills/": "media-discovery.png", "rag/": "rag.png"}.get(topic, "mcp.png")
+                    canonical = base + part
+                    metadata = json.loads(page.structured_data)
+                    self.assertEqual(metadata["@context"], "https://schema.org")
+                    if topic:
+                        self.assertEqual(metadata["@type"], "BreadcrumbList")
+                        trail = metadata["itemListElement"]
+                        self.assertEqual([item["position"] for item in trail], [1, 2])
+                        self.assertEqual(trail[0]["name"], brand)
+                        self.assertEqual(trail[0]["item"], base + ("zh/" if locale == "zh-CN" else ""))
+                        self.assertTrue(trail[1]["name"])
+                        self.assertEqual(trail[1]["item"], canonical)
+                    else:
+                        repository = f"https://github.com/{owner}/{repo}"
+                        nodes = {node["@type"]: node for node in metadata["@graph"]}
+                        self.assertEqual(set(nodes), {"WebSite", "SoftwareSourceCode"})
+                        self.assertEqual(nodes["WebSite"]["name"], brand)
+                        self.assertEqual(nodes["WebSite"]["url"], base)
+                        self.assertEqual(nodes["WebSite"]["about"]["@id"], nodes["SoftwareSourceCode"]["@id"])
+                        self.assertEqual(nodes["SoftwareSourceCode"]["codeRepository"], repository)
+                        self.assertEqual(nodes["SoftwareSourceCode"]["name"], brand)
+                        self.assertEqual(nodes["SoftwareSourceCode"]["url"], base)
+                        self.assertEqual(nodes["SoftwareSourceCode"]["license"], repository + "/blob/main/LICENSE")
+                    sitemap_images[canonical] = {
+                        urljoin(canonical, src) for src in page.assets if "assets/examples/" in src
+                    }
+                    preview = {
+                        "skills/": "media-discovery.png", "rag/": "rag.png", pi_guide: "pi-first-task.png",
+                    }.get(topic, "mcp.png")
                     example_dir = f"assets/examples/{locale.split('-')[0]}/"
+                    example_path = "../" * part.count("/") + example_dir
+                    example_images = {section: [f"{example_path}{section}.png"] for section in example_sections}
+                    for section in media_examples:
+                        example_images[section].insert(0, f"{example_path}{section}-agent.png")
                     self.assertEqual(page.preview_image, base + example_dir + preview)
                     self.assertGreater((output / example_dir / preview).stat().st_size, 0)
                     alternates = {"en": base + topic, "zh-CN": base + "zh/" + topic, "x-default": base + topic}
-                    if part == pi_guide:
-                        self.assertIn(f"<title>在 Raspberry Pi 上安装 {brand} | {owner}</title>", source)
+                    if topic == pi_guide:
+                        self.assertLessEqual(topic_sections[topic], page.ids)
+                        self.assertIn("Raspberry Pi", page.title)
                         self.assertIn(f"install-latest-release.sh --repo {identity['release_repository']} --check-only", source)
                         self.assertIn('df -h "$HOME"', source)
-                        alternates = {}
+                        self.assertEqual(page.section_assets["console"], [example_path + "pi-first-task.png"])
                     elif not topic:
-                        self.assertIn(f"<title>{brand} by {owner} | ", source)
+                        self.assertTrue(page.title.startswith(brand))
+                        self.assertIn(owner, page.title)
+                        self.assertIn(owner, page.description)
                         self.assertLessEqual(
-                            {"skills", "mcp", "rag", "media", "media-discovery", "media-download", "crypto", "aipp"},
+                            {"skills", "mcp", "rag", "media", "aipp", *skill_examples},
                             page.ids,
                         )
                         for section_id in ("skills", "mcp", "rag"):
@@ -140,7 +199,7 @@ class ProjectSiteTest(unittest.TestCase):
                         self.assertEqual(
                             {link["data-platform"]: link["href"] for link in page.links if "data-platform" in link},
                             {
-                                "pi": pi_guide if locale == "en" else "raspberry-pi-install/",
+                                "pi": pi_guide,
                                 "ubuntu": guide_url + "#ubuntu",
                                 "macos": guide_url + "#macos",
                             },
@@ -153,28 +212,81 @@ class ProjectSiteTest(unittest.TestCase):
                         self.assertIn("AiAPP", page.description)
                         self.assertCountEqual(
                             [asset for asset in page.assets if "assets/examples/" in asset],
-                            ["../" * part.count("/") + example_dir + name for name in (
-                                "mcp.png", "rag.png", "media-discovery.png", "media-download.png", "crypto.png",
-                            )],
+                            [image for images in example_images.values() for image in images],
                         )
+                        for section_id in example_sections:
+                            self.assertEqual(page.section_assets[section_id], example_images[section_id])
                         hrefs = {link["href"] for link in page.links}
                         self.assertLessEqual(set(topic_sections), hrefs)
-                        self.assertIn("skills/#crypto", hrefs)
-                        self.assertIn(pi_guide if not part else "raspberry-pi-install/", hrefs)
+                        self.assertLessEqual({f"skills/#{name}" for name in skill_examples}, hrefs)
+                        self.assertIn("rag/#scenarios", hrefs)
                     else:
                         self.assertLessEqual(topic_sections[topic], page.ids)
                         if topic == "skills/":
-                            self.assertIn("../" * part.count("/") + example_dir + "crypto.png", page.assets)
+                            for section_id in skill_examples:
+                                self.assertEqual(
+                                    page.section_assets[section_id],
+                                    example_images[section_id],
+                                )
+                        if topic == "mcp/":
+                            demo = "assets/examples/mcp-orders-demo.py"
+                            self.assertEqual(
+                                [link["href"] for link in page.links if "download" in link],
+                                ["../" * part.count("/") + demo],
+                            )
+                            self.assertEqual((output / demo).read_bytes(), (SOURCE / demo).read_bytes())
+                            self.assertEqual(
+                                page.section_assets["test"],
+                                [example_path + "mcp-setup.png", example_path + "mcp.png"],
+                            )
+                        if topic == "rag/":
+                            sample = "returns-handbook.md"
+                            archive_path = "assets/examples/rag-scenarios.zip"
+                            scenario_path = SOURCE / "assets/examples/rag-scenarios"
+                            self.assertEqual(
+                                [link["href"] for link in page.links if "download" in link],
+                                [example_path + sample, "../" * part.count("/") + archive_path],
+                            )
+                            self.assertEqual(
+                                (output / example_dir / sample).read_bytes(),
+                                (SOURCE / example_dir / sample).read_bytes(),
+                            )
+                            sources = sorted(scenario_path.glob("*.md"))
+                            self.assertEqual(len(sources), 8)
+                            with ZipFile(output / archive_path) as archive:
+                                self.assertCountEqual(
+                                    [member.filename for member in archive.infolist() if not member.is_dir()],
+                                    [f"rag-scenarios/{source.name}" for source in sources],
+                                )
+                                for source in sources:
+                                    self.assertEqual(
+                                        archive.read(f"rag-scenarios/{source.name}"), source.read_bytes(),
+                                    )
+                            self.assertEqual(page.section_assets["import"], [example_path + "rag-import.png"])
+                            self.assertEqual(page.section_assets["ask"], [example_path + "rag.png"])
+                        if topic == "order-support/":
+                            self.assertEqual(
+                                page.section_assets["verify"], [example_path + "mcp.png", example_path + "rag.png"],
+                            )
+                    if topic:
                         other_locale = "zh-CN" if locale == "en" else "en"
-                        switches = [link for link in page.links if link.get("lang") == other_locale]
+                        switches = [
+                            link for link in page.links
+                            if link.get("lang") == other_locale and link.get("hreflang") == other_locale
+                        ]
                         self.assertEqual(len(switches), 1)
                         other_path = topic if other_locale == "en" else "zh/" + topic
                         self.assertEqual((path.parent / switches[0]["href"]).resolve(), (output / other_path).resolve())
-                    self.assertEqual([link["href"] for link in page.links if link.get("rel") == "canonical"], [base + part])
+                    self.assertEqual([link["href"] for link in page.links if link.get("rel") == "canonical"], [canonical])
                     self.assertEqual(
                         {link["hreflang"]: link["href"] for link in page.links if link.get("rel") == "alternate"},
                         alternates,
                     )
+                    icons = [link for link in page.links if link.get("rel") == "icon"]
+                    self.assertEqual(len(icons), 1)
+                    self.assertEqual(icons[0]["type"], "image/png")
+                    self.assertEqual(icons[0]["sizes"], "64x64")
+                    self.assertEqual((path.parent / icons[0]["href"]).resolve(), output / "assets/favicon.png")
                     for link in page.links:
                         resolved = urlsplit(link["href"])
                         if resolved.scheme or resolved.netloc:
@@ -189,9 +301,56 @@ class ProjectSiteTest(unittest.TestCase):
                     for asset in page.assets:
                         self.assertGreater((path.parent / asset).stat().st_size, 0)
                 sitemap = ElementTree.parse(output / "sitemap.xml")
-                self.assertCountEqual([node.text for node in sitemap.findall(".//{*}loc")], [base + part for part, _ in pages])
+                self.assertIn(f"Sitemap: {base}sitemap.xml\n", (output / "robots.txt").read_text())
+                entries = sitemap.findall("{*}url")
+                self.assertCountEqual(
+                    [entry.findtext("{*}loc") for entry in entries], [base + part for part, _ in pages],
+                )
+                image_namespace = "http://www.google.com/schemas/sitemap-image/1.1"
+                for entry in entries:
+                    self.assertCountEqual(
+                        [node.text for node in entry.findall("image:image/image:loc", {"image": image_namespace})],
+                        sitemap_images[entry.findtext("{*}loc")],
+                    )
                 for verification in (SOURCE / "verification").glob("google*.html"):
                     self.assertEqual((output / verification.name).read_bytes(), verification.read_bytes())
+
+    def test_downloadable_order_server_protocol(self):
+        calls = [
+            ("initialize", {"protocolVersion": "2025-11-25"}),
+            ("notifications/initialized", {}),
+            ("ping", {}),
+            ("tools/list", {}),
+            ("tools/call", {"name": "lookup_order", "arguments": {"order_id": 3}}),
+            ("tools/call", {"name": "find_order_by_tracking", "arguments": {"tracking_number": "7898047967"}}),
+            ("tools/call", {"name": "find_order_by_tracking", "arguments": {"tracking_number": "0425386197"}}),
+            ("tools/call", {"name": "lookup_order", "arguments": {"order_id": 9999}}),
+            ("tools/call", {"name": "lookup_order", "arguments": {"order_id": True}}),
+        ]
+        requests = []
+        for index, (method, params) in enumerate(calls):
+            request = {"jsonrpc": "2.0", "method": method, "params": params}
+            if not method.startswith("notifications/"):
+                request["id"] = index
+            requests.append(json.dumps(request))
+        response = subprocess.run(
+            [sys.executable, str(SOURCE / "assets/examples/mcp-orders-demo.py")],
+            input="\n".join(requests) + "\n", check=True, capture_output=True, text=True, timeout=10,
+        )
+        replies = [json.loads(line) for line in response.stdout.splitlines()]
+        self.assertEqual([reply["id"] for reply in replies], [0, 2, 3, 4, 5, 6, 7, 8])
+        self.assertTrue(all(reply["jsonrpc"] == "2.0" for reply in replies))
+        results = {reply["id"]: reply["result"] for reply in replies}
+        self.assertEqual(results[0]["protocolVersion"], "2025-11-25")
+        self.assertEqual(results[2], {})
+        self.assertEqual([tool["name"] for tool in results[3]["tools"]], ["lookup_order", "find_order_by_tracking"])
+        forward = results[4]["structuredContent"]
+        self.assertEqual(forward["tracking_number"], "7898047967")
+        self.assertEqual((forward["status"], forward["location"]), ("in_transit", "Hangzhou sorting center"))
+        self.assertEqual(results[5]["structuredContent"], forward)
+        self.assertEqual(results[6]["structuredContent"]["order_id"], 12)
+        self.assertFalse(results[7]["structuredContent"]["found"])
+        self.assertTrue(results[8]["isError"])
 
 
 if __name__ == "__main__":
