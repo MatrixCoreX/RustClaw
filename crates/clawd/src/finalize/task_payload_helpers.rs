@@ -24,7 +24,7 @@ pub(super) fn ask_result_payload(
     }
 }
 
-pub(super) fn should_skip_ask_memory_pair(
+pub(crate) fn should_skip_ask_memory_pair(
     _state: &AppState,
     answer_text: &str,
     answer_messages: &[String],

@@ -25,6 +25,7 @@ mod projection_retirement;
 mod projection_transaction;
 pub(crate) mod quota;
 mod recall_policy;
+pub(crate) mod resumed_turn;
 pub(crate) mod retention;
 mod retirement_access;
 pub(crate) mod retrieval;

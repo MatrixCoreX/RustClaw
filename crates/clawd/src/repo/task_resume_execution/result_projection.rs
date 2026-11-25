@@ -814,7 +814,8 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let task_row = db
         .query_row(
-            "SELECT kind, result_json
+            "SELECT kind, result_json, user_id, chat_id, user_key, channel,
+                    external_user_id, external_chat_id, payload_json
              FROM tasks
              WHERE task_id = ?1
                AND status = 'running'
@@ -822,13 +823,30 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
                AND claim_attempt = ?3
              LIMIT 1",
             params![task_id, state.worker.worker_id.as_str(), claim_attempt],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            |row| {
+                Ok((
+                    ClaimedTask {
+                        claim_attempt,
+                        task_id: task_id.to_owned(),
+                        kind: row.get(0)?,
+                        user_id: row.get(2)?,
+                        chat_id: row.get(3)?,
+                        user_key: row.get(4)?,
+                        channel: row.get(5)?,
+                        external_user_id: row.get(6)?,
+                        external_chat_id: row.get(7)?,
+                        payload_json: row.get(8)?,
+                    },
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            },
         )
         .optional()?
-        .and_then(|(kind, result_json)| result_json.map(|raw| (kind, raw)));
-    let Some((task_kind, raw_result_json)) = task_row else {
+        .and_then(|(task, result_json)| result_json.map(|raw| (task, raw)));
+    let Some((task, raw_result_json)) = task_row else {
         return Ok(false);
     };
+    let task_kind = &task.kind;
     let result_json = match serde_json::from_str::<Value>(&raw_result_json) {
         Ok(value) => value,
         Err(_) => return Ok(false),
@@ -997,6 +1015,8 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
     } else {
         updated_result_json
     };
+    let memory_turn =
+        crate::memory::resumed_turn::prepare(state, &task, db_status, &terminal_result)?;
     let db = state
         .core
         .db
@@ -1030,6 +1050,9 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
     )?;
     if changed == 0 {
         return Ok(false);
+    }
+    if let Some(turn) = memory_turn {
+        turn.persist(state, &tx)?;
     }
     tx.commit()?;
     drop(db);

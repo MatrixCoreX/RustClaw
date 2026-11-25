@@ -1377,5 +1377,8 @@ fn claim_handoff_paused_checkpoint_resume_execution_uses_active_machine_lease() 
 #[path = "task_resume_execution_tests/terminal_result_projection.rs"]
 mod terminal_result_projection;
 
+#[path = "task_resume_execution_tests/terminal_memory.rs"]
+mod terminal_memory;
+
 #[path = "task_resume_execution_tests/resume_lease.rs"]
 mod resume_lease;

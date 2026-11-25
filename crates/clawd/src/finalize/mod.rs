@@ -37,7 +37,7 @@ pub(crate) use task::{
     answer_verifier_retry_answer_has_required_machine_evidence, assistant_memory_source_text,
     enforce_terminal_ask_reply_status, finalize_ask_direct_success, finalize_ask_result,
     preserve_verified_delivery_tokens_after_retry, retry_answer_after_verifier,
-    run_direct_classifier_reply,
+    run_direct_classifier_reply, should_skip_ask_memory_pair,
 };
 
 // === LOOP REPLY 层（已物理位于 finalize/loop_reply.rs，Stage 2.3）===

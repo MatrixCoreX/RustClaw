@@ -224,6 +224,31 @@ pub(crate) fn persist_turn_and_enqueue(
     require_memory_job_schema(&db)?;
     let settings = super::settings::resolve_task_memory_settings(state, task)?;
     let tx = db.unchecked_transaction()?;
+    let job_ids = persist_turn_and_enqueue_in_connection(
+        state,
+        &tx,
+        task,
+        user_content,
+        assistant_content,
+        force_consolidation,
+        settings.as_ref(),
+    )?;
+    tx.commit()?;
+    Ok(job_ids)
+}
+
+/// Join a caller-owned terminal-result transaction, so a resumed completion
+/// and its memory sources/outbox are committed or retried together.
+pub(crate) fn persist_turn_and_enqueue_in_connection(
+    state: &crate::AppState,
+    tx: &Connection,
+    task: &crate::ClaimedTask,
+    user_content: &str,
+    assistant_content: Option<&str>,
+    force_consolidation: bool,
+    settings: Option<&super::settings::MemoryEffectiveSettings>,
+) -> anyhow::Result<Vec<String>> {
+    require_memory_job_schema(tx)?;
     let user_source_memory_id = super::insert_memory_with_id_in_connection(
         state,
         &tx,
@@ -252,7 +277,6 @@ pub(crate) fn persist_turn_and_enqueue(
         _ => None,
     };
     let Some(settings) = settings.filter(|settings| settings.generate_memory) else {
-        tx.commit()?;
         return Ok(Vec::new());
     };
     super::retention::refresh_existing_principal_usage(
@@ -261,13 +285,11 @@ pub(crate) fn persist_turn_and_enqueue(
         crate::now_ts_u64() as i64,
     )?;
     if !super::retention::automatic_generation_allowed(&tx, &settings.target_principal_id)? {
-        tx.commit()?;
         return Ok(Vec::new());
     }
     let payload = serde_json::from_str::<Value>(&task.payload_json).unwrap_or(Value::Null);
     let eligibility = build_turn_eligibility(task, &payload, &settings);
     if !eligibility.durable_candidate_allowed {
-        tx.commit()?;
         return Ok(Vec::new());
     }
     let conversation_id = crate::conversation_state::task_conversation_id(task);
@@ -291,7 +313,6 @@ pub(crate) fn persist_turn_and_enqueue(
         force_consolidation,
         &tx,
     )?;
-    tx.commit()?;
     Ok(job_ids)
 }
 
