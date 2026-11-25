@@ -282,6 +282,11 @@ class ProjectSiteTest(unittest.TestCase):
                         {link["hreflang"]: link["href"] for link in page.links if link.get("rel") == "alternate"},
                         alternates,
                     )
+                    icons = [link for link in page.links if link.get("rel") == "icon"]
+                    self.assertEqual(len(icons), 1)
+                    self.assertEqual(icons[0]["type"], "image/png")
+                    self.assertEqual(icons[0]["sizes"], "64x64")
+                    self.assertEqual((path.parent / icons[0]["href"]).resolve(), output / "assets/favicon.png")
                     for link in page.links:
                         resolved = urlsplit(link["href"])
                         if resolved.scheme or resolved.netloc:

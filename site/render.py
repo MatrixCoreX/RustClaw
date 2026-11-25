@@ -221,7 +221,7 @@ def build(output: Path):
     (output / "robots.txt").write_text(f"User-agent: *\nAllow: /\nSitemap: {site}sitemap.xml\n", encoding="utf-8")
     assets = output / "assets"
     assets.mkdir(exist_ok=True)
-    for name in ("site.css", "console-demo.png"):
+    for name in ("site.css", "console-demo.png", "favicon.png"):
         shutil.copyfile(SOURCE / "assets" / name, assets / name)
     examples = assets / "examples"
     shutil.copytree(SOURCE / "assets" / "examples", examples, dirs_exist_ok=True)
