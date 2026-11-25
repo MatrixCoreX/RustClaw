@@ -8,7 +8,8 @@ fn restart_repairs_cancelled_graph_with_unfinished_children_only() {
     let mut db = Connection::open_in_memory().expect("open db");
     db.execute_batch(
         "CREATE TABLE tasks (
-            task_id TEXT PRIMARY KEY, status TEXT NOT NULL, result_json TEXT,
+            task_id TEXT PRIMARY KEY,
+            payload_json TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL, result_json TEXT,
             error_text TEXT, lease_owner TEXT, lease_expires_at INTEGER NOT NULL DEFAULT 0,
             updated_at TEXT NOT NULL
         );",

@@ -141,6 +141,7 @@ fn persisted_graph_promotes_successors_and_cancels_required_dependents() {
     db.execute_batch(
         "CREATE TABLE tasks (
             task_id TEXT PRIMARY KEY,
+            payload_json TEXT NOT NULL DEFAULT '{}',
             status TEXT NOT NULL,
             result_json TEXT,
             error_text TEXT,
@@ -203,6 +204,7 @@ fn persisted_graph_promotes_successors_and_cancels_required_dependents() {
     assert_eq!(reviewer["readiness"], "ready");
     assert_eq!(reviewer["steering_version"], 1);
     assert_eq!(reviewer["steering"]["checkpoint_id"], "checkpoint-1");
+    assert!(reviewer["child_task_ref"].is_null());
 
     db.execute(
         "UPDATE child_task_graph_nodes SET readiness = 'blocked_dependency'
@@ -233,6 +235,7 @@ fn restart_reconciliation_uses_task_rows_to_release_successor() {
     db.execute_batch(
         "CREATE TABLE tasks (
             task_id TEXT PRIMARY KEY,
+            payload_json TEXT NOT NULL DEFAULT '{}',
             status TEXT NOT NULL,
             result_json TEXT,
             error_text TEXT,
@@ -303,6 +306,8 @@ fn restart_reconciliation_uses_task_rows_to_release_successor() {
         .find(|node| node["child_task_id"] == "reviewer")
         .expect("reviewer");
     assert_eq!(writer["readiness"], "succeeded");
+    assert!(writer["child_task_ref"].is_null());
+    assert!(reviewer["child_task_ref"].is_null());
     assert_eq!(reviewer["readiness"], "ready");
 }
 
@@ -312,6 +317,7 @@ fn graph_projects_approval_and_tool_waits_from_machine_lifecycle_fields() {
     db.execute_batch(
         "CREATE TABLE tasks (
             task_id TEXT PRIMARY KEY,
+            payload_json TEXT NOT NULL DEFAULT '{}',
             status TEXT NOT NULL,
             result_json TEXT,
             error_text TEXT,
@@ -358,6 +364,7 @@ fn graph_projects_approval_and_tool_waits_from_machine_lifecycle_fields() {
         .expect("approval snapshot")
         .expect("graph");
     assert_eq!(approval["nodes"][0]["execution_state"], "waiting_approval");
+    assert!(approval["nodes"][0]["child_task_ref"].is_null());
     assert_eq!(
         approval["nodes"][0]["waiting_reason"],
         "confirmation_required"

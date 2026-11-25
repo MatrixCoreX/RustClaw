@@ -25,6 +25,7 @@ fn worker_runtime_error_immediately_transitions_running_task_to_failed() {
         db.execute_batch(
             "CREATE TABLE tasks (
                 task_id TEXT PRIMARY KEY,
+            payload_json TEXT NOT NULL DEFAULT '{}',
                 status TEXT NOT NULL,
                 result_json TEXT,
                 error_text TEXT,
