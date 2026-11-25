@@ -1037,7 +1037,13 @@ fn terminal_async_poll_projection_preserves_visible_ask_reply() {
 
 #[test]
 fn terminal_seeded_loop_projection_materializes_async_artifact_without_model_token() {
-    let mut state = state_with_tasks_table();
+    let mut memory_fixture = crate::memory::capacity_test_fixtures::Fixture::file();
+    let key = memory_fixture.key.clone();
+    let principal = memory_fixture.principal.clone();
+    let state = memory_fixture.state_mut();
+    state.policy.memory.long_term_enabled = true;
+    state.policy.memory.enable_preference_extraction = true;
+    state.policy.memory.llm_preference_fallback_enabled = true;
     let workspace = TempDirGuard::new("seeded_terminal_artifact");
     state.skill_rt.workspace_root = workspace.path.clone();
     let source_video = workspace.path.join("downloads").join("shared-video.mp4");
@@ -1080,6 +1086,16 @@ fn terminal_seeded_loop_projection_materializes_async_artifact_without_model_tok
         }
     });
     insert_task(&state, task_id, "running", Some(&seed), now);
+    state
+        .core
+        .db
+        .get()
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET user_key=?2,principal_id=?3 WHERE task_id=?1",
+            rusqlite::params![task_id, key, principal],
+        )
+        .unwrap();
     activate_resume_owner(&state, task_id, checkpoint_id, now, now + 30);
 
     claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
@@ -1117,6 +1133,7 @@ fn terminal_seeded_loop_projection_materializes_async_artifact_without_model_tok
                 "dispatch_state": "ready_to_run_seeded_agent_loop",
                 "executor_result_status": "seeded_loop_completed",
                 "result_projection_state": "project_seeded_loop_completed",
+                "answer_is_llm_reply": false,
                 "final_result_json": {
                     "text": "new resumed result",
                     "messages": ["new resumed result"],
@@ -1203,6 +1220,30 @@ fn terminal_seeded_loop_projection_materializes_async_artifact_without_model_tok
         std::fs::read(delivered).expect("read delivered video"),
         b"video fixture"
     );
+    let db = state.core.db.get().unwrap();
+    let source_count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM memory_source_events WHERE source_task_id=?1 AND principal_id=?2",
+            rusqlite::params![task_id, principal],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let job_count: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM memory_jobs WHERE source_task_id=?1 AND principal_id=?2",
+            rusqlite::params![task_id, principal],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!((source_count, job_count), (2, 2));
+    let assistant: String = db
+        .query_row(
+            "SELECT content FROM memories WHERE principal_id=?1 AND role='assistant'",
+            [principal],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(assistant, "new resumed result");
 }
 
 #[test]
