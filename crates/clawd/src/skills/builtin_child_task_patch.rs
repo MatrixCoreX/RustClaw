@@ -281,6 +281,7 @@ fn validate_optional_patch_ref(
                 "requested_patch_ref": requested,
                 "expected_patch_ref": record.patch_artifact.get("patch_ref"),
                 "child_task_id": record.child_task_id,
+                "child_task_ref": args.get("child_task_id"),
             }),
             Some(json!({
                 "retryable": true,
@@ -325,7 +326,10 @@ fn encode_result(value: Value) -> Result<String, String> {
 
 fn child_patch_repo_error(error: &anyhow::Error) -> String {
     let error_code = machine_error_code(error);
-    if error_code == "child_patch_task_not_found" {
+    if matches!(
+        error_code.as_str(),
+        "child_patch_task_not_found" | "child_patch_node_not_found"
+    ) {
         return child_patch_error_with_recovery(
             &error_code,
             json!({

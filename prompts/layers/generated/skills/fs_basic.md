@@ -228,7 +228,7 @@ Prefer registry leaf capabilities such as `filesystem.write_text`, `filesystem.m
 - Review and recovery: use `diff` and `rewind` checkpoint artifacts; never reconstruct a patch or checkpoint id from final-answer prose.
 <!--/a1-->
 <!--a1:review_child_patch,apply_child_patch,reject_child_patch-->
-- Child patch decisions: call `review_child_patch` before `apply_child_patch`; use only observed `child_task_id` and `patch_ref` machine fields. Children never apply or merge directly into the primary workspace.
+- Child patch decisions: call `review_child_patch` before `apply_child_patch`; prefer the host `child_task_ref` (an exact parent-scoped `child_node:<node_id>`) as `child_task_id`, otherwise use the complete observed child ID; retain the observed `patch_ref`. Missing or ambiguous node references fail closed. Children never apply or merge directly into the primary workspace.
 <!--/a1-->
 - Shell semantics, pipelines, or platform-specific commands belong to `run_cmd`.
 - Legacy `read_file`, `write_file`, `list_dir`, `make_dir`, `remove_file`, `fs_search`, and `system_basic` remain accepted for compatibility, but prefer `fs_basic` when this contract covers the task.

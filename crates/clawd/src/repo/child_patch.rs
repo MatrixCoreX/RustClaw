@@ -22,19 +22,21 @@ pub(crate) fn load_child_patch_record(
     child_task_id: &str,
 ) -> anyhow::Result<ChildPatchRecord> {
     validate_task_ref(parent_task_id)?;
-    validate_task_ref(child_task_id)?;
-    let db = state
+    let mut db = state
         .core
         .db
         .get()
         .map_err(|err| anyhow::anyhow!("db_pool_failed:{err}"))?;
-    let row = db
+    let transaction = db.transaction()?;
+    let child_task_id = resolve_child_patch_task_ref(&transaction, parent_task_id, child_task_id)?;
+    validate_task_ref(&child_task_id)?;
+    let row = transaction
         .query_row(
             "SELECT status, payload_json, result_json
              FROM tasks
              WHERE task_id = ?1
              LIMIT 1",
-            params![child_task_id],
+            params![&child_task_id],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -45,10 +47,87 @@ pub(crate) fn load_child_patch_record(
         )
         .optional()?
         .ok_or_else(|| anyhow::anyhow!("child_patch_task_not_found"))?;
-    let mut record = child_patch_record_from_row(parent_task_id, child_task_id, row)?;
+    let mut record = child_patch_record_from_row(parent_task_id, &child_task_id, row)?;
     record.owned_paths =
-        load_and_validate_graph_ownership(&db, parent_task_id, child_task_id, &record)?;
+        load_and_validate_graph_ownership(&transaction, parent_task_id, &child_task_id, &record)?;
+    transaction.commit()?;
     Ok(record)
+}
+
+const CHILD_NODE_REF_PREFIX: &str = "child_node:";
+
+fn valid_child_node_id(value: &str) -> bool {
+    machine_capability_token(value) && !value.contains('/') && value.trim() == value
+}
+
+fn resolve_child_patch_task_ref(
+    db: &rusqlite::Connection,
+    parent_task_id: &str,
+    reference: &str,
+) -> anyhow::Result<String> {
+    let Some(node_id) = reference.strip_prefix(CHILD_NODE_REF_PREFIX) else {
+        return Ok(reference.to_string());
+    };
+    if !valid_child_node_id(node_id) {
+        anyhow::bail!("child_patch_node_ref_invalid");
+    }
+    let mut statement = db.prepare(
+        "SELECT node.child_task_id
+         FROM child_task_graph_nodes node
+         JOIN tasks task ON task.task_id = node.child_task_id
+         WHERE node.parent_task_id = ?1
+           AND CASE WHEN json_valid(task.payload_json)
+               THEN json_extract(task.payload_json, '$.child_task_contract.scope.node_id')
+               END = ?2
+         LIMIT 2",
+    )?;
+    let matches = statement
+        .query_map(params![parent_task_id, node_id], |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    match matches.as_slice() {
+        [child_task_id] => Ok(child_task_id.clone()),
+        [] => anyhow::bail!("child_patch_node_not_found"),
+        _ => anyhow::bail!("child_patch_node_ref_ambiguous"),
+    }
+}
+
+pub(crate) fn child_patch_node_reference(
+    parent_task_id: &str,
+    child_task_id: &str,
+    raw_payload: Option<&str>,
+) -> Option<String> {
+    let payload: Value = serde_json::from_str(raw_payload?).ok()?;
+    if !crate::repo::child_tasks::is_child_subagent_payload(&payload) {
+        return None;
+    }
+    let contract = payload.get("child_task_contract")?;
+    if contract.get("parent_task_id")?.as_str()? != parent_task_id
+        || contract.get("child_task_id")?.as_str()? != child_task_id
+    {
+        return None;
+    }
+    let node_id = contract.pointer("/scope/node_id")?.as_str()?;
+    valid_child_node_id(node_id).then(|| format!("{CHILD_NODE_REF_PREFIX}{node_id}"))
+}
+
+pub(crate) fn suppress_ambiguous_child_node_references(nodes: &mut [Value]) {
+    let mut counts = std::collections::HashMap::<String, usize>::new();
+    for node in nodes.iter() {
+        if let Some(reference) = node.get("child_task_ref").and_then(Value::as_str) {
+            *counts.entry(reference.to_string()).or_default() += 1;
+        }
+    }
+    for node in nodes {
+        if node
+            .get("child_task_ref")
+            .and_then(Value::as_str)
+            .is_some_and(|reference| counts.get(reference).is_some_and(|count| *count > 1))
+        {
+            node["child_task_ref"] = Value::Null;
+        }
+    }
 }
 
 pub(crate) fn record_child_patch_disposition(

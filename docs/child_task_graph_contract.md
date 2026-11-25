@@ -78,3 +78,7 @@ CLI event/replay commands preserve these payloads. The UI task trace presents a
 compact graph or node summary and keeps raw JSON behind progressive disclosure.
 Consumers must use these machine fields and must not parse child prose to infer
 readiness, success, permissions, or merge eligibility.
+
+### Parent-scoped patch references
+
+For child patch actions, `child_task_id` accepts the complete observed ID or a host-issued `child_node:<node_id>` reference. The short form resolves an exact, unique node from the frozen child contract within the current parent and the same read transaction as ownership checks. Missing, ambiguous and malformed references are rejected; complete IDs are never fuzzy matched. Graph snapshots and resumed parent observations expose `child_task_ref` from the host contract, never from child business output. Ambiguous short references are omitted. Patch hashes, ownership, confirmation, checkpoints and cleanup retain their existing validation.

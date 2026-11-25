@@ -11,6 +11,7 @@ This hidden adapter backs planner-owned `fs_basic` actions: `workspace.preview_r
 - `rewind` restores a checkpoint only when every target still has its recorded post-patch hash.
 - Paths are workspace-relative. Parent traversal, runtime state paths, unsupported file types, and
   symbolic-link traversal are rejected.
+- Child patch actions accept a complete observed `child_task_id` or host-issued `child_node:<node_id>` in that argument. Short references resolve only an exact unique node in the current parent, retaining all ownership, artifact, confirmation and checkpoint checks. Unknown or ambiguous references are rejected.
 - Errors expose stable `error_code` and `message_key` fields. Do not infer control state from prose.
 - Replacement missing/ambiguous/stale error codes are exact-call observations; inspect current file state before replanning and never reinterpret them as natural language.
 

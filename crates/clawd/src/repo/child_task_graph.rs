@@ -915,7 +915,7 @@ pub(crate) fn graph_snapshot(
                 merge_policy, owned_paths_json, budget_json, model_policy_json,
                 tool_policy_json, result_contract_json, steering_version,
                 steering_json, task.status, task.result_json,
-                closure.closed_at
+                closure.closed_at, task.payload_json
          FROM child_task_graph_nodes node
          LEFT JOIN tasks task ON task.task_id = node.child_task_id
          LEFT JOIN child_task_thread_closures closure
@@ -923,14 +923,22 @@ pub(crate) fn graph_snapshot(
          WHERE node.parent_task_id = ?1
          ORDER BY node.created_at, node.child_task_id",
     )?;
-    let nodes = stmt
+    let mut nodes = stmt
         .query_map(params![parent_task_id], |row| {
             let readiness = row.get::<_, String>(3)?;
             let closed_at = row.get::<_, Option<String>>(15)?;
             let raw_result = row.get::<_, Option<String>>(14)?;
             let runtime = child_runtime_projection(raw_result.as_deref());
+            let child_task_id = row.get::<_, String>(0)?;
+            let raw_payload = row.get::<_, Option<String>>(16)?;
+            let child_task_ref = super::child_patch::child_patch_node_reference(
+                parent_task_id,
+                &child_task_id,
+                raw_payload.as_deref(),
+            );
             Ok(json!({
-                "child_task_id": row.get::<_, String>(0)?,
+                "child_task_id": child_task_id,
+                "child_task_ref": child_task_ref,
                 "role": row.get::<_, String>(1)?,
                 "required": row.get::<_, bool>(2)?,
                 "readiness": readiness,
@@ -957,6 +965,7 @@ pub(crate) fn graph_snapshot(
             }))
         })?
         .collect::<Result<Vec<_>, _>>()?;
+    super::child_patch::suppress_ambiguous_child_node_references(&mut nodes);
     let mut edge_stmt = db.prepare(
         "SELECT predecessor_task_id, successor_task_id, required, edge_kind
          FROM child_task_graph_edges

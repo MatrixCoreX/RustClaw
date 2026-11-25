@@ -237,6 +237,7 @@ fn child_structured_result_observation(merge: &Value) -> Option<Value> {
             let result = node.pointer("/runtime/child_task_result")?;
             let mut observation = json!({
                 "child_task_id": node.get("child_task_id"),
+                "child_task_ref": node.get("child_task_ref"),
                 "role": node.get("role"),
                 "status": result.get("status"),
                 "required": result.get("required"),

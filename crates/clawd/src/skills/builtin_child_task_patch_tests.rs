@@ -12,6 +12,9 @@ use crate::execution_isolation::{
 };
 use crate::ClaimedTask;
 
+#[path = "builtin_child_task_patch_node_ref_tests.rs"]
+mod node_refs;
+
 struct TempRepo {
     path: PathBuf,
 }

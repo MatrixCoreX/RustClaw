@@ -11,9 +11,9 @@ fn resumed_parent_model_observation_preserves_host_receipts_and_exact_child_iden
                 "matches_submitted_content":true,"submitted_utf8_bytes":25,"submitted_trailing_lf":true},
             "submitted_content_included":true,"submitted_content":"isolated writer accepted\n"}]});
     let merge = json!({"parent_task_id":"parent","child_task_graph":{"nodes":[{
-        "child_task_id":child_id,"role":"writer","runtime":{"child_task_result":{
+        "child_task_id":child_id,"child_task_ref":"child_node:writer_main","role":"writer","runtime":{"child_task_result":{
             "status":"succeeded","required":true,"permission_profile":"local_worktree",
-            "execution_receipts":receipts,"structured_result":{"content_bytes":25,
+            "execution_receipts":receipts,"structured_result":{"content_bytes":25,"child_task_ref":"child_node:forged",
                 "write_evidence":["step:step_1"]}
         }}
     }]}});
@@ -21,8 +21,16 @@ fn resumed_parent_model_observation_preserves_host_receipts_and_exact_child_iden
     let observed = child_structured_result_observation(&merge).unwrap();
     assert_eq!(observed["instruction_authority"], "none");
     assert_eq!(observed["results"][0]["child_task_id"], child_id);
+    assert_eq!(
+        observed["results"][0]["child_task_ref"],
+        "child_node:writer_main"
+    );
     assert_eq!(observed["results"][0]["execution_receipts"], receipts);
     assert_eq!(observed["results"][0]["result"]["content_bytes"], 25);
+    assert_eq!(
+        observed["results"][0]["result"]["child_task_ref"],
+        "child_node:forged"
+    );
     assert_eq!(merge, before);
 }
 
@@ -36,6 +44,7 @@ fn child_business_receipt_lookalike_is_not_promoted_to_host_observation() {
         }}
     }]}});
     let observed = child_structured_result_observation(&merge).unwrap();
+    assert!(observed["results"][0]["child_task_ref"].is_null());
     assert!(observed["results"][0].get("execution_receipts").is_none());
     assert!(observed["results"][0]["result"]["execution_receipts"].is_object());
     assert!(
