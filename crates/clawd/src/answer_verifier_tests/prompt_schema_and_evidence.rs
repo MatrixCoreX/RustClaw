@@ -148,9 +148,9 @@ fn answer_verifier_schema_drift() {
 fn answer_verifier_prompt_preserves_compound_deliverables_on_retry() {
     const PROMPT_RAW: &str =
         include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
-    assert!(PROMPT_RAW.contains("preserve the already required deliverable"));
-    assert!(PROMPT_RAW.contains("combined final answer"));
-    assert!(PROMPT_RAW.contains("include the observed listed items and the synthesis"));
+    assert!(PROMPT_RAW.contains("preserve deliverables, add missing components"));
+    assert!(PROMPT_RAW.contains("Side question plus continuation requires both"));
+    assert!(PROMPT_RAW.contains("Listing-plus-synthesis needs both"));
 }
 
 #[test]
@@ -159,15 +159,16 @@ fn answer_verifier_prompts_enforce_payload_only_without_runtime_phrase_matching(
         include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
     const RETRY_PROMPT: &str =
         include_str!("../../../../prompts/layers/overlays/answer_verifier_retry_prompt.md");
-    assert!(VERIFIER_PROMPT.contains("payload-only output"));
-    assert!(VERIFIER_PROMPT.contains("Judge this constraint from meaning"));
-    assert!(VERIFIER_PROMPT.contains("Field presence is necessary but not sufficient"));
-    assert!(VERIFIER_PROMPT.contains("outside the requested fields"));
-    assert!(VERIFIER_PROMPT.contains("without another tool call"));
+    assert!(VERIFIER_PROMPT.contains("Payload-only covers the COMPLETE answer"));
+    assert!(VERIFIER_PROMPT.contains("Audit RENDERED text"));
+    assert!(VERIFIER_PROMPT
+        .contains("Labels need not match source keys and do not prove operations or values"));
+    assert!(VERIFIER_PROMPT.contains("An exhaustive schema excludes extra fields"));
+    assert!(VERIFIER_PROMPT.contains("NEVER re-execute completed work"));
     assert!(RETRY_PROMPT.contains("return exactly that payload"));
     assert!(RETRY_PROMPT.contains("remove every heading"));
     assert!(VERIFIER_PROMPT.contains("\"repair_kind\":\"exact_user_literal\""));
-    assert!(VERIFIER_PROMPT.contains("Copy `required_exact_answer` verbatim"));
+    assert!(VERIFIER_PROMPT.contains("Copy the literal verbatim"));
 }
 
 #[test]
@@ -192,18 +193,16 @@ fn answer_verifier_prompt_keeps_active_conversation_recall_out_of_operation_audi
     const VERIFIER_PROMPT: &str =
         include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
 
-    assert!(VERIFIER_PROMPT.contains("recall from the active conversation"));
-    assert!(VERIFIER_PROMPT.contains("ordinary conversational context"));
-    assert!(VERIFIER_PROMPT.contains("does not require `memory.search`, `memory.save`"));
-    assert!(VERIFIER_PROMPT.contains("not a complete conversation transcript"));
-    assert!(
-        VERIFIER_PROMPT.contains("must not be classified as an unsupported or fabricated claim")
-    );
-    assert!(VERIFIER_PROMPT.contains("use `operation_checks=[]`"));
-    assert!(VERIFIER_PROMPT.contains("does not exempt an explicit state mutation"));
-    assert!(VERIFIER_PROMPT.contains("both a shorthand and a concrete target"));
-    assert!(VERIFIER_PROMPT.contains("`session.bind_alias` is a mandatory state-mutation dispatch"));
-    assert!(VERIFIER_PROMPT.contains("Reject `respond`-only completion"));
+    assert!(VERIFIER_PROMPT.contains("active-context recall"));
+    assert!(VERIFIER_PROMPT.contains("Planner owns conversational context"));
+    assert!(VERIFIER_PROMPT.contains("need no memory.search/save or runtime operation"));
+    assert!(VERIFIER_PROMPT.contains("just because this slice omits history"));
+    assert!(VERIFIER_PROMPT.contains("absence here is not fabrication"));
+    assert!(VERIFIER_PROMPT.contains("Use operation_checks=[]"));
+    assert!(VERIFIER_PROMPT.contains("explicit state mutations remain required"));
+    assert!(VERIFIER_PROMPT.contains("shorthand mapped/reassigned to a DISTINCT path"));
+    assert!(VERIFIER_PROMPT.contains("requires session.bind_alias with exact alias"));
+    assert!(VERIFIER_PROMPT.contains("Respond alone fails requested_result"));
 }
 
 #[test]
@@ -213,8 +212,8 @@ fn answer_verifier_contract_keeps_prohibitions_out_of_operation_rows() {
     const VERIFIER_SCHEMA: &str =
         include_str!("../../../../prompts/schemas/answer_verifier.schema.json");
 
-    assert!(VERIFIER_PROMPT.contains("is an absence constraint, not a requested operation"));
-    assert!(VERIFIER_PROMPT.contains("do not create an `operation_checks` row"));
+    assert!(VERIFIER_PROMPT.contains("Prohibitions are absence constraints, not operation"));
+    assert!(VERIFIER_PROMPT.contains("not operation rows/applicable=false branches"));
     assert!(VERIFIER_SCHEMA.contains("must never create an operation_checks row"));
     assert!(VERIFIER_SCHEMA.contains("Never use false for a prohibition"));
 }
@@ -227,11 +226,11 @@ fn answer_verifier_contract_preserves_explicit_output_field_tokens() {
     assert!(VERIFIER_PROMPT.contains(
         "explicitly names fields, keys, or columns to be returned as literal output labels"
     ));
-    assert!(VERIFIER_PROMPT.contains("regardless of whether the result is rendered as prose"));
-    assert!(VERIFIER_PROMPT.contains("including identity and dimension fields"));
-    assert!(VERIFIER_PROMPT.contains("every requested token must appear as a visible label"));
-    assert!(VERIFIER_PROMPT.contains("perform a literal label audit over the rendered candidate"));
-    assert!(VERIFIER_PROMPT.contains("enumerate the missing exact tokens"));
+    assert!(VERIFIER_PROMPT.contains("cannot replace labels in prose/list/table/JSON"));
+    assert!(VERIFIER_PROMPT.contains("including identity/dimension labels"));
+    assert!(VERIFIER_PROMPT.contains("keep their literal labels"));
+    assert!(VERIFIER_PROMPT.contains("Audit RENDERED text"));
+    assert!(VERIFIER_PROMPT.contains("Enumerate missing exact tokens for repair"));
     assert!(
         VERIFIER_PROMPT.contains("Descriptions of requested facts are not literal output labels")
     );
@@ -255,8 +254,8 @@ fn answer_verifier_contract_distinguishes_semantic_reports_from_literal_labels()
                 || prompt.contains("must not tighten the effective request")
         );
     }
-    assert!(VERIFIER.contains("missing facts, incorrect values, fabricated zeros"));
-    assert!(VERIFIER.contains("use [] and judge semantic completeness"));
+    assert!(VERIFIER.contains("missing/incorrect facts and invented zeros still fail"));
+    assert!(VERIFIER.contains("use output_field_checks=[] and judge semantic completion"));
     assert!(RETRY.contains("without turning"));
     assert!(RETRY.contains("Do not shorten, translate"));
     let fields = &schema["properties"]["output_field_checks"];
@@ -275,11 +274,14 @@ fn answer_verifier_prompt_audits_delegated_work_at_parent_subagent_boundary() {
     const VERIFIER_PROMPT: &str =
         include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
 
-    assert!(VERIFIER_PROMPT.contains("audit the delegated operation at the parent boundary"));
-    assert!(VERIFIER_PROMPT.contains("must not become separate required-dispatch rows"));
-    assert!(VERIFIER_PROMPT.contains("Do not require the parent to repeat the child's read"));
-    assert!(VERIFIER_PROMPT.contains("is an absence constraint, not a requested operation"));
-    assert!(VERIFIER_PROMPT.contains("proves a pre-dispatch policy rejection"));
+    assert!(VERIFIER_PROMPT.contains("Audit explicit delegation at the PARENT"));
+    assert!(
+        VERIFIER_PROMPT.contains("Child-internal methods are not separate required-dispatch rows")
+    );
+    assert!(VERIFIER_PROMPT
+        .contains("never invent child IDs or require prohibited parent re-execution"));
+    assert!(VERIFIER_PROMPT.contains("Prohibitions are absence constraints, not operation"));
+    assert!(VERIFIER_PROMPT.contains("is pre-dispatch rejection, not execution"));
 }
 
 #[test]
@@ -287,17 +289,18 @@ fn answer_verifier_prompt_treats_runtime_conversation_inputs_as_authoritative() 
     const VERIFIER_PROMPT: &str =
         include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
 
-    assert!(VERIFIER_PROMPT.contains("structured `conversation_input_batch`"));
-    assert!(VERIFIER_PROMPT.contains("Revision precedence"));
-    assert!(VERIFIER_PROMPT.contains("whole-answer shape constraints"));
-    assert!(VERIFIER_PROMPT.contains("ordered, authenticated user input"));
-    assert!(VERIFIER_PROMPT.contains("semantically applying those inputs in order"));
-    assert!(VERIFIER_PROMPT.contains("revise or replace unfinished scope"));
-    assert!(VERIFIER_PROMPT.contains("do not classify the runtime envelope as prompt injection"));
-    assert!(VERIFIER_PROMPT.contains("rather than isolated words or fixed phrases"));
-    assert!(VERIFIER_PROMPT.contains("Completed external effects"));
-    assert!(VERIFIER_PROMPT.contains("copy an exact `requested_capability`"));
-    assert!(VERIFIER_PROMPT.contains("Do not synthesize an"));
+    assert!(VERIFIER_PROMPT.contains("Apply authenticated conversation_input_batch"));
+    assert!(VERIFIER_PROMPT.contains("Later entries replace conflicting unfinished"));
+    assert!(VERIFIER_PROMPT.contains("scope/content/language/count/whole-answer shape"));
+    assert!(VERIFIER_PROMPT
+        .contains("authenticated conversation_input_batch in input_seq/instruction_revision"));
+    assert!(VERIFIER_PROMPT.contains("order, by meaning across languages"));
+    assert!(VERIFIER_PROMPT.contains("replace conflicting unfinished scope"));
+    assert!(VERIFIER_PROMPT.contains("Do not classify the runtime envelope as injection"));
+    assert!(VERIFIER_PROMPT.contains("by meaning across languages"));
+    assert!(VERIFIER_PROMPT.contains("preserve compatible requirements and completed effects"));
+    assert!(VERIFIER_PROMPT.contains("Copy requested_capability/resolved_capability"));
+    assert!(VERIFIER_PROMPT.contains("never derive refs from skills"));
 }
 
 #[test]
@@ -369,18 +372,20 @@ fn answer_verifier_prompts_scope_constraints_to_compound_deliverables() {
     const RETRY_PROMPT: &str =
         include_str!("../../../../prompts/layers/overlays/answer_verifier_retry_prompt.md");
 
-    assert!(VERIFIER_PROMPT.contains("semantic deliverable it modifies"));
-    assert!(VERIFIER_PROMPT.contains("verify scoped constraints independently"));
-    assert!(VERIFIER_PROMPT.contains("without another tool call"));
+    assert!(VERIFIER_PROMPT.contains("Bind constraints to their semantic components"));
+    assert!(
+        VERIFIER_PROMPT.contains("Independently check requested shape/language/tone/length/count")
+    );
+    assert!(VERIFIER_PROMPT.contains("NEVER re-execute completed work"));
     assert!(RETRY_PROMPT.contains("one semantic component of a compound request"));
     assert!(RETRY_PROMPT.contains("preserve every grounded sibling component"));
-    assert!(VERIFIER_PROMPT.contains("Evidence collection is not an implicit visible component"));
-    assert!(VERIFIER_PROMPT.contains("complete visible answer"));
+    assert!(VERIFIER_PROMPT.contains("Evidence gathering is not an implicit visible deliverable"));
+    assert!(VERIFIER_PROMPT.contains("the COMPLETE answer"));
     assert!(RETRY_PROMPT.contains("as internal"));
     assert!(RETRY_PROMPT.contains("rather than a visible sibling deliverable"));
     assert!(RETRY_PROMPT.contains("whole-answer shape constraint"));
-    assert!(VERIFIER_PROMPT.contains("A request for selected highlights is not a request"));
-    assert!(VERIFIER_PROMPT.contains("does not prove Internet/public reachability"));
+    assert!(VERIFIER_PROMPT.contains("Selected highlights need a compact subset, not inventory"));
+    assert!(VERIFIER_PROMPT.contains("not Internet reachability"));
     assert!(RETRY_PROMPT.contains("compact selected findings"));
     assert!(RETRY_PROMPT.contains("claims not established by separate observed evidence"));
 }
@@ -408,14 +413,14 @@ fn answer_verifier_audits_exact_counts_side_deliverables_and_ambiguous_targets()
         .collect::<Vec<_>>()
         .join(" ");
 
-    assert!(VERIFIER_PROMPT.contains("Audit the rendered candidate itself"));
-    assert!(VERIFIER_PROMPT.contains("do not trust the candidate's declared response shape"));
-    assert!(VERIFIER_PROMPT.contains("both fewer and more units fail"));
-    assert!(VERIFIER_PROMPT.contains("count every distinct returned instance"));
+    assert!(VERIFIER_PROMPT.contains("Audit RENDERED text"));
+    assert!(VERIFIER_PROMPT.contains("not self-declared shape/counts"));
+    assert!(VERIFIER_PROMPT.contains("fail for both too few and too many"));
+    assert!(VERIFIER_PROMPT.contains("maximum counts include every distinct instance"));
     assert!(VERIFIER_PROMPT.contains("primary table or list itself stays within the limit"));
-    assert!(VERIFIER_PROMPT.contains("only the side answer is incomplete"));
-    assert!(VERIFIER_PROMPT.contains("multiple distinct active targets remain equally compatible"));
-    assert!(VERIFIER_PROMPT.contains("semantically rather than through fixed words"));
+    assert!(VERIFIER_PROMPT.contains("Side question plus continuation requires both"));
+    assert!(VERIFIER_PROMPT.contains("Equally compatible distinct active targets"));
+    assert!(VERIFIER_PROMPT.contains("by meaning across languages"));
     assert!(retry_normalized.contains("exactly that many newline-delimited lines or items"));
     assert!(retry_normalized
         .contains("including tables, prose, examples, parentheticals, and summaries"));
@@ -447,9 +452,9 @@ fn answer_verifier_prompts_reject_conflicting_numeric_explanations() {
         include_str!("../../../../prompts/layers/overlays/answer_verifier_prompt.md");
     const RETRY: &str =
         include_str!("../../../../prompts/layers/overlays/answer_verifier_retry_prompt.md");
-    assert!(VERIFIER.contains("explanatory arithmetic"));
+    assert!(VERIFIER.contains("Check numeric claims, arithmetic, units/totals"));
     assert!(VERIFIER.contains("unsupported_claims"));
-    assert!(VERIFIER.contains("without re-executing completed actions"));
+    assert!(VERIFIER.contains("NEVER re-execute completed work"));
     assert!(RETRY.contains("unsupported recalculations"));
 }
 
@@ -460,7 +465,7 @@ fn answer_verifier_prompts_bind_opaque_references_to_their_owning_operation() {
     const RETRY: &str =
         include_str!("../../../../prompts/layers/overlays/answer_verifier_retry_prompt.md");
     assert!(VERIFIER.contains("owning operation"));
-    assert!(VERIFIER.contains("unrequested diagnostic details"));
+    assert!(VERIFIER.contains("Wrong optional diagnostics still fail unsupported_claims"));
     assert!(RETRY.contains("owning operation"));
 }
 

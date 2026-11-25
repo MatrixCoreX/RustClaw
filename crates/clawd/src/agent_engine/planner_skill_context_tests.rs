@@ -700,19 +700,19 @@ fn native_action_protocol_scopes_output_constraints_semantically() {
     const PROMPT: &str =
         include_str!("../../../../prompts/layers/overlays/native_action_protocol.md");
 
-    assert!(PROMPT.contains("bind each constraint to the semantic"));
-    assert!(PROMPT.contains("preserve sibling deliverables"));
-    assert!(PROMPT.contains("do not expand or"));
+    assert!(PROMPT.contains("Bind each language/length/count/tone/shape constraint"));
+    assert!(PROMPT.contains("Preserve siblings"));
+    assert!(PROMPT.contains("never duplicate a constrained component"));
     assert!(PROMPT.contains("payload-only"));
-    assert!(PROMPT.contains("not by itself a user-visible sibling deliverable"));
-    assert!(PROMPT.contains("apply the constraint to the entire visible answer"));
-    assert!(PROMPT.contains("return only the selected compact subset"));
-    assert!(PROMPT.contains("Do not echo the complete observation inventory"));
-    assert!(PROMPT.contains("Apply later `input_seq` and `instruction_revision`"));
-    assert!(PROMPT.contains("whole-answer shape constraint"));
-    assert!(PROMPT.contains("do not append the superseded draft"));
-    assert!(PROMPT.contains("Replacing the active deliverable"));
-    assert!(PROMPT.contains("not a lifecycle stop"));
+    assert!(PROMPT.contains("Evidence inspection alone is not a sibling deliverable"));
+    assert!(PROMPT.contains("across the whole answer"));
+    assert!(PROMPT.contains("Selected highlights need a grounded compact subset"));
+    assert!(PROMPT.contains("not the full inventory or new categories"));
+    assert!(PROMPT.contains("in input_seq and instruction_revision order"));
+    assert!(PROMPT.contains("scope/content/language/count/shape"));
+    assert!(PROMPT.contains("discard superseded drafts/literals/markers"));
+    assert!(PROMPT.contains("replacement deliverables amend work"));
+    assert!(PROMPT.contains("not lifecycle-stop it"));
 }
 
 #[test]

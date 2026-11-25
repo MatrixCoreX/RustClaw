@@ -77,64 +77,65 @@ fn native_action_protocol_requires_capability_owned_structured_observations() {
     let prompt = std::fs::read_to_string(overlay).expect("read native action protocol");
     let normalized = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
 
-    assert!(prompt.contains("an authoritative structured operation owned by a matching runtime"));
-    assert!(prompt.contains("call the `call_capability` function with that capability"));
-    assert!(prompt.contains("Never call an unrelated capability as a placeholder"));
-    assert!(prompt.contains("`load_capability_groups` is the only valid next"));
-    assert!(prompt.contains("When a structured parse, validation, preview, inspection"));
-    assert!(normalized.contains("call that capability instead of substituting your own inference"));
-    assert!(prompt.contains("A self-contained transformation whose"));
-    assert!(prompt.contains("no runtime-owned validation, evidence, or effect is"));
-    assert!(prompt.contains("A matching validation or guard capability owns the complete check"));
-    assert!(prompt.contains("bounded raw reads that cover only part of the target"));
-    assert!(prompt.contains("when a structured validator result explicitly requests supplementary"));
-    assert!(prompt.contains("known fields from a structured JSON, TOML, or YAML"));
-    assert!(prompt.contains("matching structured field-extraction capability"));
-    assert!(prompt.contains("extract all requested"));
-    assert!(prompt.contains("derive counts only from the complete observed array/object"));
-    assert!(prompt.contains("Do not call the capability again merely to confirm or"));
-    assert!(prompt.contains("restate the same successful result"));
-    assert!(prompt.contains("pair, compare, cross-check"));
-    assert!(prompt.contains("remains an open obligation across model"));
-    assert!(prompt.contains("one successful source does not satisfy the others"));
-    assert!(prompt.contains("user explicitly narrows the source scope"));
-    assert!(prompt.contains("structured capability"));
-    assert!(prompt.contains("remaining source is unavailable"));
-    assert!(prompt.contains("Copy the complete capability name exactly"));
-    assert!(prompt.contains("Never derive a capability name by combining a skill name"));
-    assert!(prompt.contains("most semantically specific capability"));
-    assert!(prompt.contains("lower-level raw primitive"));
-    assert!(prompt.contains("machine arguments for ordering, filtering, or"));
-    assert!(prompt.contains("bounded, already ordered observation"));
-    assert!(prompt.contains("after context compaction"));
-    assert!(prompt.contains("runtime delivery token (`FILE:<path>`"));
-    assert!(prompt.contains("speculative claim about channel attachment support"));
-    assert!(prompt.contains("A directory listing proves entry names and listed metadata"));
-    assert!(prompt.contains("before asserting concrete current keys, members, values"));
-    assert!(prompt.contains("is about the current workspace or project"));
-    assert!(prompt.contains("inspect authoritative workspace"));
-    assert!(prompt.contains("sources before composing it"));
-    assert!(prompt.contains("an unobserved project name"));
-    assert!(prompt.contains("current repository"));
-    assert!(prompt.contains("facts. Direct creative drafting"));
-    assert!(prompt.contains("Use `shape=free_text` for prose, compound answers"));
-    assert!(normalized.contains("`shape=list` renders ordinal numbers before each entry"));
-    assert!(normalized.contains("only when numbered presentation is allowed"));
-    assert!(normalized
-        .contains("payload-only output without presentation markers, use `shape=free_text`"));
-    assert!(prompt.contains("never mix payloads from different shapes"));
-    assert!(prompt.contains("preserve each"));
+    assert!(prompt.contains("runtime-owned structured results needed"));
+    assert!(prompt.contains("call the exact owning `call_capability`"));
+    assert!(
+        prompt.contains("never derive skill.action names or call unrelated placeholders/probes")
+    );
+    assert!(prompt.contains("only the loader is a valid next action"));
+    assert!(prompt.contains("Runtime-owned parse/validation/inspection/transformation/computation"));
+    assert!(normalized.contains("uses its capability"));
+    assert!(prompt.contains("Complete supplied input/rules may be transformed directly"));
+    assert!(prompt.contains("no runtime validation/evidence/effect is needed"));
+    assert!(prompt.contains("An owning validator performs the whole check"));
+    assert!(prompt.contains("partial raw reads cannot replace it"));
+    assert!(prompt.contains("its structured result requests more evidence"));
+    assert!(prompt.contains("Extract known JSON/TOML/YAML fields together"));
+    assert!(prompt.contains("with the structured extractor"));
+    assert!(prompt.contains("Extract known JSON/TOML/YAML fields together"));
+    assert!(prompt.contains("derive counts only from complete observed collections"));
+    assert!(prompt.contains("Never reconfirm a successful result"));
+    assert!(prompt.contains("Never reconfirm a successful result"));
+    assert!(prompt.contains("Playbook pair/compare/cross-check/combine"));
+    assert!(prompt.contains("requirements persist across turns"));
+    assert!(prompt.contains("smallest evidence set covering ALL required methods/results"));
+    assert!(prompt.contains("explicitly removed by the user"));
+    assert!(prompt.contains("structured result establishes unavailability"));
+    assert!(prompt.contains("structured result establishes unavailability"));
+    assert!(prompt.contains("Copy complete capability names"));
+    assert!(prompt.contains("never derive skill.action names"));
+    assert!(prompt.contains("specific domain contracts"));
+    assert!(prompt.contains("over raw primitives"));
+    assert!(prompt.contains("Pass user bounds/filter/order as machine args"));
+    assert!(prompt.contains("rather than broad fetching/manual trim"));
+    assert!(prompt.contains("rather than broad fetching/manual trim"));
+    assert!(prompt.contains("FILE:<path>, IMAGE_FILE:<path> or VIDEO_FILE:<path> runtime token"));
+    assert!(prompt.contains("do not replace it with guessed channel limitations"));
+    assert!(prompt.contains("Listings prove names/metadata, not contents"));
+    assert!(prompt.contains("concrete current keys/members/values/scripts/"));
+    assert!(prompt.contains("Current project facts need authoritative workspace observations"));
+    assert!(prompt.contains("need authoritative workspace observations"));
+    assert!(prompt.contains("Current project facts need authoritative workspace observations"));
+    assert!(prompt.contains("memory and project names do not suffice"));
+    assert!(prompt.contains("Current project facts"));
+    assert!(prompt.contains("Explicit fiction/speculation or drafts"));
+    assert!(prompt.contains("free_text: content contains prose, compound answers"));
+    assert!(normalized.contains("list: ordinal presentation only when allowed"));
+    assert!(normalized.contains("ordinal presentation only when allowed"));
+    assert!(normalized.contains("Payload-only lines use free_text, items=[] and item count zero"));
+    assert!(prompt.contains("unused counts are zero"));
+    assert!(prompt.contains("Explicit machine labels and scalar/object/array shapes must survive"));
     assert!(prompt.contains("scalar, object, or array shape"));
     assert!(prompt.contains("agent.subagent"));
     assert!(prompt.contains("agent.subagent_batch"));
     assert!(prompt.contains("agent.subagent_persistent"));
     assert!(prompt.contains("input_materialization=attachment_only"));
     assert!(prompt.contains("structured.visible_text"));
-    assert!(normalized.contains("array order already carries reading order"));
-    assert!(normalized.contains("Preserve a line-start marker only when it is already part"));
-    assert!(normalized.contains("Never use `analysis_text` as substitute transcription"));
-    assert!(prompt.contains("omit the recognized-text portion entirely"));
-    assert!(prompt.contains("typed natural-language instructions"));
+    assert!(normalized.contains("copy all nonempty structured.visible_text in source order"));
+    assert!(normalized.contains("Retain only original line markers"));
+    assert!(normalized.contains("analysis_text is not transcription"));
+    assert!(prompt.contains("Empty visible_text omits that section"));
+    assert!(prompt.contains("Typed instructions (raw_chars>0/typed_instruction_present=true)"));
 }
 
 #[test]
@@ -145,13 +146,14 @@ fn native_action_protocol_requires_structured_session_alias_persistence() {
     )
     .expect("read native action protocol");
 
-    assert!(prompt.contains("call `session.bind_alias` before acknowledging"));
-    assert!(prompt.contains("Mandatory semantic preflight"));
-    assert!(prompt.contains("constrains only the eventual visible response"));
-    assert!(prompt.contains("does not persist session state"));
-    assert!(prompt.contains("never use an acknowledgement literal"));
-    assert!(prompt.contains("do not infer a binding from"));
-    assert!(prompt.contains("ordinary conversation context"));
+    assert!(prompt.contains("requires `session.bind_alias` before replying"));
+    assert!(prompt.contains("Effective request and active work"));
+    assert!(prompt.contains("limits the eventual answer, never cancels execution"));
+    assert!(prompt.contains("not persist bindings"));
+    assert!(prompt
+        .contains("An acknowledgement, basename, preference, scalar fact or equal alias/target"));
+    assert!(prompt.contains("Respond does not persist bindings"));
+    assert!(prompt.contains("Ordinary contextual facts need no mutation"));
 }
 
 #[test]
@@ -163,15 +165,19 @@ fn native_action_protocol_clarifies_ambiguous_targets_and_keeps_plans_stable() {
     .expect("read native action protocol");
     let normalized = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
 
-    assert!(prompt.contains("distinct active targets that are equally compatible"));
+    assert!(prompt.contains("distinct active targets are equally compatible"));
     assert!(prompt.contains("missing_slot=target_ref"));
-    assert!(prompt.contains("language-independent"));
-    assert!(prompt.contains("capability discovery, catalog loading"));
-    assert!(prompt.contains("an update never invents or appends a new step ID"));
-    assert!(normalized.contains("task-plan bookkeeping and that action"));
-    assert!(normalized.contains("Do not spend a separate model turn on bookkeeping alone"));
-    assert!(normalized.contains("`respond` remains a standalone terminal call"));
-    assert!(prompt.contains("never terminate after only the side answer"));
+    assert!(prompt.contains("Judge meaning across languages, never fixed phrases"));
+    assert!(prompt.contains("not discovery, bookkeeping or transport"));
+    assert!(prompt.contains("stable IDs, never invent IDs"));
+    assert!(
+        normalized.contains("Batch ready plan bookkeeping FIRST with the ready material action")
+    );
+    assert!(normalized.contains("avoiding a bookkeeping-only model turn"));
+    assert!(normalized.contains("Respond stays standalone"));
+    assert!(prompt.contains(
+        "If continuation/completion is also requested, deliver both under continue/amend"
+    ));
 }
 
 #[test]
@@ -216,8 +222,8 @@ fn planner_prompts_do_not_treat_historical_delivery_as_current_execution() {
     let native = native.split_whitespace().collect::<Vec<_>>().join(" ");
     let incremental = incremental.split_whitespace().collect::<Vec<_>>().join(" ");
 
-    assert!(native.contains("produced inside the current task loop"));
-    assert!(native.contains("delivery tokens from an earlier task are context only"));
+    assert!(native.contains("Success requires current-loop observations"));
+    assert!(native.contains("not history/recent replies/old delivery tokens"));
     assert!(common.contains("not current-task execution evidence"));
     assert!(incremental.contains("scoped to the current task loop"));
     assert!(incremental.contains("do not complete a new executable user turn"));
@@ -336,10 +342,10 @@ fn answer_verifier_distinguishes_listing_metadata_from_file_contents() {
         .join("../../prompts/layers/overlays/answer_verifier_prompt.md");
     let prompt = std::fs::read_to_string(overlay).expect("read answer verifier prompt");
 
-    assert!(prompt.contains("Directory listing evidence proves entry names"));
-    assert!(prompt.contains("does not prove current file contents"));
-    assert!(prompt.contains("clearly generic or approximate type-level description"));
-    assert!(prompt.contains("current keys, members, values, scripts, schemas"));
+    assert!(prompt.contains("Listings prove names/metadata"));
+    assert!(prompt.contains("not content"));
+    assert!(prompt.contains("requested generic type-level purposes may be inferred approximately"));
+    assert!(prompt.contains("Current keys/members/values/scripts/schemas need content"));
 }
 
 #[test]
@@ -348,11 +354,10 @@ fn answer_verifier_does_not_invent_configurable_token_mappings() {
         .join("../../prompts/layers/overlays/answer_verifier_prompt.md");
     let prompt = std::fs::read_to_string(overlay).expect("read answer verifier prompt");
 
-    assert!(prompt.contains("Do not invent semantic mappings"));
-    assert!(prompt.contains("position in an `available_*` array"));
-    assert!(prompt.contains("successful runtime call with an allowed replacement token"));
-    assert!(prompt
-        .contains("does not excuse a candidate that contradicts an explicit observed mapping"));
+    assert!(prompt.contains("Never invent mappings"));
+    assert!(prompt.contains("array position"));
+    assert!(prompt.contains("successful allowed replacement tokens are evidence"));
+    assert!(prompt.contains("do not excuse contradiction of explicit mappings"));
 }
 
 #[test]
@@ -361,10 +366,10 @@ fn answer_verifier_accepts_grounded_required_input_clarification() {
         .join("../../prompts/layers/overlays/answer_verifier_prompt.md");
     let prompt = std::fs::read_to_string(overlay).expect("read answer verifier prompt");
 
-    assert!(prompt.contains("completed clarification"));
-    assert!(prompt.contains("schema declaration is sufficient machine-contract evidence"));
-    assert!(prompt.contains("never require an intentionally invalid capability call"));
-    assert!(prompt.contains("set `pass=true`"));
+    assert!(prompt.contains("one concise clarification identifying it suffices"));
+    assert!(prompt.contains("schema plus one concise clarification identifying it suffices"));
+    assert!(prompt.contains("never demand an invalid call"));
+    assert!(prompt.contains("pass=true, gaps=[], retry=false"));
 }
 
 #[test]
@@ -395,9 +400,9 @@ fn drafting_prompts_apply_explicit_replacements_without_unrelated_file_lookup() 
     ] {
         let prompt =
             std::fs::read_to_string(overlays.join(relative_path)).expect("read planner overlay");
-        assert!(prompt.contains("old-to-new correction"), "{relative_path}");
+        assert!(prompt.contains("Old-to-new corrections"), "{relative_path}");
         assert!(prompt.contains("old value is absent"), "{relative_path}");
-        assert!(prompt.contains("session alias"), "{relative_path}");
+        assert!(prompt.contains("alias mutations"), "{relative_path}");
         assert!(
             prompt.contains("unfinished file mutation"),
             "{relative_path}"
@@ -406,14 +411,14 @@ fn drafting_prompts_apply_explicit_replacements_without_unrelated_file_lookup() 
 
     let response = std::fs::read_to_string(overlays.join("chat_response_prompt.md"))
         .expect("read chat response overlay");
-    assert!(response.contains("old-to-new correction"));
+    assert!(response.contains("Old-to-new corrections"));
     assert!(response.contains("standalone correction with no active draft"));
 
     let verifier = std::fs::read_to_string(overlays.join("answer_verifier_prompt.md"))
         .expect("read answer verifier overlay");
-    assert!(verifier.contains("old-to-new correction"));
-    assert!(verifier.contains("asking where the rejected value appeared is incomplete"));
-    assert!(verifier.contains("without a tool call"));
+    assert!(verifier.contains("Old-to-new corrections"));
+    assert!(verifier.contains("asking where it appeared is incomplete"));
+    assert!(verifier.contains("Rewrite directly, without invented edits"));
 }
 
 #[test]
@@ -431,7 +436,7 @@ fn planner_and_verifier_reject_truncated_search_as_exhaustive_inventory() {
     assert!(incremental.contains("truncated=true"));
     assert!(incremental.contains("direct listing capability"));
     assert!(verifier.contains("truncated=true"));
-    assert!(verifier.contains("non-truncated direct inventory"));
+    assert!(verifier.contains("nontruncated inventory"));
 }
 
 #[test]
