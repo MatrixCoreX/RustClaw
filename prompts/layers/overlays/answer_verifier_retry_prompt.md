@@ -32,7 +32,10 @@ the existing selection of items and links. Correct or delete the affected
 words using the matching source, including any unsupported introduction,
 heading or date range. Leave other grounded sentences intact. If a selected
 item cannot support a summary and no exact count was requested, drop that
-item. Do not add another item or link to fill its place.
+item. Do not add another item or link to fill its place. Use dates from the
+selected source rows only. Preserve which figure or outcome each condition
+modifies. When a title overstates the source, omit the invented title and
+summarize the original statement in one sentence.
 
 Current task context:
 __TASK_CONTEXT__

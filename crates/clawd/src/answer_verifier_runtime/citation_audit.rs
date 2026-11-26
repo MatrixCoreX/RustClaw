@@ -16,6 +16,8 @@ pub(super) struct Citation<'a> {
     index: usize,
     url: &'a str,
     excerpts: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    source_dates: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -44,6 +46,7 @@ pub(super) fn citations<'a>(answer: &'a str, journal: &TaskJournal) -> Vec<Citat
                 index,
                 url,
                 excerpts: Vec::new(),
+                source_dates: Vec::new(),
             }
         })
         .collect();
@@ -63,6 +66,22 @@ pub(super) fn citations<'a>(answer: &'a str, journal: &TaskJournal) -> Vec<Citat
         citations.clear();
     }
     citations
+}
+
+/// Preserve only parseable source metadata. Use the original timezone for
+/// timestamps so the verifier can compare dates in the requested timezone.
+fn source_date(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.len() > 64 {
+        return None;
+    }
+    if let Ok(stamp) = chrono::DateTime::parse_from_rfc3339(value)
+        .or_else(|_| chrono::DateTime::parse_from_rfc2822(value))
+    {
+        return Some(stamp.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true));
+    }
+    let day = chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()?;
+    Some(day.to_string())
 }
 
 fn collect(
@@ -87,6 +106,16 @@ fn collect(
                 .filter(|url| url.starts_with("https://") || url.starts_with("http://"))
                 .collect::<Vec<_>>();
             if !urls.is_empty() {
+                for date in ["published_at", "date"]
+                    .iter()
+                    .filter_map(|key| source_date(row.get(*key)?.as_str()?))
+                {
+                    for citation in citations.iter_mut().filter(|c| urls.contains(&c.url)) {
+                        if citation.source_dates.len() < 4 && !citation.source_dates.contains(&date) {
+                            citation.source_dates.push(date.clone());
+                        }
+                    }
+                }
                 for key in ["title", "excerpt", "content_excerpt", "snippet", "description", "text"] {
                     let Some(text) = row
                         .get(key)
@@ -189,8 +218,10 @@ mod tests {
                 "fixture.read",
                 None,
                 serde_json::json!({"extra":{"items":[
-                    {"link":"https://example.org/a","title":"A couple shares its finances","excerpt":"The couple reported a monthly total of 500."},
-                    {"link":"https://example.org/b","title":"Vehicle registration"}
+                    {"link":"https://example.org/a","title":"A couple shares its finances","excerpt":"The couple reported a monthly total of 500.","date":"Wed, 25 Nov 2026 22:10:42 GMT"},
+                    {"link":"https://example.org/b","title":"Vehicle registration","published_at":"2026-11-26T08:00:00+08:00"},
+                    {"url":"https://example.org/unused","date":"2026-10-28","title":"Earlier unrelated article"},
+                    {"url":"https://example.org/a","date":"untrusted prose"}
                 ]}}),
             ));
         let rows = citations(answer, &journal);
@@ -198,6 +229,9 @@ mod tests {
         assert_eq!(rows[0].url, "https://example.org/b");
         assert_eq!(rows[0].excerpts, ["Vehicle registration"]);
         assert_eq!(rows[1].excerpts, ["A couple shares its finances", "The couple reported a monthly total of 500."]);
+        assert_eq!(rows[0].source_dates, ["2026-11-26T08:00:00+08:00"]);
+        assert_eq!(rows[1].source_dates, ["2026-11-25T22:10:42Z"]);
+        assert!(rows[2].source_dates.is_empty());
         assert!(rows[2].excerpts.is_empty());
     }
 
@@ -208,11 +242,13 @@ mod tests {
                 index: 0,
                 url: "https://example.org/a",
                 excerpts: vec!["shares fell".into()],
+                source_dates: Vec::new(),
             },
             Citation {
                 index: 1,
                 url: "https://example.org/b",
                 excerpts: vec!["vehicle registration".into()],
+                source_dates: Vec::new(),
             },
         ];
         let rows = |supported, quote: &str| {
