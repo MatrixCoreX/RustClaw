@@ -98,9 +98,11 @@ blockquote { margin: 1.1rem 0; padding: .55rem .8rem; border-inline-start: 3px s
 }
 @media (max-width: 36rem) {
   .wrap { width: calc(100% - 2rem); }
-  .site-header { align-items: flex-start; flex-direction: column; padding: .75rem 0; gap: .5rem; }
+  .site-header { align-items: flex-start; flex-direction: column; padding: .55rem 0; gap: .25rem; }
   nav { flex-wrap: wrap; }
-  .site-header nav { justify-content: flex-start; }
+  .site-header nav { justify-content: flex-start; row-gap: 0; }
+  .site-header nav a, .guide-nav a { display: inline-flex; align-items: center; min-height: 2.75rem; }
+  .hero { padding-block: 2rem 2.5rem; }
 }
 
 .guide { max-width: 52rem; margin: clamp(2rem, 6vw, 4.5rem) auto; padding: 0; border: 0; background: transparent; }

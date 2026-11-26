@@ -23,6 +23,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install site image tools
+        run: |
+          python3 -m pip install --target "$RUNNER_TEMP/site-python" --requirement site/requirements.txt
+          echo "PYTHONPATH=$RUNNER_TEMP/site-python" >> "$GITHUB_ENV"
       - name: Verify project site and product identity
         run: |
           python3 site/test_render.py

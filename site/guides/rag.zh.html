@@ -25,7 +25,12 @@
         <li>点击<strong>刷新资料库</strong>，选中刚才的库，用<strong>查看文档状态</strong>确认文件已列出。然后在<strong>搜索资料</strong>中查「退货运费」，确认命中的原文写明由商家承担。</li>
       </ol>
       <figure class="example-shot">
-        <a href="${examples}rag-import.png"><img src="${examples}rag-import.png" alt="记忆管理的知识库面板显示售后手册、导入的文件和退货运费原文。" width="1280" height="941" loading="lazy" decoding="async"></a>
+        <a href="${examples}rag-import.png">
+          <picture>
+            <source media="(max-width: 36rem)" type="image/webp" srcset="${examples}rag-import.mobile.webp">
+            <img src="${examples}rag-import.png" alt="记忆管理的知识库面板显示售后手册、导入的文件和退货运费原文。" width="1280" height="941" loading="lazy" decoding="async">
+          </picture>
+        </a>
         <figcaption>在「记忆管理 → 知识库」中导入售后手册并搜到原文（演示数据）。</figcaption>
       </figure>
     </section>
@@ -34,7 +39,12 @@
       <h2>在 Agent 对话里提问并核对出处</h2>
       <p>第一次提问时写出资料库名称，并请 Agent 给出处。同一段对话里已经明确在查哪个库，可以直接追问。多个资料库都可能相关时，写明要查的库名。</p>
       <figure class="example-shot">
-        <a href="${examples}rag.png"><img src="${examples}rag.png" alt="$preview_alt" width="794" height="317" loading="lazy" decoding="async"></a>
+        <a href="${examples}rag.png">
+          <picture>
+            <source media="(max-width: 36rem)" type="image/webp" srcset="${examples}rag.mobile.webp">
+            <img src="${examples}rag.png" alt="$preview_alt" width="794" height="317" loading="lazy" decoding="async">
+          </picture>
+        </a>
         <figcaption>Agent 根据演示《售后手册》第 3.2 节回答退货运费问题。</figcaption>
       </figure>
       <p>引用可以包含章节、页码或工作表，具体取决于文件格式。根据引用位置查阅原文，也可以回到<strong>搜索资料</strong>查相应段落，核对条款的适用条件和结论。</p>

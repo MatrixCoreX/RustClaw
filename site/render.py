@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Render the public project site using the repository's product identity."""
+"""Render the public project site. Install site/requirements.txt before building."""
 
 import argparse
+from hashlib import sha256
 from html import escape
 from html.parser import HTMLParser
 import json
@@ -79,6 +80,16 @@ def read_product_identity():
     return identity.split("\0", 2)
 
 
+def write_mobile_previews(examples: Path):
+    from PIL import Image
+
+    for source in examples.glob("*/*.png"):
+        with Image.open(source) as original:
+            preview = original.convert("RGBA" if original.has_transparency_data else "RGB")
+            preview.thumbnail((720, original.height), Image.Resampling.LANCZOS)
+            preview.save(source.with_suffix(".mobile.webp"), quality=88, method=4)
+
+
 def build(output: Path):
     brand, release_repository, public_site_url = read_product_identity()
     owner, repository = release_repository.split("/", 1)
@@ -89,33 +100,35 @@ def build(output: Path):
             raise ValueError("public_site_url must be the HTTPS root of a lowercase domain")
         site = public_site_url.rstrip("/") + "/"
     github = f"https://github.com/{release_repository}"
+    style_version = sha256((SOURCE / "assets/site.css").read_bytes()).hexdigest()[:12]
     shared = {"brand": brand, "owner": owner, "site": site, "repo": github,
-              "release_repository": release_repository, "profile": f"https://github.com/{owner}"}
+              "release_repository": release_repository, "profile": f"https://github.com/{owner}",
+              "style_version": style_version}
     page = Template((SOURCE / "page.html").read_text(encoding="utf-8"))
     pages = [
         (
-            "en.html", "en", "", None, f"{brand} by {owner} | Self-Hosted AI Agent",
-            f"Run {brand}, a self-hosted Rust AI agent by {owner}, on Raspberry Pi, Ubuntu, or macOS. Connect MCP tools, search a RAG knowledge base, and use AiAPP.",
+            "en.html", "en", "", None, f"{brand} | Self-Hosted AI Agent by {owner}",
+            f"Self-host {brand} by {owner} on Raspberry Pi, Ubuntu, or macOS. Use MCP tools, search with RAG, and review media results in AiAPP.",
             "Agent chat showing the status, location, and tracking number of a sample order.",
             "mcp.png",
         ),
         (
-            "zh.html", "zh-CN", "zh/", None, f"{brand} | {owner} 的自托管 AI Agent",
-            f"{brand} 是 {owner} 用 Rust 开发的自托管 AI Agent，可运行在树莓派、Ubuntu 或 macOS。接入 MCP 工具、导入 RAG 知识库，并在 AiAPP 查看媒体任务结果。",
+            "zh.html", "zh-CN", "zh/", None, f"{brand} | 自托管 AI Agent · {owner}",
+            f"在树莓派、Ubuntu 或 macOS 上安装 {owner} 的 {brand}。接入 MCP 工具、检索 RAG 知识库，并在 AiAPP 查看媒体结果。",
             "Agent 对话窗口展示模拟订单的状态、物流位置和快递单号。",
             "mcp.png",
         ),
         (
             "guides/raspberry-pi-install.en.html", "en", "raspberry-pi-install/", "Raspberry Pi installation",
-            f"Install {brand} on Raspberry Pi | 64-bit Raspberry Pi OS",
-            f"Install the signed ARM64 release of {brand} on Raspberry Pi OS. Check dependencies, run the installer, and send a first message in the web console.",
+            f"Install {brand} on Raspberry Pi",
+            f"Install {brand} on 64-bit Raspberry Pi OS with the signed ARM64 release. Check disk space, open the web console, and send your first task.",
             "First question and reply in the Agent web console.",
             "pi-first-task.png",
         ),
         (
             "guides/raspberry-pi-install.zh.html", "zh-CN", "zh/raspberry-pi-install/", "树莓派安装指南",
-            f"在 Raspberry Pi 上安装 {brand} | 64 位 Raspberry Pi OS",
-            f"在 64 位 Raspberry Pi OS 上安装 {brand}。检查 ARM64 架构与磁盘空间，下载签名发布包，打开网页控制台发送第一条消息。",
+            f"在树莓派上安装 {brand} | Raspberry Pi OS",
+            f"在 64 位 Raspberry Pi OS 上安装 {brand}。检查架构和磁盘空间，安装签名 ARM64 发布包，然后在网页控制台发送第一个任务。",
             "网页控制台中 Agent 回复第一条消息的示例。",
             "pi-first-task.png",
         ),
@@ -132,26 +145,26 @@ def build(output: Path):
             "media-discovery.png",
         ),
         (
-            "guides/mcp.en.html", "en", "mcp/", "MCP setup", f"{brand} MCP Setup | Local stdio and Streamable HTTP",
-            f"Set up local stdio or remote Streamable HTTP in {brand}. Download a read-only Python MCP server and test order lookup by order or tracking number.",
+            "guides/mcp.en.html", "en", "mcp/", "MCP setup", f"{brand} MCP Setup | Local and Remote",
+            f"Connect local stdio or remote Streamable HTTP MCP servers to {brand}. Try the Python demo to find orders by order ID or tracking number.",
             "Agent chat showing the status, location, and tracking number of a sample order.",
             "mcp.png",
         ),
         (
-            "guides/mcp.zh.html", "zh-CN", "zh/mcp/", "MCP 配置", f"{brand} MCP 配置指南 | 本机 stdio 与远程 HTTP",
-            f"在 {brand} 接入本机 stdio 或远程 Streamable HTTP MCP 服务器。下载 Python 订单示例，核对工具权限并测试订单正查和单号反查。",
+            "guides/mcp.zh.html", "zh-CN", "zh/mcp/", "MCP 配置", f"{brand} MCP 配置 | 本机与远程",
+            f"在 {brand} 接入本机 stdio 或远程 Streamable HTTP MCP 服务器。下载 Python 演示，用订单号或快递单号测试查询。",
             "Agent 对话窗口展示模拟订单的状态、物流位置和快递单号。",
             "mcp.png",
         ),
         (
-            "guides/rag.en.html", "en", "rag/", "RAG knowledge base", f"{brand} RAG Knowledge Base Guide | Import and Cite Files",
-            f"Import PDF, Markdown, or Office files into a {brand} RAG knowledge base. Download seven examples covering product questions, warehouse procedures, and MCP order lookup.",
+            "guides/rag.en.html", "en", "rag/", "RAG knowledge base", f"{brand} RAG Knowledge Base | Import and Examples",
+            f"Import PDF, Markdown, or Office files into {brand} and ask for cited answers. Try seven RAG examples with downloadable documents.",
             "Agent cites a section of the sample Returns Handbook in a return shipping answer.",
             "rag.png",
         ),
         (
-            "guides/rag.zh.html", "zh-CN", "zh/rag/", "RAG 知识库", f"{brand} RAG 知识库指南 | 导入 PDF、Word 与 Markdown",
-            f"在 {brand} 的记忆管理导入 PDF、Word 或 Markdown 并核对引用。下载七个 RAG 案例，体验商品导购、发货流程、文档对比和 MCP 订单查询。",
+            "guides/rag.zh.html", "zh-CN", "zh/rag/", "RAG 知识库", f"{brand} RAG 知识库 | 导入与实测",
+            f"在 {brand} 导入 PDF、Word 或 Markdown，让 Agent 回答并给出处。下载案例资料，试用七个实测问法。",
             "Agent 回答退货运费由谁承担，并引用示例《售后手册》第 3.2 节。",
             "rag.png",
         ),
@@ -225,6 +238,7 @@ def build(output: Path):
         shutil.copyfile(SOURCE / "assets" / name, assets / name)
     examples = assets / "examples"
     shutil.copytree(SOURCE / "assets" / "examples", examples, dirs_exist_ok=True)
+    write_mobile_previews(examples)
     shutil.make_archive(str(examples / "rag-scenarios"), "zip", root_dir=examples, base_dir="rag-scenarios")
     shutil.copyfile(REPOSITORY_ROOT / "UI/public/app-logo.svg", assets / "logo.svg")
     for verification in (SOURCE / "verification").glob("google*.html"):

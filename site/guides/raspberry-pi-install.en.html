@@ -47,7 +47,12 @@ bash install-latest-release.sh --repo $release_repository --check-only</code></p
         <li>Open <strong>Agent</strong> and ask “What can you help me do in one sentence?” A reply confirms that the console, background service, and model can communicate.</li>
       </ol>
       <figure class="example-shot">
-        <a href="${examples}pi-first-task.png"><img src="${examples}pi-first-task.png" alt="Agent chat shows the first question and a short reply after setting up the web console." width="714" height="198" loading="lazy" decoding="async"></a>
+        <a href="${examples}pi-first-task.png">
+          <picture>
+            <source media="(max-width: 36rem)" type="image/webp" srcset="${examples}pi-first-task.mobile.webp">
+            <img src="${examples}pi-first-task.png" alt="Agent chat shows the first question and a short reply after setting up the web console." width="714" height="198" loading="lazy" decoding="async">
+          </picture>
+        </a>
         <figcaption>First message in the web console (demo conversation).</figcaption>
       </figure>
       <p class="detail-links"><a href="../skills/#install">Install agent skills</a> <a href="../mcp/#demo">Connect the local MCP order demo</a> <a href="../rag/#prepare">Import a RAG knowledge base</a></p>

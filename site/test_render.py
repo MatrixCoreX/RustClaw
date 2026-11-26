@@ -32,6 +32,7 @@ class Page(HTMLParser):
         self.preview_image = ""
         self.links = []
         self.assets = []
+        self.mobile_previews = []
         self.open_sections = []
         self.section_assets = {}
         self.ids = set()
@@ -69,6 +70,8 @@ class Page(HTMLParser):
             self.preview_image = attributes["content"]
         if tag in ("link", "a"):
             self.links.append(attributes)
+        if tag == "source" and attributes.get("type") == "image/webp":
+            self.mobile_previews.append((attributes["media"], attributes["srcset"]))
         if tag == "img":
             self.assets.append(attributes["src"])
             if self.open_sections and self.open_sections[-1]:
@@ -300,6 +303,13 @@ class ProjectSiteTest(unittest.TestCase):
                             self.assertIn(resolved.fragment, linked_page.ids, link["href"])
                     for asset in page.assets:
                         self.assertGreater((path.parent / asset).stat().st_size, 0)
+                    screenshots = [asset for asset in page.assets if "assets/examples/" in asset]
+                    self.assertCountEqual(
+                        page.mobile_previews,
+                        [("(max-width: 36rem)", asset.removesuffix(".png") + ".mobile.webp") for asset in screenshots],
+                    )
+                    for _, preview in page.mobile_previews:
+                        self.assertEqual((path.parent / preview).read_bytes()[8:12], b"WEBP")
                 sitemap = ElementTree.parse(output / "sitemap.xml")
                 self.assertIn(f"Sitemap: {base}sitemap.xml\n", (output / "robots.txt").read_text())
                 entries = sitemap.findall("{*}url")

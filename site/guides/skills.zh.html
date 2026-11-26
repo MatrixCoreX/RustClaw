@@ -26,11 +26,21 @@
       <p>打开 <strong>AiAPP → 媒体发现</strong>，可以按平台或内容类型筛选、预览结果和打开原帖。需要持续采集时，可以在 Agent 中提出开启、暂停或停止的请求。</p>
       <div class="example-pair">
         <figure class="example-shot">
-          <a href="${examples}media-discovery-agent.png"><img src="${examples}media-discovery-agent.png" alt="Agent 对话中发起露营装备采集，并收到小红书和抖音各一条帖子的回复。" width="714" height="261" loading="lazy" decoding="async"></a>
+          <a href="${examples}media-discovery-agent.png">
+            <picture>
+              <source media="(max-width: 36rem)" type="image/webp" srcset="${examples}media-discovery-agent.mobile.webp">
+              <img src="${examples}media-discovery-agent.png" alt="Agent 对话中发起露营装备采集，并收到小红书和抖音各一条帖子的回复。" width="714" height="261" loading="lazy" decoding="async">
+            </picture>
+          </a>
           <figcaption><strong>Agent</strong> · 发起采集，确认保存了两条帖子。</figcaption>
         </figure>
         <figure class="example-shot">
-          <a href="${examples}media-discovery.png"><img src="${examples}media-discovery.png" alt="AiAPP「媒体发现」显示两条露营帖子及其预览、文案和来源入口。" width="1120" height="622" loading="lazy" decoding="async"></a>
+          <a href="${examples}media-discovery.png">
+            <picture>
+              <source media="(max-width: 36rem)" type="image/webp" srcset="${examples}media-discovery.mobile.webp">
+              <img src="${examples}media-discovery.png" alt="AiAPP「媒体发现」显示两条露营帖子及其预览、文案和来源入口。" width="1120" height="622" loading="lazy" decoding="async">
+            </picture>
+          </a>
           <figcaption><strong>AiAPP</strong> · 在「媒体发现」查看帖子预览、作者文案和来源（演示数据）。</figcaption>
         </figure>
       </div>
@@ -44,11 +54,21 @@
       <p>可以从 Agent 回复里下载文件，也可以到 <strong>AiAPP → 媒体下载</strong>查找已保留的任务和附件。记录覆盖 Agent 聊天和已接入的消息渠道。</p>
       <div class="example-pair">
         <figure class="example-shot">
-          <a href="${examples}media-download-agent.png"><img src="${examples}media-download-agent.png" alt="Agent 对话中提交一条露营图文的下载请求，回复附有两张原图和一份正文。" width="714" height="307" loading="lazy" decoding="async"></a>
+          <a href="${examples}media-download-agent.png">
+            <picture>
+              <source media="(max-width: 36rem)" type="image/webp" srcset="${examples}media-download-agent.mobile.webp">
+              <img src="${examples}media-download-agent.png" alt="Agent 对话中提交一条露营图文的下载请求，回复附有两张原图和一份正文。" width="714" height="307" loading="lazy" decoding="async">
+            </picture>
+          </a>
           <figcaption><strong>Agent</strong> · 发送图文分享链接，从回复中下载原图和正文。</figcaption>
         </figure>
         <figure class="example-shot">
-          <a href="${examples}media-download.png"><img src="${examples}media-download.png" alt="AiAPP「媒体下载」显示一条已完成的任务，包含两张原图和一份正文文件。" width="702" height="943" loading="lazy" decoding="async"></a>
+          <a href="${examples}media-download.png">
+            <picture>
+              <source media="(max-width: 36rem)" type="image/webp" srcset="${examples}media-download.mobile.webp">
+              <img src="${examples}media-download.png" alt="AiAPP「媒体下载」显示一条已完成的任务，包含两张原图和一份正文文件。" width="702" height="943" loading="lazy" decoding="async">
+            </picture>
+          </a>
           <figcaption><strong>AiAPP</strong> · 在「媒体下载」找到这条已完成的任务和生成文件（演示数据）。</figcaption>
         </figure>
       </div>
@@ -61,7 +81,12 @@
       <blockquote>「帮我查杭州未来三天的天气，按天列出天气状况、最低和最高气温。」</blockquote>
       <p>技能从 Open-Meteo 获取天气数据，无需天气 API Key。只想查当前天气时，说出城市即可。想看逐日预报时，再告诉 Agent 要查几天。</p>
       <figure class="example-shot">
-        <a href="${examples}weather.png"><img src="${examples}weather.png" alt="Agent 对话展示杭州三天的天气状况、最低气温和最高气温。" width="714" height="290" loading="lazy" decoding="async"></a>
+        <a href="${examples}weather.png">
+          <picture>
+            <source media="(max-width: 36rem)" type="image/webp" srcset="${examples}weather.mobile.webp">
+            <img src="${examples}weather.png" alt="Agent 对话展示杭州三天的天气状况、最低气温和最高气温。" width="714" height="290" loading="lazy" decoding="async">
+          </picture>
+        </a>
         <figcaption>Agent 对话中的杭州三天天气预报（演示数据）。</figcaption>
       </figure>
       <p><a href="$repo/blob/main/optional_skills/weather/INTERFACE.md#actions">查看天气技能支持的查询方式</a></p>
@@ -73,7 +98,12 @@
       <blockquote>「把我上传的会议录音 meeting.wav 转成文字，回复里贴上全文，再给我一个 TXT 文件。」</blockquote>
       <p>任务完成后，可以在回复中阅读完整文字稿。点击 <code>transcript.txt</code> 旁的下载按钮即可保存一份。</p>
       <figure class="example-shot">
-        <a href="${examples}speech-transcription.png"><img src="${examples}speech-transcription.png" alt="Agent 对话展示会议录音的转写全文和 transcript.txt 下载按钮。" width="714" height="289" loading="lazy" decoding="async"></a>
+        <a href="${examples}speech-transcription.png">
+          <picture>
+            <source media="(max-width: 36rem)" type="image/webp" srcset="${examples}speech-transcription.mobile.webp">
+            <img src="${examples}speech-transcription.png" alt="Agent 对话展示会议录音的转写全文和 transcript.txt 下载按钮。" width="714" height="289" loading="lazy" decoding="async">
+          </picture>
+        </a>
         <figcaption>Agent 对话中的会议转写和 TXT 下载（演示数据）。</figcaption>
       </figure>
       <p><a href="$repo/blob/main/crates/skills/audio_transcribe/INTERFACE.md#config-entry-points">查看语音识别配置说明</a></p>

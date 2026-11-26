@@ -26,11 +26,21 @@
       <p>Open <strong>AiAPP → Media Discovery</strong> to filter by platform or content type, preview a post, or open the source. You can also ask the agent to start, pause, or stop an ongoing collection.</p>
       <div class="example-pair">
         <figure class="example-shot">
-          <a href="${examples}media-discovery-agent.png"><img src="${examples}media-discovery-agent.png" alt="Agent chat shows a camping gear collection request and a reply listing one post from each platform." width="714" height="281" loading="lazy" decoding="async"></a>
+          <a href="${examples}media-discovery-agent.png">
+            <picture>
+              <source media="(max-width: 36rem)" type="image/webp" srcset="${examples}media-discovery-agent.mobile.webp">
+              <img src="${examples}media-discovery-agent.png" alt="Agent chat shows a camping gear collection request and a reply listing one post from each platform." width="714" height="281" loading="lazy" decoding="async">
+            </picture>
+          </a>
           <figcaption><strong>Agent</strong> · Start the collection and see which two posts were saved.</figcaption>
         </figure>
         <figure class="example-shot">
-          <a href="${examples}media-discovery.png"><img src="${examples}media-discovery.png" alt="The Media Discovery AiAPP shows two sample camping posts with previews, captions, and source links." width="1120" height="642" loading="lazy" decoding="async"></a>
+          <a href="${examples}media-discovery.png">
+            <picture>
+              <source media="(max-width: 36rem)" type="image/webp" srcset="${examples}media-discovery.mobile.webp">
+              <img src="${examples}media-discovery.png" alt="The Media Discovery AiAPP shows two sample camping posts with previews, captions, and source links." width="1120" height="642" loading="lazy" decoding="async">
+            </picture>
+          </a>
           <figcaption><strong>AiAPP</strong> · Open Media Discovery to see the previews, captions, and source links (demo data).</figcaption>
         </figure>
       </div>
@@ -44,11 +54,21 @@
       <p>Download the files from the Agent result, or go to <strong>AiAPP → Media Download</strong> to review retained tasks and their files. The history includes tasks run in Agent chat and through connected messaging channels.</p>
       <div class="example-pair">
         <figure class="example-shot">
-          <a href="${examples}media-download-agent.png"><img src="${examples}media-download-agent.png" alt="Agent chat shows a request to download a camping post and a reply with two original photos and a text file." width="714" height="330" loading="lazy" decoding="async"></a>
+          <a href="${examples}media-download-agent.png">
+            <picture>
+              <source media="(max-width: 36rem)" type="image/webp" srcset="${examples}media-download-agent.mobile.webp">
+              <img src="${examples}media-download-agent.png" alt="Agent chat shows a request to download a camping post and a reply with two original photos and a text file." width="714" height="330" loading="lazy" decoding="async">
+            </picture>
+          </a>
           <figcaption><strong>Agent</strong> · Send a post’s share link and download the photos and text from the reply.</figcaption>
         </figure>
         <figure class="example-shot">
-          <a href="${examples}media-download.png"><img src="${examples}media-download.png" alt="The Media Download AiAPP shows one completed task with two original photos and the article text file." width="702" height="943" loading="lazy" decoding="async"></a>
+          <a href="${examples}media-download.png">
+            <picture>
+              <source media="(max-width: 36rem)" type="image/webp" srcset="${examples}media-download.mobile.webp">
+              <img src="${examples}media-download.png" alt="The Media Download AiAPP shows one completed task with two original photos and the article text file." width="702" height="943" loading="lazy" decoding="async">
+            </picture>
+          </a>
           <figcaption><strong>AiAPP</strong> · Open Media Download to find the completed task and its files (demo data).</figcaption>
         </figure>
       </div>
@@ -61,7 +81,12 @@
       <blockquote>“What’s the weather in Hangzhou for the next three days? List the conditions, low, and high for each day.”</blockquote>
       <p>The skill uses Open-Meteo and needs no weather API key. Give the agent a city for current conditions or add the number of days for a daily forecast.</p>
       <figure class="example-shot">
-        <a href="${examples}weather.png"><img src="${examples}weather.png" alt="Agent chat shows three days of weather conditions and daily lows and highs for Hangzhou." width="714" height="310" loading="lazy" decoding="async"></a>
+        <a href="${examples}weather.png">
+          <picture>
+            <source media="(max-width: 36rem)" type="image/webp" srcset="${examples}weather.mobile.webp">
+            <img src="${examples}weather.png" alt="Agent chat shows three days of weather conditions and daily lows and highs for Hangzhou." width="714" height="310" loading="lazy" decoding="async">
+          </picture>
+        </a>
         <figcaption>Three-day forecast for Hangzhou in Agent chat (demo data).</figcaption>
       </figure>
       <p><a href="$repo/blob/main/optional_skills/weather/INTERFACE.md#actions">See the weather skill’s query options</a></p>
@@ -73,7 +98,12 @@
       <blockquote>“Transcribe the meeting recording I uploaded, meeting.wav. Paste the full transcript here and attach a TXT file.”</blockquote>
       <p>When the task finishes, read the full transcript in the reply and use the download button on <code>transcript.txt</code> to save a copy.</p>
       <figure class="example-shot">
-        <a href="${examples}speech-transcription.png"><img src="${examples}speech-transcription.png" alt="Agent chat shows the text of a meeting recording and a transcript.txt download." width="714" height="331" loading="lazy" decoding="async"></a>
+        <a href="${examples}speech-transcription.png">
+          <picture>
+            <source media="(max-width: 36rem)" type="image/webp" srcset="${examples}speech-transcription.mobile.webp">
+            <img src="${examples}speech-transcription.png" alt="Agent chat shows the text of a meeting recording and a transcript.txt download." width="714" height="331" loading="lazy" decoding="async">
+          </picture>
+        </a>
         <figcaption>Meeting transcript and TXT download in Agent chat (demo data).</figcaption>
       </figure>
       <p><a href="$repo/blob/main/crates/skills/audio_transcribe/INTERFACE.md#config-entry-points">See speech recognition configuration options</a></p>

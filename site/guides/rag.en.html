@@ -25,7 +25,12 @@
         <li>Select <strong>Refresh libraries</strong>, choose the library, and use <strong>View document status</strong> to check that the file is listed. Under <strong>Search material</strong>, search for <strong>return shipping</strong> and check that the excerpt mentions the seller covering it.</li>
       </ol>
       <figure class="example-shot">
-        <a href="${examples}rag-import.png"><img src="${examples}rag-import.png" alt="The Knowledge base panel shows the Returns Handbook, its file, and a search result for return shipping." width="1280" height="961" loading="lazy" decoding="async"></a>
+        <a href="${examples}rag-import.png">
+          <picture>
+            <source media="(max-width: 36rem)" type="image/webp" srcset="${examples}rag-import.mobile.webp">
+            <img src="${examples}rag-import.png" alt="The Knowledge base panel shows the Returns Handbook, its file, and a search result for return shipping." width="1280" height="961" loading="lazy" decoding="async">
+          </picture>
+        </a>
         <figcaption>Import and search for the original passage in Memory → Knowledge base (demo data).</figcaption>
       </figure>
     </section>
@@ -34,7 +39,12 @@
       <h2>Ask in Agent chat and verify the source</h2>
       <p>Name the library in your first question and ask for a citation. When the library is clear from the current conversation, you can ask a follow-up directly. If several libraries could contain the answer, name the one you want the agent to search.</p>
       <figure class="example-shot">
-        <a href="${examples}rag.png"><img src="${examples}rag.png" alt="$preview_alt" width="794" height="317" loading="lazy" decoding="async"></a>
+        <a href="${examples}rag.png">
+          <picture>
+            <source media="(max-width: 36rem)" type="image/webp" srcset="${examples}rag.mobile.webp">
+            <img src="${examples}rag.png" alt="$preview_alt" width="794" height="317" loading="lazy" decoding="async">
+          </picture>
+        </a>
         <figcaption>The Agent reply cites section 3.2 of the sample Returns Handbook.</figcaption>
       </figure>
       <p>A citation may include a section, page, or worksheet, depending on the document. Use that location or find the passage in <strong>Search material</strong> to verify both the rule and the conditions under which it applies.</p>
