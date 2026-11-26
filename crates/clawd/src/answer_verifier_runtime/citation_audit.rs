@@ -87,7 +87,7 @@ fn collect(
                 .filter(|url| url.starts_with("https://") || url.starts_with("http://"))
                 .collect::<Vec<_>>();
             if !urls.is_empty() {
-                for key in ["title", "content_excerpt", "snippet", "description", "text"] {
+                for key in ["title", "excerpt", "content_excerpt", "snippet", "description", "text"] {
                     let Some(text) = row
                         .get(key)
                         .and_then(Value::as_str)
@@ -173,7 +173,7 @@ mod tests {
                 "fixture.read",
                 None,
                 serde_json::json!({"extra":{"items":[
-                    {"link":"https://example.org/a","title":"A couple shares its finances"},
+                    {"link":"https://example.org/a","title":"A couple shares its finances","excerpt":"The couple reported a monthly total of 500."},
                     {"link":"https://example.org/b","title":"Vehicle registration"}
                 ]}}),
             ));
@@ -181,7 +181,7 @@ mod tests {
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0].url, "https://example.org/b");
         assert_eq!(rows[0].excerpts, ["Vehicle registration"]);
-        assert_eq!(rows[1].excerpts, ["A couple shares its finances"]);
+        assert_eq!(rows[1].excerpts, ["A couple shares its finances", "The couple reported a monthly total of 500."]);
         assert!(rows[2].excerpts.is_empty());
     }
 
