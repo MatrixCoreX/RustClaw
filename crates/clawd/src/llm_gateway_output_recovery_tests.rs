@@ -163,6 +163,7 @@ async fn length_discards_complete_partial_calls_then_recovers_without_disabling_
         2
     );
     assert_eq!(db.query_row("SELECT COUNT(*) FROM task_model_token_reservations WHERE task_id=?1 AND status='in_flight'", [&fixture.task.task_id], |row|row.get::<_,i64>(0)).unwrap(), 0);
+    drop(db);
     let events =
         crate::task_event_transport::replay_events_after(&fixture.state, &fixture.task.task_id, 0)
             .unwrap()
