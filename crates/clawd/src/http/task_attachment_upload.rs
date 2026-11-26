@@ -10,7 +10,7 @@ use axum::{
 };
 use serde_json::json;
 use std::sync::OnceLock;
-use tokio::sync::Semaphore;
+use tokio::{io::AsyncWriteExt, sync::Semaphore};
 
 pub(crate) async fn upload(
     State(state): State<AppState>,
@@ -40,7 +40,7 @@ pub(crate) async fn upload(
     }
     let inputs = match tokio::time::timeout(
         std::time::Duration::from_secs(120),
-        read_multipart(multipart),
+        read_multipart(multipart, root),
     )
     .await
     {
@@ -48,13 +48,19 @@ pub(crate) async fn upload(
         Ok(Err(response)) => return response,
         Err(_) => return error(StatusCode::REQUEST_TIMEOUT, "ui_attachment_upload_timeout"),
     };
-    match ui_attachments::commit_upload_batch(
-        root,
-        identity.user_id,
-        identity.chat_id,
-        &client_id,
-        inputs,
-    ) {
+    let root = root.to_owned();
+    let commit = tokio::task::spawn_blocking(move || {
+        let _hold_upload_slot = _permit;
+        ui_attachments::commit_upload_batch(
+            &root,
+            identity.user_id,
+            identity.chat_id,
+            &client_id,
+            inputs,
+        )
+    })
+    .await;
+    match commit.unwrap_or_else(|_| Err("ui_attachment_commit_failed".into())) {
         Ok(items) => Json(json!({"ok":true,"data":items,"error":null})).into_response(),
         Err(code) => error(
             if code == "ui_attachment_replay_conflict" {
@@ -70,7 +76,10 @@ fn error(status: StatusCode, code: &str) -> Response {
     (status, Json(json!({"ok":false,"data":null,"error":code}))).into_response()
 }
 
-async fn read_multipart(mut multipart: Multipart) -> Result<Vec<UploadInput>, Response> {
+async fn read_multipart(
+    mut multipart: Multipart,
+    root: &std::path::Path,
+) -> Result<Vec<UploadInput<std::fs::File>>, Response> {
     let mut inputs = Vec::new();
     let mut total = 0usize;
     loop {
@@ -92,15 +101,21 @@ async fn read_multipart(mut multipart: Multipart) -> Result<Vec<UploadInput>, Re
                 "ui_attachments_too_many",
             ));
         }
-        let mut input = UploadInput {
-            name: field.file_name().unwrap_or("attachment").to_owned(),
-            mime_type: field
-                .content_type()
-                .unwrap_or("application/octet-stream")
-                .to_owned(),
-            kind: field.name().unwrap_or("file").to_owned(),
-            bytes: Vec::new(),
+        let name = field.file_name().unwrap_or("attachment").to_owned();
+        let mime_type = field
+            .content_type()
+            .unwrap_or("application/octet-stream")
+            .to_owned();
+        let kind = field.name().unwrap_or("file").to_owned();
+        let staging_error = |_| {
+            error(
+                StatusCode::INSUFFICIENT_STORAGE,
+                "ui_attachment_storage_pressure",
+            )
         };
+        let temporary = tempfile::tempfile_in(root).map_err(staging_error)?;
+        let mut file = tokio::fs::File::from_std(temporary);
+        let mut size = 0usize;
         loop {
             let chunk = match field.chunk().await {
                 Ok(chunk) => chunk,
@@ -115,9 +130,8 @@ async fn read_multipart(mut multipart: Multipart) -> Result<Vec<UploadInput>, Re
                 break;
             };
             total = total.saturating_add(chunk.len());
-            if input.bytes.len().saturating_add(chunk.len())
-                > ui_attachments::MAX_UI_ATTACHMENT_BYTES
-            {
+            size = size.saturating_add(chunk.len());
+            if size > ui_attachments::MAX_UI_ATTACHMENT_BYTES {
                 return Err(error(
                     StatusCode::PAYLOAD_TOO_LARGE,
                     "ui_attachment_too_large",
@@ -129,9 +143,15 @@ async fn read_multipart(mut multipart: Multipart) -> Result<Vec<UploadInput>, Re
                     "ui_attachments_total_too_large",
                 ));
             }
-            input.bytes.extend_from_slice(&chunk);
+            file.write_all(&chunk).await.map_err(staging_error)?;
         }
-        inputs.push(input);
+        file.flush().await.map_err(staging_error)?;
+        inputs.push(UploadInput {
+            name,
+            mime_type,
+            kind,
+            bytes: file.into_std().await,
+        });
     }
     Ok(inputs)
 }

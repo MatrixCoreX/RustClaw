@@ -87,7 +87,7 @@ pub(crate) fn materialize_ui_task_attachments(
                 } else {
                     input.mime_type
                 },
-                bytes,
+                bytes: std::io::Cursor::new(bytes),
             })
         })
         .collect::<Result<Vec<_>, String>>()?;

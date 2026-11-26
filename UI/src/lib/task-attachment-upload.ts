@@ -7,8 +7,10 @@ export async function uploadTaskAttachments(apiFetch: ApiFetch, clientId: string
   if (!attachments.length) return [];
   const form = new FormData();
   for (const attachment of attachments) {
-    // Decode in the browser once; the task JSON carries references only.
-    const blob = await (await fetch(attachment.dataUrl, { signal })).blob();
+    const blob = attachment.file ?? (attachment.dataUrl?.startsWith("data:")
+      ? await (await fetch(attachment.dataUrl, { signal })).blob()
+      : null);
+    if (!blob) throw new Error("ui_attachment_content_missing");
     form.append(attachment.kind, blob, attachment.name);
   }
   const response = await apiFetch(`/v1/task-attachments/${encodeURIComponent(clientId)}`, { method: "POST", body: form, signal });

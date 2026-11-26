@@ -368,7 +368,7 @@ impl AippSpec {
             ));
         }
         match (self.renderer.as_str(), self.data_contract.as_str()) {
-            ("collection_feed_v1", "media_collection_v1") => {
+            ("collection_feed_v1", "media_collection_v1") | ("schedule_history_v1", "owned_schedule_runs_v1") => {
                 if self.asset_root.is_some()
                     || self.entrypoint.is_some()
                     || !self.bridge_capabilities.is_empty()

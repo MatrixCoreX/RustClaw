@@ -73,3 +73,12 @@ output_fields = []
 [capability_request.evidence_contract]
 required = false
 selectors = []
+
+[aipp]
+schema_version = 1
+renderer = "schedule_history_v1"
+data_contract = "owned_schedule_runs_v1"
+icon = "clock"
+default_locale = "en"
+titles = { en = "Scheduled task history", zh = "定时任务历史" }
+descriptions = { en = "Review past runs, execution failures and delivery status.", zh = "查看每次执行的时间、失败原因和消息投递状态。" }

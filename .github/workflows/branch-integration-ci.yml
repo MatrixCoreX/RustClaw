@@ -81,6 +81,7 @@ jobs:
           set -euo pipefail
           python3 scripts/nl_tests/replay_verifier_candidate_tests.py
           python3 scripts/nl_tests/scheduled_run_receipt_sync_tests.py
+          python3 scripts/nl_tests/scheduled_run_failure_sync_tests.py
           python3 -m unittest discover -s scripts/tests -p test_retire_superseded_release_archives.py
           python3 scripts/check_long_files.py
           python3 scripts/check_cross_platform_contracts.py

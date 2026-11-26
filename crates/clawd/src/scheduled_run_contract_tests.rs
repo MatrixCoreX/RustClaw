@@ -231,7 +231,8 @@ fn scheduled_run_terminal_sync_repairs_and_tracks_terminal_task_status() {
         "CREATE TABLE tasks (
             task_id TEXT PRIMARY KEY,
             status TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            updated_at TEXT NOT NULL,
+            result_json TEXT
          );",
     )
     .expect("task schema");
@@ -439,4 +440,79 @@ fn insert_test_scheduled_job(db: &Connection, job_id: &str, user_id: i64, chat_i
         rusqlite::params![job_id, user_id, chat_id],
     )
     .expect("insert scheduled job");
+}
+
+#[test]
+fn scheduled_history_preserves_owners_and_paginates_past_deleted_schedules() {
+    let db = Connection::open_in_memory().unwrap();
+    crate::db_init::ensure_schedule_schema(&db).unwrap();
+    db.execute_batch(
+        "CREATE TABLE tasks(task_id TEXT PRIMARY KEY,principal_id TEXT);
+        ALTER TABLE scheduled_jobs ADD COLUMN principal_id TEXT;",
+    )
+    .or_else(|error| {
+        if error.to_string().contains("duplicate column name") {
+            Ok(())
+        } else {
+            Err(error)
+        }
+    })
+    .unwrap();
+    db.execute_batch(include_str!("scheduled_run_ownership.sql"))
+        .unwrap();
+    for i in 1..=125 {
+        let owner = if i <= 120 {
+            Some("one")
+        } else if i <= 124 {
+            Some("two")
+        } else {
+            None
+        };
+        let task = format!("task-{i}");
+        db.execute(
+            "INSERT INTO tasks VALUES (?1,?2)",
+            rusqlite::params![task, owner],
+        )
+        .unwrap();
+        insert_scheduled_run_enqueued(
+            &db,
+            &ScheduledRunEnqueued {
+                run_id: &format!("run-{i}"),
+                job_id: "removed",
+                task_id: &task,
+                thread_ref: "schedule",
+                started_at: "1000",
+            },
+        )
+        .unwrap();
+    }
+    db.execute("DELETE FROM tasks", []).unwrap();
+    let actor = |principal: &str, role: &str| claw_core::types::AuthIdentity {
+        user_key: "fixture".into(),
+        principal_id: principal.into(),
+        role: role.into(),
+        user_id: 1,
+        chat_id: 1,
+    };
+    let one = actor("one", "user");
+    let first = super::scheduled_history_page(&db, &one, None, 100, None).unwrap();
+    assert_eq!(first["items"].as_array().unwrap().len(), 100);
+    let next =
+        super::scheduled_history_page(&db, &one, first["next_cursor"].as_u64(), 100, None).unwrap();
+    assert_eq!(next["items"].as_array().unwrap().len(), 20);
+    assert_eq!(first["items"][0]["task_id"], "task-120");
+    assert_eq!(next["items"][0]["task_id"], "task-20");
+    assert_eq!(
+        super::scheduled_history_page(&db, &actor("two", "guest"), None, 100, None).unwrap()
+            ["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
+    assert_eq!(
+        super::scheduled_history_page(&db, &actor("admin", "admin"), None, 100, None).unwrap()
+            ["items"][0]["task_id"],
+        "task-125"
+    );
 }

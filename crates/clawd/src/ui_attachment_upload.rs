@@ -2,13 +2,13 @@
 use super::*;
 use fs2::FileExt;
 use sha2::{Digest, Sha256};
-use std::io::Read;
+use std::io::{self, Read, Seek, SeekFrom};
 
-pub(crate) struct UploadInput {
+pub(crate) struct UploadInput<R = io::Cursor<Vec<u8>>> {
     pub name: String,
     pub mime_type: String,
     pub kind: String,
-    pub bytes: Vec<u8>,
+    pub bytes: R,
 }
 
 struct Rollback<'a> {
@@ -26,12 +26,12 @@ impl Drop for Rollback<'_> {
     }
 }
 
-pub(crate) fn commit_upload_batch(
+pub(crate) fn commit_upload_batch<R: Read + Seek>(
     root: &Path,
     user_id: i64,
     chat_id: i64,
     call_id: &str,
-    inputs: Vec<UploadInput>,
+    inputs: Vec<UploadInput<R>>,
 ) -> Result<Vec<MaterializedAttachment>, String> {
     if inputs.is_empty() || inputs.len() > MAX_UI_ATTACHMENTS {
         return Err("ui_attachments_too_many".into());
@@ -40,28 +40,43 @@ pub(crate) fn commit_upload_batch(
     let scope = hex::encode(Sha256::digest(call_id.as_bytes()));
     let directory = root.join(format!("data/ui/{user_id}/{chat_id}/{scope}"));
     let mut prepared = Vec::new();
-    for (index, input) in inputs.into_iter().enumerate() {
-        if input.bytes.len() > MAX_UI_ATTACHMENT_BYTES {
+    for (index, mut input) in inputs.into_iter().enumerate() {
+        let size = input
+            .bytes
+            .seek(SeekFrom::End(0))
+            .map_err(|_| "ui_attachment_stream_failed")?;
+        if size > MAX_UI_ATTACHMENT_BYTES as u64 {
             return Err("ui_attachment_too_large".into());
         }
-        total = total.saturating_add(input.bytes.len());
+        total = total.saturating_add(size as usize);
         if total > MAX_UI_TOTAL_ATTACHMENT_BYTES {
             return Err("ui_attachments_total_too_large".into());
         }
         let name = safe_upload_filename(&input.name, &input.kind, &input.mime_type);
-        let digest = hex::encode(Sha256::digest(&input.bytes));
+        input
+            .bytes
+            .rewind()
+            .map_err(|_| "ui_attachment_stream_failed")?;
+        let mut hasher = Sha256::new();
+        io::copy(&mut input.bytes, &mut hasher).map_err(|_| "ui_attachment_stream_failed")?;
+        let digest = hex::encode(hasher.finalize());
+        input
+            .bytes
+            .rewind()
+            .map_err(|_| "ui_attachment_stream_failed")?;
         let relative = format!("data/ui/{user_id}/{chat_id}/{scope}/{index:02}-{digest}-{name}");
         let metadata = MaterializedAttachment {
             name,
             mime_type: input.mime_type,
             kind: normalize_kind(&input.kind, ""),
             rel_path: relative,
-            size: input.bytes.len(),
+            size: size as usize,
         };
-        prepared.push((metadata, input.bytes));
+        prepared.push((metadata, input.bytes, digest));
     }
-    let manifest = serde_json::to_vec(&prepared.iter().map(|(item, _)| item).collect::<Vec<_>>())
-        .map_err(|_| "ui_attachment_manifest_invalid")?;
+    let manifest =
+        serde_json::to_vec(&prepared.iter().map(|(item, _, _)| item).collect::<Vec<_>>())
+            .map_err(|_| "ui_attachment_manifest_invalid")?;
     crate::secure_workspace_fs::ensure_private_workspace_directory(root, &directory)
         .map_err(|_| "ui_attachment_directory_unavailable")?;
     let lock_path = directory.join(".upload-lock");
@@ -85,14 +100,18 @@ pub(crate) fn commit_upload_batch(
                 return Err("ui_attachment_replay_conflict".into());
             }
             // Replays verify immutable file contents, never overwrite them.
-            for (item, expected) in &prepared {
-                let mut actual = Vec::new();
-                crate::secure_workspace_fs::open_workspace_file(root, &root.join(&item.rel_path))
-                    .map_err(|_| "ui_attachment_replay_missing")?
-                    .take((MAX_UI_ATTACHMENT_BYTES + 1) as u64)
-                    .read_to_end(&mut actual)
+            for (item, _, expected_digest) in &prepared {
+                let mut hasher = Sha256::new();
+                let mut file = crate::secure_workspace_fs::open_workspace_file(
+                    root,
+                    &root.join(&item.rel_path),
+                )
+                .map_err(|_| "ui_attachment_replay_missing")?
+                .take((MAX_UI_ATTACHMENT_BYTES + 1) as u64);
+                let length = io::copy(&mut file, &mut hasher)
                     .map_err(|_| "ui_attachment_replay_unreadable")?;
-                if actual != *expected {
+                if length != item.size as u64 || hex::encode(hasher.finalize()) != *expected_digest
+                {
                     return Err("ui_attachment_replay_digest_mismatch".into());
                 }
             }
@@ -106,9 +125,9 @@ pub(crate) fn commit_upload_batch(
                 created: Vec::new(),
                 committed: false,
             };
-            for (item, bytes) in &prepared {
+            for (item, bytes, _) in &mut prepared {
                 let target = root.join(&item.rel_path);
-                crate::secure_workspace_fs::atomic_create_workspace_file(root, &target, bytes)
+                crate::secure_workspace_fs::atomic_create_workspace_stream(root, &target, bytes)
                     .map_err(|_| "ui_attachment_immutable_write_failed")?;
                 rollback.created.push(target);
             }
@@ -122,7 +141,10 @@ pub(crate) fn commit_upload_batch(
         }
         Err(_) => return Err("ui_attachment_manifest_unavailable".into()),
     }
-    Ok(prepared.into_iter().map(|(metadata, _)| metadata).collect())
+    Ok(prepared
+        .into_iter()
+        .map(|(metadata, _, _)| metadata)
+        .collect())
 }
 
 #[cfg(test)]

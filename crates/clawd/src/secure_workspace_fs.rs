@@ -285,6 +285,26 @@ pub(crate) fn atomic_create_workspace_file(
     atomic_publish_workspace_file(workspace_root, target, bytes, true, Publication::CreateNew)
 }
 
+pub(crate) fn atomic_create_workspace_stream(
+    workspace_root: &Path,
+    target: &Path,
+    content: impl io::Read,
+) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let (parent, filename) = open_parent_directory(workspace_root, target, true)?;
+        atomic_publish_in_directory(parent, filename, content, Publication::CreateNew)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (workspace_root, target, content);
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "workspace_atomic_create_unsupported",
+        ))
+    }
+}
+
 #[cfg(unix)]
 fn sync_directory(directory: &OwnedFd) -> io::Result<()> {
     // SAFETY: the caller owns this directory descriptor throughout the call.
@@ -443,7 +463,7 @@ fn atomic_publish_workspace_file_with_guard(
 fn atomic_publish_in_directory(
     parent: OwnedFd,
     filename: CString,
-    bytes: &[u8],
+    mut content: impl io::Read,
     publication: Publication,
 ) -> io::Result<()> {
     let temporary_name = CString::new(format!(
@@ -508,7 +528,7 @@ fn atomic_publish_in_directory(
         if let Some(mode) = existing_mode {
             file.set_permissions(std::fs::Permissions::from_mode(mode))?;
         }
-        file.write_all(bytes)?;
+        io::copy(&mut content, &mut file)?;
         file.flush()?;
         file.sync_all()?;
         drop(file);

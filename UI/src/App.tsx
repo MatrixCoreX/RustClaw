@@ -118,7 +118,7 @@ const SkillStorePage = lazy(() => import("./components/SkillStorePage").then((mo
 const TasksPage = lazy(() => import("./components/TasksPage").then((module) => ({ default: module.TasksPage })));
 
 const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "ai_learning", "nni", "nni_apr", "bancor", "assets", "services", "channels", "models", "skills", "aipps", "skill_store", "memory", "logs", "tasks"];
-const ADMIN_ONLY_UI_PAGES = new Set<ConsolePage>(["nni", "nni_apr", "bancor", "assets", "aipps"]);
+const ADMIN_ONLY_UI_PAGES = new Set<ConsolePage>(["nni", "nni_apr", "bancor", "assets"]);
 
 const STORAGE_KEYS = {
   baseUrl: appStorageKey("monitor.baseUrl"),
@@ -877,6 +877,7 @@ export default function App() {
     chatStopping,
     chatDeliveryMode,
     setChatDeliveryMode,
+    failedDeferredInputs, retryDeferredInput, discardDeferredDraft,
     chatDeferredInputs,
     chatDeferredActionInputId,
     activateDeferredChatInput,
@@ -2140,6 +2141,9 @@ export default function App() {
               chatCanStop={chatCanStop}
               chatStopping={chatStopping}
               chatDeliveryMode={chatDeliveryMode}
+              failedDeferredInputs={failedDeferredInputs}
+              onRetryDeferredDraft={retryDeferredInput}
+              onDiscardDeferredDraft={discardDeferredDraft}
               chatDeferredInputs={chatDeferredInputs}
               chatDeferredActionInputId={chatDeferredActionInputId}
               onChatDeliveryModeChange={setChatDeliveryMode}
@@ -2660,6 +2664,7 @@ export default function App() {
 
           {currentPage === "aipps" ? (
             <AippPage
+              canManage={isAdminIdentity}
               key={activeUiRequestScope}
               requestScope={activeUiRequestScope}
               lang={lang}

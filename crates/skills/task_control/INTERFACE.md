@@ -297,3 +297,7 @@ Response text example:
 ```json
 {"schema_version":1,"action":"preview_coding_repair","status":"dry_run","synthetic":true,"would_mutate":false,"would_execute_command":false,"checkpoint":{"status":"planned","checkpoint_ref":"dry_run:checkpoint:pre_patch"},"diff":{"status":"planned","diff_ref":"dry_run:diff:repair_patch"},"failed_verification":{"status":"failed","verification_ref":"dry_run:verification:first"},"repair_attempt":{"status":"planned","attempt":1,"repair_ref":"dry_run:repair:attempt_1"},"passing_verification":{"status":"passed","verification_ref":"dry_run:verification:second"},"rewind_references":["dry_run:checkpoint:pre_patch","dry_run:diff:repair_patch"]}
 ```
+
+## Companion app
+
+The host renders the read-only scheduled task history using `owned_schedule_runs_v1`. Signed-in users see their own runs. Administrators can review all runs, including historical entries whose owner cannot be established. Results and message delivery have separate statuses.

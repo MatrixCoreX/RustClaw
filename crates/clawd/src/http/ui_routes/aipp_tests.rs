@@ -13,7 +13,7 @@ mod items_state;
 mod shared_query;
 
 #[tokio::test]
-async fn aipp_catalog_rejects_non_admin_users_before_reading_skill_storage() {
+async fn ordinary_catalog_exposes_only_installed_owner_scoped_apps() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     state.seed_test_auth_identity("ordinary-aipp-user", "user");
     let mut headers = HeaderMap::new();
@@ -24,8 +24,8 @@ async fn aipp_catalog_rejects_non_admin_users_before_reading_skill_storage() {
 
     let (status, Json(response)) = get_aipp_catalog(State(state), headers).await;
 
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(response.error.as_deref(), Some("admin_required"));
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(response.data.unwrap()["apps"], json!([]));
 }
 
 fn fixture_root() -> PathBuf {

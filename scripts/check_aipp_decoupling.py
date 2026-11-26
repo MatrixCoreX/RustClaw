@@ -22,6 +22,7 @@ HOST_FILES = (
 SUPPORTED_HOST_PAIRS = {
     ("collection_feed_v1", "media_collection_v1"),
     ("task_activity_v1", "skill_task_activity_v1"),
+    ("schedule_history_v1", "owned_schedule_runs_v1"),
 }
 SUPPORTED_SANDBOX_CONTRACTS = {
     "capability_bridge_v1",

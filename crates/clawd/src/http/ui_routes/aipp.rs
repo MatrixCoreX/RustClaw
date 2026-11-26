@@ -233,11 +233,17 @@ fn read_aipp_catalog(
     state: &AppState,
     headers: &HeaderMap,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err(response) = require_ui_admin(state, headers) {
-        return response;
-    }
+    let actor = match require_ui_identity(state, headers) {
+        Ok(actor) => actor,
+        Err(response) => return response,
+    };
     let view = state.get_skill_views_snapshot();
-    crate::api_ok(json!({ "schema_version": 1, "apps": project_aipp_catalog(state, &view) }))
+    let mut apps = project_aipp_catalog(state, &view);
+    if !actor.role.eq_ignore_ascii_case("admin") {
+        apps.retain(|app| app.installed && app.data_contract == "owned_schedule_runs_v1");
+    }
+    crate::api_ok(json!({ "schema_version": 1, "apps": apps }))
+
 }
 
 fn project_aipp_catalog(
@@ -1092,13 +1098,17 @@ fn read_aipp_items(
     skill_name: &str,
     query: &AippMediaQuery,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err(response) = require_ui_admin(state, headers) {
-        return response;
-    }
+    let actor = match require_ui_identity(state, headers) {
+        Ok(actor) => actor,
+        Err(response) => return response,
+    };
     let active = match active_aipp_package(state, skill_name) {
         Ok(Some(active)) => active,
         _ => return aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_available"),
     };
+    if active.aipp.data_contract != "owned_schedule_runs_v1" && !actor.role.eq_ignore_ascii_case("admin") {
+        return aipp_api_error(StatusCode::FORBIDDEN, "admin_required");
+    }
     let view = match aipp_admission_service(state).and_then(|service| {
         service
             .aipp_view_state(skill_name)
@@ -1107,6 +1117,18 @@ fn read_aipp_items(
         Ok(view) if view.installed => view,
         _ => return aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_available"),
     };
+    if active.aipp.data_contract == "owned_schedule_runs_v1" {
+        let db = match state.core.db.get() {
+            Ok(db) => db,
+            Err(_) => return aipp_api_error(StatusCode::INTERNAL_SERVER_ERROR, "aipp_history_database_unavailable"),
+        };
+        return match crate::scheduled_run_contract::scheduled_history_page(
+            &db, &actor, query.cursor_sequence, query.limit.unwrap_or(AIPP_PAGE_SIZE), query.status.as_deref(),
+        ) {
+            Ok(page) => crate::api_ok(page),
+            Err(_) => aipp_api_error(StatusCode::INTERNAL_SERVER_ERROR, "aipp_history_read_failed"),
+        };
+    }
     if active.aipp.data_contract == "skill_task_activity_v1" {
         let task_channel_scope = active
             .aipp

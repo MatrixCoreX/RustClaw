@@ -88,3 +88,14 @@ test("transformed previews keep the existing authenticated content path", async 
   assert.equal((await fetchTaskArtifactVideoSource(fetcher, `${path}&preview=browser`, new AbortController().signal)).kind, "blob");
   assert.deepEqual(methods, ["GET"]);
 });
+
+test("browser downloads use the same cookie scope and keep the disposition separate from previews", () => {
+  const url = path.replace("inline", "attachment");
+  const session = withSessionArtifactStreaming(async () => new Response(), defaults);
+  assert.equal(session.nativeMediaUrl?.(url, "attachment"), `https://console.example${url}`);
+  assert.equal(session.nativeMediaUrl?.(url), null);
+  assert.equal(session.nativeMediaUrl?.(path, "attachment"), null);
+  assert.equal(session.nativeMediaUrl?.(url + "&token=secret", "attachment"), null);
+  const keyLogin = withSessionArtifactStreaming(async () => new Response(), { ...defaults, authMode: "key" });
+  assert.equal(keyLogin.nativeMediaUrl?.(url, "attachment"), null);
+});

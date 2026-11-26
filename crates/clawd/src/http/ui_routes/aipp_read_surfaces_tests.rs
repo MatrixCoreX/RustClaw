@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 #[path = "aipp_read_surfaces_tests/fixtures.rs"]
 mod fixtures;
-use fixtures::{BUNDLE, PREVIEW, SURFACES, Surface, SurfaceFixture};
+use fixtures::{Surface, SurfaceFixture, BUNDLE, PREVIEW, SURFACES};
 
 fn auth_headers(key: Option<&'static str>) -> HeaderMap {
     let mut headers = HeaderMap::new();
@@ -92,7 +92,16 @@ async fn pool_wait(key: &'static str, status: StatusCode, code: Option<&str>) {
                 start.elapsed()
             },);
         release.join().unwrap();
-        assert_eq!(response.status(), status, "{surface:?}");
+        let scoped_catalog = matches!(surface, Surface::Catalog) && code == Some("admin_required");
+        assert_eq!(
+            response.status(),
+            if scoped_catalog {
+                StatusCode::OK
+            } else {
+                status
+            },
+            "{surface:?}"
+        );
         eprintln!(
             "aipp_surface={surface:?} pool_hold_ms=500 timer_delay_ms={}",
             timer_delay.as_millis()
@@ -101,7 +110,7 @@ async fn pool_wait(key: &'static str, status: StatusCode, code: Option<&str>) {
             timer_delay < Duration::from_millis(400),
             "{surface:?}: {timer_delay:?}"
         );
-        if let Some(code) = code {
+        if let Some(code) = code.filter(|_| !scoped_catalog) {
             error_body(response, status, code, true).await;
         }
     }
@@ -195,13 +204,17 @@ async fn all_aipp_read_surfaces_recheck_roles_and_key_revocation_on_every_reques
                 [],
             )
             .unwrap();
-        error_body(
-            request(surface, &fixture.state, Some("aipp-view-admin"), "").await,
-            StatusCode::FORBIDDEN,
-            "admin_required",
-            true,
-        )
-        .await;
+        let response = request(surface, &fixture.state, Some("aipp-view-admin"), "").await;
+        if matches!(surface, Surface::Catalog) {
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(response.into_body(), 65536)
+                .await
+                .unwrap();
+            let value: Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(value["data"]["apps"], json!([]));
+        } else {
+            error_body(response, StatusCode::FORBIDDEN, "admin_required", true).await;
+        }
         fixture
             .state
             .core

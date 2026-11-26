@@ -188,6 +188,12 @@ export function useChatRuntime({
     !threadHasServerHistory(activeChatThread) &&
     activeChatThread.messages.every((message) => message.role === "system");
   const chatThreadSummaries = buildChatThreadSummaries(chatThreadState.threads, t);
+  type FailedDeferred = {
+    id: string; threadId: string; text: string; attachments: ChatAttachment[];
+    expectedTaskId?: string; submittedAt: number;
+  };
+  const [failedDeferred, setFailedDeferred] = useState<FailedDeferred[]>([]);
+  const retryingDeferred = useRef(new Set<string>());
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
   const [chatDeliveryMode, setChatDeliveryMode] = useState<"auto" | "defer">("auto");
   const [chatStopping, setChatStopping] = useState(false);
@@ -269,6 +275,8 @@ export function useChatRuntime({
 
   useEffect(() => {
     setLiveThreads({});
+    setFailedDeferred([]);
+    retryingDeferred.current.clear();
     setChatAttachments([]);
     setChatError(null);
     setChatStopping(false);
@@ -590,6 +598,7 @@ export function useChatRuntime({
   };
 
   const removeChatThreadLocally = (threadId: string) => {
+    setFailedDeferred(items => items.filter(item => item.threadId !== threadId));
     for (const [runId, submission] of submissionAbortControllersRef.current) {
       if (submission.threadId !== threadId) continue;
       submission.controller.abort();
@@ -958,6 +967,24 @@ export function useChatRuntime({
       void recoverPendingChatTask(thread.id, teachingRunId, taskId);
     },
   });
+  const failedDeferredInputs = failedDeferred.filter(item => item.threadId === activeChatThread.id)
+    .map(item => ({ id: item.id, text: item.text, filenames: item.attachments.map(file => file.name) }));
+  const retryDeferredInput = async (id: string) => {
+    const thread = activeChatThreadRef.current;
+    const draft = failedDeferred.find(item => item.threadId === thread.id && item.id === id);
+    if (!draft || !isCurrent() || retryingDeferred.current.has(id)) return;
+    retryingDeferred.current.add(id);
+    setChatError(null);
+    try {
+      await submitConversationInputSnapshot(draft.text, draft.attachments, thread, draft.id, draft.expectedTaskId, "defer", draft.submittedAt);
+    } finally {
+      retryingDeferred.current.delete(id);
+    }
+  };
+  const discardDeferredDraft = (id: string) => {
+    if (!isCurrent() || retryingDeferred.current.has(id)) return;
+    setFailedDeferred(items => items.filter(item => item.id !== id || item.threadId !== activeChatThread.id));
+  };
   const chatDeferredInputs = deferredInputs.items;
   const chatDeferredActionInputId = deferredInputs.actionInputId;
   const activateDeferredChatInput = deferredInputs.activate;
@@ -1214,9 +1241,9 @@ export function useChatRuntime({
     teachingRunId: string,
     activeTaskId: string | undefined,
     deliveryMode: "auto" | "defer",
+    submittedAt = Date.now(),
   ) => {
     if (!isCurrent()) return;
-    const submittedAt = Date.now();
     const clientMessageId = `ui:${threadAtSubmit.id}:${teachingRunId}`;
     const attachedImages = attached.filter(attachmentIsImage);
     const attachedAudios = attached.filter(attachmentIsAudio);
@@ -1332,6 +1359,7 @@ export function useChatRuntime({
       }
       if (!isCurrent()) return;
       if (deliveryMode === "defer") {
+        setFailedDeferred(items => items.filter(item => item.id !== teachingRunId));
         const deferredUserMessage = { ...userMsg, id: `u-${receipt.input_id}` };
         updateChatThreadById(threadAtSubmit.id, (thread) => ({
           ...thread,
@@ -1389,6 +1417,12 @@ export function useChatRuntime({
           : "The follow-up instruction could not be submitted. Please retry.",
       );
       if (activeChatThreadRef.current.id === threadAtSubmit.id) setChatError(message);
+      if (deliveryMode === "defer") {
+        setFailedDeferred(items => items.some(item => item.id === teachingRunId) ? items : [
+          ...items, { id: teachingRunId, threadId: threadAtSubmit.id, text, attachments: attached, expectedTaskId: activeTaskId, submittedAt },
+        ]);
+        return;
+      }
       const systemMessage: ChatMessage = {
         id: `e-${teachingRunId}`,
         role: "system",
@@ -2011,6 +2045,7 @@ export function useChatRuntime({
     chatStopping,
     chatDeliveryMode,
     setChatDeliveryMode,
+    failedDeferredInputs, retryDeferredInput, discardDeferredDraft,
     chatDeferredInputs,
     chatDeferredActionInputId,
     activateDeferredChatInput,

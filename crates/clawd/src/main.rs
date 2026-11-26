@@ -766,6 +766,7 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         repo::ensure_channel_event_admission_schema(&db)?;
         repo::ensure_channel_delivery_outbox_schema(&db)?;
         ensure_task_lease_schema(&db)?;
+        db.execute_batch(include_str!("scheduled_run_ownership.sql"))?;
         db.execute_batch(include_str!("scheduled_run_receipt_sync.sql"))?;
         let repaired_scheduled_runs =
             scheduled_run_contract::ensure_scheduled_run_terminal_sync(&db)?;
