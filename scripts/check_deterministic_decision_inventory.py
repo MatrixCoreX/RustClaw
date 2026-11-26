@@ -179,7 +179,7 @@ BRANCH_INVENTORY: tuple[BranchInventoryEntry, ...] = (
     ),
     BranchInventoryEntry(
         name="finalizer_verifier_failure_message_key",
-        path="crates/clawd/src/finalize/task_answer_verifier_failure.rs",
+        path="crates/clawd/src/answer_verification_failure_presentation.rs",
         category="contract_boundary",
         input_fields=("AnswerVerifierError", "missing_evidence_fields"),
         output_fields=("message_key", "reason_code", "status_code"),

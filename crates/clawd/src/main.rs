@@ -26,6 +26,7 @@ mod app_helpers;
 mod approval_grant;
 mod ask_flow;
 mod assistant_delivery_policy;
+mod answer_verification_failure_presentation;
 mod assistant_presentation;
 mod assistant_presentation_stream;
 mod async_job_contract;

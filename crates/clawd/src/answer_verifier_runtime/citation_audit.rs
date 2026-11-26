@@ -137,6 +137,22 @@ fn collect(
     }
 }
 
+/// Keep complete, source-bound rows for a wording repair. Bound the additional
+/// prompt data independently of the journal trace.
+pub(crate) fn repair_sources(answer: &str, journal: &TaskJournal) -> Vec<Value> {
+    let mut rows = Vec::new();
+    let mut bytes = 0;
+    for citation in citations(answer, journal) {
+        let row = serde_json::to_value(citation).expect("serializable citation");
+        bytes += row.to_string().len();
+        if bytes > 16_384 {
+            break;
+        }
+        rows.push(row);
+    }
+    rows
+}
+
 pub(super) fn missing_checks(citations: &[Citation<'_>], checks: &[CitationCheck]) -> Vec<String> {
     citations
         .iter()

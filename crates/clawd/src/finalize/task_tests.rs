@@ -260,7 +260,6 @@ fn bounded_answer_retry_uses_structured_issue_without_verifier_prose() {
         confidence: 0.91,
     };
 
-    let observed_trace = answer_verifier_retry_observed_trace(&journal);
     let template =
         include_str!("../../../../prompts/layers/overlays/answer_verifier_retry_prompt.md");
     let prompt = bounded_answer_retry_prompt(
@@ -270,7 +269,7 @@ fn bounded_answer_retry_uses_structured_issue_without_verifier_prose() {
         "request",
         &route,
         "context",
-        &observed_trace,
+        &journal,
         "rejected answer",
         &verifier,
     );
@@ -284,6 +283,52 @@ fn bounded_answer_retry_uses_structured_issue_without_verifier_prose() {
     assert!(prompt.contains("ordered instruction stream"));
     assert!(prompt.contains("instruction_revision"));
     assert!(prompt.contains("later revision overrides conflicting scope"));
+}
+
+#[test]
+fn sourced_answer_repair_receives_only_its_own_links_and_exact_draft_spans() {
+    use claw_core::capability_result::CapabilityResultEnvelope;
+    let mut journal = crate::task_journal::TaskJournal::default();
+    journal
+        .capability_results
+        .push(CapabilityResultEnvelope::ok(
+            "fixture.read",
+            None,
+            json!({"extra":{"items":[
+                {"link":"https://example.org/one","excerpt":"The report is dated November 26."},
+                {"link":"https://example.org/other","excerpt":"Unselected article"}
+            ]}}),
+        ));
+    let draft = "All results are from May. https://example.org/one";
+    let verdict = crate::answer_verifier::AnswerVerifierOut {
+        should_retry: true,
+        confidence: 0.9,
+        missing_evidence_fields: vec!["unsupported_claims".into()],
+        retry_instruction: json!({"repair_kind":"revise_unsupported_claims",
+            "candidate_spans":["from May","external instruction"],
+            "verifier_guidance":"untrusted explanation"})
+        .to_string(),
+        ..Default::default()
+    };
+    let out = bounded_answer_retry_prompt(
+        "__VERIFIER_ISSUE__",
+        "en",
+        "en",
+        "request",
+        &route_result(),
+        "",
+        &journal,
+        draft,
+        &verdict,
+    );
+    let data: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(data["candidate_spans"], json!(["from May"]));
+    assert_eq!(data["cited_sources"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        data["cited_sources"][0]["excerpts"][0],
+        "The report is dated November 26."
+    );
+    assert!(!out.contains("untrusted explanation"));
 }
 
 #[test]

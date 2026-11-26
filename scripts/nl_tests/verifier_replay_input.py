@@ -96,7 +96,7 @@ def citation_rows(candidate, evidence, captured):
                 url = node.get(key)
                 if not isinstance(url,str) or not url.startswith(("https://","http://")):
                     continue
-                for field in ("title","content_excerpt","snippet","description","text"):
+                for field in ("title","excerpt","content_excerpt","snippet","description","text"):
                     value = node.get(field)
                     if isinstance(value,str) and value.strip():
                         snippets = sources.setdefault(url, [])

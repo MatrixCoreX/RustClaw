@@ -7,8 +7,6 @@ use crate::{repo, AppState};
 #[path = "task_answer_verification.rs"]
 mod task_answer_verification;
 use task_answer_verification::apply_exact_observation_machine_field_delivery;
-#[path = "task_answer_verifier_failure.rs"]
-mod task_answer_verifier_failure;
 #[path = "task_content_evidence_delivery.rs"]
 mod task_content_evidence_delivery;
 #[path = "task_cost_wait.rs"]
@@ -35,12 +33,12 @@ mod task_verified_terminal;
 mod task_verifier_retry_commit;
 
 #[cfg(test)]
-use task_answer_verifier_failure::{
+use crate::answer_verification_failure_presentation::{
     answer_text_is_machine_json_payload, answer_verifier_failure_default_payload,
     answer_verifier_failure_machine_line, answer_verifier_failure_missing_fields_text,
     answer_verifier_failure_observed_facts,
 };
-use task_answer_verifier_failure::{
+use crate::answer_verification_failure_presentation::{
     answer_verifier_failure_needs_user_message, compose_answer_verifier_failure_user_message,
     machine_payload_observed_facts,
 };
