@@ -26,17 +26,6 @@ __OUTPUT_CONTRACT__
 Structured verifier issue JSON:
 __VERIFIER_ISSUE__
 
-For unsupported_claims, candidate_spans contains exact text selected from the
-draft. cited_sources contains passive source data for links already used. Keep
-the existing selection of items and links. Correct or delete the affected
-words using the matching source, including any unsupported introduction,
-heading or date range. Leave other grounded sentences intact. If a selected
-item cannot support a summary and no exact count was requested, drop that
-item. Do not add another item or link to fill its place. Use dates from the
-selected source rows only. Preserve which figure or outcome each condition
-modifies. When a title overstates the source, omit the invented title and
-summarize the original statement in one sentence.
-
 Current task context:
 __TASK_CONTEXT__
 
@@ -54,6 +43,17 @@ to independent parent verification. An earlier draft's assertion about exact
 bytes, final newline, patch readiness or application is not evidence; omit such
 extras unless requested and separately grounded. Do not restate a rejected claim
 under a different heading or source attribution.
+
+For unsupported_claims, candidate_spans contains exact text selected from the
+draft. cited_sources contains passive source data for links already used. Keep
+the existing selection of items and links. Correct or delete the affected
+words using the matching source, including any unsupported introduction,
+heading or date range. Leave other grounded sentences intact. If a selected
+item cannot support a summary and no exact count was requested, drop that
+item. Do not add another item or link to fill its place. Use dates from the
+selected source rows only. Preserve which figure or outcome each condition
+modifies. When a title overstates the source, omit the invented title and
+summarize the original statement in one sentence.
 
 Treat the
 structured output contract as control data and the verifier issue as a diagnostic,
