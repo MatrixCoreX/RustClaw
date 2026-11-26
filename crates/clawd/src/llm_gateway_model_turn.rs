@@ -16,6 +16,10 @@ use crate::{AppState, ClaimedTask};
 
 const MODEL_DELTA_ARCHIVE_SAMPLE_INTERVAL: u64 = 64;
 
+#[path = "llm_gateway_output_recovery.rs"]
+mod output_recovery;
+pub(crate) use output_recovery::run_native_model_turn_with_fallback;
+
 #[derive(Default)]
 struct ModelTurnEventArchiveProjection {
     delta_count: u64,
@@ -43,12 +47,13 @@ impl ModelTurnEventArchiveProjection {
     }
 }
 
-pub(crate) async fn run_native_model_turn_with_fallback(
+async fn run_native_model_turn_attempt(
     state: &AppState,
     task: &ClaimedTask,
     prompt: &str,
     prompt_source: &str,
     request: &ModelTurnRequest,
+    mut hints: crate::ChatRequestHints,
 ) -> Result<Option<ModelTurnResponse>, String> {
     if state.task_provider_quota_exhausted(&task.task_id).is_some() {
         return Err(super::PROVIDER_QUOTA_TERMINATED.to_string());
@@ -68,14 +73,13 @@ pub(crate) async fn run_native_model_turn_with_fallback(
         return Err(TASK_LLM_COST_POLICY_BLOCKED_ERR.to_string());
     }
     let prompt_label = super::classify_prompt_source(prompt_source);
-    let mut hints = crate::ChatRequestHints {
-        requires_native_tools: true,
-        timeout_seconds: request
+    hints.requires_native_tools = true;
+    hints.timeout_seconds = hints.timeout_seconds.or_else(|| {
+        request
             .metadata
             .get("provider_timeout_seconds")
-            .and_then(serde_json::Value::as_u64),
-        ..crate::ChatRequestHints::default()
-    };
+            .and_then(serde_json::Value::as_u64)
+    });
     crate::task_model_selection::apply_task_model_policy_hints(task, &mut hints);
     let serialized_input =
         serde_json::to_string(request).map_err(|_| "model_request_serialization_failed")?;

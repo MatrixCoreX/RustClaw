@@ -22,6 +22,7 @@ pub(crate) use model_turn::run_native_model_turn_with_fallback;
 const TASK_LLM_COST_POLICY_BLOCKED_ERR: &str = "llm_cost_policy_blocked";
 const NO_ELIGIBLE_LLM_PROVIDER_ERR: &str = "no_eligible_llm_provider";
 pub(crate) const CONTEXT_LENGTH_EXCEEDED_ERR: &str = "context_length_exceeded";
+pub(crate) const NATIVE_OUTPUT_LIMIT_EXHAUSTED_ERR: &str = "native_model_output_limit_exhausted";
 pub(crate) const CONVERSATION_INPUT_INTERRUPTED_ERR: &str = "conversation_input_interrupted";
 const LLM_RESOURCE_ADMISSION_WAIT_ERR: &str = "llm_resource_admission_wait";
 const LLM_RESOURCE_ADMISSION_RETRY_SECONDS: u64 = 15;

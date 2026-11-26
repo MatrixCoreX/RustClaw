@@ -13,6 +13,7 @@ pub(crate) struct ModelAdmission {
     ceiling: u64,
     input_bound: u64,
     output_cap: u64,
+    minimum_output: Option<u64>,
     label: String,
     attempts_started: std::sync::atomic::AtomicU64,
 }
@@ -42,7 +43,7 @@ pub(crate) fn prepare(
     // UTF-8 bytes bound text-token use conservatively; reserve framing/tool wrapper overhead too.
     // This is admission evidence, never fabricated provider usage.
     let input_bound = (serialized_input.len() as u64).saturating_add(8192);
-    let stage_cap = if label == "verifier" { 4096 } else { 8192 };
+    let stage_cap = policy.model_output.stage_tokens(label);
     let output_cap = hints.max_tokens.unwrap_or(stage_cap).max(1);
     let admission = Arc::new(ModelAdmission {
         state: state.clone(),
@@ -50,6 +51,7 @@ pub(crate) fn prepare(
         ceiling,
         input_bound,
         output_cap,
+        minimum_output: hints.minimum_output_tokens.map(|tokens| tokens.max(1)),
         label: label.into(),
         attempts_started: std::sync::atomic::AtomicU64::new(0),
     });
@@ -66,9 +68,20 @@ pub(crate) fn prepare(
     db.execute("INSERT OR IGNORE INTO task_model_budget_baselines(task_id,historical_tokens,token_ceiling) VALUES(?1,?2,?3)",params![task.task_id,historical_tokens,ceiling])
         .map_err(|_| "task_budget_ledger_unavailable")?;
     let available = admission.remaining(&db, historical_tokens)?;
+    if admission
+        .minimum_output
+        .is_some_and(|minimum| minimum > output_cap)
+    {
+        return Err(json!({
+            "schema_version":1,"owner_layer":"model_policy","status":"failed",
+            "error_code":"model_output_policy_limit","message_key":"clawd.task.budget_exhausted",
+            "reason_code":"recovery_output_cap_exceeds_policy","retryable":false,"provider_called":false,
+            "configured_output_tokens":output_cap,"minimum_output_tokens":admission.minimum_output
+        }).to_string());
+    }
     available
         .checked_sub(input_bound)
-        .filter(|n| *n >= 256)
+        .filter(|n| *n >= admission.minimum_output.unwrap_or(256))
         .ok_or_else(|| admission.denied(available))?;
     hints.max_tokens = Some(output_cap);
     hints.structured_verification = false;
@@ -87,7 +100,8 @@ impl ModelAdmission {
         json!({"schema_version":1,"owner_layer":"task_budget","status":"failed","error_code":ERROR,
             "message_key":"clawd.task.budget_exhausted","reason_code":"pre_call_token_reservation_unavailable",
             "retryable":false,"provider_called":false,"remaining_tokens":available,
-            "required_token_bound":self.input_bound.saturating_add(256),"input_bound_is_conservative":true}).to_string()
+            "required_token_bound":self.input_bound.saturating_add(self.minimum_output.unwrap_or(256)),
+            "minimum_output_tokens":self.minimum_output,"input_bound_is_conservative":true}).to_string()
     }
 
     fn remaining(&self, db: &rusqlite::Connection, known_tokens: u64) -> Result<u64, String> {
@@ -120,7 +134,7 @@ impl ModelAdmission {
             self.remaining(&tx, cost.input_tokens.saturating_add(cost.output_tokens))?;
         let output = remaining
             .checked_sub(self.input_bound)
-            .filter(|n| *n >= 256)
+            .filter(|n| *n >= self.minimum_output.unwrap_or(256))
             .ok_or_else(|| self.denied(remaining))?
             .min(self.output_cap);
         hints.max_tokens = Some(output);

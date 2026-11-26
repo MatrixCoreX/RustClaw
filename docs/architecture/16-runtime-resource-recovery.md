@@ -609,3 +609,11 @@ hardlinks, preserving all pathnames and result records; later host publication a
 a path rather than editing the shared inode. Original skill invocation/source files, other owners,
 active tasks, symlinks and files without matching manifests remain untouched. Retain the private
 report and compare result/history fingerprints and available space before restarting.
+
+## Native model output truncation recovery
+
+When a native turn finishes with the typed `Length` reason, the gateway discards every action in that response and regenerates it with a larger output budget. `configs/agent_guard.toml`, under `[agent.task_budget.model_output]`, configures `default_tokens`, `verifier_tokens`, `recovery_max_tokens`, and `recovery_attempts`; defaults are 8192, 4096, 32768 tokens, and two recovery attempts. Each recovery at most doubles the output allowance.
+
+Provider adapters preserve this finish reason and usage even when no visible text was produced. Truncated tool/function prefixes are discarded before validation or materialization; their presence cannot replace a provider-declared length limit with `ToolCalls`. Ordinary empty responses remain errors.
+
+A recovery must reserve its full requested output allowance within the task's frozen total-token, cost, and delegated-budget limits. Insufficient allowance fails before contacting a provider, preventing silent reduction to an already exhausted generation budget. Reasoning preferences stay unchanged. This gateway recovery only regenerates model output and never replays completed tools or skills. Reaching the configured ceiling returns `native_model_output_limit_exhausted`. Machine `model_output_recovery` events record budget changes and discarded partial actions.

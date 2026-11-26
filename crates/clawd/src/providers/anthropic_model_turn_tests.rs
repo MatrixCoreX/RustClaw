@@ -4,11 +4,42 @@ use std::sync::Arc;
 use claw_core::config::{LlmProviderConfig, LlmProviderParams};
 use claw_core::model_turn::{
     ModelContentPart, ModelFinishReason, ModelMessage, ModelRole, ModelToolCall, ModelToolChoice,
-    ModelToolDefinition, ModelTurnRequest,
+    ModelToolDefinition, ModelTurnEvent, ModelTurnRequest,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 
 use super::{build_anthropic_request, parse_anthropic_model_turn, ChatRequestHints};
+
+#[test]
+fn output_limit_is_authoritative_for_empty_and_partial_tool_use() {
+    for content in [
+        json!([]),
+        json!([{"type":"thinking","thinking":"private"}]),
+        json!([{"type":"tool_use","id":"prefix","name":"write_fixture","input":{}}]),
+        json!([{"type":"tool_use","id":"incomplete"}]),
+        Value::Null,
+    ] {
+        let turn = parse_anthropic_model_turn(&json!({
+            "content":content,"stop_reason":"max_tokens",
+            "usage":{"input_tokens":12,"output_tokens":8192}
+        }))
+        .unwrap();
+        assert_eq!(turn.finish_reason, ModelFinishReason::Length);
+        assert!(turn.tool_calls.is_empty());
+        assert_eq!(turn.usage.unwrap().output_tokens, Some(8192));
+        assert!(!turn
+            .events
+            .iter()
+            .any(|event| matches!(event, ModelTurnEvent::ToolCall { .. })));
+    }
+    assert_eq!(
+        parse_anthropic_model_turn(&json!({
+            "content":[],"stop_reason":"end_turn"
+        }))
+        .unwrap_err(),
+        "anthropic_model_turn_empty_response"
+    );
+}
 
 fn provider() -> crate::LlmProviderRuntime {
     crate::LlmProviderRuntime {

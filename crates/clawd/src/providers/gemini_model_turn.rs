@@ -293,16 +293,29 @@ pub(super) fn parse_gemini_model_turn(value: &Value) -> Result<ModelTurnResponse
         .and_then(Value::as_array)
         .and_then(|candidates| candidates.first())
         .ok_or_else(|| "gemini_model_turn_candidate_missing".to_string())?;
-    let parts = candidate
+    let provider_finish = gemini_finish_reason(
+        candidate
+            .get("finishReason")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    );
+    let parts = match candidate
         .pointer("/content/parts")
         .and_then(Value::as_array)
-        .ok_or_else(|| "gemini_model_turn_parts_missing".to_string())?;
+    {
+        Some(parts) => parts.as_slice(),
+        None if provider_finish == ModelFinishReason::Length => &[],
+        None => return Err("gemini_model_turn_parts_missing".to_string()),
+    };
     let mut text = String::new();
     let mut tool_calls = Vec::new();
     let mut tool_call_metadata = Map::new();
     for (index, part) in parts.iter().enumerate() {
         if let Some(fragment) = part.get("text").and_then(Value::as_str) {
             text.push_str(fragment);
+        }
+        if provider_finish == ModelFinishReason::Length {
+            continue;
         }
         let Some(function) = part.get("functionCall") else {
             continue;
@@ -329,19 +342,14 @@ pub(super) fn parse_gemini_model_turn(value: &Value) -> Result<ModelTurnResponse
             arguments,
         });
     }
-    if text.is_empty() && tool_calls.is_empty() {
+    if text.is_empty() && tool_calls.is_empty() && provider_finish != ModelFinishReason::Length {
         return Err("gemini_model_turn_empty_response".to_string());
     }
     let usage = super::gemini_usage_snapshot(value);
     let finish_reason = if !tool_calls.is_empty() {
         ModelFinishReason::ToolCalls
     } else {
-        gemini_finish_reason(
-            candidate
-                .get("finishReason")
-                .and_then(Value::as_str)
-                .unwrap_or_default(),
-        )
+        provider_finish
     };
     let mut events = Vec::new();
     if !text.is_empty() {

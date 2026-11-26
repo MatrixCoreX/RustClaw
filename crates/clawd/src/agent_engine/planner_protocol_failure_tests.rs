@@ -7,6 +7,7 @@ fn exhausted_native_protocol_retains_successful_execution_and_its_owner() {
         "native_plan_contract_repair_stagnated",
         "native_plan_contract_repair_budget_exhausted",
         "native_plan_contract_repair_unavailable",
+        crate::llm_gateway::NATIVE_OUTPUT_LIMIT_EXHAUSTED_ERR,
     ] {
         let mut state = LoopState::default();
         state.executed_step_results.push(StepExecutionResult {
@@ -33,6 +34,19 @@ fn exhausted_native_protocol_retains_successful_execution_and_its_owner() {
             Some("completed fixture output")
         );
     }
+}
+
+#[test]
+fn gateway_output_limit_retains_machine_failure_owner_without_a_format_repair_loop() {
+    let mut state = LoopState::default();
+    assert!(retain_terminal_failure(
+        &mut state,
+        crate::llm_gateway::NATIVE_OUTPUT_LIMIT_EXHAUSTED_ERR
+    ));
+    let payload = terminal_failure_payload(&state).unwrap();
+    assert_eq!(payload["source_error_code"], "model_output_truncated");
+    assert_eq!(payload["failure_phase"], "generation_budget");
+    assert_eq!(payload["execution_failure"], false);
 }
 
 #[test]

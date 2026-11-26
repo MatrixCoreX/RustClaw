@@ -4,11 +4,40 @@ use std::sync::Arc;
 use claw_core::config::{LlmProviderConfig, LlmProviderParams};
 use claw_core::model_turn::{
     ModelContentPart, ModelFinishReason, ModelMessage, ModelRole, ModelToolCall, ModelToolChoice,
-    ModelToolDefinition, ModelTurnRequest,
+    ModelToolDefinition, ModelTurnEvent, ModelTurnRequest,
 };
 use serde_json::json;
 
 use super::{build_gemini_request, parse_gemini_model_turn};
+
+#[test]
+fn output_limit_is_authoritative_for_empty_and_partial_function_calls() {
+    for content in [
+        json!({"parts":[]}),
+        json!({"parts":[{"functionCall":{"name":"write_fixture","args":{}}}]}),
+        json!({"parts":[{"functionCall":{}}]}),
+        json!({"role":"model"}),
+    ] {
+        let turn = parse_gemini_model_turn(&json!({
+            "candidates":[{"content":content,"finishReason":"MAX_TOKENS"}],
+            "usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":8192,"totalTokenCount":8204}
+        })).unwrap();
+        assert_eq!(turn.finish_reason, ModelFinishReason::Length);
+        assert!(turn.tool_calls.is_empty());
+        assert_eq!(turn.usage.unwrap().completion_tokens, Some(8192));
+        assert!(!turn
+            .events
+            .iter()
+            .any(|event| matches!(event, ModelTurnEvent::ToolCall { .. })));
+    }
+    assert_eq!(
+        parse_gemini_model_turn(&json!({
+            "candidates":[{"content":{"parts":[]},"finishReason":"STOP"}]
+        }))
+        .unwrap_err(),
+        "gemini_model_turn_empty_response"
+    );
+}
 
 fn provider() -> crate::LlmProviderRuntime {
     crate::LlmProviderRuntime {
