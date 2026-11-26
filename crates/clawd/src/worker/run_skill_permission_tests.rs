@@ -91,3 +91,35 @@ fn direct_high_risk_skill_stops_at_one_shot_approval_boundary() {
         "system.run_command"
     );
 }
+
+#[test]
+fn direct_write_confirmation_binds_the_verified_personal_target() {
+    let mut state = state();
+    let personal = tempfile::tempdir().unwrap();
+    state.skill_rt.principal_workspace = Some(personal.path().to_owned());
+    let path = personal.path().join("report.txt");
+    std::fs::write(&path, "previous").unwrap();
+    let task = task();
+    let check = |content: &str| {
+        let verified = verify_direct_run_skill(
+            &state,
+            &task,
+            "fs_basic",
+            json!({"action":"write_text","path":"report.txt","content":content}),
+        );
+        assert!(verified.needs_confirmation());
+        assert_eq!(verified.plan.steps[0].args["path"], path.to_str().unwrap());
+        let ids = crate::approval_grant::confirmation_step_ids(&verified.verify.issues);
+        let binding = crate::approval_grant::binding_for_confirmation_steps(
+            &state,
+            &verified.plan.steps,
+            &ids,
+        )
+        .unwrap();
+        let decision = &verified.verify.permission_decision["approval_grant"];
+        assert_eq!(decision["arguments_hash"], binding.arguments_hash);
+        binding.arguments_hash
+    };
+    assert_eq!(check("new"), check("new"));
+    assert_ne!(check("new"), check("different"));
+}

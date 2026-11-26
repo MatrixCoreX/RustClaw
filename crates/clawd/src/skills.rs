@@ -1541,28 +1541,7 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
         ));
     }
 
-    let policy_token = format!("skill:{skill_name}");
-    let capability_policy_token = action_scoped_planner_mapping(state, &skill_name, &args)
-        .map(|mapping| format!("capability:{}", mapping.name));
-    let mut policy_tokens = vec![policy_token.as_str()];
-    if let Some(capability_policy_token) = capability_policy_token.as_deref() {
-        policy_tokens.push(capability_policy_token);
-    }
-    if !task_tools_allowed(state, Some(task), &policy_tokens) {
-        let observed_facts = vec![
-            format!("skill: {skill_name}"),
-            format!("policy_token: {policy_token}"),
-        ];
-        return Err(policy_block_error(
-            "skill_policy_denied",
-            observed_facts,
-            vec![
-                "action=execute_skill".to_string(),
-                "policy=tools_policy".to_string(),
-                "required_decision=allow".to_string(),
-            ],
-        ));
-    }
+    ensure_task_skill_access(state, task, &skill_name, &args)?;
 
     if !state.get_skills_list().contains(&skill_name) {
         let mut allowed: Vec<String> = state.get_skills_list().iter().cloned().collect();

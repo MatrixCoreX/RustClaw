@@ -652,12 +652,24 @@ pub(crate) async fn process_run_skill_task(
         &prepared_input.skill_name,
         prepared_input.args.clone(),
     );
+    let [step] = verification.plan.steps.as_slice() else {
+        anyhow::bail!("invalid_direct_skill_step_count");
+    };
     if verification.needs_confirmation() {
+        // Confirmation authorizes a permitted effect. A denied capability cannot
+        // become available by approving an interactive checkpoint.
+        if let Err(error) = crate::skills::ensure_task_skill_access(
+            state, task, &step.skill, &step.args,
+        ) {
+            return finalize_run_skill_result(
+                state, task, payload, &step.skill, &verification, Err(error),
+            ).await;
+        }
         return finalize_run_skill_confirmation_required(
             state,
             task,
             payload,
-            &prepared_input.skill_name,
+            &step.skill,
             &verification,
         )
         .await;
@@ -666,8 +678,8 @@ pub(crate) async fn process_run_skill_task(
         run_skill_mutation::prepare_direct_run_skill_mutation(
             state,
             task,
-            &prepared_input.skill_name,
-            &prepared_input.args,
+            &step.skill,
+            &step.args,
         )
         .map_err(anyhow::Error::msg)?
     } else {
@@ -679,7 +691,7 @@ pub(crate) async fn process_run_skill_task(
         return run_skill_mutation::finalize_direct_run_skill_reconciliation(
             state,
             task,
-            &prepared_input.skill_name,
+            &step.skill,
             &record.action_ref,
             &record.fingerprint_hash,
         );
@@ -694,8 +706,8 @@ pub(crate) async fn process_run_skill_task(
                 crate::skills::run_skill_with_runner_outcome_with_context(
                     state,
                     task,
-                    &prepared_input.skill_name,
-                    prepared_input.args.clone(),
+                    &step.skill,
+                    step.args.clone(),
                     execution_context.as_ref(),
                     None,
                 )
@@ -703,7 +715,7 @@ pub(crate) async fn process_run_skill_task(
             }
         }
     } else {
-        Err(verification.denial_error(&prepared_input.skill_name))
+        Err(verification.denial_error(&step.skill))
     };
     if !run_skill_mutation::persist_direct_run_skill_mutation_result(
         state,
@@ -715,8 +727,8 @@ pub(crate) async fn process_run_skill_task(
                 state,
                 task,
                 lease,
-                &prepared_input.skill_name,
-                &prepared_input.args,
+                &step.skill,
+                &step.args,
             )
             .await
             {
@@ -727,7 +739,7 @@ pub(crate) async fn process_run_skill_task(
                     return run_skill_mutation::finalize_direct_run_skill_reconciliation(
                         state,
                         task,
-                        &prepared_input.skill_name,
+                        &step.skill,
                         &record.action_ref,
                         &record.fingerprint_hash,
                     );
@@ -736,7 +748,7 @@ pub(crate) async fn process_run_skill_task(
                     return run_skill_mutation::finalize_direct_run_skill_reconciliation(
                         state,
                         task,
-                        &prepared_input.skill_name,
+                        &step.skill,
                         &record.action_ref,
                         &record.fingerprint_hash,
                     );
@@ -746,7 +758,7 @@ pub(crate) async fn process_run_skill_task(
                     return run_skill_mutation::finalize_direct_run_skill_reconciliation(
                         state,
                         task,
-                        &prepared_input.skill_name,
+                        &step.skill,
                         &lease.record.action_ref,
                         &lease.record.fingerprint_hash,
                     );
@@ -759,7 +771,7 @@ pub(crate) async fn process_run_skill_task(
         state,
         task,
         payload,
-        &prepared_input.skill_name,
+        &step.skill,
         &verification,
         result,
     )

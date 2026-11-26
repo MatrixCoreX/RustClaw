@@ -64,7 +64,7 @@ pub(super) fn verify_direct_run_skill(
             .unwrap_or_default(),
     })
     .to_string();
-    let plan = PlanResult {
+    let mut plan = PlanResult {
         goal: format!("skill:{canonical_skill}"),
         missing_slots: Vec::new(),
         needs_confirmation: false,
@@ -93,6 +93,7 @@ pub(super) fn verify_direct_run_skill(
         },
         VerifyMode::Enforce,
     );
+    plan.steps.clone_from(&verify.approved_steps);
     DirectRunSkillVerification {
         request_envelope,
         plan,

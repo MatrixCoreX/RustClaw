@@ -387,6 +387,22 @@ fn roles_and_principal_overrides_are_resolved_from_host_identity() {
         chat_id: 1,
     };
     for role in ["guest", "reviewer"] {
+        for capability in ["filesystem.read_text_range", "filesystem.list_entries"] {
+            assert!(policy.allowed_for_identity(
+                &["skill:fs_basic", &format!("capability:{capability}")],
+                None, Some(&actor("member", role)),
+            ));
+        }
+        for capability in ["system.read_range", "system.inventory_dir"] {
+            assert!(policy.allowed_for_identity(
+                &["skill:system_basic", &format!("capability:{capability}")],
+                None, Some(&actor("member", role)),
+            ));
+        }
+        assert!(!policy.allowed_for_identity(
+            &["skill:fs_basic", "capability:filesystem.write_file"],
+            None, Some(&actor("member", role)),
+        ));
         assert!(policy.allowed_for_identity(
             &["skill:read_file"],
             None,

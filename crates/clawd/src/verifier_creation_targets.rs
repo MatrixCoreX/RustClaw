@@ -1,6 +1,7 @@
 use std::path::{Component, Path};
 
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::{AppState, ClaimedTask, PlanResult, PlanStep};
 
@@ -33,14 +34,19 @@ fn value_as_non_empty_str<'a>(
 fn default_make_dir_path(state: &AppState, task: &ClaimedTask) -> String {
     state
         .skill_rt
-        .workspace_root
+        .files_root()
         .join(format!("agent-created-dir-{}", stable_task_suffix(task)))
         .to_string_lossy()
         .to_string()
 }
 
-fn default_write_file_path(state: &AppState) -> String {
-    crate::ensure_default_file_path(state.skill_rt.files_root(), "")
+fn default_write_file_path(state: &AppState, task: &ClaimedTask, step_id: &str) -> String {
+    // A resumed approval must resolve to the same file even after a restart.
+    let identity = serde_json::json!([task.task_id, step_id]);
+    let digest = Sha256::digest(identity.to_string().as_bytes());
+    let filename = format!("artifact-{digest:x}.txt");
+    let configured_path = crate::ensure_default_file_path(&state.skill_rt.workspace_root, &filename);
+    state.skill_rt.files_root().join(configured_path).to_string_lossy().into_owned()
 }
 
 fn path_has_parent_dir(path: &Path) -> bool {
@@ -75,7 +81,7 @@ fn anchor_creation_path_to_workspace(state: &AppState, path: &str) -> Option<Str
     Some(
         state
             .skill_rt
-            .workspace_root
+            .files_root()
             .join(candidate)
             .to_string_lossy()
             .to_string(),
@@ -174,7 +180,7 @@ fn apply_default_creation_target_to_step(
             &step.step_id,
             normalized_skill,
             obj,
-            default_write_file_path(state),
+            default_write_file_path(state, task, &step.step_id),
             issues,
         ),
         "fs_basic" => match obj
@@ -195,7 +201,7 @@ fn apply_default_creation_target_to_step(
                 &step.step_id,
                 normalized_skill,
                 obj,
-                default_write_file_path(state),
+                default_write_file_path(state, task, &step.step_id),
                 issues,
             ),
             _ => false,
