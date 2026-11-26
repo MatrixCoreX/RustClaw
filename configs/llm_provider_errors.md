@@ -173,7 +173,7 @@ Retry-After 后不额外请求、正常文本/native/stream 回归。测试结�
   用时 5 分 10 秒；二次构建 0.62 秒确认缓存已最新。部署保留此前工作区的其他改动，
   不将当前二进制冒充为该提交的纯净源码构建。
 - 只重启本机 `clawd`，未重编 UI/技能、未操作远端。启动日志确认
-  `provider_error_rules_loaded revision=2026-09-14.1 profiles=13`。
+  `provider_error_rules_loaded revision=2026-11-26.1 profiles=13`。
   运行二进制 SHA-256：`49d245e080c1a6a164cfe7e626a8e7d9c2310768ed4ecdac90507e4b1e169dd9`。
 - 再次执行既有最新测试产物的 provider 测试：93 passed / 0 failed；重启脚本自测、
   LLM trace helper/runner 合同自测与主检查通过。

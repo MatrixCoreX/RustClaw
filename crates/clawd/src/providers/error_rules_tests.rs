@@ -43,10 +43,20 @@ fn invalid_configuration_is_rejected_not_silently_defaulted() {
         BUILTIN.replace("class = \"quota_exhausted\"", "class = \"retry_forever\""),
         BUILTIN.replace("\"/error/code\"", "\"error/code\""),
         BUILTIN.replace("\"/error/code\"", "\"/error/~9code\""),
-        BUILTIN.replace(
-            "message_code_http_statuses = [429]",
-            "message_code_http_statuses = []",
-        ),
+        BUILTIN
+            .lines()
+            .map(|line| {
+                if line
+                    .trim_start()
+                    .starts_with("message_code_http_statuses =")
+                {
+                    "message_code_http_statuses = []"
+                } else {
+                    line
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
         format!("{BUILTIN}\n[[bindings]]\nprovider_name = 'custom'\nprofile = 'missing'"),
     ] {
         assert!(ErrorRules::parse(&raw).is_err());
@@ -104,7 +114,21 @@ fn missing_explicit_configuration_fails_but_standalone_has_embedded_rules() {
     std::fs::create_dir(&temp).unwrap();
     let missing = temp.join("missing.toml");
     assert!(load(&missing, true).is_err());
-    assert_eq!(load(&missing, false).unwrap().revision, "2026-09-14.1");
+    let standalone = load(&missing, false).unwrap();
+    let embedded = ErrorRules::parse(BUILTIN).unwrap();
+    assert_eq!(standalone.revision, embedded.revision);
+    assert_eq!(
+        standalone
+            .profiles
+            .iter()
+            .map(|profile| &profile.id)
+            .collect::<Vec<_>>(),
+        embedded
+            .profiles
+            .iter()
+            .map(|profile| &profile.id)
+            .collect::<Vec<_>>()
+    );
     let invalid = temp.join("invalid.toml");
     std::fs::write(&invalid, "not valid toml").unwrap();
     assert!(load(&invalid, false).is_err());
