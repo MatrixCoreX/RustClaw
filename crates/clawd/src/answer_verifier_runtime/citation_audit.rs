@@ -162,6 +162,30 @@ pub(super) fn missing_checks(citations: &[Citation<'_>], checks: &[CitationCheck
 mod tests {
     use super::*;
     #[test]
+    fn journal_rows_bind_only_their_own_excerpts_to_answer_urls() {
+        use claw_core::capability_result::CapabilityResultEnvelope;
+        let mut journal = TaskJournal::default();
+        let answer = "[second](https://example.org/b) [first](https://example.org/a) https://example.org/unknown";
+        assert!(citations(answer, &journal).is_empty());
+        journal
+            .capability_results
+            .push(CapabilityResultEnvelope::ok(
+                "fixture.read",
+                None,
+                serde_json::json!({"extra":{"items":[
+                    {"link":"https://example.org/a","title":"A couple shares its finances"},
+                    {"link":"https://example.org/b","title":"Vehicle registration"}
+                ]}}),
+            ));
+        let rows = citations(answer, &journal);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].url, "https://example.org/b");
+        assert_eq!(rows[0].excerpts, ["Vehicle registration"]);
+        assert_eq!(rows[1].excerpts, ["A couple shares its finances"]);
+        assert!(rows[2].excerpts.is_empty());
+    }
+
+    #[test]
     fn passing_verdict_requires_each_citations_own_observed_words() {
         let refs = vec![
             Citation {

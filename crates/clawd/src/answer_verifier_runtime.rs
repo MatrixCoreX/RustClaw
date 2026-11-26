@@ -148,53 +148,64 @@ pub(crate) async fn verify_answer_observe_only(
         None,
     );
     let prompt_source = resolved.source;
-    let llm_out = match crate::llm_gateway::run_with_fallback_with_prompt_source(
+    let mut hints = crate::ChatRequestHints::default();
+    crate::task_model_selection::apply_task_model_policy_hints(task, &mut hints);
+    let (llm_out, finish) = match crate::llm_gateway::run_with_provider_resource(
         state,
         task,
         &prompt,
         &prompt_source,
+        hints,
+        state.task_llm_providers(task),
+        None,
     )
     .await
     {
-        Ok(value) => value,
+        Ok(response) => response,
         Err(err) => {
-            tracing::info!(
-                "answer_verifier llm_failed task_id={} err={}",
-                task.task_id,
-                err
-            );
+            tracing::info!(task_id = %task.task_id, %err, "answer_verifier_provider_failed");
             return AnswerVerificationOutcome::Unavailable {
                 error_code: "answer_verifier_provider_unavailable",
                 retryable: true,
             };
         }
     };
-    let validation = match crate::prompt_utils::validate_against_schema::<
-        operation_audit::ModelVerifierOut,
-    >(
-        &llm_out,
-        crate::prompt_utils::PromptSchemaId::AnswerVerifier,
-    ) {
-        Ok(validated) => {
+    let parsed = if citations.is_empty() {
+        crate::prompt_utils::validate_against_schema::<operation_audit::ModelVerifierOut>(
+            &llm_out, crate::prompt_utils::PromptSchemaId::AnswerVerifier,
+        ).map(|validated| {
             if !validated.raw_parse_ok || validated.schema_normalized {
-                tracing::info!(
-                    "answer_verifier schema_parse_recovery task_id={} raw_parse_ok={} schema_normalized={}",
-                    task.task_id,
-                    validated.raw_parse_ok,
-                    validated.schema_normalized
-                );
+                tracing::info!(task_id = %task.task_id, raw_parse_ok = validated.raw_parse_ok,
+                    schema_normalized = validated.schema_normalized, "answer_verifier_schema_parse_recovery");
             }
-            let mut model = validated.value;
-            if model.verdict.pass {
-                let missing = citation_audit::missing_checks(&citations, &model.citation_checks);
-                if !missing.is_empty() {
-                    return AnswerVerificationOutcome::from_verdict(AnswerVerifierOut {
-                        pass: false, missing_evidence_fields: vec!["unsupported_claims".into()],
-                        answer_incomplete_reason: "citation_evidence_incomplete".into(),
-                        retry_instruction: serde_json::json!({"repair_kind":"revise_unsupported_claims","citations":missing}).to_string(),
-                        should_retry: true, confidence: 1.0,
-                    });
-                }
+            validated.value
+        })
+    } else {
+        if finish != claw_core::model_turn::ModelFinishReason::Stop {
+            return AnswerVerificationOutcome::Unavailable {
+                error_code: "answer_verifier_response_invalid",
+                retryable: true,
+            };
+        }
+        crate::prompt_utils::validate_complete_schema::<operation_audit::ModelVerifierOut>(
+            &llm_out,
+            crate::prompt_utils::PromptSchemaId::AnswerVerifier,
+        )
+    };
+    let validation = match parsed {
+        Ok(mut model) => {
+            let missing = citation_audit::missing_checks(&citations, &model.citation_checks);
+            if !missing.is_empty() {
+                // A structurally complete answer can still misstate a cited fact.
+                return AnswerVerificationOutcome::from_verdict(AnswerVerifierOut {
+                    pass: false,
+                    missing_evidence_fields: vec!["unsupported_claims".into()],
+                    answer_incomplete_reason: "citation_evidence_incomplete".into(),
+                    retry_instruction: serde_json::json!({"repair_kind":"revise_unsupported_claims","citations":missing,
+                        "verifier_guidance":model.verdict.retry_instruction}).to_string(),
+                    should_retry: true,
+                    confidence: 1.0,
+                });
             }
             let output_field_checks = operation_audit::host_output_field_checks(
                 &route_result.output_contract,
