@@ -12,6 +12,43 @@ pub const WORKSPACES: &str = "data/principal-workspaces";
 const FILE_LIMIT: u64 = 100 * 1024 * 1024;
 const BATCH_LIMIT: u64 = 250 * 1024 * 1024;
 
+fn safe_telegram_storage_segment(raw: &str, fallback: &str) -> String {
+    let sanitized: String = raw
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if sanitized.trim_matches('_').is_empty() {
+        fallback.to_string()
+    } else {
+        sanitized
+    }
+}
+
+pub fn telegram_inbox_path(
+    root_dir: &str,
+    bot_name: &str,
+    chat_id: i64,
+    user_id: i64,
+    provider_message_id: &str,
+    ext: &str,
+) -> String {
+    let base = root_dir.trim().trim_end_matches('/');
+    let safe_bot = safe_telegram_storage_segment(bot_name, "bot");
+    let safe_message_id = safe_telegram_storage_segment(provider_message_id, "message");
+    let safe_ext = ext.trim().trim_start_matches('.');
+    if base.is_empty() {
+        format!("{safe_bot}/{chat_id}/{user_id}/{safe_message_id}.{safe_ext}")
+    } else {
+        format!("{base}/{safe_bot}/{chat_id}/{user_id}/{safe_message_id}.{safe_ext}")
+    }
+}
+
 pub fn private_directory(runtime: &Path, principal: &str) -> anyhow::Result<PathBuf> {
     ensure!(!principal.trim().is_empty(), "workspace_principal_missing");
     let namespace = runtime.join(WORKSPACES);
@@ -61,7 +98,7 @@ pub async fn stage_received_attachments(
     .await?
 }
 
-fn stage_inbox_files(
+pub fn stage_inbox_files(
     root: &Path,
     own: &Path,
     attachments: &[crate::channel_ingress::ChannelIngressAttachment],

@@ -325,18 +325,20 @@ fn seed_photo_organize_policy_memory(state: &AppState, user_id: i64, chat_id: i6
     crate::ensure_memory_schema(&db).expect("ensure memory schema");
     crate::repo::auth::ensure_key_auth_schema(&db).expect("ensure fixture authentication schema");
     crate::memory::indexing::ensure_retrieval_schema(&db).expect("ensure retrieval schema");
+    crate::memory::scope::ensure_memory_scope_schema(&db).expect("ensure owned memory schema");
+    let principal = crate::repo::auth::principal_id_for_user_key(&db, user_key).unwrap().unwrap();
     let ts = 1_775_301_800_i64;
 
     db.execute(
-            "INSERT INTO user_preferences (user_id, chat_id, user_key, pref_key, pref_value, confidence, source, updated_at, updated_at_ts)
-             VALUES (?1, ?2, ?3, 'photo_grouping', 'PHOTO_ALLOWED_PREF_by_year_month', 0.95, 'test', '1775301800', ?4)",
-            rusqlite::params![user_id, chat_id, user_key, ts],
+            "INSERT INTO user_preferences (user_id, chat_id, user_key, pref_key, pref_value, confidence, source, updated_at, updated_at_ts, principal_id, scope_ref)
+             VALUES (?1, ?2, ?3, 'photo_grouping', 'PHOTO_ALLOWED_PREF_by_year_month', 0.95, 'test', '1775301800', ?4, ?5, ?5)",
+            rusqlite::params![user_id, chat_id, user_key, ts, principal],
         )
         .expect("insert preference");
     db.execute(
-            "INSERT INTO long_term_memories (user_id, chat_id, user_key, summary, source_memory_id, created_at, updated_at, created_at_ts, updated_at_ts)
-             VALUES (?1, ?2, ?3, 'PHOTO_BLOCKED_LONG_TERM_SUMMARY', 1, '1775301800', '1775301800', ?4, ?4)",
-            rusqlite::params![user_id, chat_id, user_key, ts],
+            "INSERT INTO long_term_memories (user_id, chat_id, user_key, summary, source_memory_id, created_at, updated_at, created_at_ts, updated_at_ts, principal_id, scope_ref)
+             VALUES (?1, ?2, ?3, 'PHOTO_BLOCKED_LONG_TERM_SUMMARY', 1, '1775301800', '1775301800', ?4, ?4, ?5, ?5)",
+            rusqlite::params![user_id, chat_id, user_key, ts, principal],
         )
         .expect("insert long term summary");
 
@@ -958,10 +960,10 @@ async fn run_skill_photo_organize_injects_registry_cropped_memory_args() {
     state.skill_rt.skill_timeout_seconds = 5;
     receipt_support::install_verified_test_package(temp.path(), "photo_organize");
 
-    let user_id = 91;
     let chat_id = 92;
     let user_key = "user:photo-policy";
     state.seed_test_auth_identity(user_key, "user");
+    let user_id = crate::resolve_auth_identity_by_key(&state, user_key).unwrap().unwrap().user_id;
     seed_photo_organize_policy_memory(&state, user_id, chat_id, user_key);
     let recalled = crate::memory::retrieval::retrieve_indexed_memories_for_scope(
         &state,

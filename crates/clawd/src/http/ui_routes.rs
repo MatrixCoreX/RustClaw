@@ -542,6 +542,8 @@ include!("ui_routes/nni_bancor.rs");
 include!("ui_routes/nni_bancor_candles.rs");
 include!("ui_routes/nni_asset_transfer.rs");
 include!("ui_routes/nni_skill_gateway.rs");
+#[path = "ui_routes/pending_bound_files.rs"]
+mod pending_bound_files;
 include!("ui_routes/auth_feishu_bind.rs");
 include!("ui_routes/channel_registration_transport.rs");
 include!("ui_routes/channel_registration_guard.rs");
