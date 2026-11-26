@@ -301,7 +301,7 @@ pub(crate) fn update_task_success(
             &["running", "succeeded"],
         ));
     }
-    let result_json = success_artifacts::prepare_succeeded_result_json(state, task_id, result_json);
+    let result_json = success_artifacts::prepare_succeeded_result_json(state, task_id, result_json)?;
     let db = state
         .core
         .db

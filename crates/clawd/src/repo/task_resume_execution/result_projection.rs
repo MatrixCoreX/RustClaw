@@ -1011,7 +1011,7 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
     let updated_result_json = terminal_result.to_string();
     drop(db);
     let updated_result_json = if db_status == "succeeded" {
-        crate::repo::tasks::prepare_succeeded_result_json(state, task_id, &updated_result_json)
+        crate::repo::tasks::prepare_succeeded_result_json(state, task_id, &updated_result_json)?
     } else {
         updated_result_json
     };

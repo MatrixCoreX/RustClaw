@@ -148,7 +148,7 @@ fn invalid_candidate_never_overwrites_an_existing_valid_delivery() {
         size_bytes: None,
         sha256: Some(sha256_file(&destination).unwrap()),
     };
-    assert!(publish_artifact_file(&source, &destination, &expected)
+    assert!(publish_artifact_file(workspace.path(), &source, &destination, &expected)
         .unwrap()
         .is_none());
     assert_eq!(fs::read(&destination).unwrap(), b"valid previous delivery");
