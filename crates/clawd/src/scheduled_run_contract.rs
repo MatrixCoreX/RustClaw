@@ -238,50 +238,52 @@ pub(crate) fn update_scheduled_run_terminal(
     Ok(affected)
 }
 
+pub(crate) enum ScheduleHistoryOwner<'a> {
+    Authenticated(&'a claw_core::types::AuthIdentity),
+    LocalUser(i64),
+}
+
 pub(crate) fn list_scheduled_run_history(
     db: &Connection,
-    user_id: i64,
+    owner: ScheduleHistoryOwner<'_>,
     chat_id: i64,
     job_id: Option<&str>,
     limit: usize,
 ) -> anyhow::Result<Vec<Value>> {
-    let limit = limit.clamp(1, 100) as i64;
-    let job_id = job_id
+    let (principal, key, user_id) = match owner {
+        ScheduleHistoryOwner::Authenticated(identity) => (
+            Some(identity.principal_id.as_str()),
+            Some(identity.user_key.as_str()),
+            identity.user_id,
+        ),
+        ScheduleHistoryOwner::LocalUser(id) => (None, None, id),
+    };
+    let job = job_id
         .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|s| !s.is_empty())
         .map(stable_machine_ref);
-    let mut rows = Vec::new();
-    if let Some(job_id) = job_id {
-        let mut stmt = db.prepare(
-            "SELECT r.run_id, r.job_id, r.task_id, r.thread_ref, r.task_status,
-                    r.triage_status, r.result_json, r.started_at, r.finished_at, r.updated_at
-             FROM scheduled_job_runs r
-             JOIN scheduled_jobs j ON j.job_id = r.job_id
-             WHERE j.user_id = ?1 AND j.chat_id = ?2 AND r.job_id = ?3
-             ORDER BY CAST(r.updated_at AS INTEGER) DESC, r.id DESC
-             LIMIT ?4",
-        )?;
-        let mapped = stmt.query_map(params![user_id, chat_id, job_id, limit], scheduled_run_row)?;
-        for row in mapped {
-            rows.push(row?);
-        }
-        return Ok(rows);
-    }
-
     let mut stmt = db.prepare(
         "SELECT r.run_id, r.job_id, r.task_id, r.thread_ref, r.task_status,
                 r.triage_status, r.result_json, r.started_at, r.finished_at, r.updated_at
-         FROM scheduled_job_runs r
-         JOIN scheduled_jobs j ON j.job_id = r.job_id
-         WHERE j.user_id = ?1 AND j.chat_id = ?2
-         ORDER BY CAST(r.updated_at AS INTEGER) DESC, r.id DESC
-         LIMIT ?3",
+         FROM scheduled_job_runs r JOIN scheduled_jobs j ON j.job_id=r.job_id
+         WHERE j.chat_id=?1 AND (?2 IS NULL OR r.job_id=?2)
+           AND ((?3 IS NULL AND j.user_id=?5) OR
+                (?3 IS NOT NULL AND (j.principal_id=?3 OR
+                 (j.principal_id IS NULL AND (j.user_key=?4 OR (j.user_key IS NULL AND j.user_id=?5))))))
+         ORDER BY CAST(r.updated_at AS INTEGER) DESC, r.id DESC LIMIT ?6",
     )?;
-    let mapped = stmt.query_map(params![user_id, chat_id, limit], scheduled_run_row)?;
-    for row in mapped {
-        rows.push(row?);
-    }
-    Ok(rows)
+    let rows = stmt.query_map(
+        params![
+            chat_id,
+            job,
+            principal,
+            key,
+            user_id,
+            limit.clamp(1, 100) as i64
+        ],
+        scheduled_run_row,
+    )?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 pub(crate) fn scheduled_run_terminal_result(

@@ -680,9 +680,19 @@ pub(super) async fn list_automation_runs(
     headers: HeaderMap,
     Json(req): Json<AutomationRunsRequest>,
 ) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
-    let effective_user_id = match authorize_task_admin_request(&state, &headers, req.user_id) {
-        Ok(user_id) => user_id,
-        Err(resp) => return resp,
+    use crate::scheduled_run_contract::ScheduleHistoryOwner;
+    let identity;
+    let owner = if crate::auth_key_from_headers(&headers).is_some() {
+        identity = match crate::require_auth_identity_for_api::<Value>(&state, &headers) {
+            Ok(identity) => identity,
+            Err(response) => return response,
+        };
+        ScheduleHistoryOwner::Authenticated(&identity)
+    } else {
+        match authorize_task_admin_request(&state, &headers, req.user_id) {
+            Ok(user_id) => ScheduleHistoryOwner::LocalUser(user_id),
+            Err(response) => return response,
+        }
     };
     let db = match state.core.db.get() {
         Ok(db) => db,
@@ -696,7 +706,7 @@ pub(super) async fn list_automation_runs(
     };
     match crate::scheduled_run_contract::list_scheduled_run_history(
         &db,
-        effective_user_id,
+        owner,
         req.chat_id,
         req.job_id.as_deref(),
         req.limit.unwrap_or(20),

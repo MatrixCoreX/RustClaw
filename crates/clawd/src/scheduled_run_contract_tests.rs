@@ -326,15 +326,23 @@ fn scheduled_run_history_listing_filters_owner_and_job() {
             .expect("terminal update");
     }
 
-    let all = list_scheduled_run_history(&db, 7, 11, None, 10).expect("list all owner runs");
+    let all =
+        list_scheduled_run_history(&db, super::ScheduleHistoryOwner::LocalUser(7), 11, None, 10)
+            .expect("list all owner runs");
     assert_eq!(all.len(), 2);
     assert_eq!(all[0]["task_status"], "succeeded");
     assert!(all[0].get("result").is_none());
     assert!(all[0]["result_summary"].get("text").is_none());
     assert_eq!(all[0]["finding_refs"][0], "finding:2");
 
-    let filtered =
-        list_scheduled_run_history(&db, 7, 11, Some("job_abc123"), 10).expect("list job runs");
+    let filtered = list_scheduled_run_history(
+        &db,
+        super::ScheduleHistoryOwner::LocalUser(7),
+        11,
+        Some("job_abc123"),
+        10,
+    )
+    .expect("list job runs");
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0]["run_id"], "run_001");
     assert_eq!(filtered[0]["finding_refs"][0], "finding:1");
@@ -384,7 +392,14 @@ fn scheduled_run_history_listing_exposes_policy_provider_machine_summary() {
     update_scheduled_run_terminal(&db, "job_abc123", "task_policy", "failed", "1010", &result)
         .expect("terminal update");
 
-    let rows = list_scheduled_run_history(&db, 7, 11, Some("job_abc123"), 10).expect("list runs");
+    let rows = list_scheduled_run_history(
+        &db,
+        super::ScheduleHistoryOwner::LocalUser(7),
+        11,
+        Some("job_abc123"),
+        10,
+    )
+    .expect("list runs");
     let summary = &rows[0]["result_summary"];
 
     assert_eq!(rows[0]["triage_status"], "failed");

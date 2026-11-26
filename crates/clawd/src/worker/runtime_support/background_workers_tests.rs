@@ -686,6 +686,20 @@ fn manual_scheduled_run_reuses_request_and_keeps_timer_and_recipient() {
         ManualScheduledRun::Active
     ));
     let db = state.core.db.get().unwrap();
+    use crate::scheduled_run_contract::{list_scheduled_run_history, ScheduleHistoryOwner};
+    let history = |who| {
+        list_scheduled_run_history(
+            &db,
+            ScheduleHistoryOwner::Authenticated(who),
+            7,
+            Some(job),
+            10,
+        )
+        .unwrap()
+    };
+    assert_ne!(owner.user_id, 42);
+    assert_eq!(history(&owner)[0]["task_id"], task_id);
+    assert!(history(&other).is_empty());
     let actual: (i64,String,String,i64) = db.query_row("SELECT j.next_run_at, j.last_thread_task_id, t.channel, t.chat_id
         FROM scheduled_jobs j JOIN scheduled_job_runs r ON j.job_id=r.job_id JOIN tasks t ON r.task_id=t.task_id WHERE t.task_id=?1",
         [&task_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
