@@ -164,7 +164,7 @@ impl Drop for TempDirGuard {
 fn test_state(locale: &str) -> AppState {
     let agent = AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new());
     let agents_by_id = HashMap::from([(DEFAULT_AGENT_ID.to_string(), agent)]);
-    AppState {
+    let state = AppState {
         core: crate::CoreServices {
             agents_by_id: Arc::new(std::sync::RwLock::new(Arc::new(agents_by_id))),
             agent_runtime_leases: Arc::new(std::sync::RwLock::new(HashMap::new())),
@@ -201,7 +201,9 @@ fn test_state(locale: &str) -> AppState {
         channels: crate::ChannelConfig::default(),
         reload_ctx: crate::ReloadContext::default(),
         ask_states: crate::AskStateRegistry::default(),
-    }
+    };
+    state.seed_test_auth_identity("rk-test", "admin");
+    state
 }
 
 fn install_real_registry(state: &mut AppState) {
@@ -959,6 +961,7 @@ async fn run_skill_photo_organize_injects_registry_cropped_memory_args() {
     let user_id = 91;
     let chat_id = 92;
     let user_key = "user:photo-policy";
+    state.seed_test_auth_identity(user_key, "user");
     seed_photo_organize_policy_memory(&state, user_id, chat_id, user_key);
     let recalled = crate::memory::retrieval::retrieve_indexed_memories_for_scope(
         &state,

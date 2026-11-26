@@ -3995,7 +3995,7 @@ dependencies = [
 
 [[package]]
 name = "rss-fetch-skill"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "fs2",

@@ -24,6 +24,7 @@ impl Fixture {
             ToolSandboxBackend::Auto,
             &self.0,
             &[],
+    false,
         )
         .expect("actual durable producer preparation")
     }
@@ -156,6 +157,7 @@ fn async_launch_refuses_missing_relative_file_or_symlink_directory_before_spawn(
             ToolSandboxBackend::Auto,
             &root.0,
             &[],
+    false,
         )
         .err()
         .expect("invalid directory must not yield a launch");
@@ -194,6 +196,7 @@ async fn host_private_policy_reaches_actual_durable_producer_preparation() {
         ToolSandboxBackend::Auto,
         &root.0,
         &policy.process_directories().unwrap(),
+        false,
     )
     .unwrap();
     run(launch).await;

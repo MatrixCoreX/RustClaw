@@ -132,13 +132,15 @@ async fn aipp_read_surfaces_require_auth_before_invalid_manifest_and_fail_closed
     for surface in SURFACES {
         let fixture = SurfaceFixture::new(surface);
         fs::write(fixture.manifest_path(), "invalid manifest").unwrap();
-        error_body(
-            request(surface, &fixture.state, Some("aipp-view-user"), "").await,
-            StatusCode::FORBIDDEN,
-            "admin_required",
-            true,
-        )
-        .await;
+        let user_response = request(surface, &fixture.state, Some("aipp-view-user"), "").await;
+        if matches!(surface, Surface::Catalog) {
+            assert_eq!(user_response.status(), StatusCode::OK);
+            let bytes = axum::body::to_bytes(user_response.into_body(), 65536).await.unwrap();
+            let body: Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(body["data"]["apps"], json!([]));
+        } else {
+            error_body(user_response, StatusCode::FORBIDDEN, "admin_required", true).await;
+        }
         let response = request(surface, &fixture.state, Some("aipp-view-admin"), "").await;
         if matches!(surface, Surface::Catalog) {
             assert_eq!(response.status(), StatusCode::OK);

@@ -1,3 +1,4 @@
+mod excerpts;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::{self, BufRead, Write};
@@ -97,6 +98,7 @@ struct Resp {
 
 #[derive(Debug, Clone)]
 struct FeedItem {
+    excerpt: Option<String>,
     title: String,
     link: String,
     date: String,
@@ -1353,6 +1355,7 @@ fn parse_rss_items(xml: &str, limit: usize) -> Vec<FeedItem> {
             .or_else(|| extract_tag_text(blk, "dc:date"))
             .unwrap_or_default();
         items.push(FeedItem {
+            excerpt: excerpts::from_tags(blk, &["description", "content:encoded"]),
             title,
             link,
             date,
@@ -1374,6 +1377,7 @@ fn parse_atom_items(xml: &str, limit: usize) -> Vec<FeedItem> {
             .or_else(|| extract_tag_text(blk, "published"))
             .unwrap_or_default();
         items.push(FeedItem {
+            excerpt: excerpts::from_tags(blk, &["summary", "content"]),
             title,
             link,
             date,
@@ -1438,6 +1442,7 @@ fn format_layered_news_output(
 fn feed_item_extra(item: &FeedItem, topic: &str) -> Value {
     json!({
         "title": compact_text(&item.title),
+        "excerpt": item.excerpt,
         "link": compact_text(&item.link),
         "date": compact_text(&item.date),
         "source": compact_text(&item.source),

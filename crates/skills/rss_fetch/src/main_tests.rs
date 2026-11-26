@@ -316,6 +316,7 @@ fn all_sources_for_category_empty_for_unknown_category() {
 fn sort_feed_items_by_date_orders_by_date_desc() {
     let mut items = vec![
         FeedItem {
+            excerpt: None,
             title: "a".into(),
             link: "l1".into(),
             date: "2020-01-01".into(),
@@ -323,6 +324,7 @@ fn sort_feed_items_by_date_orders_by_date_desc() {
             layer: String::new(),
         },
         FeedItem {
+            excerpt: None,
             title: "b".into(),
             link: "l2".into(),
             date: "2022-06-15".into(),
@@ -330,6 +332,7 @@ fn sort_feed_items_by_date_orders_by_date_desc() {
             layer: String::new(),
         },
         FeedItem {
+            excerpt: None,
             title: "c".into(),
             link: "l3".into(),
             date: "2021-03-10".into(),
@@ -347,6 +350,7 @@ fn sort_feed_items_by_date_orders_by_date_desc() {
 fn sort_feed_items_by_date_empty_dates_at_end() {
     let mut items = vec![
         FeedItem {
+            excerpt: None,
             title: "a".into(),
             link: "l1".into(),
             date: "2022-01-01".into(),
@@ -354,6 +358,7 @@ fn sort_feed_items_by_date_empty_dates_at_end() {
             layer: String::new(),
         },
         FeedItem {
+            excerpt: None,
             title: "b".into(),
             link: "l2".into(),
             date: "".into(),
@@ -361,6 +366,7 @@ fn sort_feed_items_by_date_empty_dates_at_end() {
             layer: String::new(),
         },
         FeedItem {
+            excerpt: None,
             title: "c".into(),
             link: "l3".into(),
             date: "2021-01-01".into(),
@@ -735,6 +741,7 @@ fn limit_applied_after_merge_and_dedupe() {
 #[test]
 fn feed_item_extra_exposes_structured_news_fields() {
     let item = FeedItem {
+        excerpt: None,
         title: "Example market update".to_string(),
         link: "https://example.com/news/1".to_string(),
         date: "2026-06-02T10:00:00Z".to_string(),
@@ -766,6 +773,7 @@ fn feed_item_extra_exposes_structured_news_fields() {
 #[test]
 fn feed_item_topic_uses_machine_token_not_title_keywords() {
     let item = FeedItem {
+        excerpt: None,
         title: "SEC hack funding launch macro jobs".to_string(),
         link: "https://example.com/news/1".to_string(),
         date: "2026-06-02T10:00:00Z".to_string(),
@@ -882,4 +890,17 @@ fn config_persistence_rejects_stale_snapshot_without_overwrite() {
     assert_eq!(persisted.rss.default_limit, Some(20));
 
     std::fs::remove_dir_all(path.parent().unwrap()).expect("remove test directory");
+}
+
+#[test]
+fn publisher_excerpts_stay_with_their_article_and_preserve_numeric_claims() {
+    let feed = r#"<rss><channel><item><title>First</title><link>https://example.com/a</link><description><![CDATA[<p>It paid $5<b>00</b>, not $500,000.</p>]]></description></item><item><title>Second</title></item></channel></rss>"#;
+    let items = parse_rss_items(feed, 8);
+    let first = feed_item_extra(&items[0],"business");
+    assert_eq!(first["excerpt"], "It paid $500, not $500,000.");
+    assert_eq!(first["link"], "https://example.com/a");
+    assert!(feed_item_extra(&items[1],"business")["excerpt"].is_null());
+    let atom = "<feed><entry><title>独立来源</title><summary>金额为 500 元。</summary></entry></feed>";
+    assert_eq!(parse_atom_items(atom,1)[0].excerpt.as_deref(), Some("金额为 500 元。"));
+    assert!(excerpts::from_tags("<summary><![CDATA[<script>hidden</script>]]></summary>", &["summary"]).is_none());
 }
