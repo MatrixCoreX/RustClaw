@@ -256,8 +256,8 @@ pub(crate) fn claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
         return Ok(None);
     }
     drop(db);
-    match crate::task_artifacts::preserve_async_completion_artifacts(
-        &state.skill_rt.workspace_root,
+    match crate::task_artifacts::preserve_stored_async_artifacts(
+        state,
         task_id,
         &recorded.execution_result_payload,
     ) {

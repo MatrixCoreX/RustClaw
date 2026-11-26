@@ -1215,7 +1215,7 @@ fn terminal_seeded_loop_projection_materializes_async_artifact_without_model_tok
     let manifest: crate::task_artifacts::TaskArtifactManifest =
         serde_json::from_value(artifacts[0].clone()).expect("artifact manifest");
     let delivered =
-        crate::task_artifacts::validated_delivery_artifact_path(&own, task_id, &manifest)
+        crate::task_artifacts::validated_delivery_artifact_path(&workspace.path, task_id, &manifest)
             .expect("delivered artifact path");
     assert_eq!(
         std::fs::read(delivered).expect("read delivered video"),

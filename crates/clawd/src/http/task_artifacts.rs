@@ -115,13 +115,9 @@ async fn serve_task_artifact(
     else {
         return api_error(StatusCode::NOT_FOUND, "task_artifact_not_found");
     };
-    let id = task_id.to_string();
-    let owned_path = state.stored_task_files_root(&id).ok().and_then(|root|
-        task_artifacts::validated_delivery_artifact_path(&root, &id, &manifest));
-    // Already-delivered legacy artifacts retain their verified per-task path.
-    let Some(path) = owned_path.or_else(|| task_artifacts::validated_delivery_artifact_path(
-        &state.skill_rt.workspace_root, &id, &manifest,
-    )) else {
+    let Some(path) = task_artifacts::validated_delivery_artifact_path(
+        &state.skill_rt.workspace_root, &task_id.to_string(), &manifest,
+    ) else {
         return api_error(StatusCode::GONE, "task_artifact_unavailable");
     };
     if query

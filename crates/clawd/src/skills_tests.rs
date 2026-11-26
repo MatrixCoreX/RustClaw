@@ -1019,11 +1019,10 @@ fn task_allows_privileged_tools_for_admin_only() {
     state.policy.allow_sudo = true;
     state.policy.allow_path_outside_workspace = true;
 
-    insert_auth_key(&state, "rk-admin", "admin");
     insert_auth_key(&state, "rk-user", "user");
 
     let mut admin_task = test_task(json!({ "text": "run privileged command" }));
-    admin_task.user_key = Some("rk-admin".to_string());
+    admin_task.user_key = Some("rk-test".to_string());
     assert!(task_allows_sudo(&state, Some(&admin_task)));
     assert!(task_allows_path_outside_workspace(
         &state,
@@ -1044,10 +1043,9 @@ fn authenticated_admin_yolo_keeps_host_permission_switches() {
     let state = test_state("zh-CN");
     assert!(!state.policy.allow_sudo);
     assert!(!state.policy.allow_path_outside_workspace);
-    insert_auth_key(&state, "rk-admin-yolo", "admin");
     insert_auth_key(&state, "rk-user-yolo", "user");
 
-    let admin_identity = crate::resolve_auth_identity_by_key(&state, "rk-admin-yolo")
+    let admin_identity = crate::resolve_auth_identity_by_key(&state, "rk-test")
         .expect("resolve admin identity")
         .expect("admin identity");
     let mut admin_payload = json!({"text": "inspect the host"});
@@ -1059,7 +1057,7 @@ fn authenticated_admin_yolo_keeps_host_permission_switches() {
     )
     .expect("stamp admin policy");
     let mut admin_task = test_task(admin_payload);
-    admin_task.user_key = Some("rk-admin-yolo".to_string());
+    admin_task.user_key = Some("rk-test".to_string());
     assert!(!task_allows_sudo(&state, Some(&admin_task)));
     assert!(!task_allows_path_outside_workspace(
         &state,
@@ -1077,7 +1075,7 @@ fn authenticated_admin_yolo_keeps_host_permission_switches() {
     let db = state.core.db.get().expect("db pool");
     db.execute(
         "UPDATE auth_keys SET enabled = 0 WHERE user_key = ?1",
-        params!["rk-admin-yolo"],
+        params!["rk-test"],
     )
     .expect("revoke admin key");
     drop(db);

@@ -67,8 +67,8 @@ fn preserve_completed_async_delivery_artifacts(
     claimed: &repo::ClaimedDispatchedPausedCheckpointResumeExecution,
     payload: &Value,
 ) {
-    if let Err(error) = crate::task_artifacts::preserve_async_completion_artifacts(
-        &state.skill_rt.workspace_root,
+    if let Err(error) = crate::task_artifacts::preserve_stored_async_artifacts(
+        state,
         &claimed.task_id,
         payload,
     ) {

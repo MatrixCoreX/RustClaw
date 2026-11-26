@@ -44,8 +44,20 @@ struct ArtifactSource {
     sha256: Option<String>,
 }
 
+#[cfg(test)]
 pub(crate) fn materialize_task_result_artifacts(
     workspace_root: &Path,
+    task_id: &str,
+    raw_result: &str,
+) -> anyhow::Result<String> {
+    materialize_scoped_task_artifacts(workspace_root, workspace_root, task_id, raw_result)
+}
+
+/// Inputs are authorized in the account's workspace. Final delivery files go to
+/// the host-managed store, where download, preview and retention can share them.
+pub(crate) fn materialize_scoped_task_artifacts(
+    workspace_root: &Path,
+    delivery_root: &Path,
     task_id: &str,
     raw_result: &str,
 ) -> anyhow::Result<String> {
@@ -62,7 +74,7 @@ pub(crate) fn materialize_task_result_artifacts(
     let mut sources = collect_artifact_sources(&result);
     collect_published_transcript_sources(&workspace, task_id, &mut sources);
     collect_published_image_text_sources(&workspace, task_id, &mut sources);
-    collect_preserved_task_delivery_sources(&workspace, task_id, &mut sources);
+    collect_preserved_task_delivery_sources(&workspace, delivery_root, task_id, &mut sources);
     revisions::select_current_revisions(&workspace, task_id, &result, &mut sources);
     if sources.is_empty() {
         return Ok(raw_result.to_string());
@@ -80,9 +92,8 @@ pub(crate) fn materialize_task_result_artifacts(
         {
             continue;
         }
-        let Some(source_path) = validated_source_path(&workspace, &source.path)
-            .or_else(|| validated_pre_materialized_source_path(&workspace, task_id, &source))
-            .or_else(|| find_invocation_file_by_digest(&workspace, task_id, &source))
+        let Some((read_root, source_path)) =
+            resolve_task_source(&workspace, delivery_root, task_id, &source)
         else {
             continue;
         };
@@ -117,9 +128,14 @@ pub(crate) fn materialize_task_result_artifacts(
             }
         }
         let mime_type = normalized_mime_type(source.mime_type.as_deref(), &filename);
-        let destination = delivery_artifact_path(&workspace, task_id, &artifact_id, &filename);
-        let Some((sha256, size_bytes)) =
-            publish_artifact_file(&workspace, &source_path, &destination, &source)?
+        let destination = delivery_artifact_path(delivery_root, task_id, &artifact_id, &filename);
+        let Some((sha256, size_bytes)) = publish_artifact_file(
+            read_root,
+            delivery_root,
+            &source_path,
+            &destination,
+            &source,
+        )?
         else {
             seen_ids.remove(&artifact_id);
             continue;
@@ -173,28 +189,30 @@ pub(crate) fn materialize_task_result_artifacts(
 
 fn collect_preserved_task_delivery_sources(
     workspace_root: &Path,
+    delivery_root: &Path,
     task_id: &str,
     out: &mut Vec<ArtifactSource>,
 ) {
-    let task_root = claw_core::workspace_state::workspace_artifacts_root(workspace_root)
+    let task_root = claw_core::workspace_state::workspace_artifacts_root(delivery_root)
         .join("delivery")
         .join(machine_path_component(task_id, "task"));
     let Ok(canonical_task_root) = task_root.canonicalize() else {
         return;
     };
-    if !canonical_task_root.starts_with(workspace_root) {
+    if canonical_task_root != task_root {
         return;
     }
 
     let mut known_digests = HashSet::new();
     for source in out.iter() {
-        let Some(path) = validated_source_path(workspace_root, &source.path)
-            .or_else(|| validated_pre_materialized_source_path(workspace_root, task_id, source))
-            .or_else(|| find_invocation_file_by_digest(workspace_root, task_id, source))
+        let Some((read_root, path)) =
+            resolve_task_source(workspace_root, delivery_root, task_id, source)
         else {
             continue;
         };
-        if let Ok(digest) = sha256_file(&path) {
+        if let Ok((digest, _)) = crate::secure_workspace_fs::open_workspace_file(read_root, &path)
+            .and_then(|input| copy_and_hash(input, &mut io::sink()))
+        {
             known_digests.insert(digest);
         }
     }
@@ -263,8 +281,25 @@ fn collect_preserved_task_delivery_sources(
     }
 }
 
+pub(crate) fn preserve_stored_async_artifacts(
+    state: &crate::AppState,
+    task_id: &str,
+    payload: &Value,
+) -> anyhow::Result<bool> {
+    if payload
+        .get("executor_result_status")
+        .and_then(Value::as_str)
+        != Some("async_poll_completed")
+    {
+        return Ok(false);
+    }
+    let owned = state.stored_task_files_root(task_id)?;
+    preserve_async_completion_artifacts(&owned, &state.skill_rt.workspace_root, task_id, payload)
+}
+
 pub(crate) fn preserve_async_completion_artifacts(
     workspace_root: &Path,
+    delivery_root: &Path,
     task_id: &str,
     execution_result_payload: &Value,
 ) -> anyhow::Result<bool> {
@@ -293,7 +328,8 @@ pub(crate) fn preserve_async_completion_artifacts(
     let mut preserved = false;
     for candidate in candidates {
         let raw_result = candidate.to_string();
-        let materialized = materialize_task_result_artifacts(workspace_root, task_id, &raw_result)?;
+        let materialized =
+            materialize_scoped_task_artifacts(workspace_root, delivery_root, task_id, &raw_result)?;
         preserved |= materialized != raw_result;
     }
     Ok(preserved)
@@ -341,7 +377,8 @@ pub(crate) fn validated_delivery_artifact_path(
                 .join(safe_filename(&manifest.filename));
             let canonical = candidate.canonicalize().ok()?;
             let canonical_task_root = task_root.canonicalize().ok()?;
-            (canonical.starts_with(canonical_task_root) && canonical.is_file()).then_some(canonical)
+            (canonical_task_root == task_root && canonical == candidate && canonical.is_file())
+                .then_some(canonical)
         })
 }
 
@@ -708,6 +745,23 @@ fn validated_source_path(workspace_root: &Path, raw: &str) -> Option<PathBuf> {
     (canonical.starts_with(workspace_root) && canonical.is_file()).then_some(canonical)
 }
 
+fn resolve_task_source<'a>(
+    workspace: &'a Path,
+    delivery: &'a Path,
+    task_id: &str,
+    source: &ArtifactSource,
+) -> Option<(&'a Path, PathBuf)> {
+    validated_source_path(workspace, &source.path)
+        .map(|path| (workspace, path))
+        .or_else(|| {
+            validated_pre_materialized_source_path(delivery, task_id, source)
+                .map(|path| (delivery, path))
+        })
+        .or_else(|| {
+            find_invocation_file_by_digest(workspace, task_id, source).map(|path| (workspace, path))
+        })
+}
+
 fn validated_pre_materialized_source_path(
     workspace_root: &Path,
     task_id: &str,
@@ -835,7 +889,8 @@ fn matching_delivery_file(
 ) -> Option<PathBuf> {
     let canonical = candidate.canonicalize().ok()?;
     let metadata = canonical.metadata().ok()?;
-    (canonical.starts_with(workspace_root)
+    (canonical == candidate
+        && canonical.starts_with(workspace_root)
         && metadata.is_file()
         && metadata.len() == expected_size
         && sha256_file(&canonical)
@@ -878,6 +933,7 @@ fn find_delivery_file_by_digest(
 
 fn publish_artifact_file(
     workspace: &Path,
+    delivery_root: &Path,
     source: &Path,
     destination: &Path,
     expected: &ArtifactSource,
@@ -888,8 +944,10 @@ fn publish_artifact_file(
         return Ok(artifact_digest_matches(expected, &hash, size).then_some((hash, size)));
     }
     let mut mismatch = false;
-    let result =
-        crate::secure_workspace_fs::replace_workspace_stream(workspace, destination, |output| {
+    let result = crate::secure_workspace_fs::replace_workspace_stream(
+        delivery_root,
+        destination,
+        |output| {
             let (hash, size) = copy_and_hash(input, output)?;
             if !artifact_digest_matches(expected, &hash, size) {
                 mismatch = true;
@@ -899,7 +957,8 @@ fn publish_artifact_file(
                 ));
             }
             Ok((hash, size))
-        });
+        },
+    );
     if mismatch {
         Ok(None)
     } else {
@@ -918,11 +977,18 @@ fn artifact_digest_matches(expected: &ArtifactSource, sha256: &str, size: u64) -
 fn copy_and_hash(mut input: File, output: &mut impl Write) -> io::Result<(String, u64)> {
     let mut hash = Sha256::new();
     let mut size = 0u64;
+    let maximum = max_artifact_bytes();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
         let read = input.read(&mut buffer)?;
         if read == 0 {
             break;
+        }
+        if size + read as u64 > maximum {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "artifact_size_limit_exceeded",
+            ));
         }
         hash.update(&buffer[..read]);
         output.write_all(&buffer[..read])?;

@@ -11,8 +11,14 @@ pub(crate) fn prepare_succeeded_result_json(
     task_id: &str,
     result_json: &str,
 ) -> anyhow::Result<String> {
-    let root = state.stored_task_files_root(task_id)
+    let root = state
+        .stored_task_files_root(task_id)
         .context("artifact_workspace_owner_unavailable")?;
-    crate::task_artifacts::materialize_task_result_artifacts(&root, task_id, result_json)
-        .context("artifact_publication_failed")
+    crate::task_artifacts::materialize_scoped_task_artifacts(
+        &root,
+        &state.skill_rt.workspace_root,
+        task_id,
+        result_json,
+    )
+    .context("artifact_publication_failed")
 }

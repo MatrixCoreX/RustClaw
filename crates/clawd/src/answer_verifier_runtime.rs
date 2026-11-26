@@ -57,6 +57,7 @@ pub(crate) async fn verify_answer_observe_only(
     candidate_answer: &str,
 ) -> AnswerVerificationOutcome {
     if let Some(gap) = delivery_manifest_gap::missing_delivery_manifest_gap(
+        state.skill_rt.files_root(),
         &state.skill_rt.workspace_root,
         &task.task_id,
         route_result,

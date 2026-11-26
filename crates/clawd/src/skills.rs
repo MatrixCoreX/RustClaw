@@ -1482,10 +1482,6 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
     execution_context: Option<&SkillExecutionContext>,
     pinned_execution_binding: Option<&Value>,
 ) -> Result<SkillRunOutcome, String> {
-    let scoped = state.scope_task_workspace(task).map_err(|error|
-        structured_skill_error_from_parts(skill_name, "workspace_scope_unavailable", "workspace_scope_unavailable",
-            Some(std::env::consts::OS), Some(json!({"retryable":false,"failure_phase":"pre_dispatch","detail":error.to_string()}))))?;
-    let state = scoped.as_ref().unwrap_or(state);
     if let Some(reason_code) =
         crate::task_execution_policy::execution_policy_authorization_error(state, task)
     {
@@ -1502,6 +1498,10 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
             ],
         ));
     }
+    let scoped = state.scope_task_workspace(task).map_err(|error|
+        structured_skill_error_from_parts(skill_name, "workspace_scope_unavailable", "workspace_scope_unavailable",
+            Some(std::env::consts::OS), Some(json!({"retryable":false,"failure_phase":"pre_dispatch","detail":error.to_string()}))))?;
+    let state = scoped.as_ref().unwrap_or(state);
     let execution_policy = crate::task_execution_policy::effective_policy_for_task(state, task);
     let mut skill_name = state.resolve_canonical_skill_name(skill_name);
     if skill_name.is_empty() {

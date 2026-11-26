@@ -57,6 +57,7 @@ fn state_with_runtime_tasks_table() -> crate::AppState {
             user_id INTEGER NOT NULL,
             chat_id INTEGER NOT NULL,
             user_key TEXT,
+            principal_id TEXT,
             channel TEXT NOT NULL,
             external_user_id TEXT,
             external_chat_id TEXT,

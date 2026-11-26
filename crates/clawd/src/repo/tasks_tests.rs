@@ -361,9 +361,10 @@ fn update_task_success_materializes_artifacts_before_terminal_status() {
     let mut state = state_with_tasks_table();
     state.skill_rt.workspace_root = workspace.path.clone();
     let task_id = "artifact-success";
-    let output = workspace.path.join("report.txt");
-    std::fs::write(&output, b"committed output").expect("write output fixture");
     insert_task(&state, task_id, "running", None, crate::now_ts_u64() as i64);
+    let personal = state.stored_task_files_root(task_id).expect("task source workspace");
+    let output = personal.join("report.txt");
+    std::fs::write(&output, b"committed output").expect("write output fixture");
     set_task_lease(
         &state,
         task_id,

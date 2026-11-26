@@ -37,7 +37,7 @@ planner_capabilities = [
     loop_state.round_no = 1;
     let raw_args = serde_json::json!({
         "command": "sleep 0.05 && echo APP_ASYNC_SMOKE",
-        "cwd": workspace_root.display().to_string(),
+        "cwd": ".",
         "async_start": true,
         "poll_after_seconds": 1,
         "expires_in_seconds": 30,
