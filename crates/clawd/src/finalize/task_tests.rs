@@ -260,6 +260,7 @@ fn bounded_answer_retry_uses_structured_issue_without_verifier_prose() {
         confidence: 0.91,
     };
 
+    let observed_trace = answer_verifier_retry_observed_trace(&journal);
     let template =
         include_str!("../../../../prompts/layers/overlays/answer_verifier_retry_prompt.md");
     let prompt = bounded_answer_retry_prompt(
