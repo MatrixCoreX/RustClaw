@@ -444,6 +444,10 @@ note = "placeholder"
 # 建议修改/Recommended change: 只在明确需要时扩展 allow 或开启高权限开关.
 # 风险/Risk: 扩展到 `allow=["*"]`、sudo 或工作区外路径会显著放大误调用影响.
 [tools]
+# Role and principal entries select host-defined profiles. Principal IDs are durable
+# identities, independent of API-key rotation. An individual assignment takes priority.
+role_profiles = { guest = "read_only" }
+principal_profiles = {}
 allow = []
 access_profile = "coding"
 admin_access_profile = "full"

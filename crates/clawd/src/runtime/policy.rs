@@ -14,6 +14,8 @@ pub(crate) struct RateLimiter {
 pub(crate) struct ToolsPolicy {
     profile_allow: Vec<String>,
     admin_profile_allow: Vec<String>,
+    role_profiles: HashMap<String, Vec<String>>,
+    principal_profiles: HashMap<String, Vec<String>>,
     pub(crate) sandbox_mode: ToolSandboxMode,
     pub(crate) sandbox_backend: ToolSandboxBackend,
     pub(crate) approval_policy: ToolApprovalPolicy,
@@ -116,6 +118,24 @@ impl ToolsPolicy {
             .map(|value| normalize_capability_pattern(value.trim()))
             .filter(|value| !value.is_empty())
             .collect();
+        let resolve_profiles = |assignments: &HashMap<String,String>| -> Result<HashMap<String,Vec<String>>,String> {
+            assignments.iter().map(|(owner, profile)| {
+                if owner.is_empty() || owner.trim() != owner { return Err("invalid_tools_profile_owner".into()); }
+                let entries = cfg.profiles.get(profile).ok_or_else(|| format!("invalid_tools_actor_profile:{profile}"))?;
+                let allowed = entries.iter().map(|p| normalize_capability_pattern(p.trim())).collect::<Vec<_>>();
+                if allowed.iter().any(|p| p!="*" && !p.starts_with("skill:") && !p.starts_with("capability:")) {
+                    return Err("invalid_tools_actor_profile_pattern".into());
+                }
+                Ok((owner.clone(),allowed))
+            }).collect()
+        };
+        let mut role_profiles = resolve_profiles(&cfg.role_profiles)?;
+        // Older configurations did not name a guest profile. Fail closed when a
+        // custom catalog omits the read-only defaults.
+        role_profiles
+            .entry("guest".into())
+            .or_insert_with(|| cfg.profiles.get("read_only").cloned().unwrap_or_default());
+        let principal_profiles = resolve_profiles(&cfg.principal_profiles)?;
         let allow: Vec<String> = cfg
             .allow
             .iter()
@@ -181,6 +201,8 @@ impl ToolsPolicy {
         Ok(Self {
             profile_allow,
             admin_profile_allow,
+            role_profiles,
+            principal_profiles,
             sandbox_mode: cfg.sandbox_mode,
             sandbox_backend: cfg.sandbox_backend,
             approval_policy: cfg.approval_policy,
@@ -209,11 +231,40 @@ impl ToolsPolicy {
         self.is_any_allowed_for_execution_for_actor(tokens, provider_type, false)
     }
 
+    pub(crate) fn allowed_for_identity(
+        &self,
+        tokens: &[&str],
+        provider: Option<&str>,
+        actor: Option<&claw_core::types::AuthIdentity>,
+    ) -> bool {
+        let override_profile = actor.and_then(|a| {
+            self.principal_profiles
+                .get(&a.principal_id)
+                .or_else(|| self.role_profiles.get(&a.role.to_ascii_lowercase()))
+        });
+        self.allowed_with_profile(
+            tokens,
+            provider,
+            actor.is_some_and(|a| a.role.eq_ignore_ascii_case("admin")),
+            override_profile,
+        )
+    }
+
     pub(crate) fn is_any_allowed_for_execution_for_actor(
         &self,
         tokens: &[&str],
         provider_type: Option<&str>,
         use_admin_profile: bool,
+    ) -> bool {
+        self.allowed_with_profile(tokens, provider_type, use_admin_profile, None)
+    }
+
+    fn allowed_with_profile(
+        &self,
+        tokens: &[&str],
+        provider_type: Option<&str>,
+        use_admin_profile: bool,
+        assignment: Option<&Vec<String>>,
     ) -> bool {
         if tokens.is_empty() {
             return false;
@@ -226,7 +277,16 @@ impl ToolsPolicy {
             return false;
         }
 
-        let mut allowed = if self.allow.is_empty() {
+        let mut allowed = if let Some(profile) = assignment {
+            profile
+                .iter()
+                .any(|pattern| tokens.iter().any(|token| wildcard_match(pattern, token)))
+                && (self.allow.is_empty()
+                    || self
+                        .allow
+                        .iter()
+                        .any(|pattern| tokens.iter().any(|token| wildcard_match(pattern, token))))
+        } else if self.allow.is_empty() {
             tokens
                 .iter()
                 .any(|token| self.default_allowed(token, use_admin_profile))

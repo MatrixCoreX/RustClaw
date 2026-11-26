@@ -244,17 +244,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
         .map(|task| crate::task_execution_policy::effective_policy_for_task(state, task))
         .unwrap_or_else(|| crate::task_execution_policy::configured_policy(state));
     let policy_token = format!("skill:{skill_name}");
-    if !state
-        .skill_rt
-        .tools_policy
-        .is_any_allowed_for_execution_for_actor(
-            &[&policy_token],
-            state.core.active_provider_type.as_deref(),
-            task.is_some_and(|task| {
-                crate::task_execution_policy::task_has_current_admin_identity(state, task)
-            }),
-        )
-    {
+    if !crate::skills::task_tools_allowed(state, task, &[&policy_token]) {
         return Err(crate::skills::policy_block_error(
             "skill_policy_denied",
             vec![

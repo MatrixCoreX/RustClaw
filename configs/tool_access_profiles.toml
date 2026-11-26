@@ -22,3 +22,5 @@ minimal = [
   "skill:memory_store",
 ]
 messaging = ["skill:system_basic", "skill:memory_store"]
+
+read_only = ["skill:read_file", "skill:list_dir", "capability:schedule.list"]

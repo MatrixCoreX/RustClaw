@@ -383,6 +383,9 @@ fn begin_route_mutation<'a>(
         Ok(crate::repo::task_admin_mutation_receipts::TaskAdminMutationClaim::InProgress) => Err(
             super::api_err::<Value>(StatusCode::CONFLICT, "task_mutation_in_progress"),
         ),
+        Ok(crate::repo::task_admin_mutation_receipts::TaskAdminMutationClaim::OutcomeUnknown) => Err(
+            super::api_err::<Value>(StatusCode::CONFLICT, "task_mutation_outcome_unconfirmed"),
+        ),
         Ok(crate::repo::task_admin_mutation_receipts::TaskAdminMutationClaim::Conflict) => Err(
             super::api_err::<Value>(StatusCode::CONFLICT, "idempotency_key_payload_conflict"),
         ),

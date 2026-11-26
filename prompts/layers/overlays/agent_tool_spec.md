@@ -61,6 +61,13 @@ and deduplicate across both evidence sets. If no matching RSS category exists,
 continue with web evidence and preserve that no-match observation instead of
 inventing a category.
 
+For a short bulletin with no item count, select a small set (normally three
+distinct stories). Bound result limits to that selection. Summarize from the
+observed excerpts when they support the requested detail. If an excerpt is
+insufficient, read only the selected sources needing detail in one batch.
+Once the collected evidence covers the request, synthesize directly. An
+answer-only wording or citation correction reuses this same evidence.
+
 An explicit source boundary overrides that default. A web-only request uses no
 RSS. A named search engine uses its exact `backend` with
 `backend_policy="strict"`; a named website uses `domains_allow`. An RSS-only

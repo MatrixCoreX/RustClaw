@@ -368,3 +368,44 @@ fn subprocess_requires_declared_isolation_in_restrictive_modes() {
         None
     );
 }
+
+#[test]
+fn roles_and_principal_overrides_are_resolved_from_host_identity() {
+    let mut config = ToolsConfig::default();
+    config
+        .role_profiles
+        .insert("reviewer".into(), "read_only".into());
+    config
+        .principal_profiles
+        .insert("individual".into(), "messaging".into());
+    let policy = ToolsPolicy::from_config(&config).unwrap();
+    let actor = |principal: &str, role: &str| claw_core::types::AuthIdentity {
+        principal_id: principal.into(),
+        user_key: "credential".into(),
+        role: role.into(),
+        user_id: 1,
+        chat_id: 1,
+    };
+    for role in ["guest", "reviewer"] {
+        assert!(policy.allowed_for_identity(
+            &["skill:read_file"],
+            None,
+            Some(&actor("member", role))
+        ));
+        assert!(!policy.allowed_for_identity(
+            &["skill:write_file"],
+            None,
+            Some(&actor("member", role))
+        ));
+    }
+    assert!(!policy.allowed_for_identity(
+        &["skill:read_file"],
+        None,
+        Some(&actor("individual", "reviewer"))
+    ));
+    assert!(policy.allowed_for_identity(
+        &["skill:write_file"],
+        None,
+        Some(&actor("ordinary", "user"))
+    ));
+}
