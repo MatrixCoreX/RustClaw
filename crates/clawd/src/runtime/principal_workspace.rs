@@ -114,18 +114,23 @@ mod tests {
         let mut host = AppState::test_default_with_fixture_provider();
         host.skill_rt.workspace_root = tmp.path().to_owned();
         host.skill_rt.principal_workspace = Some(tmp.path().join("own"));
+        let mut config = claw_core::config::ToolsConfig::default();
+        config.operator_skill_configs =
+            [("fixture_reader".into(), "configs/feeds.toml".into())].into();
+        host.skill_rt.tools_policy =
+            std::sync::Arc::new(crate::ToolsPolicy::from_config(&config).unwrap());
         let configs = tmp.path().join("configs");
         std::fs::create_dir(&configs).unwrap();
-        std::fs::write(configs.join("rss.toml"), "[rss]").unwrap();
+        std::fs::write(configs.join("feeds.toml"), "[feeds]").unwrap();
         assert_eq!(
-            host.granted_operator_config("rss_fetch").unwrap(),
-            Some(configs.join("rss.toml").canonicalize().unwrap())
+            host.granted_operator_config("fixture_reader").unwrap(),
+            Some(configs.join("feeds.toml").canonicalize().unwrap())
         );
         assert!(host.granted_operator_config("ungranted").unwrap().is_none());
-        std::fs::remove_file(configs.join("rss.toml")).unwrap();
+        std::fs::remove_file(configs.join("feeds.toml")).unwrap();
         std::fs::write(tmp.path().join("private"), "fixture").unwrap();
-        symlink(tmp.path().join("private"), configs.join("rss.toml")).unwrap();
-        assert!(host.granted_operator_config("rss_fetch").is_err());
+        symlink(tmp.path().join("private"), configs.join("feeds.toml")).unwrap();
+        assert!(host.granted_operator_config("fixture_reader").is_err());
     }
 
     #[test]

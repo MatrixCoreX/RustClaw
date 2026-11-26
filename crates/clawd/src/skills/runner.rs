@@ -961,7 +961,7 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
         state.skill_rt.skill_runner_path.clone(),
         installed_launch.install_root.clone(),
     ];
-    let operator_config = if installed_launch.environment_allowlist.iter().any(|name| name == "APP_SKILL_OPERATOR_CONFIG") {
+    let operator_config = if installed_launch.environment_allowlist.iter().any(|variable| variable == "APP_SKILL_OPERATOR_CONFIG") {
         state.granted_operator_config(canonical_skill_name).map_err(|_| "operator_config_grant_unavailable".to_string())?
     } else { None };
     personal_grants.extend(operator_config.iter().cloned());
