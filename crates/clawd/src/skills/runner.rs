@@ -957,10 +957,14 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
             Some(serde_json::json!({"side_effect_applied":false,"failure_phase":"pre_dispatch","retryable":false})),
         )
     })?;
-    let personal_grants = [
+    let mut personal_grants = vec![
         state.skill_rt.skill_runner_path.clone(),
         installed_launch.install_root.clone(),
     ];
+    let operator_config = if installed_launch.environment_allowlist.iter().any(|name| name == "APP_SKILL_OPERATOR_CONFIG") {
+        state.granted_operator_config(canonical_skill_name).map_err(|_| "operator_config_grant_unavailable".to_string())?
+    } else { None };
+    personal_grants.extend(operator_config.iter().cloned());
     let prepared = if warm_reuse_allowed {
         // The outer runner is trusted host code. Keeping it outside a sandbox
         // lets it create a fresh receipt-controlled sandbox (and fresh /tmp on
@@ -1157,6 +1161,11 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
             "APP_WORKSPACE_STATE_DIR",
             claw_core::workspace_state::WORKSPACE_STATE_DIR_NAME,
         );
+    if let Some(path) = operator_config {
+        launch.env("APP_SKILL_OPERATOR_CONFIG", path.as_os_str());
+    } else {
+        launch.env_remove("APP_SKILL_OPERATOR_CONFIG");
+    }
     if let Some(token_store_dir) = sandbox_token_store_dir {
         launch.env(
             "APP_SECRET_TOKEN_DIR",

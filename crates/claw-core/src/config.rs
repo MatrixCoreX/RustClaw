@@ -1569,6 +1569,8 @@ pub struct ToolsConfig {
     pub role_profiles: HashMap<String, String>,
     #[serde(default)]
     pub principal_profiles: HashMap<String, String>,
+    #[serde(default = "default_operator_skill_configs")]
+    pub operator_skill_configs: HashMap<String, String>,
     #[serde(default = "default_tool_cmd_timeout_seconds")]
     pub cmd_timeout_seconds: u64,
     #[serde(default = "default_tool_cmd_idle_timeout_seconds")]
@@ -1707,6 +1709,7 @@ impl Default for ToolsConfig {
             profiles: default_tool_access_profiles(),
             role_profiles: HashMap::new(),
             principal_profiles: HashMap::new(),
+            operator_skill_configs: default_operator_skill_configs(),
             cmd_timeout_seconds: default_tool_cmd_timeout_seconds(),
             cmd_idle_timeout_seconds: default_tool_cmd_idle_timeout_seconds(),
             cmd_async_retention_seconds: default_tool_cmd_async_retention_seconds(),

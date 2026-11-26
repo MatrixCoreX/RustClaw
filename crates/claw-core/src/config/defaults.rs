@@ -403,6 +403,13 @@ pub(super) fn default_tool_access_profiles() -> std::collections::HashMap<String
     .profiles
 }
 
+pub(super) fn default_operator_skill_configs() -> std::collections::HashMap<String, String> {
+    #[derive(serde::Deserialize)]
+    struct ConfigGrants { operator_configs: std::collections::HashMap<String, String> }
+    toml::from_str::<ConfigGrants>(include_str!("../../../../configs/tool_access_profiles.toml"))
+        .expect("host config grants must be valid").operator_configs
+}
+
 pub(super) fn default_telegram_quick_result_wait_seconds() -> u64 {
     3
 }

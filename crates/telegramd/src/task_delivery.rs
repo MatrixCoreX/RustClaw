@@ -529,6 +529,7 @@ pub(super) async fn submit_task_only(
         payload,
     };
 
+    claw_core::channel_workspace::stage_received_attachments(&state.core_client, &state.clawd_base_url, &submit_req).await?;
     let use_conversation_input = matches!(kind, TaskKind::Ask)
         && message_id.is_some()
         && (submit_req

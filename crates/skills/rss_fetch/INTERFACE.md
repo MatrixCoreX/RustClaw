@@ -33,7 +33,7 @@ Read RSS/Atom. Select only registry-granted capabilities. For short bulletins wi
 - Operator settings and active feeds live in `configs/rss.toml` under `rss`, `rss.categories` and `rss.discovery`. Health, candidate, quarantine and deprecation records use the runner-provided private SQLite store. Use structured errors and side-effect evidence for recovery. The skill rejects unsafe destinations and invalid feeds.
 
 ## Config Entry Points
-- Main RSS config: `configs/rss.toml`.
+- Main RSS config: `configs/rss.toml`. In personal workspaces the host grants read-only access to this file through `APP_SKILL_OPERATOR_CONFIG`. Changing the operator feed list requires the operator workspace.
 - Category source lists: `configs/rss.toml` -> `[rss.categories.<name>]`.
 - Defaults: `rss.default_category`, `rss.default_limit`, and `rss.timeout_seconds`.
 - Optional category topic token: `[rss.categories.<name>].topic`, a lowercase machine token such as `macro_market`, `tech_ecosystem`, or `other`.

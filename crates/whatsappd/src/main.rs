@@ -1126,6 +1126,7 @@ async fn submit_task_only(
         kind,
         payload,
     };
+    claw_core::channel_workspace::stage_received_attachments(&state.core_client, &state.clawd_base_url, &req).await?;
     let use_conversation_input = matches!(req.kind, TaskKind::Ask)
         && message_id.is_some()
         && (req

@@ -88,12 +88,10 @@ pub(crate) async fn accept_client_task(
     if let Err(code) = validate_task_template(&request, channel, &input_text) {
         return crate::api_err(StatusCode::BAD_REQUEST, code);
     }
-    let attachment_root = if channel == ChannelKind::Ui {
-        match state.identity_files_root(&identity) {
-            Ok(root) => root,
-            Err(_) => return crate::api_err(StatusCode::SERVICE_UNAVAILABLE, "workspace_scope_unavailable"),
-        }
-    } else { state.skill_rt.workspace_root.clone() };
+    let attachment_root = match state.identity_files_root(&identity) {
+        Ok(root) => root,
+        Err(_) => return crate::api_err(StatusCode::SERVICE_UNAVAILABLE, "workspace_scope_unavailable"),
+    };
     let attachment_bindings = match attachments::prepare_attachment_bindings(
         &attachment_root,
         &identity.principal_id,

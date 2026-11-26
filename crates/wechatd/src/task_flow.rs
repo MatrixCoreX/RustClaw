@@ -470,6 +470,15 @@ pub(super) async fn submit_wechat_task_with_payload(
     if let Err(error) = send_generating_message_state(&state, &context).await {
         warn!("wechatd: generating state delivery failed err={}", error);
     }
+    if existing_task_id.is_none() {
+        if let Err(error) = claw_core::channel_workspace::stage_received_attachments(
+            &state.core_client, &state.config.clawd_base_url, &submit_req,
+        ).await {
+            tracing::warn!(%error, "could not prepare incoming attachments");
+            finalize_submit_failure(&state, &context, &mut typing_heartbeat).await;
+            return;
+        }
+    }
     let (task_id, owns_terminal_delivery) = if let Some(task_id) = existing_task_id {
         (task_id, true)
     } else if matches!(submit_req.kind, TaskKind::Ask)

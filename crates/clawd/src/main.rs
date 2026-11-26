@@ -1824,7 +1824,7 @@ async fn submit_task(
     if let Err((status, error)) = ui_attachments::prepare_submission(
         &state,
         &mut req,
-        submit_ctx.resolved_identity.as_ref().filter(|_| channel == ChannelKind::Ui),
+        submit_ctx.resolved_identity.as_ref(),
         effective_user_id,
         effective_chat_id,
         &call_id,

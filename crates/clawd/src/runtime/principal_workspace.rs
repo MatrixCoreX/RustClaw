@@ -1,9 +1,7 @@
 use crate::{AppState, ClaimedTask};
 use anyhow::{ensure, Context};
-use sha2::{Digest, Sha256};
+use claw_core::channel_workspace::{private_directory as directory, WORKSPACES};
 use std::path::{Path, PathBuf};
-
-const WORKSPACES: &str = "data/principal-workspaces";
 
 /// Recognize the host-selected data layout when reconstructing persisted worktree plans.
 pub(crate) fn personal_base(path: &Path) -> Option<&Path> {
@@ -18,16 +16,28 @@ pub(crate) fn personal_base(path: &Path) -> Option<&Path> {
     })
 }
 
-fn directory(runtime: &Path, principal: &str) -> anyhow::Result<PathBuf> {
-    ensure!(!principal.trim().is_empty(), "workspace_principal_missing");
-    let namespace = runtime.join(WORKSPACES);
-    let path = namespace.join(format!("{:x}", Sha256::digest(principal.as_bytes())));
-    crate::secure_workspace_fs::ensure_private_workspace_directory(runtime, &namespace)?;
-    crate::secure_workspace_fs::ensure_private_workspace_directory(&namespace, &path)?;
-    Ok(path)
-}
-
 impl AppState {
+    pub(crate) fn granted_operator_config(&self, skill: &str) -> anyhow::Result<Option<PathBuf>> {
+        if self.skill_rt.principal_workspace.is_none() {
+            return Ok(None);
+        }
+        let Some(relative) = self.skill_rt.tools_policy.operator_skill_configs.get(skill) else {
+            return Ok(None);
+        };
+        let relative = Path::new(relative);
+        ensure!(
+            relative.parent() == Some(Path::new("configs")) && relative.file_name().is_some(),
+            "operator_config_grant_invalid"
+        );
+        let root = self.skill_rt.workspace_root.canonicalize()?;
+        let path = root.join(relative);
+        ensure!(
+            path.canonicalize()? == path && path.is_file(),
+            "operator_config_grant_invalid"
+        );
+        Ok(Some(path))
+    }
+
     pub(crate) fn identity_files_root(
         &self,
         identity: &claw_core::types::AuthIdentity,
@@ -97,6 +107,26 @@ impl AppState {
 mod tests {
     use super::*;
     use std::os::unix::fs::{symlink, PermissionsExt};
+
+    #[test]
+    fn personal_skill_config_is_a_single_reviewed_file_and_rejects_links() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut host = AppState::test_default_with_fixture_provider();
+        host.skill_rt.workspace_root = tmp.path().to_owned();
+        host.skill_rt.principal_workspace = Some(tmp.path().join("own"));
+        let configs = tmp.path().join("configs");
+        std::fs::create_dir(&configs).unwrap();
+        std::fs::write(configs.join("rss.toml"), "[rss]").unwrap();
+        assert_eq!(
+            host.granted_operator_config("rss_fetch").unwrap(),
+            Some(configs.join("rss.toml").canonicalize().unwrap())
+        );
+        assert!(host.granted_operator_config("ungranted").unwrap().is_none());
+        std::fs::remove_file(configs.join("rss.toml")).unwrap();
+        std::fs::write(tmp.path().join("private"), "fixture").unwrap();
+        symlink(tmp.path().join("private"), configs.join("rss.toml")).unwrap();
+        assert!(host.granted_operator_config("rss_fetch").is_err());
+    }
 
     #[test]
     fn authenticated_accounts_get_distinct_workspaces_with_stable_ownership() {

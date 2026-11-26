@@ -1799,7 +1799,8 @@ fn load_external_i18n(path: &Path) -> Option<HashMap<String, String>> {
 
 fn load_root_config() -> Result<RootConfig, String> {
     let root = workspace_root();
-    let rss_path = root.join("configs/rss.toml");
+    let rss_path = std::env::var_os("APP_SKILL_OPERATOR_CONFIG").map(PathBuf::from)
+        .unwrap_or_else(|| root.join("configs/rss.toml"));
     load_root_config_at(&rss_path)
 }
 
@@ -1813,6 +1814,9 @@ fn load_root_config_at(rss_path: &Path) -> Result<RootConfig, String> {
 }
 
 fn save_config(cfg: &RootConfig, expected_config: &RootConfig) -> Result<(), String> {
+    if std::env::var_os("APP_SKILL_OPERATOR_CONFIG").is_some() {
+        return Err("config_operator_required".into());
+    }
     let path = workspace_root().join("configs/rss.toml");
     save_config_if_unchanged_at(&path, cfg, expected_config)
 }
