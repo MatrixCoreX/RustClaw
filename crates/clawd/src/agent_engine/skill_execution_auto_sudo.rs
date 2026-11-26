@@ -234,7 +234,7 @@ fn auto_sudo_structured_read_targets_outside_workspace(
     args: &Value,
 ) -> bool {
     structured_read_request_path(normalized_skill, args)
-        .map(|path| !path_stays_within_workspace(&state.skill_rt.workspace_root, path))
+        .map(|path| !path_stays_within_workspace(state.skill_rt.files_root(), path))
         .unwrap_or(false)
 }
 

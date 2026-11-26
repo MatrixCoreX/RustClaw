@@ -40,7 +40,7 @@ fn default_make_dir_path(state: &AppState, task: &ClaimedTask) -> String {
 }
 
 fn default_write_file_path(state: &AppState) -> String {
-    crate::ensure_default_file_path(&state.skill_rt.workspace_root, "")
+    crate::ensure_default_file_path(state.skill_rt.files_root(), "")
 }
 
 fn path_has_parent_dir(path: &Path) -> bool {
@@ -96,12 +96,12 @@ fn path_is_safe_workspace_creation_target(
         return false;
     }
     let resolved = if candidate.is_absolute() {
-        if !candidate.starts_with(&state.skill_rt.workspace_root) {
+        if !candidate.starts_with(state.skill_rt.files_root()) {
             return false;
         }
         candidate.to_path_buf()
     } else {
-        state.skill_rt.workspace_root.join(candidate)
+        state.skill_rt.files_root().join(candidate)
     };
     if allow_existing_dir && resolved.is_dir() {
         return true;

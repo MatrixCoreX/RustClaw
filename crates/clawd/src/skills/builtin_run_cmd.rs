@@ -428,6 +428,7 @@ pub(crate) async fn run_safe_command(
         claw_core::config::ToolSandboxBackend::Auto,
         cwd,
         &[],
+        false,
         "test-task",
     )
     .await
@@ -460,6 +461,7 @@ pub(crate) async fn run_safe_command_with_sandbox(
         sandbox_backend,
         workspace_root,
         &[],
+        false,
         "direct",
     )
     .await
@@ -479,6 +481,7 @@ pub(super) async fn run_safe_command_detailed(
     sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
     host_private_directories: &[std::path::PathBuf],
+    personal: bool,
     output_artifact_task_id: &str,
 ) -> Result<CommandRunSuccess, RunSafeCommandError> {
     if command.len() > max_cmd_length {
@@ -516,6 +519,7 @@ pub(super) async fn run_safe_command_detailed(
         sandbox_backend,
         workspace_root,
         host_private_directories,
+        personal,
     )?;
     crate::skills::apply_skill_runner_env_isolation(&mut cmd);
     configure_bash_command(&mut cmd, command);
@@ -740,6 +744,7 @@ pub(super) async fn start_async_command(
     sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
     host_private_directories: &[std::path::PathBuf],
+    personal: bool,
 ) -> Result<String, RunSafeCommandError> {
     if command.len() > max_cmd_length {
         return Err(RunSafeCommandError::Command(CommandRunFailure::new(
@@ -978,6 +983,7 @@ mv -f {} {}
         sandbox_backend,
         workspace_root,
         host_private_directories,
+        personal,
     )?;
     let mut cmd = Command::from(launch.into_command());
     place_child_in_own_process_group(&mut cmd);
@@ -1022,6 +1028,7 @@ fn prepare_run_cmd_process(
     sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
     host_private_directories: &[std::path::PathBuf],
+    personal: bool,
 ) -> Result<Command, RunSafeCommandError> {
     prepare_run_cmd_process_for_lifetime(
         cwd,
@@ -1029,6 +1036,7 @@ fn prepare_run_cmd_process(
         sandbox_backend,
         workspace_root,
         host_private_directories,
+        personal,
         false,
     )
 }
@@ -1039,6 +1047,7 @@ fn prepare_durable_run_cmd_process(
     sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
     host_private_directories: &[std::path::PathBuf],
+    personal: bool,
 ) -> Result<Command, RunSafeCommandError> {
     prepare_run_cmd_process_for_lifetime(
         cwd,
@@ -1046,6 +1055,7 @@ fn prepare_durable_run_cmd_process(
         sandbox_backend,
         workspace_root,
         host_private_directories,
+        personal,
         true,
     )
 }
@@ -1057,6 +1067,7 @@ pub(super) fn prepare_durable_pty_command(
     sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
     host_private_directories: &[std::path::PathBuf],
+    personal: bool,
 ) -> Result<Command, RunSafeCommandError> {
     let mut cmd = prepare_durable_run_cmd_process(
         cwd,
@@ -1064,6 +1075,7 @@ pub(super) fn prepare_durable_pty_command(
         sandbox_backend,
         workspace_root,
         host_private_directories,
+        personal,
     )?;
     crate::skills::apply_skill_runner_env_isolation(&mut cmd);
     configure_bash_command(&mut cmd, command);
@@ -1084,6 +1096,7 @@ fn prepare_run_cmd_process_for_lifetime(
     sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
     host_private_directories: &[std::path::PathBuf],
+    personal: bool,
     durable_async: bool,
 ) -> Result<Command, RunSafeCommandError> {
     let prepared = prepare_run_cmd_invocation_for_lifetime(
@@ -1092,6 +1105,7 @@ fn prepare_run_cmd_process_for_lifetime(
         sandbox_backend,
         workspace_root,
         host_private_directories,
+        personal,
         durable_async,
     )?;
     Ok(Command::from(prepared.invocation.into_command()))
@@ -1104,6 +1118,7 @@ fn prepare_async_command_launch(
     sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
     host_private_directories: &[std::path::PathBuf],
+    personal: bool,
 ) -> Result<ProcessLaunch, RunSafeCommandError> {
     let mut prepared = prepare_run_cmd_invocation_for_lifetime(
         cwd,
@@ -1111,6 +1126,7 @@ fn prepare_async_command_launch(
         sandbox_backend,
         workspace_root,
         host_private_directories,
+        personal,
         true,
     )?;
     prepared.invocation.arg(script);
@@ -1138,9 +1154,11 @@ fn prepare_run_cmd_invocation_for_lifetime(
     sandbox_backend: claw_core::config::ToolSandboxBackend,
     workspace_root: &Path,
     host_private_directories: &[std::path::PathBuf],
+    personal: bool,
     durable_async: bool,
 ) -> Result<crate::process_sandbox::PreparedSandboxInvocation, RunSafeCommandError> {
     let request = crate::process_sandbox::ProcessSandboxRequest {
+        principal_readonly: personal.then_some(&[]),
         mode: sandbox_mode,
         backend: sandbox_backend,
         workspace_root,

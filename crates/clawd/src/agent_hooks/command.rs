@@ -127,6 +127,7 @@ pub(super) async fn execute_command_handler(
     let prepared = crate::process_sandbox::prepare_process_command(
         &handler.path,
         crate::process_sandbox::ProcessSandboxRequest {
+            principal_readonly: None,
             mode: sandbox_mode,
             backend: sandbox_backend,
             workspace_root,

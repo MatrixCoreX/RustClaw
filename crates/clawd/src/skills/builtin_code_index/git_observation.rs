@@ -161,6 +161,7 @@ pub(super) fn prepare_query(
     let prepared = crate::process_sandbox::prepare_readonly_process_command(
         "git",
         crate::process_sandbox::ProcessSandboxRequest {
+            principal_readonly: filesystem.personal_root.is_some().then_some(&[]),
             mode: ToolSandboxMode::ReadOnly,
             backend,
             workspace_root: root,

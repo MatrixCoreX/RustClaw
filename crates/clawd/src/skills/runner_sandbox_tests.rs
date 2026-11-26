@@ -28,6 +28,7 @@ mod linux {
 
     fn request(root: &std::path::Path) -> ProcessSandboxRequest<'_> {
         ProcessSandboxRequest {
+            principal_readonly: None,
             mode: ToolSandboxMode::WorkspaceWrite,
             backend: ToolSandboxBackend::Auto,
             workspace_root: root,

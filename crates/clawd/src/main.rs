@@ -1237,6 +1237,7 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
             cmd_terminate_grace_seconds: config.tools.cmd_terminate_grace_seconds.max(1),
             cmd_max_output_bytes: config.tools.cmd_max_output_bytes.max(128),
             max_cmd_length: config.tools.max_cmd_length.max(16),
+            principal_workspace: None,
             workspace_root,
             default_locator_search_dir,
         },

@@ -13,7 +13,7 @@ pub(super) fn normalize_planned_actions(
     let actions = annotate_readonly_cli_surface_run_cmds(state, actions);
     let actions = collapse_redundant_drafting_synthesis(actions);
     super::media_artifact_plan::strip_media_artifact_text_overwrites(
-        &state.skill_rt.workspace_root,
+        state.skill_rt.files_root(),
         actions,
     )
 }

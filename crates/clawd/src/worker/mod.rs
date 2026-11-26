@@ -308,6 +308,8 @@ async fn process_claimed_task_by_kind(
     task: &crate::ClaimedTask,
     payload: &mut Value,
 ) -> anyhow::Result<()> {
+    let scoped_state = state.scope_task_workspace(task)?;
+    let state = scoped_state.as_ref().unwrap_or(state);
     match task.kind.as_str() {
         "ask" => {
             let mut child_scope =

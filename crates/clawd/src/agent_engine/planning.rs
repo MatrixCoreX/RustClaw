@@ -280,7 +280,7 @@ pub(super) async fn plan_round_actions(
 ) -> Result<PlanResult, String> {
     let runtime_os = runtime_os_label();
     let runtime_shell = runtime_shell_label();
-    let workspace_root = state.skill_rt.workspace_root.display().to_string();
+    let workspace_root = state.skill_rt.files_root().display().to_string();
     let agent_runtime_identity = state.agent_runtime_identity_label().to_string();
     let recent_assistant_replies = crate::memory::build_recent_assistant_replies_context(
         state,

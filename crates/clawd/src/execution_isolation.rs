@@ -154,9 +154,11 @@ pub(crate) fn create_execution_isolation(
     match plan.creation_kind.as_str() {
         "create_local_temp_workspace" => {
             ensure_safe_allocation_path(plan)?;
-            fs::create_dir_all(&plan.execution_root).with_context(|| {
-                format!("create isolation dir {}", plan.execution_root.display())
-            })?;
+            crate::secure_workspace_fs::ensure_private_workspace_directory(
+                &plan.workspace_root,
+                &plan.execution_root,
+            )
+            .with_context(|| format!("create isolation dir {}", plan.execution_root.display()))?;
             write_isolation_marker(plan, created_at_unix)?;
         }
         "create_local_git_worktree" => {
@@ -341,9 +343,10 @@ fn write_isolation_marker(plan: &ExecutionIsolationPlan, created_at_unix: u64) -
         "created_at_unix": created_at_unix,
         "cleanup_ref": plan.cleanup_ref,
     });
-    fs::write(
-        plan.execution_root.join(MARKER_FILE),
-        serde_json::to_vec_pretty(&marker)?,
+    crate::secure_workspace_fs::atomic_create_workspace_file(
+        &plan.workspace_root,
+        &plan.execution_root.join(MARKER_FILE),
+        &serde_json::to_vec_pretty(&marker)?,
     )
     .with_context(|| format!("write isolation marker {}", plan.execution_root.display()))
 }
@@ -368,15 +371,55 @@ fn validate_existing_isolation(plan: &ExecutionIsolationPlan) -> Result<()> {
     Ok(())
 }
 
+/// Host-originated Git worktree operations over user-writable repositories use
+/// the same filesystem boundary as the task, including post-restart cleanup.
+fn workspace_git(root: &Path) -> Result<Command> {
+    let Some(base) = crate::runtime::principal_workspace::personal_base(root) else {
+        return Ok(Command::new("git"));
+    };
+    let prepared = crate::process_sandbox::prepare_process_invocation(
+        "git",
+        crate::process_sandbox::ProcessSandboxRequest {
+            principal_readonly: Some(&[]),
+            mode: claw_core::config::ToolSandboxMode::WorkspaceWrite,
+            backend: claw_core::config::ToolSandboxBackend::Auto,
+            workspace_root: base,
+            execution_root: root,
+            network: crate::process_sandbox::ProcessNetworkPolicy::Deny,
+            additional_writable_paths: &[],
+            host_private_directories: &[],
+            browser_subprocess: false,
+        },
+    )
+    .map_err(anyhow::Error::msg)?;
+    let mut command = prepared.invocation.into_command();
+    command
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .args([
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.fsmonitor=false",
+        ]);
+    Ok(command)
+}
+
 fn create_git_worktree(plan: &ExecutionIsolationPlan) -> Result<()> {
     if plan.execution_root.exists() {
         bail!("isolation_target_exists");
     }
     if let Some(parent) = plan.execution_root.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("create worktree parent {}", parent.display()))?;
+        crate::secure_workspace_fs::ensure_private_workspace_directory(
+            &plan.workspace_root,
+            parent,
+        )
+        .with_context(|| format!("create worktree parent {}", parent.display()))?;
     }
-    let output = Command::new("git")
+    let output = workspace_git(&plan.workspace_root)?
         .arg("-C")
         .arg(&plan.workspace_root)
         .args(["worktree", "add", "--detach"])
@@ -394,7 +437,7 @@ fn create_git_worktree(plan: &ExecutionIsolationPlan) -> Result<()> {
 }
 
 fn remove_git_worktree(plan: &ExecutionIsolationPlan) -> Result<()> {
-    let output = Command::new("git")
+    let output = workspace_git(&plan.workspace_root)?
         .arg("-C")
         .arg(&plan.workspace_root)
         .args(["worktree", "remove", "--force"])

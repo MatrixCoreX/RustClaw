@@ -61,7 +61,7 @@ pub(super) fn execute_workspace_patch(
         .map(|task| task.task_id.as_str())
         .unwrap_or("test-task");
     execute_workspace_patch_with_policy(
-        &state.skill_rt.workspace_root,
+        state.skill_rt.files_root(),
         task_id,
         args,
         &state.skill_rt.host_filesystem,
@@ -1233,6 +1233,7 @@ fn git_command(
     let prepared = crate::process_sandbox::prepare_process_command(
         "git",
         crate::process_sandbox::ProcessSandboxRequest {
+            principal_readonly: filesystem.personal_root.is_some().then_some(&[]),
             mode: if writable {
                 ToolSandboxMode::WorkspaceWrite
             } else {

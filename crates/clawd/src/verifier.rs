@@ -1096,7 +1096,7 @@ pub(crate) fn verify_plan(
                 && step_reads_path_content_under_unbound_locator(
                     step,
                     &step.skill,
-                    &state.skill_rt.workspace_root,
+                    state.skill_rt.files_root(),
                 )
             {
                 push_unbound_locator_boundary_clarify_issue(&mut issues, &step.step_id);
@@ -1157,7 +1157,7 @@ pub(crate) fn verify_plan(
                 && step_reads_path_content_under_unbound_locator(
                     step,
                     &normalized_skill,
-                    &state.skill_rt.workspace_root,
+                    state.skill_rt.files_root(),
                 )
             {
                 push_unbound_locator_boundary_clarify_issue(&mut issues, &step.step_id);

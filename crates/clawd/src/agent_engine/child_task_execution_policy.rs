@@ -401,7 +401,7 @@ fn append_local_worktree_violations(
     capability: &SelectedCapability,
     violations: &mut Vec<&'static str>,
 ) {
-    if crate::execution_isolation::execution_isolation_root_profile(&state.skill_rt.workspace_root)
+    if crate::execution_isolation::execution_isolation_root_profile(state.skill_rt.files_root())
         .as_deref()
         != Some("local_worktree")
     {

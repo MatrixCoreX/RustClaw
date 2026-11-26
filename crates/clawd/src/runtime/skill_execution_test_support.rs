@@ -20,6 +20,7 @@ impl SkillRuntime {
             cmd_max_output_bytes: 8000,
             max_cmd_length: 4096,
             workspace_root: std::env::temp_dir(),
+            principal_workspace: None,
             default_locator_search_dir: std::env::temp_dir(),
         }
     }

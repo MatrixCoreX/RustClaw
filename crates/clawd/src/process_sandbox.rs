@@ -83,6 +83,8 @@ fn valid_domain(value: &str) -> bool {
 pub(crate) struct ProcessSandboxRequest<'a> {
     pub(crate) mode: ToolSandboxMode,
     pub(crate) backend: ToolSandboxBackend,
+    /// Host-approved extra read-only files for a principal-scoped process.
+    pub(crate) principal_readonly: Option<&'a [PathBuf]>,
     pub(crate) workspace_root: &'a Path,
     pub(crate) execution_root: &'a Path,
     pub(crate) network: ProcessNetworkPolicy,
@@ -324,6 +326,15 @@ fn prepare_invocation_for_lifetime(
     process_namespace: ProcessNamespacePolicy,
     readonly_paths: &[PathBuf],
 ) -> Result<PreparedSandboxInvocation, &'static str> {
+    let mut request = request;
+    if request.principal_readonly.is_some() {
+        if process_namespace == ProcessNamespacePolicy::HostVisible {
+            return Err("sandbox_principal_requires_isolation");
+        }
+        if request.mode == ToolSandboxMode::DangerFull {
+            request.mode = ToolSandboxMode::WorkspaceWrite;
+        }
+    }
     if request.mode == ToolSandboxMode::DangerFull {
         if !request.host_private_directories.is_empty() {
             return Err("sandbox_private_directories_require_isolation");
@@ -537,18 +548,39 @@ fn prepare_bubblewrap_with_process_namespace(
     command.arg("--new-session");
     // Private scopes cannot depend on bwrap's installation-specific implicit
     // user namespace. Preserve host PID visibility without host process access.
-    if !exclusions.is_empty() {
+    if !exclusions.is_empty() || request.principal_readonly.is_some() {
         command.arg("--unshare-user");
     }
     if process_namespace == ProcessNamespacePolicy::Isolated {
         command.arg("--unshare-pid");
     }
-    command
-        .arg("--unshare-ipc")
-        .arg("--unshare-uts")
-        .arg("--ro-bind")
-        .arg("/")
-        .arg("/");
+    command.arg("--unshare-ipc").arg("--unshare-uts");
+    if let Some(grants) = request.principal_readonly {
+        command.arg("--cap-drop").arg("ALL");
+        for path in [
+            "/usr",
+            "/bin",
+            "/sbin",
+            "/lib",
+            "/lib64",
+            "/etc/ssl/certs",
+            "/etc/resolv.conf",
+            "/etc/hosts",
+            "/etc/nsswitch.conf",
+            "/etc/ld.so.cache",
+            "/etc/localtime",
+        ] {
+            command.arg("--ro-bind-try").arg(path).arg(path);
+        }
+        for path in grants {
+            let canonical = path
+                .canonicalize()
+                .map_err(|_| "sandbox_principal_grant_missing")?;
+            command.arg("--ro-bind").arg(&canonical).arg(path);
+        }
+    } else {
+        command.arg("--ro-bind").arg("/").arg("/");
+    }
     command.arg("--dev").arg("/dev");
     if request.network == ProcessNetworkPolicy::Deny {
         command.arg("--unshare-net");
@@ -569,6 +601,9 @@ fn prepare_bubblewrap_with_process_namespace(
     let mut visible_mappings = Vec::new();
     let mut writable_mappings = Vec::new();
     for source in canonical_readonly_directories(readonly_paths)? {
+        if request.principal_readonly.is_some() && !source.starts_with(&workspace_root) {
+            return Err("sandbox_principal_read_mapping_denied");
+        }
         visible_mappings.push((source.clone(), source.clone()));
         command.arg("--ro-bind").arg(&source).arg(&source);
     }
@@ -644,7 +679,7 @@ fn prepare_macos_seatbelt(
         .map(|path| canonical_directory(path))
         .collect::<Result<Vec<_>, _>>()?;
     if sandbox_writes_workspace(request.mode) {
-        writable_paths.push(workspace_root);
+        writable_paths.push(workspace_root.clone());
     }
     for temp in [Path::new("/private/tmp"), Path::new("/tmp")] {
         if let Ok(temp) = canonical_directory(temp) {
@@ -665,6 +700,50 @@ fn prepare_macos_seatbelt(
     }
     let mut profile =
         build_macos_seatbelt_profile(request.network, &writable_paths, request.browser_subprocess)?;
+    if let Some(grants) = request.principal_readonly {
+        // A private system profile grants just the OS runtime, workspace and approved package files.
+        profile = String::from("(version 1)\n(deny default)\n(allow process-exec process-fork sysctl-read)\n(allow signal (target children))\n");
+        for path in [
+            "/usr",
+            "/bin",
+            "/sbin",
+            "/System",
+            "/Library/Apple",
+            "/private/etc/ssl",
+            "/dev/null",
+            "/dev/urandom",
+        ] {
+            profile.push_str(&format!("(allow file-read* (subpath \"{path}\"))\n"));
+        }
+        for path in std::iter::once(&workspace_root)
+            .chain(grants.iter())
+            .chain(request.additional_writable_paths.iter())
+        {
+            let path = seatbelt_path_literal(
+                &path
+                    .canonicalize()
+                    .map_err(|_| "sandbox_principal_grant_missing")?,
+            )?;
+            profile.push_str(&format!("(allow file-read* (subpath \"{path}\"))\n"));
+        }
+        for path in request
+            .additional_writable_paths
+            .iter()
+            .chain(sandbox_writes_workspace(request.mode).then_some(&workspace_root))
+        {
+            let path = seatbelt_path_literal(path)?;
+            profile.push_str(&format!("(allow file-write* (subpath \"{path}\"))\n"));
+        }
+        if request.network == ProcessNetworkPolicy::Inherit {
+            profile.push_str("(allow network*)\n");
+        }
+        if readonly_paths
+            .iter()
+            .any(|p| !p.starts_with(&workspace_root))
+        {
+            return Err("sandbox_principal_read_mapping_denied");
+        }
+    }
     for path in readonly_paths {
         let literal = seatbelt_path_literal(&path)?;
         profile.push_str(&format!("(deny file-write* (subpath \"{literal}\"))\n"));
@@ -689,6 +768,9 @@ fn canonical_roots(request: ProcessSandboxRequest<'_>) -> Result<(PathBuf, PathB
     let execution_root = canonical_directory(request.execution_root)?;
     if sandbox_writes_workspace(request.mode) && !execution_root.starts_with(&workspace_root) {
         return Err("sandbox_execution_root_outside_workspace");
+    }
+    if request.principal_readonly.is_some() && !execution_root.starts_with(&workspace_root) {
+        return Err("sandbox_principal_execution_root_denied");
     }
     Ok((workspace_root, execution_root))
 }
