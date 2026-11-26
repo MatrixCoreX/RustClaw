@@ -158,6 +158,15 @@ admin_max_elapsed_seconds = 86400
 admin_max_continuations = 64
 admin_max_non_resumable_tool_seconds = 3600
 
+# Per-call output tokens include provider thinking. A typed native Length result
+# retries the same generation with a larger funded budget before exposing actions.
+# These limits do not change task-wide token/cost ceilings or disable reasoning.
+[agent.task_budget.model_output]
+default_tokens = 8192
+verifier_tokens = 4096
+recovery_max_tokens = 32768
+recovery_attempts = 2
+
 [agent.task_budget.profiles.general]
 soft_slice_seconds = 300
 stagnation_tolerance = 3

@@ -231,6 +231,7 @@ impl BudgetProfilePolicy {
 pub(crate) struct TaskBudgetPolicy {
     pub(crate) hard_ceilings: BudgetHardCeilings,
     pub(crate) limit_policy: TaskBudgetLimitPolicy,
+    pub(crate) model_output: model_output::ModelOutputBudgetPolicy,
     general: BudgetProfilePolicy,
     fast_read: BudgetProfilePolicy,
     grounded_summary: BudgetProfilePolicy,
@@ -286,6 +287,7 @@ impl Default for TaskBudgetPolicy {
         Self {
             hard_ceilings: BudgetHardCeilings::default(),
             limit_policy: TaskBudgetLimitPolicy::default(),
+            model_output: model_output::ModelOutputBudgetPolicy::default(),
             general: BudgetProfilePolicy::default_for(TaskBudgetProfile::General),
             fast_read: BudgetProfilePolicy::default_for(TaskBudgetProfile::FastRead),
             grounded_summary: BudgetProfilePolicy::default_for(TaskBudgetProfile::GroundedSummary),
@@ -828,6 +830,7 @@ pub(crate) fn load_task_budget_policy(workspace_root: &Path) -> TaskBudgetPolicy
 
 fn task_budget_policy_from_toml(root: &TomlValue) -> TaskBudgetPolicy {
     let mut policy = TaskBudgetPolicy::default();
+    policy.model_output = model_output::ModelOutputBudgetPolicy::from_toml(root);
     policy.limit_policy = match value_at(root, &["agent", "task_budget", "limit_policy"])
         .and_then(TomlValue::as_str)
     {
@@ -978,3 +981,6 @@ mod tests;
 
 #[path = "task_budget_model_admission.rs"]
 pub(crate) mod model_admission;
+
+#[path = "task_budget_model_output.rs"]
+pub(crate) mod model_output;

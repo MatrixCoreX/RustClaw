@@ -156,3 +156,46 @@ fn direct_verification_hint_is_stage_scoped_and_preserves_explicit_reasoning_pre
         assert_eq!(hints.max_tokens, Some(cap));
     }
 }
+
+#[test]
+fn recovery_minimum_is_funded_before_call_and_cannot_be_silently_clamped() {
+    let state = AppState::test_default_with_fixture_provider();
+    let task = task(20000);
+    let mut hints = ChatRequestHints {
+        max_tokens: Some(16384),
+        minimum_output_tokens: Some(16384),
+        ..Default::default()
+    };
+    let error = prepare(&state, &task, "prompt", "plan", &mut hints).unwrap_err();
+    let detail: serde_json::Value = serde_json::from_str(&error).unwrap();
+    assert_eq!(detail["provider_called"], false);
+    assert_eq!(detail["minimum_output_tokens"], 16384);
+    assert_eq!(state.task_llm_call_count(&task.task_id), 0);
+}
+
+#[test]
+fn existing_explicit_small_caps_and_funded_recovery_keep_their_exact_limits() {
+    for (cap, minimum) in [(64, None), (16384, Some(16384))] {
+        let state = AppState::test_default_with_fixture_provider();
+        let mut hints = ChatRequestHints {
+            max_tokens: Some(cap),
+            minimum_output_tokens: minimum,
+            ..Default::default()
+        };
+        let guard = prepare(&state, &task(100000), "prompt", "plan", &mut hints).unwrap();
+        let attempt = guard.start(&mut hints, "fixture", "model").unwrap();
+        assert_eq!(hints.max_tokens, Some(cap));
+        drop(attempt);
+    }
+}
+
+#[test]
+fn minimum_cannot_exceed_requested_generation_cap() {
+    let state = AppState::test_default_with_fixture_provider();
+    let mut hints = ChatRequestHints {
+        max_tokens: Some(8192),
+        minimum_output_tokens: Some(16384),
+        ..Default::default()
+    };
+    assert!(prepare(&state, &task(100000), "prompt", "plan", &mut hints).is_err());
+}

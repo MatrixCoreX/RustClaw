@@ -386,6 +386,8 @@ pub(crate) struct ChatRequestHints {
         Option<Arc<crate::task_budget_contract::model_admission::ModelAdmission>>,
     pub(crate) temperature: Option<f64>,
     pub(crate) max_tokens: Option<u64>,
+    /// A recovery call must not silently shrink back to an exhausted output budget.
+    pub(crate) minimum_output_tokens: Option<u64>,
     pub(crate) reasoning_effort: Option<String>,
     pub(crate) structured_verification: bool,
     pub(crate) timeout_seconds: Option<u64>,
@@ -402,6 +404,7 @@ impl Default for ChatRequestHints {
             host_admission: None,
             temperature: None,
             max_tokens: None,
+            minimum_output_tokens: None,
             reasoning_effort: None,
             structured_verification: false,
             timeout_seconds: None,
