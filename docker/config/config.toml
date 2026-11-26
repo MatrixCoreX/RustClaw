@@ -95,6 +95,17 @@ output_usd_per_million = 1.20
 cache_read_usd_per_million = 0.06
 cache_write_usd_per_million = 0.375
 
+[[llm.pricing]]
+provider = "minimax"
+model = "MiniMax-M2.7-highspeed"
+effective_from = "2026-11-26"
+currency = "USD"
+source = "https://platform.minimax.io/subscribe/token-plan?tab=api-enterprise"
+input_usd_per_million = 0.60
+output_usd_per_million = 2.40
+cache_read_usd_per_million = 0.06
+cache_write_usd_per_million = 0.375
+
 # 用途/Purpose: Anthropic 提供商连接与模型池.
 # 建议修改/Recommended change: 可改，需保证 key/base_url/model 对齐.
 # 风险/Risk: key 无效或 URL 错误会直接失败；并发过高可能触发限流.

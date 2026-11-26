@@ -270,3 +270,27 @@ test("slow periodic refreshes do not overlap or starve task and grant results", 
   assert.equal(api.calls.length, 4, "polling resumes after the prior refresh finishes");
   await act(async () => { api.calls[2].finish({ tasks: [] }); api.calls[3].finish({ grants: [] }); });
 });
+
+test("lost task submission responses reuse the draft key until accepted", async t => {
+  const keys: string[] = [];
+  const probe = await taskProbe(async (path, init) => {
+    if (path !== "/v1/tasks") return reply({ tasks: [] });
+    keys.push(JSON.parse(String(init?.body)).idempotency_key);
+    if (keys.length === 1 || keys.length === 4) throw new Error("response_lost");
+    return reply({ task_id: "accepted" });
+  });
+  t.after(() => probe.close());
+  await act(async () => { probe.runtime.setInteractionAskText("one"); });
+  for (let index = 0; index < 3; index++) {
+    await act(async () => { await probe.runtime.submitInteractionTask(); });
+  }
+  assert.ok(keys[0]);
+  assert.equal(keys[0], keys[1]);
+  assert.notEqual(keys[1], keys[2]);
+  await act(async () => { probe.runtime.setResumeDraftValue("previous", "continue"); });
+  await act(async () => { await probe.runtime.submitResumeForTask("previous"); });
+  await act(async () => { await probe.runtime.submitResumeForTask("previous"); });
+  assert.ok(keys[3]);
+  assert.equal(keys[3], keys[4]);
+  assert.notEqual(keys[2], keys[3]);
+});

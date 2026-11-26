@@ -1200,8 +1200,18 @@ pub(crate) fn reconcile_missing_turn_jobs(state: &crate::AppState) -> anyhow::Re
         };
         drop(db);
         let task = load_source_task(state, &job)?;
-        let db = state.core.db.get().map_err(|error| anyhow!(error))?;
-        let ids = sources::verified_ids(&db, &task, &job.principal_id)?;
+        let mut db = state.core.db.get().map_err(|error| anyhow!(error))?;
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let ids = sources::verified_ids(&tx, &task, &job.principal_id)?;
+        if ids.is_none() {
+            tx.execute(
+                "INSERT OR IGNORE INTO memory_turn_evidence_deferrals
+                 SELECT task_id,principal_id,chat_id,CAST(updated_at AS INTEGER),?3 FROM tasks
+                 WHERE task_id=?1 AND principal_id=?2 AND status='succeeded'",
+                params![task.task_id,job.principal_id,"memory_job_source_binding_unverified"],
+            )?;
+        }
+        tx.commit()?;
         drop(db);
         let Some((user, assistant)) = ids else {
             warn!(
@@ -1219,11 +1229,13 @@ pub(crate) fn reconcile_missing_turn_jobs(state: &crate::AppState) -> anyhow::Re
 }
 
 fn missing_turn_task_ids(db: &Connection) -> anyhow::Result<Vec<String>> {
+    db.execute_batch(include_str!("missing_turn_evidence.sql"))?;
     let mut stmt = db.prepare(
         "SELECT DISTINCT t.task_id
          FROM tasks t
          JOIN memories m ON m.principal_id = t.principal_id AND m.chat_id = t.chat_id
          WHERE t.status = 'succeeded' AND t.kind = 'ask'
+           AND NOT EXISTS (SELECT 1 FROM memory_turn_evidence_deferrals d WHERE d.task_id=t.task_id)
            AND m.created_at_ts >= COALESCE(CAST(t.updated_at AS INTEGER), 0) - 5
            AND m.created_at_ts <= COALESCE(CAST(t.updated_at AS INTEGER), 0) + 5
            AND NOT EXISTS (

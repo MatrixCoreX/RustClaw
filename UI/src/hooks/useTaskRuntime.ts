@@ -85,11 +85,26 @@ export function useTaskRuntime({
   const grantsRequestEpoch = useRef(0);
   const selectedTaskIdRef = useRef("");
   const scopeKey = JSON.stringify([apiBase, activeUserKey, interactionUserId, interactionChatId, uiAuthReady]);
-  const taskScopeRef = useRef({ key: scopeKey });
+  const newScope = () => ({ key: scopeKey, pending: new Map<string, string>() });
+  const taskScopeRef = useRef<ReturnType<typeof newScope> | null>(null);
   // A fresh token also fences an old request across an identity A -> B -> A roundtrip.
-  if (taskScopeRef.current.key !== scopeKey) taskScopeRef.current = { key: scopeKey };
+  if (taskScopeRef.current?.key !== scopeKey) taskScopeRef.current = newScope();
   const taskScope = taskScopeRef.current;
   const isCurrentScope = () => taskScopeRef.current === taskScope;
+  function mutationAttempt(operation: string, target: Record<string, unknown>) {
+    const signature = JSON.stringify([operation, target]);
+    let key = taskScope.pending.get(signature);
+    if (!key) {
+      key = `ui-${operation}-${newRequestUuid()}`;
+      taskScope.pending.set(signature, key);
+    }
+    return {
+      key,
+      accepted() {
+        if (taskScope.pending.get(signature) === key) taskScope.pending.delete(signature);
+      },
+    };
+  }
   const beginRead = (epoch: { current: number }) => {
     const requestEpoch = ++epoch.current;
     return () => isCurrentScope() && epoch.current === requestEpoch;
@@ -406,6 +421,8 @@ export function useTaskRuntime({
         body.external_chat_id = externalChatId;
       }
 
+      const attempt = mutationAttempt("followup", body);
+      body.idempotency_key = attempt.key;
       const res = await apiFetch(`/v1/tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -416,10 +433,11 @@ export function useTaskRuntime({
       if (!res.ok || !resp.ok || !resp.data?.task_id) {
         throw new Error(resp.error || `task_resume_submit_http_${res.status}`);
       }
+      attempt.accepted();
 
       setResumeDrafts((prev) => {
         const next = { ...prev };
-        delete next[resumeTaskId];
+        if (next[resumeTaskId]?.trim() === text) delete next[resumeTaskId];
         return next;
       });
       setResumeTaskMessage(t("已提交继续执行请求。", "Resume request submitted."));
@@ -441,12 +459,13 @@ export function useTaskRuntime({
     setCancelTaskMessage(null);
     setCancelTaskError(null);
     try {
+      const attempt = mutationAttempt("cancel", { task_id: item.task_id });
       const res = await apiFetch(`/v1/tasks/cancel-by-task-id`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           task_id: item.task_id,
-          idempotency_key: `ui-cancel-${newRequestUuid()}`,
+          idempotency_key: attempt.key,
         }),
       });
       const body = (await res.json()) as ApiResponse<{ canceled?: number }>;
@@ -454,6 +473,7 @@ export function useTaskRuntime({
       if (!res.ok || !body.ok) {
         throw new Error(body.error || `task_cancel_http_${res.status}`);
       }
+      attempt.accepted();
       setCancelTaskMessage(t("任务取消请求已提交。", "Task cancel request submitted."));
       await fetchActiveTasks(true);
       if (taskResult?.task_id === item.task_id) {
@@ -485,22 +505,12 @@ export function useTaskRuntime({
           : control === "pause"
             ? "/v1/tasks/pause-by-task-id"
             : "/v1/tasks/resume-by-task-id";
-      const payload =
-        control === "steer"
-          ? {
-              task_id: normalizedTaskId,
-              user_message: userMessage?.trim(),
-              idempotency_key: `ui-steer-${newRequestUuid()}`,
-            }
-          : control === "pause"
-            ? {
-                task_id: normalizedTaskId,
-                idempotency_key: `ui-pause-${newRequestUuid()}`,
-              }
-            : {
-                task_id: normalizedTaskId,
-                idempotency_key: `ui-resume-${newRequestUuid()}`,
-              };
+      const target = {
+        task_id: normalizedTaskId,
+        ...(control === "steer" ? { user_message: userMessage?.trim() } : {}),
+      };
+      const attempt = mutationAttempt(control, target);
+      const payload = { ...target, idempotency_key: attempt.key };
       const res = await apiFetch(path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -511,6 +521,7 @@ export function useTaskRuntime({
       if (!res.ok || !body.ok) {
         throw new Error(body.error || `task_control_http_${res.status}`);
       }
+      attempt.accepted();
       setTaskControlMessage(
         control === "steer"
           ? t("新要求已送达，将在安全步骤边界应用。", "The new direction was accepted and will apply at a safe step boundary.")
@@ -549,7 +560,10 @@ export function useTaskRuntime({
     setTaskControlError(null);
     try {
       let path = "/v1/tasks/resume-by-task-id";
-      const idempotencyKey = `ui-subagent-${control}-${newRequestUuid()}`;
+      const attempt = mutationAttempt(`subagent-${control}`, {
+        parent: normalizedParentId, child: normalizedChildId, message: userMessage?.trim(),
+      });
+      const idempotencyKey = attempt.key;
       let payload: Record<string, unknown> = {
         task_id: normalizedChildId,
         idempotency_key: idempotencyKey,
@@ -589,6 +603,7 @@ export function useTaskRuntime({
       if (!res.ok || !body.ok) {
         throw new Error(body.error || `subagent_control_http_${res.status}`);
       }
+      attempt.accepted();
       setTaskControlMessage(
         control === "stop_all"
           ? t("已停止这个任务仍在运行的并行项。", "Active parallel items for this task were stopped.")
@@ -619,6 +634,9 @@ export function useTaskRuntime({
     setTaskControlMessage(null);
     setTaskControlError(null);
     try {
+      const attempt = mutationAttempt("approval", {
+        task_id: normalizedTaskId, approval_request_id: normalizedRequestId, approval_decision: approvalDecision,
+      });
       const res = await apiFetch("/v1/tasks/resume-by-task-id", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -626,7 +644,7 @@ export function useTaskRuntime({
           task_id: normalizedTaskId,
           approval_request_id: normalizedRequestId,
           approval_decision: approvalDecision,
-          idempotency_key: `ui-approval-${newRequestUuid()}`,
+          idempotency_key: attempt.key,
         }),
       });
       const body = (await res.json()) as ApiResponse<{ status?: string; task_id?: string }>;
@@ -634,6 +652,7 @@ export function useTaskRuntime({
       if (!res.ok || !body.ok) {
         throw new Error(body.error || `task_approval_http_${res.status}`);
       }
+      attempt.accepted();
       setTaskControlMessage(
         approvalDecision === "deny"
           ? t("已拒绝这一次操作，任务不会继续执行。", "This action was denied and the task will not continue.")
@@ -804,6 +823,8 @@ export function useTaskRuntime({
         body.external_chat_id = externalChatId;
       }
 
+      const attempt = mutationAttempt("submit", body);
+      body.idempotency_key = attempt.key;
       const res = await apiFetch(`/v1/tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -814,6 +835,7 @@ export function useTaskRuntime({
       if (!res.ok || !resp.ok || !resp.data?.task_id) {
         throw new Error(resp.error || `task_submit_http_${res.status}`);
       }
+      attempt.accepted();
 
       setInteractionSubmittedTaskId(resp.data.task_id);
       markTaskSubmitted(resp.data.task_id);

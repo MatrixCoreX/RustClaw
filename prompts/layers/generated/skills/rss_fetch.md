@@ -2,7 +2,7 @@
 ## Interface Source
 crates/skills/rss_fetch/INTERFACE.md
 
-Read RSS/Atom. Select only registry-granted capabilities. Use `extra.items` for evidence, preserving each title, URL, source, date and excerpt. Summaries and translations must preserve attribution, time, modality, direction and uncertainty. A headline supports only its literal claims. If the excerpt lacks detail, report what the source says without adding explanations.
+Read RSS/Atom. Select only registry-granted capabilities. Use `extra.items` for evidence, preserving each title, URL, source, date and excerpt. Summaries and translations must preserve attribution, time, modality, direction, uncertainty and degree. Use a comparative or superlative only when the source states that comparison or rank. Preserve quantities, currencies and units across number systems. A headline supports only its literal claims. If the excerpt lacks detail, report what the source says without adding explanations.
 
 - `list_categories` returns active category tokens, the default and pending proposals offline. Choose a returned token for `latest` / `news` (alias). Pass the requested `limit` after merge, deduplication and sort. All active category feeds are fetched. Partial success supplies usable items. All-empty/all-failed is an error. Config provides the default category and limit.
 - `fetch` requires explicit public HTTP(S) `url`, `feed_url` or `feed_urls`. `latest` also accepts explicit feed URLs to override configured sources without updating health. Optional `timeout_seconds` bounds fetching. `topic` / `topic_token` is a stable machine token from args or config, default `other`.
