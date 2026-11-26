@@ -109,6 +109,8 @@ def main():
 
 
 def retire(prior, successor, apply):
+    prior = prior.resolve(strict=True)
+    successor = successor.resolve(strict=True)
     audit = successor/'superseded-full-archive-retirement.json'
     report = plan(prior, successor)
     previous = load(audit) if audit.exists() else {}

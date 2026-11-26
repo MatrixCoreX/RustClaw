@@ -62,6 +62,13 @@ class RetentionTests(unittest.TestCase):
         self.assertTrue((self.successor/"ubuntu.rollback").is_file())
         self.assertTrue(json.loads((self.prior/"retained-release-assets.json").read_text())["full_archives_retired"])
 
+    def test_directory_supplied_through_system_temp_alias(self):
+        alias = self.prior.parent / "temp-alias"
+        alias.symlink_to(self.prior.parent, target_is_directory=True)
+        with contextlib.redirect_stdout(io.StringIO()):
+            retention.retire(alias/self.prior.name, alias/self.successor.name, apply=False)
+        self.assertTrue(all(p.exists() for p in self.archives))
+
     def test_one_bad_hash_preserves_both_packages(self):
         self.archives[-1].write_bytes(b"changed")
         with self.assertRaisesRegex(ValueError,"local package mismatch"):
