@@ -24,3 +24,19 @@ fn invalid_generation_values_keep_valid_defaults() {
         ModelOutputBudgetPolicy::default()
     );
 }
+
+#[test]
+fn schema_correction_consumes_one_attempt_without_requiring_more_tokens() {
+    let mut budget =
+        super::GenerationBudget::new(super::ModelOutputBudgetPolicy::default(), "memory");
+    let initial = budget.hints();
+    assert!(budget.retry_at_current_limit());
+    assert_eq!(budget.hints().max_tokens, initial.max_tokens);
+    assert_eq!(budget.hints().minimum_output_tokens, None);
+    assert!(budget.grow());
+    assert_eq!(
+        budget.hints().minimum_output_tokens,
+        budget.hints().max_tokens
+    );
+    assert!(!budget.retry_at_current_limit());
+}

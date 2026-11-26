@@ -744,12 +744,21 @@ fn operation_and_audit_gaps_are_not_suppressed_by_output_shape() {
         include_str!("../../../../prompts/layers/overlays/answer_verifier_retry_prompt.md");
     assert!(RETRY_PROMPT.contains("verification_audit"));
     assert!(super::super::verifier_gap_requires_visible_answer_repair(
-        &audit
+        &audit, false
     ));
     let check = json!({"requested_operation":"fixture method","evidence_step_ids":[],
                       "method_observed":false,"result_observed":false});
     let missing = validate_operation_audit(model(json!([check])), &journal());
     assert!(super::super::verifier_gap_requires_visible_answer_repair(
-        &missing
+        &missing, false
     ));
+}
+
+#[test]
+fn a_cited_answer_preserves_the_global_verdict_even_without_a_field_name() {
+    let mut rejected = model(json!([])).verdict;
+    rejected.pass = false;
+    rejected.should_retry = true;
+    assert!(rejected.missing_evidence_fields.is_empty());
+    assert!(super::super::verifier_gap_requires_visible_answer_repair(&rejected, true));
 }

@@ -56,6 +56,7 @@ impl ModelOutputBudgetPolicy {
 pub(crate) struct GenerationBudget {
     pub(crate) tokens: u64,
     pub(crate) attempts: u64,
+    increased_limit: bool,
     pub(crate) policy: ModelOutputBudgetPolicy,
 }
 
@@ -64,6 +65,7 @@ impl GenerationBudget {
         Self {
             tokens: policy.stage_tokens(label),
             attempts: 0,
+            increased_limit: false,
             policy,
         }
     }
@@ -71,9 +73,17 @@ impl GenerationBudget {
     pub(crate) fn hints(&self) -> crate::ChatRequestHints {
         crate::ChatRequestHints {
             max_tokens: Some(self.tokens),
-            minimum_output_tokens: (self.attempts > 0).then_some(self.tokens),
+            minimum_output_tokens: self.increased_limit.then_some(self.tokens),
             ..Default::default()
         }
+    }
+
+    pub(crate) fn retry_at_current_limit(&mut self) -> bool {
+        if self.attempts >= self.policy.recovery_attempts {
+            return false;
+        }
+        self.attempts += 1;
+        true
     }
 
     pub(crate) fn grow(&mut self) -> bool {
@@ -88,6 +98,7 @@ impl GenerationBudget {
             return false;
         }
         self.tokens = next;
+        self.increased_limit = true;
         self.attempts = self.attempts.saturating_add(1);
         true
     }

@@ -244,7 +244,7 @@ pub(crate) async fn verify_answer_observe_only(
         }
     };
     if validation.high_confidence_gap()
-        && !verifier_gap_requires_visible_answer_repair(&validation)
+        && !verifier_gap_requires_visible_answer_repair(&validation, !citations.is_empty())
         && structurally_satisfies_answer_contract(route_result, journal, candidate_answer)
     {
         tracing::info!(
@@ -283,17 +283,21 @@ pub(super) fn structured_json_values_from_step_output(output: &str) -> Vec<serde
 #[path = "answer_verifier_runtime/compacted_machine_ref_gap_tests.rs"]
 mod compacted_machine_ref_gap_tests;
 
-fn verifier_gap_requires_visible_answer_repair(validation: &AnswerVerifierOut) -> bool {
-    validation.missing_evidence_fields.iter().any(|field| {
-        matches!(
-            field.as_str(),
-            "output_format"
-                | "unsupported_claims"
-                | "candidates"
-                | "requested_result"
-                | "verification_audit"
-        )
-    })
+fn verifier_gap_requires_visible_answer_repair(
+    validation: &AnswerVerifierOut,
+    has_citations: bool,
+) -> bool {
+    has_citations
+        || validation.missing_evidence_fields.iter().any(|field| {
+            matches!(
+                field.as_str(),
+                "output_format"
+                    | "unsupported_claims"
+                    | "candidates"
+                    | "requested_result"
+                    | "verification_audit"
+            )
+        })
 }
 
 pub(super) fn answer_verifier_user_request_for_prompt(

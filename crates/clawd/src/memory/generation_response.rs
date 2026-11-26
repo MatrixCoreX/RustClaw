@@ -234,11 +234,7 @@ async fn generate<T>(
         let (safe, _) = crate::skill_output_artifact::sensitivity_aware_text_model_view(&text);
         match parse(&safe) {
             Ok(parsed) => return Ok((safe, parsed)),
-            Err(error)
-                if corrected_prompt.is_none()
-                    && policy.model_output.recovery_attempts > budget.attempts =>
-            {
-                budget.attempts += 1;
+            Err(error) if corrected_prompt.is_none() && budget.retry_at_current_limit() => {
                 corrected_prompt = Some(format!(
                     "{prompt}\n\n{}",
                     json!({"schema_version":1,"previous_response_rejected":error.error_code,"regenerate_complete_object":true})
