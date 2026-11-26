@@ -263,10 +263,17 @@ fn tool_result_text(content: &Value) -> String {
 }
 
 pub(super) fn parse_anthropic_model_turn(value: &Value) -> Result<ModelTurnResponse, String> {
-    let content = value
-        .get("content")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "anthropic_model_turn_content_missing".to_string())?;
+    let provider_finish = anthropic_finish_reason(
+        value
+            .get("stop_reason")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    );
+    let content = match value.get("content").and_then(Value::as_array) {
+        Some(content) => content.as_slice(),
+        None if provider_finish == ModelFinishReason::Length => &[],
+        None => return Err("anthropic_model_turn_content_missing".to_string()),
+    };
     let mut text = String::new();
     let mut tool_calls = Vec::new();
     for (index, block) in content.iter().enumerate() {
@@ -276,7 +283,7 @@ pub(super) fn parse_anthropic_model_turn(value: &Value) -> Result<ModelTurnRespo
                     text.push_str(fragment);
                 }
             }
-            Some("tool_use") => {
+            Some("tool_use") if provider_finish != ModelFinishReason::Length => {
                 let id = required_string(block, "id", "anthropic_tool_call_id_missing", index)?;
                 let name =
                     required_string(block, "name", "anthropic_tool_call_name_missing", index)?;
@@ -294,19 +301,14 @@ pub(super) fn parse_anthropic_model_turn(value: &Value) -> Result<ModelTurnRespo
             _ => {}
         }
     }
-    if text.is_empty() && tool_calls.is_empty() {
+    if text.is_empty() && tool_calls.is_empty() && provider_finish != ModelFinishReason::Length {
         return Err("anthropic_model_turn_empty_response".to_string());
     }
     let usage = super::anthropic_usage_snapshot(value);
     let finish_reason = if !tool_calls.is_empty() {
         ModelFinishReason::ToolCalls
     } else {
-        anthropic_finish_reason(
-            value
-                .get("stop_reason")
-                .and_then(Value::as_str)
-                .unwrap_or_default(),
-        )
+        provider_finish
     };
     let mut events = Vec::new();
     if !text.is_empty() {

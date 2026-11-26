@@ -440,7 +440,10 @@ impl OpenAiStreamAccumulator {
             return Err("model_turn_stream_disconnected".to_string());
         }
         let mut completed_calls = Vec::new();
-        let pending_calls = std::mem::take(&mut self.tool_calls);
+        let mut pending_calls = std::mem::take(&mut self.tool_calls);
+        if self.finish_reason == ModelFinishReason::Length {
+            pending_calls.clear();
+        }
         for (index, pending) in pending_calls {
             let name = pending
                 .name
@@ -455,7 +458,10 @@ impl OpenAiStreamAccumulator {
             self.emit(ModelTurnEvent::ToolCall { call: call.clone() }, sink);
             completed_calls.push(call);
         }
-        if self.text.is_empty() && completed_calls.is_empty() {
+        if self.text.is_empty()
+            && completed_calls.is_empty()
+            && self.finish_reason != ModelFinishReason::Length
+        {
             return Err("model_turn_empty_response".to_string());
         }
         if self.finish_reason == ModelFinishReason::Unknown && !completed_calls.is_empty() {
@@ -839,6 +845,12 @@ fn parse_openai_model_turn(value: &Value) -> Result<ModelTurnResponse, String> {
         .and_then(Value::as_array)
         .and_then(|choices| choices.first())
         .ok_or_else(|| "model_turn_missing_choice".to_string())?;
+    let finish_reason = openai_finish_reason(
+        choice
+            .get("finish_reason")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    );
     let message = choice
         .get("message")
         .and_then(Value::as_object)
@@ -848,28 +860,26 @@ fn parse_openai_model_turn(value: &Value) -> Result<ModelTurnResponse, String> {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    let tool_calls = message
-        .get("tool_calls")
-        .and_then(Value::as_array)
-        .map(|calls| {
-            calls
-                .iter()
-                .enumerate()
-                .map(|(index, call)| parse_tool_call(call, index))
-                .collect::<Result<Vec<_>, _>>()
-        })
-        .transpose()?
-        .unwrap_or_default();
-    if text.is_empty() && tool_calls.is_empty() {
+    let tool_calls = if finish_reason == ModelFinishReason::Length {
+        Vec::new()
+    } else {
+        message
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .map(|calls| {
+                calls
+                    .iter()
+                    .enumerate()
+                    .map(|(index, call)| parse_tool_call(call, index))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?
+            .unwrap_or_default()
+    };
+    if text.is_empty() && tool_calls.is_empty() && finish_reason != ModelFinishReason::Length {
         return Err("model_turn_empty_response".to_string());
     }
     let usage = openai_usage_snapshot(value);
-    let finish_reason = openai_finish_reason(
-        choice
-            .get("finish_reason")
-            .and_then(Value::as_str)
-            .unwrap_or_default(),
-    );
     let mut events = Vec::new();
     if !text.is_empty() {
         events.push(ModelTurnEvent::TextDelta { text: text.clone() });

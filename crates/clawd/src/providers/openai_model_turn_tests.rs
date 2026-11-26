@@ -6,6 +6,73 @@ use claw_core::model_turn::{
 
 use super::*;
 
+#[test]
+fn output_limit_preserves_usage_without_exposing_partial_actions() {
+    for message in [
+        json!({"role":"assistant","content":null,"reasoning_content":"private"}),
+        json!({"role":"assistant","content":"partial","tool_calls":[
+            {"id":"prefix","function":{"name":"write_fixture","arguments":"{}"}}
+        ]}),
+        json!({"role":"assistant","content":null,"tool_calls":[
+            {"id":"incomplete","function":{"arguments":"{"}}
+        ]}),
+    ] {
+        let turn = parse_openai_model_turn(&json!({
+            "choices":[{"message":message,"finish_reason":"length"}],
+            "usage":{"prompt_tokens":12,"completion_tokens":8192,"total_tokens":8204}
+        }))
+        .unwrap();
+        assert_eq!(turn.finish_reason, ModelFinishReason::Length);
+        assert!(turn.tool_calls.is_empty());
+        assert_eq!(turn.usage.unwrap().completion_tokens, Some(8192));
+        assert!(!turn
+            .events
+            .iter()
+            .any(|event| matches!(event, ModelTurnEvent::ToolCall { .. })));
+    }
+    assert_eq!(
+        parse_openai_model_turn(&json!({
+            "choices":[{"message":{"content":null},"finish_reason":"stop"}]
+        }))
+        .unwrap_err(),
+        "model_turn_empty_response"
+    );
+}
+
+#[test]
+fn streamed_output_limit_allows_empty_or_incomplete_action_prefixes() {
+    for delta in [
+        json!({"reasoning_content":"private"}),
+        json!({"tool_calls":[{"index":0,"id":"prefix","function":{"arguments":"{"}}]}),
+        json!({"tool_calls":[{"index":0,"id":"prefix","function":{"name":"write_fixture","arguments":"{}"}}]}),
+    ] {
+        let mut accumulator = OpenAiStreamAccumulator::default();
+        accumulator
+            .apply(SseFrame::Data(json!({"choices":[{"delta":delta}]})), None)
+            .unwrap();
+        accumulator
+            .apply(
+                SseFrame::Data(json!({
+                    "choices":[{"delta":{},"finish_reason":"length"}],
+                    "usage":{"prompt_tokens":12,"completion_tokens":8192,"total_tokens":8204}
+                })),
+                None,
+            )
+            .unwrap();
+        accumulator.complete_terminal_eof();
+        let output = accumulator.finish(None).unwrap();
+        assert_eq!(output.turn.finish_reason, ModelFinishReason::Length);
+        assert!(output.turn.tool_calls.is_empty());
+        assert_eq!(output.turn.usage.unwrap().completion_tokens, Some(8192));
+        assert!(!output.raw_response.contains("private"));
+        assert!(!output
+            .turn
+            .events
+            .iter()
+            .any(|event| matches!(event, ModelTurnEvent::ToolCall { .. })));
+    }
+}
+
 fn provider() -> LlmProviderRuntime {
     LlmProviderRuntime {
         config: LlmProviderConfig {

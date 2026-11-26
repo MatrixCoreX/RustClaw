@@ -18,6 +18,10 @@ impl Drop for Fixture {
 
 impl Fixture {
     async fn new(length_responses: usize, total_tokens: u64) -> Self {
+        Self::with_empty_length(length_responses, total_tokens, false).await
+    }
+
+    async fn with_empty_length(length_responses: usize, total_tokens: u64, empty: bool) -> Self {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let captured = requests.clone();
         let app = Router::new().route("/chat/completions", post(move |Json(body): Json<serde_json::Value>| {
@@ -32,12 +36,17 @@ impl Fixture {
                 };
                 let length = index < length_responses;
                 let output = if length { output_cap } else { 64 };
-                Json(json!({
-                    "model":"MiniMax-M3",
-                    "choices":[{"message":{"role":"assistant","content":"","tool_calls":[{
+                let message = if length && empty {
+                    json!({"role":"assistant","content":null,"reasoning_content":"private"})
+                } else {
+                    json!({"role":"assistant","content":"","tool_calls":[{
                         "id":format!("fixture-call-{index}"),"type":"function",
                         "function":{"name":if length { "fixture_mutation" } else { "fixture_complete" },"arguments":"{}"}
-                    }]},"finish_reason":if length { "length" } else { "tool_calls" }}],
+                    }]})
+                };
+                Json(json!({
+                    "model":"MiniMax-M3",
+                    "choices":[{"message":message,"finish_reason":if length { "length" } else { "tool_calls" }}],
                     "usage":{"prompt_tokens":16,"completion_tokens":output,"total_tokens":16+output}
                 }))
             }
@@ -119,6 +128,15 @@ async fn completed_turn_keeps_existing_budget_and_is_not_retried() {
     let turn = fixture.call().await.unwrap().unwrap();
     assert_eq!(turn.finish_reason, ModelFinishReason::ToolCalls);
     assert_eq!(fixture.limits(), vec![8192]);
+}
+
+#[tokio::test]
+async fn reasoning_only_length_reaches_budget_recovery_instead_of_empty_response_error() {
+    let fixture = Fixture::with_empty_length(1, 1000000, true).await;
+    let turn = fixture.call().await.unwrap().unwrap();
+    assert_eq!(fixture.limits(), vec![8192, 16384]);
+    assert_eq!(turn.finish_reason, ModelFinishReason::ToolCalls);
+    assert_eq!(turn.tool_calls[0].name, "fixture_complete");
 }
 
 #[tokio::test]
