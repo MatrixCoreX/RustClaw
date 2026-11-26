@@ -1704,14 +1704,14 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
         SkillKind::Builtin => {
             if skill_name == "run_cmd" {
                 prepare_builtin_run_cmd_async_start_args(
-                    &execution_state.skill_rt.workspace_root,
+                    execution_state.skill_rt.files_root(),
                     execution_state.skill_rt.cmd_async_retention_seconds,
                     execution_state.skill_rt.cmd_terminate_grace_seconds,
                     &mut args,
                 );
             }
             let mut extra = append_extra_artifact_refs(
-                builtin_success_extra(&execution_state.skill_rt.workspace_root, &skill_name, &args),
+                builtin_success_extra(execution_state.skill_rt.files_root(), &skill_name, &args),
                 isolation_artifact_refs,
             );
             let mut text = execute_builtin_skill_for_task_with_resource_lease(
@@ -1723,7 +1723,7 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
             )
             .await?;
             generated_file_delivery::publish(
-                &state.skill_rt.workspace_root,
+                state.skill_rt.files_root(),
                 &task.task_id,
                 &args,
                 &mut extra,

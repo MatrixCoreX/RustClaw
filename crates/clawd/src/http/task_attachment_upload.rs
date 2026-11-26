@@ -30,8 +30,11 @@ pub(crate) async fn upload(
     let Ok(_permit) = GATE.get_or_init(|| Semaphore::new(1)).try_acquire() else {
         return error(StatusCode::TOO_MANY_REQUESTS, "ui_attachment_upload_busy");
     };
-    let root = &state.skill_rt.workspace_root;
-    let available = fs2::available_space(root).unwrap_or(0);
+    let root = match state.identity_files_root(&identity) {
+        Ok(root) => root,
+        Err(_) => return error(StatusCode::SERVICE_UNAVAILABLE, "workspace_scope_unavailable"),
+    };
+    let available = fs2::available_space(&root).unwrap_or(0);
     if available < 2 * 1024 * 1024 * 1024 + ui_attachments::MAX_UI_TOTAL_ATTACHMENT_BYTES as u64 {
         return error(
             StatusCode::INSUFFICIENT_STORAGE,
@@ -40,7 +43,7 @@ pub(crate) async fn upload(
     }
     let inputs = match tokio::time::timeout(
         std::time::Duration::from_secs(120),
-        read_multipart(multipart, root),
+        read_multipart(multipart, &root),
     )
     .await
     {

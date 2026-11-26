@@ -1819,9 +1819,16 @@ async fn submit_task(
         }
     }
 
+    let attachment_root = match submit_ctx.resolved_identity.as_ref() {
+        Some(identity) if channel == ChannelKind::Ui => match state.identity_files_root(identity) {
+            Ok(root) => root,
+            Err(_) => return api_err::<SubmitTaskResponse>(StatusCode::SERVICE_UNAVAILABLE, "workspace_scope_unavailable"),
+        },
+        _ => state.skill_rt.workspace_root.clone(),
+    };
     if let Some(ingress) = req.ingress.as_ref() {
         if let Err(error_code) = ui_attachments::validate_channel_ingress_attachments(
-            &state.skill_rt.workspace_root,
+            &attachment_root,
             &ingress.attachments,
         ) {
             return api_err::<SubmitTaskResponse>(StatusCode::BAD_REQUEST, error_code);
@@ -1830,8 +1837,8 @@ async fn submit_task(
 
     let task_id = Uuid::new_v4();
     let call_id = task_id.to_string();
-    if let Err(err) = ui_attachments::materialize_ui_task_attachments(
-        &state,
+    if let Err(err) = ui_attachments::materialize_ui_task_attachments_at(
+        &attachment_root,
         &mut req.payload,
         effective_user_id,
         effective_chat_id,

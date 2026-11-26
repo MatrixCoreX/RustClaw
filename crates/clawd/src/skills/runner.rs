@@ -620,7 +620,7 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
         .and_then(|descriptor| descriptor.browser_authentication.as_ref())
         .map(|authentication| PathBuf::from(&authentication.directory_path));
     let artifact_output_directory = invocation_artifact_output_directory(
-        &state.skill_rt.workspace_root,
+        state.skill_rt.files_root(),
         &task.task_id,
         canonical_skill_name,
     );

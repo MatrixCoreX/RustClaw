@@ -1582,44 +1582,14 @@ fn render_rss(xml: &str, limit: usize) -> String {
     let channel = extract_first_block(xml, "channel").unwrap_or(xml);
     let feed_title = extract_tag_text(channel, "title").unwrap_or_else(|| "(untitled)".to_string());
     let feed_link = extract_tag_text(channel, "link").unwrap_or_default();
-    let mut items = Vec::new();
-    for blk in extract_blocks(channel, "item").into_iter().take(limit) {
-        let title = extract_tag_text(blk, "title").unwrap_or_else(|| "(no title)".to_string());
-        let link = extract_tag_text(blk, "link").unwrap_or_default();
-        let date = extract_tag_text(blk, "pubDate")
-            .or_else(|| extract_tag_text(blk, "dc:date"))
-            .unwrap_or_default();
-        items.push(FeedItem {
-            title,
-            link,
-            date,
-            source: String::new(),
-            layer: String::new(),
-        });
-    }
+    let items = parse_rss_items(xml, limit);
     format_feed_output(feed_title, feed_link, items)
 }
 
 fn render_atom(xml: &str, limit: usize) -> String {
     let feed_title = extract_tag_text(xml, "title").unwrap_or_else(|| "(untitled)".to_string());
     let feed_link = extract_atom_link(xml).unwrap_or_default();
-    let mut items = Vec::new();
-    for blk in extract_blocks(xml, "entry").into_iter().take(limit) {
-        let title = extract_tag_text(blk, "title").unwrap_or_else(|| "(no title)".to_string());
-        let link = extract_atom_link(blk)
-            .or_else(|| extract_tag_text(blk, "id"))
-            .unwrap_or_default();
-        let date = extract_tag_text(blk, "updated")
-            .or_else(|| extract_tag_text(blk, "published"))
-            .unwrap_or_default();
-        items.push(FeedItem {
-            title,
-            link,
-            date,
-            source: String::new(),
-            layer: String::new(),
-        });
-    }
+    let items = parse_atom_items(xml, limit);
     format_feed_output(feed_title, feed_link, items)
 }
 

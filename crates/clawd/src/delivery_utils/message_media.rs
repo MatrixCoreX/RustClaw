@@ -72,15 +72,12 @@ fn resolve_existing_delivery_path(state: &AppState, raw_path: &str) -> Option<Pa
     } else {
         vec![
             state.skill_rt.default_locator_search_dir.join(&trimmed),
-            state.skill_rt.workspace_root.join(&trimmed),
+            state.skill_rt.files_root().join(&trimmed),
         ]
     };
     for candidate in candidates {
-        let Ok(canonical) = candidate.canonicalize() else {
-            continue;
-        };
-        if canonical.is_file() {
-            return Some(canonical);
+        if let Some(path) = state.skill_rt.delivery_file(&candidate) {
+            return Some(path);
         }
     }
     None

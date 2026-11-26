@@ -466,6 +466,27 @@ fn atomic_publish_in_directory(
     mut content: impl io::Read,
     publication: Publication,
 ) -> io::Result<()> {
+    write_in_directory(parent, filename, publication, |file| {
+        io::copy(&mut content, file).map(|_| ())
+    })
+}
+
+pub(crate) fn replace_workspace_stream<T>(
+    root: &Path,
+    target: &Path,
+    write: impl FnOnce(&mut File) -> io::Result<T>,
+) -> io::Result<T> {
+    let (parent, filename) = open_parent_directory(root, target, true)?;
+    write_in_directory(parent, filename, Publication::Replace, write)
+}
+
+#[cfg(unix)]
+fn write_in_directory<T>(
+    parent: OwnedFd,
+    filename: CString,
+    publication: Publication,
+    write: impl FnOnce(&mut File) -> io::Result<T>,
+) -> io::Result<T> {
     let temporary_name = CString::new(format!(
         ".agent-write-{}.tmp",
         uuid::Uuid::new_v4().simple()
@@ -528,7 +549,7 @@ fn atomic_publish_in_directory(
         if let Some(mode) = existing_mode {
             file.set_permissions(std::fs::Permissions::from_mode(mode))?;
         }
-        io::copy(&mut content, &mut file)?;
+        let written = write(&mut file)?;
         file.flush()?;
         file.sync_all()?;
         drop(file);
@@ -561,7 +582,8 @@ fn atomic_publish_in_directory(
             sync_directory(&parent)?;
         }
         renamed?;
-        sync_directory(&parent)
+        sync_directory(&parent)?;
+        Ok(written)
     })();
     if result.is_err() {
         // SAFETY: unlinkat receives the same trusted directory and generated name.

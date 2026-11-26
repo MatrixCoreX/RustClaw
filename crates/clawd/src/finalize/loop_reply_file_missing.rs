@@ -159,12 +159,9 @@ fn route_locator_file_token(
     let resolved = if path.is_absolute() {
         path.to_path_buf()
     } else {
-        state.skill_rt.workspace_root.join(path)
+        state.skill_rt.files_root().join(path)
     };
-    if !resolved.is_file() {
-        return None;
-    }
-    let resolved = resolved.canonicalize().unwrap_or(resolved);
+    let resolved = state.skill_rt.delivery_file(&resolved)?;
     Some(format!("FILE:{}", resolved.display()))
 }
 

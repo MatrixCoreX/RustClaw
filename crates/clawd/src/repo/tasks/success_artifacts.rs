@@ -11,11 +11,9 @@ pub(crate) fn prepare_succeeded_result_json(
     task_id: &str,
     result_json: &str,
 ) -> String {
-    match crate::task_artifacts::materialize_task_result_artifacts(
-        &state.skill_rt.workspace_root,
-        task_id,
-        result_json,
-    ) {
+    match state.stored_task_files_root(task_id).and_then(|root| {
+        crate::task_artifacts::materialize_task_result_artifacts(&root, task_id, result_json)
+    }) {
         Ok(delivered) => delivered,
         Err(error) => {
             warn!(

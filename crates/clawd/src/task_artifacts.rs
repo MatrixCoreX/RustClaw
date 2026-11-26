@@ -119,14 +119,14 @@ pub(crate) fn materialize_task_result_artifacts(
         let mime_type = normalized_mime_type(source.mime_type.as_deref(), &filename);
         let destination = delivery_artifact_path(&workspace, task_id, &artifact_id, &filename);
         let Some((sha256, size_bytes)) =
-            publish_artifact_file(&source_path, &destination, &source)?
+            publish_artifact_file(&workspace, &source_path, &destination, &source)?
         else {
             seen_ids.remove(&artifact_id);
             continue;
         };
         if !seen_digests.insert(sha256.clone()) {
             if source_path != destination {
-                fs::remove_file(&destination)?;
+                crate::secure_workspace_fs::remove_workspace_file(&workspace, &destination)?;
             }
             seen_ids.remove(&artifact_id);
             continue;
@@ -877,41 +877,34 @@ fn find_delivery_file_by_digest(
 }
 
 fn publish_artifact_file(
+    workspace: &Path,
     source: &Path,
     destination: &Path,
     expected: &ArtifactSource,
 ) -> io::Result<Option<(String, u64)>> {
+    let input = crate::secure_workspace_fs::open_workspace_file(workspace, source)?;
     if source == destination {
-        let sha256 = sha256_file(source)?;
-        let size = source.metadata()?.len();
-        return Ok(artifact_digest_matches(expected, &sha256, size).then_some((sha256, size)));
+        let (hash, size) = copy_and_hash(input, &mut io::sink())?;
+        return Ok(artifact_digest_matches(expected, &hash, size).then_some((hash, size)));
     }
-    if let (Ok(source), Ok(destination)) = (source.canonicalize(), destination.canonicalize()) {
-        if source == destination {
-            let sha256 = sha256_file(&source)?;
-            let size = source.metadata()?.len();
-            return Ok(artifact_digest_matches(expected, &sha256, size).then_some((sha256, size)));
-        }
+    let mut mismatch = false;
+    let result =
+        crate::secure_workspace_fs::replace_workspace_stream(workspace, destination, |output| {
+            let (hash, size) = copy_and_hash(input, output)?;
+            if !artifact_digest_matches(expected, &hash, size) {
+                mismatch = true;
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "artifact_digest_mismatch",
+                ));
+            }
+            Ok((hash, size))
+        });
+    if mismatch {
+        Ok(None)
+    } else {
+        result.map(Some)
     }
-    let parent = destination
-        .parent()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "artifact_parent_missing"))?;
-    fs::create_dir_all(parent)?;
-    let temp = parent.join(format!(".artifact-{}.tmp", uuid::Uuid::new_v4()));
-    let result = copy_and_hash(source, &temp).and_then(|sha256| {
-        let size = temp.metadata()?.len();
-        if !artifact_digest_matches(expected, &sha256, size) {
-            return Ok(None);
-        }
-        // Validate the private temporary copy before the atomic replacement.
-        // Invalid candidates must not overwrite or become preserved deliveries.
-        fs::rename(&temp, destination)?;
-        Ok(Some((sha256, size)))
-    });
-    if result.is_err() || result.as_ref().is_ok_and(Option::is_none) {
-        let _ = fs::remove_file(temp);
-    }
-    result
 }
 
 fn artifact_digest_matches(expected: &ArtifactSource, sha256: &str, size: u64) -> bool {
@@ -922,21 +915,20 @@ fn artifact_digest_matches(expected: &ArtifactSource, sha256: &str, size: u64) -
         && expected.size_bytes.is_none_or(|bytes| bytes == size)
 }
 
-fn copy_and_hash(source: &Path, destination: &Path) -> io::Result<String> {
-    let mut input = File::open(source)?;
-    let mut output = File::create(destination)?;
-    let mut hasher = Sha256::new();
+fn copy_and_hash(mut input: File, output: &mut impl Write) -> io::Result<(String, u64)> {
+    let mut hash = Sha256::new();
+    let mut size = 0u64;
     let mut buffer = [0_u8; 64 * 1024];
     loop {
         let read = input.read(&mut buffer)?;
         if read == 0 {
             break;
         }
-        hasher.update(&buffer[..read]);
+        hash.update(&buffer[..read]);
         output.write_all(&buffer[..read])?;
+        size += read as u64;
     }
-    output.flush()?;
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok((format!("{:x}", hash.finalize()), size))
 }
 
 fn sha256_file(path: &Path) -> io::Result<String> {

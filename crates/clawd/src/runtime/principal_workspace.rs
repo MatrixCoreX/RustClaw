@@ -28,6 +28,43 @@ fn directory(runtime: &Path, principal: &str) -> anyhow::Result<PathBuf> {
 }
 
 impl AppState {
+    pub(crate) fn identity_files_root(
+        &self,
+        identity: &claw_core::types::AuthIdentity,
+    ) -> anyhow::Result<PathBuf> {
+        if identity.role.eq_ignore_ascii_case("admin") {
+            return Ok(self.skill_rt.workspace_root.clone());
+        }
+        directory(&self.skill_rt.workspace_root, &identity.principal_id)
+    }
+
+    pub(crate) fn stored_task_files_root(&self, task_id: &str) -> anyhow::Result<PathBuf> {
+        let db = self.core.db.get()?;
+        let (key, owner): (Option<String>, Option<String>) = db.query_row(
+            "SELECT user_key, principal_id FROM tasks WHERE task_id=?1",
+            [task_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let credential_present = key.is_some();
+        if let Some(key) = key {
+            if let Some(actor) = crate::repo::auth::resolve_auth_identity_on_connection(&db, &key)?
+            {
+                if owner
+                    .as_ref()
+                    .is_none_or(|owner| owner == &actor.principal_id)
+                {
+                    return self.identity_files_root(&actor);
+                }
+            }
+        }
+        directory(
+            &self.skill_rt.workspace_root,
+            &owner
+                .filter(|_| credential_present)
+                .unwrap_or_else(|| format!("legacy-task:{task_id}")),
+        )
+    }
+
     pub(crate) fn scope_task_workspace(&self, task: &ClaimedTask) -> anyhow::Result<Option<Self>> {
         let principal = if let Some(key) = task.user_key.as_deref() {
             let actor = crate::resolve_auth_identity_by_key(self, key)?
@@ -41,7 +78,7 @@ impl AppState {
             }
             actor.principal_id
         } else {
-            format!("legacy-user:{}", task.user_id)
+            format!("legacy-task:{}", task.task_id)
         };
         let root = directory(&self.skill_rt.workspace_root, &principal)?;
         if let Some(current) = &self.skill_rt.principal_workspace {

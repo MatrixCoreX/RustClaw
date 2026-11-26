@@ -67,6 +67,22 @@ pub(crate) fn materialize_ui_task_attachments(
     effective_chat_id: i64,
     call_id: &str,
 ) -> Result<(), String> {
+    materialize_ui_task_attachments_at(
+        state.skill_rt.files_root(),
+        payload,
+        effective_user_id,
+        effective_chat_id,
+        call_id,
+    )
+}
+
+pub(crate) fn materialize_ui_task_attachments_at(
+    workspace_root: &Path,
+    payload: &mut Value,
+    effective_user_id: i64,
+    effective_chat_id: i64,
+    call_id: &str,
+) -> Result<(), String> {
     let inputs = collect_ui_attachment_inputs(payload);
     if inputs.is_empty() {
         return Ok(());
@@ -92,7 +108,7 @@ pub(crate) fn materialize_ui_task_attachments(
         })
         .collect::<Result<Vec<_>, String>>()?;
     let materialized = commit_upload_batch(
-        &state.skill_rt.workspace_root,
+        workspace_root,
         effective_user_id,
         effective_chat_id,
         call_id,

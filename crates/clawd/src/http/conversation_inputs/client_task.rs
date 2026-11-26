@@ -88,8 +88,14 @@ pub(crate) async fn accept_client_task(
     if let Err(code) = validate_task_template(&request, channel, &input_text) {
         return crate::api_err(StatusCode::BAD_REQUEST, code);
     }
+    let attachment_root = if channel == ChannelKind::Ui {
+        match state.identity_files_root(&identity) {
+            Ok(root) => root,
+            Err(_) => return crate::api_err(StatusCode::SERVICE_UNAVAILABLE, "workspace_scope_unavailable"),
+        }
+    } else { state.skill_rt.workspace_root.clone() };
     let attachment_bindings = match attachments::prepare_attachment_bindings(
-        &state.skill_rt.workspace_root,
+        &attachment_root,
         &identity.principal_id,
         &request,
     ) {
@@ -300,15 +306,16 @@ fn prepare_ui_task_ingress(
     identity: &AuthIdentity,
     request: &mut ConversationInputClientTaskRequest,
 ) -> Result<(), String> {
-    crate::ui_attachments::materialize_ui_task_attachments(
-        state,
+    let root = state.identity_files_root(identity).map_err(|_| "workspace_scope_unavailable".to_string())?;
+    crate::ui_attachments::materialize_ui_task_attachments_at(
+        &root,
         &mut request.task.payload,
         identity.user_id,
         identity.chat_id,
         &request.input.client_message_id,
     )?;
     crate::ui_attachments::validate_upload_references(
-        &state.skill_rt.workspace_root,
+        &root,
         identity.user_id,
         identity.chat_id,
         &request.input.client_message_id,
