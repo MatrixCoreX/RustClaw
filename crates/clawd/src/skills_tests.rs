@@ -275,7 +275,7 @@ fn init_git_fixture_repo(root: &Path) {
     run(&["commit", "-q", "-m", "init"]);
 }
 
-#[path = "skills_test_photo_memory.rs"]
+#[path = "skills_photo_memory_tests.rs"]
 mod photo_memory;
 use photo_memory::seed_photo_organize_policy_memory;
 
