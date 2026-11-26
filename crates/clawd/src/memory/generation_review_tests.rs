@@ -268,3 +268,16 @@ async fn repeated_length_terminates_without_committing_even_a_parseable_prefix()
         0
     );
 }
+
+#[tokio::test]
+async fn invalid_complete_answers_retain_the_schema_error_without_staging_or_committing() {
+    let fixture = GenerationFixture::for_kind("extract").await;
+    for _ in 0..2 {
+        fixture.queue_response("stop", r#"{"memory_actions":false}"#);
+    }
+    assert!(fixture.run().await.unwrap());
+    assert_eq!(fixture.provider_request_count(), 2);
+    assert_eq!(fixture.scalar("SELECT COUNT(*) FROM memory_jobs WHERE status='failed' AND error_code='memory_job_extract_schema_invalid' AND retryable=0"), 1);
+    assert_eq!(fixture.scalar("SELECT COUNT(*) FROM memory_generation_outputs"), 0);
+    assert_eq!(fixture.scalar("SELECT COUNT(*) FROM user_preferences"), 0);
+}

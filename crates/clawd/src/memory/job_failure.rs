@@ -8,6 +8,8 @@ pub(crate) struct JobFailure {
     pub retryable: bool,
     pub phase: String,
     pub provider_error_kind: Option<String>,
+    #[serde(skip)]
+    pub(super) rejected_provider_response: bool,
 }
 
 impl std::fmt::Display for JobFailure {
@@ -29,7 +31,16 @@ impl JobFailure {
             retryable,
             phase: phase.into(),
             provider_error_kind: None,
+            rejected_provider_response: false,
         }
+    }
+
+    // Only the worker that received the provider response can establish this.
+    // A worker recovering a started request after a crash has no such evidence.
+    pub(super) fn after_response_rejection(mut self) -> Self {
+        self.rejected_provider_response = true;
+        self.retryable = false;
+        self
     }
 
     pub(crate) fn from_error(error: &anyhow::Error) -> Self {

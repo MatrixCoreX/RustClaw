@@ -222,12 +222,15 @@ async fn generate<T>(
                     false,
                     "generation",
                 )
+                .after_response_rejection()
                 .into())
             }
             ModelFinishReason::Stop => (),
             _ => {
                 return Err(
-                    JobFailure::new("memory_job_finish_unverified", false, "generation").into(),
+                    JobFailure::new("memory_job_finish_unverified", false, "generation")
+                        .after_response_rejection()
+                        .into(),
                 )
             }
         }
@@ -240,7 +243,7 @@ async fn generate<T>(
                     json!({"schema_version":1,"previous_response_rejected":error.error_code,"regenerate_complete_object":true})
                 ));
             }
-            Err(error) => return Err(error.into()),
+            Err(error) => return Err(error.after_response_rejection().into()),
         }
     }
 }

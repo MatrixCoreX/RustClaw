@@ -1070,6 +1070,7 @@ fn fail_or_retry_job(
         return complete_job(state, job_id, worker_id);
     }
     let phase_failure = match phase {
+        super::job_completion::JobPhase::ProviderStarted if failure.rejected_provider_response => None,
         super::job_completion::JobPhase::ProviderStarted => Some(JobFailure::new(
             "memory_job_provider_result_unknown",
             false,
