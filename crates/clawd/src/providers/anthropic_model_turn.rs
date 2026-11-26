@@ -346,7 +346,7 @@ fn required_string(value: &Value, key: &str, code: &str, index: usize) -> Result
         .ok_or_else(|| format!("{code} index={index}"))
 }
 
-fn anthropic_finish_reason(reason: &str) -> ModelFinishReason {
+pub(super) fn anthropic_finish_reason(reason: &str) -> ModelFinishReason {
     match reason {
         "end_turn" | "stop_sequence" => ModelFinishReason::Stop,
         "tool_use" => ModelFinishReason::ToolCalls,

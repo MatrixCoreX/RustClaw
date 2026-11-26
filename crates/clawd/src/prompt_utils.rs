@@ -612,6 +612,26 @@ pub(crate) fn validate_against_schema<T: DeserializeOwned>(
             details: vec!["unable to parse repaired JSON candidate".to_string()],
         }
     })?;
+    validate_parsed_schema(parsed_value, schema_id, raw_parse_ok)
+}
+
+pub(crate) fn validate_complete_schema<T: DeserializeOwned>(
+    raw: &str,
+    schema_id: PromptSchemaId,
+) -> Result<T, SchemaValidationError> {
+    let value = serde_json::from_str(raw).map_err(|_| SchemaValidationError {
+        schema_id,
+        stage: "parse",
+        details: Vec::new(),
+    })?;
+    validate_parsed_schema(value, schema_id, true).map(|validated| validated.value)
+}
+
+fn validate_parsed_schema<T: DeserializeOwned>(
+    parsed_value: Value,
+    schema_id: PromptSchemaId,
+    raw_parse_ok: bool,
+) -> Result<ValidatedSchemaJson<T>, SchemaValidationError> {
     let (schema_value, schema_normalized) = canonicalize_schema_input(schema_id, parsed_value);
     let schema_root = schema_id.schema_value();
     let mut validation_errors = Vec::new();

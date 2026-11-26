@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "answer_verifier_runtime/citation_audit.rs"]
+mod citation_audit;
+
 #[path = "answer_verifier_runtime/child_result_evidence.rs"]
 mod child_result_evidence;
 #[path = "answer_verifier_runtime/compacted_machine_ref_gap.rs"]
@@ -53,7 +56,8 @@ pub(crate) async fn verify_answer_observe_only(
         );
         return AnswerVerificationOutcome::from_verdict(local_gap);
     }
-    if !should_verify_answer(route_result, journal, candidate_answer) {
+    let citations = citation_audit::citations(candidate_answer, journal);
+    if citations.is_empty() && !should_verify_answer(route_result, journal, candidate_answer) {
         return AnswerVerificationOutcome::NotRequired;
     }
     if let Some(local_gap) =
@@ -68,7 +72,9 @@ pub(crate) async fn verify_answer_observe_only(
         );
         return AnswerVerificationOutcome::from_verdict(local_gap);
     }
-    if structural_satisfaction_can_skip_verifier(route_result, journal, candidate_answer) {
+    if citations.is_empty()
+        && structural_satisfaction_can_skip_verifier(route_result, journal, candidate_answer)
+    {
         tracing::info!(
             task_id = %task.task_id,
             "answer_verifier_skipped_structural_satisfaction"
@@ -126,6 +132,10 @@ pub(crate) async fn verify_answer_observe_only(
                 "__AGENT_RUNTIME_IDENTITY__",
                 state.agent_runtime_identity_label(),
             ),
+            (
+                "__CITATION_EVIDENCE__",
+                &serde_json::to_string(&citations).expect("serializable citations"),
+            ),
             ("__CANDIDATE_ANSWER__", candidate_answer.trim()),
         ],
     );
@@ -175,6 +185,17 @@ pub(crate) async fn verify_answer_observe_only(
                 );
             }
             let mut model = validated.value;
+            if model.verdict.pass {
+                let missing = citation_audit::missing_checks(&citations, &model.citation_checks);
+                if !missing.is_empty() {
+                    return AnswerVerificationOutcome::from_verdict(AnswerVerifierOut {
+                        pass: false, missing_evidence_fields: vec!["unsupported_claims".into()],
+                        answer_incomplete_reason: "citation_evidence_incomplete".into(),
+                        retry_instruction: serde_json::json!({"repair_kind":"revise_unsupported_claims","citations":missing}).to_string(),
+                        should_retry: true, confidence: 1.0,
+                    });
+                }
+            }
             let output_field_checks = operation_audit::host_output_field_checks(
                 &route_result.output_contract,
                 candidate_answer,

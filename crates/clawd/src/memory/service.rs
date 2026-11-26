@@ -811,32 +811,20 @@ pub(super) async fn maybe_refresh_long_term_summary_for_range(
         None,
     );
 
-    let summary = super::generation_response::run(
+    let parsed = super::generation_response::run(
         state,
         task,
         &summary_prompt,
         &summary_prompt_source,
         generation,
+        |raw| {
+            parse_long_term_refresh_llm_out(
+                raw,
+                state.policy.memory.long_term_summary_max_chars.max(512),
+            )
+        },
     )
     .await?;
-    let parsed = match try_parse_long_term_refresh_llm_out_with_schema(&summary) {
-        Ok(parsed) => parsed,
-        Err(err) => {
-            info!(
-                "long_term_summary schema_validation_failed task_id={} err={}",
-                task.task_id, err
-            );
-            parse_long_term_refresh_llm_out_legacy(&summary)
-        }
-    };
-    if parsed.summary.chars().count() > state.policy.memory.long_term_summary_max_chars.max(512) {
-        return Err(super::job_failure::JobFailure::new(
-            "memory_job_summary_schema_limit",
-            false,
-            "consolidate_parse",
-        )
-        .into());
-    }
     let db = state
         .core
         .db
@@ -881,36 +869,31 @@ fn normalize_long_term_refresh_llm_out(
     }
 }
 
-fn try_parse_long_term_refresh_llm_out_with_schema(
+fn parse_long_term_refresh_llm_out(
     raw: &str,
-) -> Result<LongTermRefreshLlmOut, String> {
-    crate::prompt_utils::validate_against_schema::<LongTermRefreshLlmOut>(
+    max_chars: usize,
+) -> Result<LongTermRefreshLlmOut, super::job_failure::JobFailure> {
+    let invalid = || {
+        super::job_failure::JobFailure::new(
+            "memory_job_summary_schema_invalid",
+            false,
+            "consolidate_parse",
+        )
+    };
+    let result = crate::prompt_utils::validate_complete_schema(
         raw,
         crate::prompt_utils::PromptSchemaId::LongTermSummary,
     )
-    .map(|validated| validated.value)
-    .map_err(|err| err.to_string())
-    .and_then(|parsed| {
-        normalize_long_term_refresh_llm_out(parsed)
-            .ok_or_else(|| "long_term_summary empty summary after normalize".to_string())
-    })
-}
-
-fn parse_long_term_refresh_llm_out_legacy(raw: &str) -> LongTermRefreshLlmOut {
-    crate::parse_llm_json_extract_or_any::<LongTermRefreshLlmOut>(raw)
-        .or_else(|| crate::parse_llm_json_raw_or_any::<LongTermRefreshLlmOut>(raw))
-        .and_then(normalize_long_term_refresh_llm_out)
-        .unwrap_or_else(|| LongTermRefreshLlmOut {
-            summary: raw.trim().to_string(),
-            fact_candidates: Vec::new(),
-            knowledge_candidates: Vec::new(),
-        })
-}
-
-#[cfg(test)]
-fn parse_long_term_refresh_llm_out(raw: &str) -> LongTermRefreshLlmOut {
-    try_parse_long_term_refresh_llm_out_with_schema(raw)
-        .unwrap_or_else(|_| parse_long_term_refresh_llm_out_legacy(raw))
+    .map_err(|_| invalid())?;
+    let result = normalize_long_term_refresh_llm_out(result).ok_or_else(invalid)?;
+    if result.summary.chars().count() > max_chars {
+        return Err(super::job_failure::JobFailure::new(
+            "memory_job_summary_schema_limit",
+            false,
+            "consolidate_parse",
+        ));
+    }
+    Ok(result)
 }
 
 fn persist_valid_knowledge_candidates(

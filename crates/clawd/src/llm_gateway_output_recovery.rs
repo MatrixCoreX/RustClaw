@@ -2,50 +2,13 @@
 use claw_core::model_turn::{ModelFinishReason, ModelTurnRequest, ModelTurnResponse};
 use serde_json::json;
 
+#[cfg(test)]
 use crate::task_budget_contract::model_output::ModelOutputBudgetPolicy;
-use crate::{AppState, ChatRequestHints, ClaimedTask};
+use crate::{AppState, ClaimedTask};
 
 use crate::llm_gateway::NATIVE_OUTPUT_LIMIT_EXHAUSTED_ERR as EXHAUSTED;
 
-struct GenerationBudget {
-    tokens: u64,
-    attempts: u64,
-    policy: ModelOutputBudgetPolicy,
-}
-
-impl GenerationBudget {
-    fn new(policy: ModelOutputBudgetPolicy, label: &str) -> Self {
-        Self {
-            tokens: policy.stage_tokens(label),
-            attempts: 0,
-            policy,
-        }
-    }
-
-    fn hints(&self) -> ChatRequestHints {
-        ChatRequestHints {
-            max_tokens: Some(self.tokens),
-            minimum_output_tokens: (self.attempts > 0).then_some(self.tokens),
-            ..Default::default()
-        }
-    }
-
-    fn grow(&mut self) -> bool {
-        if self.attempts >= self.policy.recovery_attempts {
-            return false;
-        }
-        let next = self
-            .tokens
-            .saturating_mul(2)
-            .min(self.policy.recovery_max_tokens);
-        if next <= self.tokens {
-            return false;
-        }
-        self.tokens = next;
-        self.attempts = self.attempts.saturating_add(1);
-        true
-    }
-}
+use crate::task_budget_contract::model_output::GenerationBudget;
 
 pub(crate) async fn run_native_model_turn_with_fallback(
     state: &AppState,

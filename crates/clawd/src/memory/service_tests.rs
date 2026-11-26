@@ -49,32 +49,44 @@ fn estimate_context_window_prefers_configured_capacity() {
 }
 
 #[test]
-fn parse_long_term_refresh_output_falls_back_to_plain_summary() {
-    let parsed = parse_long_term_refresh_llm_out("plain summary");
-    assert_eq!(parsed.summary, "plain summary");
-    assert!(parsed.knowledge_candidates.is_empty());
+fn memory_summary_rejects_malformed_envelope_even_with_a_complete_summary_field() {
+    for raw in [
+        "plain text",
+        r#"{"summary":"complete prefix","fact_candidates":["#,
+        r#"{"summary":"x","fact_candidates":[]} trailing"#,
+    ] {
+        assert_eq!(
+            parse_long_term_refresh_llm_out(raw, 1600)
+                .unwrap_err()
+                .error_code,
+            "memory_job_summary_schema_invalid"
+        );
+    }
 }
 
 #[test]
-fn parse_long_term_refresh_output_falls_back_to_legacy_parse_on_schema_mismatch() {
-    let raw = serde_json::json!({
-        "summary": "durable summary",
-        "knowledge_candidates": [
-            {
-                "should_persist": true,
-                "kind": "oops_kind",
-                "namespace": "user_profile",
-                "fact": "some fact",
-                "confidence": 0.9,
-                "reason": "bad enum"
-            }
-        ]
-    })
-    .to_string();
-    let parsed = parse_long_term_refresh_llm_out(&raw);
-    assert_eq!(parsed.summary, "durable summary");
-    assert_eq!(parsed.knowledge_candidates.len(), 1);
-    assert_eq!(parsed.knowledge_candidates[0].kind, "oops_kind");
+fn memory_summary_distinguishes_candidate_type_from_summary_length() {
+    let mut value = serde_json::json!({"summary":"short","fact_candidates":[{"should_persist":true,
+        "kind":"project_fact","namespace":"project_facts","fact":"x","confidence":1.0,"reason":"x","fact_value":{"invalid":true}}]});
+    assert_eq!(
+        parse_long_term_refresh_llm_out(&value.to_string(), 100)
+            .unwrap_err()
+            .error_code,
+        "memory_job_summary_schema_invalid"
+    );
+    value["fact_candidates"][0]["fact_value"] = serde_json::json!("fixed");
+    assert_eq!(
+        parse_long_term_refresh_llm_out(&value.to_string(), 4)
+            .unwrap_err()
+            .error_code,
+        "memory_job_summary_schema_limit"
+    );
+    assert_eq!(
+        parse_long_term_refresh_llm_out(&value.to_string(), 5)
+            .unwrap()
+            .summary,
+        "short"
+    );
 }
 
 fn retrieved_item(kind: &str, text: &str) -> RetrievedMemoryItem {

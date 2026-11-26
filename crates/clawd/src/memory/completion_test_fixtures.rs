@@ -22,6 +22,7 @@ pub(super) struct GenerationFixture {
     requests: Arc<AtomicUsize>,
     request_started: Arc<tokio::sync::Notify>,
     response_release: Arc<tokio::sync::Notify>,
+    first_responses: Arc<std::sync::Mutex<std::collections::VecDeque<serde_json::Value>>>,
     server: tokio::task::JoinHandle<()>,
 }
 
@@ -103,11 +104,17 @@ impl GenerationFixture {
         let started = request_started.clone();
         let release = response_release.clone();
         let hold = Arc::new(AtomicBool::new(hold_response));
+        let first_responses = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
+        let queued = first_responses.clone();
         let app = Router::new().route(
             "/chat/completions",
             post(move || {
                 observed.fetch_add(1, Ordering::SeqCst);
-                let response = response.clone();
+                let response = queued
+                    .lock()
+                    .unwrap()
+                    .pop_front()
+                    .unwrap_or_else(|| response.clone());
                 let started = started.clone();
                 let release = release.clone();
                 let hold = hold.clone();
@@ -267,6 +274,7 @@ impl GenerationFixture {
             requests,
             request_started,
             response_release,
+            first_responses,
             server,
         }
     }
@@ -296,6 +304,13 @@ impl GenerationFixture {
         let result = super::jobs::run_one_memory_job(&state, "cold-first-worker").await;
         self.trace_job_state();
         result.map(|ran| (ran, state.task_llm_call_count(&self.task.task_id) as usize))
+    }
+
+    pub(super) fn queue_response(&self, finish: &str, text: &str) {
+        self.first_responses.lock().unwrap().push_back(json!({
+            "choices":[{"message":{"role":"assistant","content":text},"finish_reason":finish}],
+            "usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}
+        }));
     }
 
     pub(super) fn provider_request_count(&self) -> usize {

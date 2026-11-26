@@ -376,40 +376,26 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
     hints: crate::ChatRequestHints,
     providers: Vec<Arc<LlmProviderRuntime>>,
 ) -> Result<String, String> {
-    run_with_provider_resource(state, task, prompt, prompt_source, hints, providers, None).await
+    run_with_provider_resource(state, task, prompt, prompt_source, hints, providers, None)
+        .await
+        .and_then(|(text, reason)| {
+            if text.is_empty() && reason == claw_core::model_turn::ModelFinishReason::Length {
+                Err("model_output_truncated".to_owned())
+            } else {
+                Ok(text)
+            }
+        })
 }
 
-pub(crate) async fn run_with_preacquired_resource(
-    state: &AppState,
-    task: &ClaimedTask,
-    prompt: &str,
-    prompt_source: &str,
-    provider: Arc<LlmProviderRuntime>,
-    resource: crate::resource_scheduler::ResourceLease,
-) -> Result<String, String> {
-    let mut hints = crate::ChatRequestHints::default();
-    crate::task_model_selection::apply_task_model_policy_hints(task, &mut hints);
-    run_with_provider_resource(
-        state,
-        task,
-        prompt,
-        prompt_source,
-        hints,
-        vec![provider],
-        Some(resource),
-    )
-    .await
-}
-
-async fn run_with_provider_resource(
+pub(crate) async fn run_with_provider_resource(
     state: &AppState,
     task: &ClaimedTask,
     prompt: &str,
     prompt_source: &str,
     mut hints: crate::ChatRequestHints,
     providers: Vec<Arc<LlmProviderRuntime>>,
-    admitted: Option<crate::resource_scheduler::ResourceLease>,
-) -> Result<String, String> {
+    admitted: Option<&crate::resource_scheduler::ResourceLease>,
+) -> Result<(String, claw_core::model_turn::ModelFinishReason), String> {
     if state.task_provider_quota_exhausted(&task.task_id).is_some() {
         return Err(PROVIDER_QUOTA_TERMINATED.to_string());
     }
@@ -420,8 +406,8 @@ async fn run_with_provider_resource(
     state.clear_task_provider_blocker(&task.task_id);
     state.clear_task_cost_blocker(&task.task_id);
     let _resource_lease = match admitted {
-        Some(resource) => resource,
-        None => acquire_llm_resource_lease(state, task)?,
+        Some(_) => None,
+        None => Some(acquire_llm_resource_lease(state, task)?),
     };
     state.restore_task_llm_call_count_from_cost_ledger(&task.task_id);
     if !llm_cost_policy_allows(state, task, None, prompt_source) {
@@ -774,7 +760,7 @@ async fn run_with_provider_resource(
                     prompt_label,
                     "call_success",
                 );
-                return Ok(cleaned_text);
+                return Ok((cleaned_text, output.finish_reason));
             }
             Err(err) => {
                 if err.host_admission_blocked {

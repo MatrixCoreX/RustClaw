@@ -569,6 +569,7 @@ impl LlmProvider for FixtureReplayProvider {
                         .clone()
                         .unwrap_or_else(|| rec.clean_response.clone());
                     Ok(LlmProviderResponse {
+                        finish_reason: replay_finish_reason(&raw),
                         text: rec.clean_response.clone(),
                         request_payload: json!({
                             "fixture_replay": true,
@@ -601,6 +602,7 @@ impl LlmProvider for FixtureReplayProvider {
                                 .clone()
                                 .unwrap_or_else(|| rec.clean_response.clone());
                             return Ok(LlmProviderResponse {
+                                finish_reason: replay_finish_reason(&raw),
                                 text: rec.clean_response.clone(),
                                 request_payload: json!({
                                     "fixture_replay": true,
@@ -642,6 +644,33 @@ impl LlmProvider for FixtureReplayProvider {
             }
         })
     }
+}
+
+fn replay_finish_reason(raw: &str) -> claw_core::model_turn::ModelFinishReason {
+    let parsed: serde_json::Value = serde_json::from_str(raw).unwrap_or_default();
+    for (pointer, convert) in [
+        (
+            "/choices/0/finish_reason",
+            super::openai_model_turn::openai_finish_reason as fn(&str) -> _,
+        ),
+        (
+            "/terminal/choices/0/finish_reason",
+            super::openai_model_turn::openai_finish_reason,
+        ),
+        (
+            "/stop_reason",
+            super::anthropic_model_turn::anthropic_finish_reason,
+        ),
+        (
+            "/candidates/0/finishReason",
+            super::gemini_model_turn::gemini_finish_reason,
+        ),
+    ] {
+        if let Some(reason) = parsed.pointer(pointer).and_then(serde_json::Value::as_str) {
+            return convert(reason);
+        }
+    }
+    claw_core::model_turn::ModelFinishReason::Unknown
 }
 
 #[cfg(test)]

@@ -128,6 +128,7 @@ pub(super) async fn call_openai_compat(
         }
         return Ok(LlmProviderResponse {
             text: output.turn.text,
+            finish_reason: output.turn.finish_reason,
             request_payload: output.request_payload,
             raw_response: output.raw_response,
             usage: output.turn.usage,
@@ -171,6 +172,12 @@ pub(super) async fn call_openai_compat(
         }
     }
 
+    let finish_reason = super::openai_model_turn::openai_finish_reason(
+        value
+            .pointer("/choices/0/finish_reason")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    );
     let text = value
         .get("choices")
         .and_then(|c| c.as_array())
@@ -180,6 +187,9 @@ pub(super) async fn call_openai_compat(
         .and_then(|content| content.as_str())
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty())
+        .or_else(|| {
+            (finish_reason == claw_core::model_turn::ModelFinishReason::Length).then(String::new)
+        })
         .ok_or_else(|| {
             ProviderError::non_retryable_with_response(
                 "missing choices[0].message.content".to_string(),
@@ -190,6 +200,7 @@ pub(super) async fn call_openai_compat(
         })?;
 
     Ok(LlmProviderResponse {
+        finish_reason,
         text,
         request_payload: req_body,
         raw_response: body_text,

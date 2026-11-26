@@ -82,3 +82,5 @@ Use these optional subheading labels when needed:
 - ...
 Keep only language-specific nuances here; keep general rules in the main prompt body.
 -->
+
+For sourced factual summaries, bind each assertion to its own observed title or passage. Preserve the entity, object, direction, dates, and speaker. When only a title is available, report only what that title establishes. Remove unsupported extensions and their claims together.

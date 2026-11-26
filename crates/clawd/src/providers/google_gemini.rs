@@ -163,6 +163,12 @@ pub(super) async fn call_google_gemini(
         }
     }
 
+    let finish_reason = super::gemini_model_turn::gemini_finish_reason(
+        value
+            .pointer("/candidates/0/finishReason")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    );
     let text = value
         .get("candidates")
         .and_then(|v| v.as_array())
@@ -183,6 +189,9 @@ pub(super) async fn call_google_gemini(
                 Some(merged)
             }
         })
+        .or_else(|| {
+            (finish_reason == claw_core::model_turn::ModelFinishReason::Length).then(String::new)
+        })
         .ok_or_else(|| {
             ProviderError::non_retryable_with_response(
                 "missing candidates[0].content.parts[*].text".to_string(),
@@ -193,6 +202,7 @@ pub(super) async fn call_google_gemini(
         })?;
 
     Ok(LlmProviderResponse {
+        finish_reason,
         text,
         request_payload: req_body,
         raw_response: body_text,

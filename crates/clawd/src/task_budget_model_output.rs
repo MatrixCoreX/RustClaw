@@ -53,6 +53,46 @@ impl ModelOutputBudgetPolicy {
     }
 }
 
+pub(crate) struct GenerationBudget {
+    pub(crate) tokens: u64,
+    pub(crate) attempts: u64,
+    pub(crate) policy: ModelOutputBudgetPolicy,
+}
+
+impl GenerationBudget {
+    pub(crate) fn new(policy: ModelOutputBudgetPolicy, label: &str) -> Self {
+        Self {
+            tokens: policy.stage_tokens(label),
+            attempts: 0,
+            policy,
+        }
+    }
+
+    pub(crate) fn hints(&self) -> crate::ChatRequestHints {
+        crate::ChatRequestHints {
+            max_tokens: Some(self.tokens),
+            minimum_output_tokens: (self.attempts > 0).then_some(self.tokens),
+            ..Default::default()
+        }
+    }
+
+    pub(crate) fn grow(&mut self) -> bool {
+        if self.attempts >= self.policy.recovery_attempts {
+            return false;
+        }
+        let next = self
+            .tokens
+            .saturating_mul(2)
+            .min(self.policy.recovery_max_tokens);
+        if next <= self.tokens {
+            return false;
+        }
+        self.tokens = next;
+        self.attempts = self.attempts.saturating_add(1);
+        true
+    }
+}
+
 #[cfg(test)]
 #[path = "task_budget_model_output_tests.rs"]
 mod tests;

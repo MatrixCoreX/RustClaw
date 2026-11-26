@@ -83,6 +83,18 @@
         }
       }
     },
+    "citation_checks": {
+      "type": "array", "maxItems": 64,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["index", "quote", "supported"],
+        "properties": {
+          "index": {"type": "integer", "minimum": 0},
+          "quote": {"type": "string", "maxLength": 1000},
+          "supported": {"type": "boolean"}
+        }
+      }
+    },
     "unsupported_claims": {
       "type": "array",
       "maxItems": 64,

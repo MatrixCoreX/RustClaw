@@ -229,3 +229,25 @@ async fn forced_consolidation_does_not_pair_or_reuse_a_summary() {
     assert_eq!(fixture.provider_request_count(), 2);
     assert_eq!(fixture.scalar("SELECT COUNT(*) FROM long_term_memories"), 1);
 }
+
+#[tokio::test]
+async fn truncated_or_invalid_generation_retries_without_committing_a_partial_summary() {
+    let fixture = GenerationFixture::for_kind("consolidate").await;
+    fixture.queue_response("length", r#"{"summary":"partial","fact_candidates":[]}"#);
+    fixture.queue_response("stop", r#"{"summary":"short","fact_candidates":[{"fact_value":{}}]}"#);
+    assert!(fixture.run().await.unwrap());
+    assert_eq!(fixture.status(), "completed");
+    assert_eq!(fixture.provider_request_count(), 3);
+    assert_eq!(fixture.scalar("SELECT COUNT(*) FROM long_term_memories WHERE summary IN ('partial','short')"),0);
+}
+
+#[tokio::test]
+async fn repeated_length_terminates_without_committing_even_a_parseable_prefix() {
+    let fixture = GenerationFixture::for_kind("consolidate").await;
+    for _ in 0..3 { fixture.queue_response("length", r#"{"summary":"partial","fact_candidates":[]}"#); }
+    assert!(fixture.run().await.unwrap());
+    assert_eq!(fixture.status(),"failed");
+    assert_eq!(fixture.provider_request_count(),3);
+    assert_eq!(fixture.scalar("SELECT COUNT(*) FROM memory_jobs WHERE error_code='memory_job_output_limit_exhausted'"),1);
+    assert_eq!(fixture.scalar("SELECT COUNT(*) FROM long_term_memories WHERE summary='partial'"),0);
+}

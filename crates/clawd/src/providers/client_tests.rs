@@ -203,6 +203,7 @@ fn rate_limit_retry_times_env_parser_is_bounded() {
 #[test]
 fn provider_retry_metadata_is_attached_to_results() {
     let response = super::LlmProviderResponse {
+        finish_reason: Default::default(),
         text: "{}".to_string(),
         request_payload: Value::Null,
         raw_response: "{}".to_string(),

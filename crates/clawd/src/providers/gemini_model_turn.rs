@@ -394,7 +394,7 @@ fn required_string(value: &Value, key: &str, code: &str, index: usize) -> Result
         .ok_or_else(|| format!("{code} index={index}"))
 }
 
-fn gemini_finish_reason(reason: &str) -> ModelFinishReason {
+pub(super) fn gemini_finish_reason(reason: &str) -> ModelFinishReason {
     match reason {
         "STOP" => ModelFinishReason::Stop,
         "MAX_TOKENS" => ModelFinishReason::Length,

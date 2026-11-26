@@ -53,7 +53,7 @@ async fn extract(
         prompt.push_str("\n\n");
         prompt.push_str(&review.prompt);
     }
-    let raw = match super::generation_response::run(
+    let intent = super::generation_response::run(
         state,
         task,
         &prompt,
@@ -62,23 +62,17 @@ async fn extract(
             .map(|review| review.prompt_source.as_str())
             .unwrap_or("memory_intent_extract"),
         generation,
+        |raw| {
+            intent::parse_memory_intent_schema(raw).map_err(|_| {
+                super::job_failure::JobFailure::new(
+                    "memory_job_extract_schema_invalid",
+                    false,
+                    "extract_parse",
+                )
+            })
+        },
     )
-    .await
-    {
-        Ok(raw) => raw,
-        Err(error) => return Err(error),
-    };
-    let intent = match intent::parse_memory_intent_schema(&raw) {
-        Ok(intent) => intent,
-        Err(_) => {
-            return Err(super::job_failure::JobFailure::new(
-                "memory_job_extract_schema_invalid",
-                false,
-                "extract_parse",
-            )
-            .into())
-        }
-    };
+    .await?;
     let summary_update_needed = intent.summary_update_needed;
     let validation =
         intent::validate_memory_intent_actions(intent, cfg.llm_preference_min_confidence);

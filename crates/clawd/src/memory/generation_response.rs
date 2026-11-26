@@ -17,22 +17,17 @@ fn digest(text: &str) -> String {
     format!("sha256:{:x}", Sha256::digest(text.as_bytes()))
 }
 
-pub(super) async fn run(
+pub(super) async fn run<T>(
     state: &crate::AppState,
     task: &crate::ClaimedTask,
     prompt: &str,
     prompt_source: &str,
     generation: Option<&GenerationCall<'_>>,
-) -> anyhow::Result<String> {
+    parse: impl Fn(&str) -> Result<T, super::job_failure::JobFailure>,
+) -> anyhow::Result<T> {
     let Some(generation) = generation else {
-        return crate::llm_gateway::run_with_fallback_with_prompt_source(
-            state,
-            task,
-            prompt,
-            prompt_source,
-        )
-        .await
-        .map_err(|_| super::job_failure::JobFailure::provider(prompt_source).into());
+        let (_, parsed) = generate(state, task, prompt, prompt_source, None, None, &parse).await?;
+        return Ok(parsed);
     };
     let lease = generation.lease;
     let prompt_digest = digest(&serde_json::to_string(&(prompt_source, prompt))?);
@@ -65,7 +60,15 @@ pub(super) async fn run(
                 original_prompt == prompt_digest,
                 "memory_job_response_prompt_changed"
             );
-            return Ok(response);
+            if serde_json::from_str::<serde_json::Value>(&checkpoint)?["finish_reason"] != "stop" {
+                return Err(super::job_failure::JobFailure::new(
+                    "memory_job_finish_unverified",
+                    false,
+                    "response_restore",
+                )
+                .into());
+            }
+            return Ok(parse(&response)?);
         }
         anyhow::ensure!(
             matches!(
@@ -113,18 +116,16 @@ pub(super) async fn run(
     }
     // No database connection, transaction or wall-clock task timer is held
     // across the provider call. The worker continues renewing its own lease.
-    let response = crate::llm_gateway::run_with_preacquired_resource(
+    let (safe_response, parsed) = generate(
         state,
         task,
         prompt,
         prompt_source,
-        generation.provider.clone(),
-        resource,
+        Some(generation),
+        Some(&resource),
+        &parse,
     )
-    .await
-    .map_err(|_| super::job_failure::JobFailure::provider(prompt_source))?;
-    let (safe_response, _) =
-        crate::skill_output_artifact::sensitivity_aware_text_model_view(&response);
+    .await?;
     {
         let mut db = state.core.db.get()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -146,7 +147,7 @@ pub(super) async fn run(
             WHERE job_id = ?3 AND principal_id = ?4 AND status = 'running'
               AND lease_owner = ?5 AND cancel_requested = 0",
             params![
-                json!({"schema_version":1,"phase":"provider_response_persisted",
+                json!({"schema_version":1,"phase":"provider_response_persisted","finish_reason":"stop",
                 "prompt_digest":prompt_digest, "response_digest":digest(&safe_response)})
                 .to_string(),
                 crate::now_ts_u64() as i64,
@@ -158,5 +159,92 @@ pub(super) async fn run(
         anyhow::ensure!(changed == 1, "memory_job_provider_lease_lost");
         tx.commit()?;
     }
-    Ok(safe_response)
+    Ok(parsed)
+}
+
+async fn generate<T>(
+    state: &crate::AppState,
+    task: &crate::ClaimedTask,
+    prompt: &str,
+    source: &str,
+    generation: Option<&GenerationCall<'_>>,
+    resource: Option<&crate::resource_scheduler::ResourceLease>,
+    parse: impl Fn(&str) -> Result<T, super::job_failure::JobFailure>,
+) -> anyhow::Result<(String, T)> {
+    use super::job_failure::JobFailure;
+    use claw_core::model_turn::ModelFinishReason;
+    let policy =
+        crate::task_budget_contract::load_task_budget_policy(&state.skill_rt.workspace_root);
+    let mut budget = crate::task_budget_contract::model_output::GenerationBudget::new(
+        policy.model_output,
+        crate::llm_gateway::classify_prompt_source(source),
+    );
+    let mut corrected_prompt = None;
+    let providers = match generation {
+        Some(call) => vec![call.provider.clone()],
+        None => state.task_llm_providers(task),
+    };
+    loop {
+        if let Some(call) = generation {
+            let lease = call.lease;
+            let active: bool = state.core.db.get()?.query_row(
+                "SELECT EXISTS(SELECT 1 FROM memory_jobs WHERE job_id=?1 AND principal_id=?2 AND status='running' AND lease_owner=?3 AND cancel_requested=0 AND lease_expires_at_ts>=?4)",
+                params![lease.job_id, lease.principal_id, lease.worker_id, crate::now_ts_u64() as i64], |row| row.get(0))?;
+            anyhow::ensure!(active, "memory_job_provider_lease_lost");
+        }
+        let mut hints = budget.hints();
+        crate::task_model_selection::apply_task_model_policy_hints(task, &mut hints);
+        let (text, finish) = crate::llm_gateway::run_with_provider_resource(
+            state,
+            task,
+            corrected_prompt.as_deref().unwrap_or(prompt),
+            source,
+            hints,
+            providers.clone(),
+            resource,
+        )
+        .await
+        .map_err(|error| {
+            if let Some(code) = serde_json::from_str::<serde_json::Value>(&error)
+                .ok()
+                .and_then(|v| v["error_code"].as_str().map(str::to_owned))
+            {
+                JobFailure::new(&code, false, "provider_admission")
+            } else {
+                JobFailure::provider(source)
+            }
+        })?;
+        match finish {
+            ModelFinishReason::Length if budget.grow() => continue,
+            ModelFinishReason::Length => {
+                return Err(JobFailure::new(
+                    "memory_job_output_limit_exhausted",
+                    false,
+                    "generation",
+                )
+                .into())
+            }
+            ModelFinishReason::Stop => (),
+            _ => {
+                return Err(
+                    JobFailure::new("memory_job_finish_unverified", false, "generation").into(),
+                )
+            }
+        }
+        let (safe, _) = crate::skill_output_artifact::sensitivity_aware_text_model_view(&text);
+        match parse(&safe) {
+            Ok(parsed) => return Ok((safe, parsed)),
+            Err(error)
+                if corrected_prompt.is_none()
+                    && policy.model_output.recovery_attempts > budget.attempts =>
+            {
+                budget.attempts += 1;
+                corrected_prompt = Some(format!(
+                    "{prompt}\n\n{}",
+                    json!({"schema_version":1,"previous_response_rejected":error.error_code,"regenerate_complete_object":true})
+                ));
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
 }

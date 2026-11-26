@@ -123,11 +123,10 @@ pub(crate) struct RejectedMemoryAction {
 pub(crate) fn parse_memory_intent_schema(
     raw: &str,
 ) -> Result<MemoryIntentOut, crate::prompt_utils::SchemaValidationError> {
-    crate::prompt_utils::validate_against_schema::<MemoryIntentOut>(
+    crate::prompt_utils::validate_complete_schema::<MemoryIntentOut>(
         raw,
         crate::prompt_utils::PromptSchemaId::MemoryIntent,
     )
-    .map(|validated| validated.value)
 }
 
 pub(crate) fn validate_memory_intent_actions(

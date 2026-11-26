@@ -10,6 +10,8 @@ pub(super) struct ModelVerifierOut {
     pub(super) operation_checks: Vec<OperationCheck>,
     pub(super) output_field_checks: Vec<OutputFieldCheck>,
     #[serde(default)]
+    pub(super) citation_checks: Vec<super::citation_audit::CitationCheck>,
+    #[serde(default)]
     pub(super) unsupported_claims: Vec<String>,
 }
 

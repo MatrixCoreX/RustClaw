@@ -940,7 +940,7 @@ fn parse_tool_arguments(arguments: &str) -> Value {
     serde_json::from_str(arguments).unwrap_or_else(|_| Value::String(arguments.to_string()))
 }
 
-fn openai_finish_reason(reason: &str) -> ModelFinishReason {
+pub(super) fn openai_finish_reason(reason: &str) -> ModelFinishReason {
     match reason {
         "stop" => ModelFinishReason::Stop,
         "tool_calls" | "function_call" => ModelFinishReason::ToolCalls,

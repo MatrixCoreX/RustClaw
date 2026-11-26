@@ -79,6 +79,7 @@ fn answer_verifier_schema_drift() {
     let expected = [
         "operation_checks",
         "output_field_checks",
+        "citation_checks",
         "unsupported_claims",
         "pass",
         "missing_evidence_fields",

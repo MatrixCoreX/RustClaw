@@ -55,6 +55,7 @@ pub(crate) type LlmUsageSnapshot = ModelTurnUsage;
 
 #[derive(Debug, Clone)]
 pub(crate) struct LlmProviderResponse {
+    pub(crate) finish_reason: claw_core::model_turn::ModelFinishReason,
     pub(crate) text: String,
     pub(crate) request_payload: Value,
     pub(crate) raw_response: String,

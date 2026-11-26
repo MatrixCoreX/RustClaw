@@ -46,7 +46,7 @@ Fact-candidate rules:
 - Keep at most 3 candidates.
 - `fact` should be a concise standalone statement that can be stored directly.
 - `fact_key` is required for updatable facts such as response language, testing preference, UI style, project command, or channel default. Use lowercase snake_case when possible.
-- `fact_value` should hold the structured value for `fact_key`; leave it empty only when the fact has no stable value.
+- `fact_value` should hold the value for `fact_key` as a JSON string, including when the source value is an object or array; leave it empty only when the fact has no stable value.
 - `conflict_group` must be stable for mutually exclusive facts so a newer fact can supersede the older one. Prefer `namespace:fact_key`.
 - Use `expires_at_ts=null` for durable facts. Use a Unix timestamp only when the user explicitly gives a temporary expiry.
 - Keep `knowledge_candidates` as an empty compatibility array; new facts go in `fact_candidates`.
