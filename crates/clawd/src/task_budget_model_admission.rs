@@ -72,7 +72,12 @@ pub(crate) fn prepare(
         .minimum_output
         .is_some_and(|minimum| minimum > output_cap)
     {
-        return Err(admission.denied(available));
+        return Err(json!({
+            "schema_version":1,"owner_layer":"model_policy","status":"failed",
+            "error_code":"model_output_policy_limit","message_key":"clawd.task.budget_exhausted",
+            "reason_code":"recovery_output_cap_exceeds_policy","retryable":false,"provider_called":false,
+            "configured_output_tokens":output_cap,"minimum_output_tokens":admission.minimum_output
+        }).to_string());
     }
     available
         .checked_sub(input_bound)

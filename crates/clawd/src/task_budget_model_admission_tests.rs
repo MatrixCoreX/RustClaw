@@ -197,5 +197,24 @@ fn minimum_cannot_exceed_requested_generation_cap() {
         minimum_output_tokens: Some(16384),
         ..Default::default()
     };
-    assert!(prepare(&state, &task(100000), "prompt", "plan", &mut hints).is_err());
+    let error = prepare(&state, &task(100000), "prompt", "plan", &mut hints).unwrap_err();
+    let detail: serde_json::Value = serde_json::from_str(&error).unwrap();
+    assert_eq!(detail["error_code"], "model_output_policy_limit");
+    assert_eq!(detail["configured_output_tokens"], 8192);
+    assert_eq!(detail["provider_called"], false);
+}
+
+#[test]
+fn strict_recovery_floor_is_rechecked_after_concurrent_budget_reservation() {
+    let state = AppState::test_default_with_fixture_provider();
+    let task = task(100000);
+    let mut hints = ChatRequestHints {
+        max_tokens: Some(16384),
+        minimum_output_tokens: Some(16384),
+        ..Default::default()
+    };
+    let guard = prepare(&state, &task, "prompt", "plan", &mut hints).unwrap();
+    state.core.db.get().unwrap().execute("INSERT INTO task_model_token_reservations(attempt_id,task_id,reserved_tokens,status) VALUES('other-attempt',?1,80000,'in_flight')",[&task.task_id]).unwrap();
+    assert!(guard.start(&mut hints, "fixture", "model").is_err());
+    assert_eq!(guard.attempts_started(), 0);
 }

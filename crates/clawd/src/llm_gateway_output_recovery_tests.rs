@@ -171,6 +171,19 @@ async fn exhausted_task_budget_blocks_growth_before_another_provider_request() {
     assert_eq!(fixture.limits(), vec![8192]);
 }
 
+#[tokio::test]
+async fn explicit_model_output_policy_cannot_be_raised_by_recovery() {
+    let mut fixture = Fixture::new(1, 1000000).await;
+    let mut payload: serde_json::Value = serde_json::from_str(&fixture.task.payload_json).unwrap();
+    payload["resolved_model_policy"] = json!({"max_output_tokens":8192});
+    fixture.task.payload_json = payload.to_string();
+    let error = fixture.call().await.unwrap_err();
+    let detail: serde_json::Value = serde_json::from_str(&error).unwrap();
+    assert_eq!(detail["error_code"], "model_output_policy_limit");
+    assert_eq!(detail["provider_called"], false);
+    assert_eq!(fixture.limits(), vec![8192]);
+}
+
 #[test]
 fn configured_growth_is_monotonic_bounded_and_can_be_disabled() {
     let mut policy = ModelOutputBudgetPolicy {
