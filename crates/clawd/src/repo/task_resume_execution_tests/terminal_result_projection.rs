@@ -1046,7 +1046,11 @@ fn terminal_seeded_loop_projection_materializes_async_artifact_without_model_tok
     state.policy.memory.llm_preference_fallback_enabled = true;
     let workspace = TempDirGuard::new("seeded_terminal_artifact");
     state.skill_rt.workspace_root = workspace.path.clone();
-    let source_video = workspace.path.join("downloads").join("shared-video.mp4");
+    let actor = crate::resolve_auth_identity_by_key(state, &key)
+        .unwrap()
+        .unwrap();
+    let own = state.identity_files_root(&actor).unwrap();
+    let source_video = own.join("downloads").join("shared-video.mp4");
     std::fs::create_dir_all(source_video.parent().expect("video parent"))
         .expect("create video parent");
     std::fs::write(&source_video, b"video fixture").expect("write source video");
@@ -1210,12 +1214,9 @@ fn terminal_seeded_loop_projection_materializes_async_artifact_without_model_tok
     assert!(artifacts[0]["preview_url"].as_str().is_some());
     let manifest: crate::task_artifacts::TaskArtifactManifest =
         serde_json::from_value(artifacts[0].clone()).expect("artifact manifest");
-    let delivered = crate::task_artifacts::validated_delivery_artifact_path(
-        &workspace.path,
-        task_id,
-        &manifest,
-    )
-    .expect("delivered artifact path");
+    let delivered =
+        crate::task_artifacts::validated_delivery_artifact_path(&own, task_id, &manifest)
+            .expect("delivered artifact path");
     assert_eq!(
         std::fs::read(delivered).expect("read delivered video"),
         b"video fixture"

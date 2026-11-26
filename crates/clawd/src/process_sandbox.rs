@@ -555,7 +555,7 @@ fn prepare_bubblewrap_with_process_namespace(
         command.arg("--unshare-pid");
     }
     command.arg("--unshare-ipc").arg("--unshare-uts");
-    if let Some(grants) = request.principal_readonly {
+    if request.principal_readonly.is_some() {
         command.arg("--cap-drop").arg("ALL");
         for path in [
             "/usr",
@@ -571,12 +571,6 @@ fn prepare_bubblewrap_with_process_namespace(
             "/etc/localtime",
         ] {
             command.arg("--ro-bind-try").arg(path).arg(path);
-        }
-        for path in grants {
-            let canonical = path
-                .canonicalize()
-                .map_err(|_| "sandbox_principal_grant_missing")?;
-            command.arg("--ro-bind").arg(&canonical).arg(path);
         }
     } else {
         command.arg("--ro-bind").arg("/").arg("/");
@@ -630,6 +624,16 @@ fn prepare_bubblewrap_with_process_namespace(
             .arg(&source)
             .arg(&target);
         additional_writable_targets.push(target);
+    }
+    // Map exact approved files after the private device, temporary and workspace
+    // mounts, including when an installation itself lives below one of them.
+    if let Some(grants) = request.principal_readonly {
+        for path in grants {
+            let canonical = path
+                .canonicalize()
+                .map_err(|_| "sandbox_principal_grant_missing")?;
+            command.arg("--ro-bind").arg(&canonical).arg(path);
+        }
     }
     for (source, target) in exclusions.mount_anchors(&writable_mappings)? {
         command.arg("--bind").arg(source).arg(target);

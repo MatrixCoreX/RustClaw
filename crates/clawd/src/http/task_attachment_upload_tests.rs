@@ -18,6 +18,10 @@ async fn real_multipart_supports_twenty_mib_and_rejects_oversize_and_replay_chan
     let mut state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     state.skill_rt.workspace_root = root.path().into();
     state.seed_test_auth_identity("upload-owner", "user");
+    let actor = crate::resolve_auth_identity_by_key(&state, "upload-owner")
+        .unwrap()
+        .unwrap();
+    let own = state.identity_files_root(&actor).unwrap();
     let app = Router::new()
         .route(
             "/upload/:client_id",
@@ -38,8 +42,9 @@ async fn real_multipart_supports_twenty_mib_and_rejects_oversize_and_replay_chan
     let body: serde_json::Value =
         serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
     let path = body["data"][0]["path"].as_str().unwrap();
+    assert!(!root.path().join(path).exists());
     assert_eq!(
-        std::fs::metadata(root.path().join(path)).unwrap().len(),
+        std::fs::metadata(own.join(path)).unwrap().len(),
         20 * 1024 * 1024
     );
     let response = app
@@ -51,7 +56,7 @@ async fn real_multipart_supports_twenty_mib_and_rejects_oversize_and_replay_chan
     let response = app.clone().oneshot(send(8)).await.unwrap();
     assert_eq!(response.status(), StatusCode::CONFLICT);
     assert_eq!(
-        std::fs::metadata(root.path().join(path)).unwrap().len(),
+        std::fs::metadata(own.join(path)).unwrap().len(),
         20 * 1024 * 1024
     );
     let response = app
