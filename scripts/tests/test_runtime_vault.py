@@ -39,6 +39,19 @@ class ProcessTransport(RemoteTransport):
     def command(self,operation,*args):return [sys.executable,str(Path(receiver.__file__)),operation,str(self.root),*args]
 
 
+class LockedInventoryTests(unittest.TestCase):
+    def test_lock_is_reported_and_retry_succeeds_after_release(self):
+        import fcntl
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            transport = ProcessTransport(root)
+            with (root / '.vault.lock').open('a') as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                with self.assertRaisesRegex(RuntimeError, 'vault_remote_busy'):
+                    transport.inventory()
+            self.assertEqual(transport.inventory()['objects'], {})
+
+
 class CipherTests(unittest.TestCase):
     def test_authenticated_objects_bind_identity_key_and_size(self):
         cipher=VaultCipher(b'x'*32)

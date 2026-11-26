@@ -162,3 +162,114 @@ fn ensure_schema(conn: &rusqlite::Connection) -> Result<(), String> {
     conn.execute_batch(INIT_LLM_COST_LEDGER_SQL)
         .map_err(|err| format!("ensure_llm_cost_ledger_schema:{err}"))
 }
+
+/// Fill only recorded usage for which an operator catalog covers the date of the
+/// call. Retain the original ledger projection alongside every recalculation.
+pub(crate) fn reconcile_catalog(
+    db: &rusqlite::Connection,
+    catalog: &[claw_core::config::LlmModelPricingConfig],
+) -> anyhow::Result<(usize, usize)> {
+    db.execute_batch(INIT_LLM_COST_LEDGER_SQL)?;
+    let tx = db.unchecked_transaction()?;
+    tx.execute_batch("CREATE TABLE IF NOT EXISTS llm_cost_pricing_revisions (
+        ledger_id INTEGER PRIMARY KEY, original_record_json TEXT NOT NULL, repriced_at_ts INTEGER NOT NULL
+    )")?;
+    let mut changed = 0;
+    let mut unavailable = 0;
+    {
+        let mut stmt = tx.prepare("SELECT id,record_json,date(created_at_ts,'unixepoch') FROM llm_cost_ledger
+            WHERE cost_status='unknown' AND json_valid(record_json) AND json_extract(record_json,'$.unknown_reason')='pricing_not_configured' ORDER BY id")?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let id: i64 = row.get(0)?;
+            let original: String = row.get(1)?;
+            let date: Option<String> = row.get(2)?;
+            let record: LlmCallCostRecord = match serde_json::from_str(&original) {
+                Ok(record) => record,
+                Err(_) => {
+                    unavailable += 1;
+                    continue;
+                }
+            };
+            let eligible = date.as_deref().and_then(|date| {
+                crate::providers::model_pricing_on(
+                    catalog,
+                    &record.provider,
+                    "",
+                    &record.model,
+                    date,
+                )
+            });
+            let Some(price) = eligible else {
+                unavailable += 1;
+                continue;
+            };
+            let revised = crate::providers::build_cost_record(
+                record.logical_call_index,
+                &record.prompt_label,
+                &record.provider,
+                &record.model,
+                &record.provider_status,
+                record.provider_attempts as usize,
+                record.usage.as_ref(),
+                Some(price),
+            );
+            let Some(nanos) = revised.estimated_cost_usd_nanos else {
+                unavailable += 1;
+                continue;
+            };
+            tx.execute(
+                "INSERT INTO llm_cost_pricing_revisions VALUES (?1,?2,?3)",
+                params![id, original, crate::now_ts_u64() as i64],
+            )?;
+            tx.execute("UPDATE llm_cost_ledger SET record_json=?2,cost_status='known',estimated_cost_usd_nanos=?3 WHERE id=?1",
+                params![id,serde_json::to_string(&revised)?,i64::try_from(nanos)?])?;
+            changed += 1;
+        }
+    }
+    tx.commit()?;
+    Ok((changed, unavailable))
+}
+
+#[cfg(test)]
+mod pricing_reconciliation_tests {
+    use super::*;
+
+    #[test]
+    fn historical_pricing_requires_both_usage_and_a_catalog_effective_on_the_call_date() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(INIT_LLM_COST_LEDGER_SQL).unwrap();
+        let cfg: claw_core::config::LlmModelPricingConfig = toml::from_str(
+            r#"
+            provider="vendor"
+            model="example"
+            currency="USD"
+            effective_from="2024-01-01"
+            input_usd_per_million=0.6
+            output_usd_per_million=2.4
+        "#,
+        )
+        .unwrap();
+        let record = serde_json::json!({"provider":"vendor","model":"example","prompt_label":"fixture","logical_call_index":1,
+            "provider_attempts":1,"provider_status":"ok","usage":{"input_tokens":100,"output_tokens":10},
+            "cost_status":"unknown","unknown_reason":"pricing_not_configured"});
+        for (id, ts) in [(1, 1), (2, 1_740_000_000)] {
+            db.execute("INSERT INTO llm_cost_ledger(id,task_id,user_id,provider,model,logical_call_index,prompt_label,provider_status,cost_status,record_json,created_at_ts)
+                VALUES(?1,'task',1,'vendor','example',1,'fixture','ok','unknown',?2,?3)", params![id,record.to_string(),ts]).unwrap();
+        }
+        assert_eq!(
+            reconcile_catalog(&db, std::slice::from_ref(&cfg)).unwrap(),
+            (1, 1)
+        );
+        assert_eq!(reconcile_catalog(&db, &[cfg]).unwrap(), (0, 1));
+        let row: (i64, i64) = db
+            .query_row(
+                "SELECT estimated_cost_usd_nanos,(SELECT count(*) FROM llm_cost_pricing_revisions)
+            FROM llm_cost_ledger WHERE id=2",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(row, (84_000, 1));
+    }
+}

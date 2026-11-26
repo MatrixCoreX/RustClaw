@@ -18,7 +18,7 @@ from runtime_checkpoint_storage import write_json
 from runtime_backup_local import checked_local, publish_local_status, recover_published_checkpoint
 from runtime_backup_capacity import capacity_report, verified_source_revision
 
-BUSY={'checkpoint_foreground_not_idle','checkpoint_distributed_work_active','checkpoint_already_running'}
+BUSY={'vault_remote_busy','checkpoint_foreground_not_idle','checkpoint_distributed_work_active','checkpoint_already_running'}
 CAPACITY={'checkpoint_capacity_unavailable','checkpoint_destination_low_space','checkpoint_source_storage_pressure'}
 PERMANENT={'vault_key_invalid','vault_key_not_private','vault_crypto_dependency_missing','vault_scope_invalid','vault_retention_invalid','vault_existing_object_corrupt','vault_attachments_exceed_capacity','checkpoint_cohort_mismatch','vault_receiver_not_committed'}
 

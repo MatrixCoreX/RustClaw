@@ -111,7 +111,7 @@ fn stale_lease_needs_bound_evidence_and_never_repeats_an_unknown_mutation() {
         .unwrap();
     db.execute_batch(
         "CREATE TABLE IF NOT EXISTS task_control_mailbox(task_id TEXT, action TEXT, issued_by TEXT,
-        control_id TEXT, control_seq INTEGER, status TEXT, payload_digest TEXT)",
+        control_id TEXT, control_seq INTEGER, status TEXT, payload_digest TEXT, issued_at INTEGER NOT NULL)",
     )
     .unwrap();
     drop(db);
@@ -122,8 +122,8 @@ fn stale_lease_needs_bound_evidence_and_never_repeats_an_unknown_mutation() {
         Sha256::digest(format!("target\nsteer\nlost-response\n{digest}").as_bytes())
     );
     let db = state.core.db.get().unwrap();
-    db.execute("INSERT INTO task_control_mailbox(task_id,action,issued_by,control_id,control_seq,status,payload_digest)
-        VALUES ('target','steer','task_control_api',?1,1,'applied',?2)", params![id,digest]).unwrap();
+    db.execute("INSERT INTO task_control_mailbox(task_id,action,issued_by,control_id,control_seq,status,payload_digest,issued_at)
+        VALUES ('target','steer','task_control_api',?1,1,'applied',?2,1)", params![id,digest]).unwrap();
     drop(db);
     for _ in 0..2 {
         assert!(

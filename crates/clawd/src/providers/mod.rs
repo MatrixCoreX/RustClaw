@@ -10,11 +10,11 @@ pub(crate) mod fixture_replay;
 pub(crate) mod gemini_model_turn;
 pub(crate) mod google_gemini;
 pub(crate) mod model_log_payload;
-mod reasoning_control;
 pub(crate) mod openai_compat;
 pub(crate) mod openai_model_turn;
 pub(crate) mod output;
 pub(crate) mod pricing;
+mod reasoning_control;
 pub(crate) mod routing;
 mod stream_capture;
 pub(crate) mod usage;
@@ -37,8 +37,8 @@ pub(crate) use output::{
     rotate_model_io_log_daily, truncate_text, utf8_safe_prefix, MODEL_IO_LOG_KEEP_DAYS,
 };
 pub(crate) use pricing::{
-    build_cost_record, resolve_model_pricing, summarize_task_cost, LlmCallCostRecord,
-    LlmTaskCostSummary,
+    build_cost_record, model_pricing_on, resolve_model_pricing, summarize_task_cost,
+    LlmCallCostRecord, LlmTaskCostSummary,
 };
 pub(crate) use routing::{route_providers, LlmProviderLatencyTracker, LlmProviderRouteEvaluation};
 pub(crate) use usage::{anthropic_usage_snapshot, gemini_usage_snapshot, openai_usage_snapshot};

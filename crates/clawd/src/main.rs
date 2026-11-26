@@ -759,6 +759,10 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
             .get()
             .map_err(|e| anyhow::anyhow!("get db conn for setup: {e}"))?;
         seed_users(&db, &config)?;
+        let (repriced, unknown) = runtime::reconcile_cost_catalog(&db, &config.llm.pricing)?;
+        if unknown > 0 {
+            warn!(repriced, unknown, "llm_historical_pricing_unavailable");
+        }
         ensure_schedule_schema(&db)?;
         ensure_memory_schema(&db)?;
         ensure_channel_schema(&db)?;
