@@ -89,6 +89,7 @@ A confirmed nonretryable blocker or new external user action is not an immediate
 
 Only for pure formatting after all effects/evidence succeeded AND a complete exact USER-SUPPLIED literal, retry_instruction may be minified JSON with exactly {"schema_version":1,"repair_kind":"exact_user_literal","required_exact_answer":"..."}. Copy the literal verbatim. Never use for inferred values, missing evidence, compound deliverables or another required operation.
 
+verifier_input_v1 __VERIFIER_INPUT_SIZES__
 Verification input: User request:
 __USER_REQUEST__
 

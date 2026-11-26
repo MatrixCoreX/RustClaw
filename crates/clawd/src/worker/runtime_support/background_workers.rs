@@ -498,7 +498,7 @@ async fn channel_terminal_delivery_once(state: &AppState) -> anyhow::Result<bool
 }
 
 fn stamp_current_admin_policy_for_legacy_scheduled_job(
-    state: &AppState,
+    db: &rusqlite::Connection,
     user_key: Option<&str>,
     payload: &mut Value,
 ) -> anyhow::Result<()> {
@@ -508,7 +508,7 @@ fn stamp_current_admin_policy_for_legacy_scheduled_job(
     {
         return Ok(());
     }
-    let identity = crate::resolve_auth_identity_by_key(state, user_key.unwrap())?;
+    let identity = crate::repo::auth::resolve_auth_identity_on_connection(db, user_key.unwrap())?;
     crate::task_execution_policy::stamp_authenticated_submission_policy(
         payload,
         identity.as_ref(),
@@ -518,45 +518,21 @@ fn stamp_current_admin_policy_for_legacy_scheduled_job(
     .map_err(|error| anyhow!(error.as_token()))
 }
 
+include!("scheduled_enqueue.rs");
+
 fn schedule_once(state: &AppState) -> anyhow::Result<()> {
     let now = now_ts_u64() as i64;
     let mut due_jobs: Vec<ScheduledJobDue> = Vec::new();
 
     {
         let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
-        let mut stmt = db.prepare(
-            "SELECT job_id, user_id, chat_id, user_key, principal_id, channel, external_user_id, external_chat_id, task_kind, task_payload_json, next_run_at,
-                    schedule_type, time_of_day, weekday, every_minutes, timezone, isolation_profile, permission_policy_json,
-                    thread_resume_enabled, last_thread_task_id
-             FROM scheduled_jobs
+        let mut stmt = db.prepare(&format!(
+            "{SCHEDULE_JOB_SELECT}
              WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?1
              ORDER BY next_run_at ASC
-             LIMIT 16",
-        )?;
-        let rows = stmt.query_map(rusqlite::params![now], |row| {
-            Ok(ScheduledJobDue {
-                job_id: row.get(0)?,
-                user_id: row.get(1)?,
-                chat_id: row.get(2)?,
-                user_key: row.get(3)?,
-                principal_id: row.get(4)?,
-                channel: row.get(5)?,
-                external_user_id: row.get(6)?,
-                external_chat_id: row.get(7)?,
-                task_kind: row.get(8)?,
-                task_payload_json: row.get(9)?,
-                next_run_at: row.get(10)?,
-                schedule_type: row.get(11)?,
-                time_of_day: row.get(12)?,
-                weekday: row.get(13)?,
-                every_minutes: row.get(14)?,
-                timezone: row.get(15)?,
-                isolation_profile: row.get(16)?,
-                permission_policy_json: row.get(17)?,
-                thread_resume_enabled: row.get::<_, i64>(18)? != 0,
-                last_thread_task_id: row.get(19)?,
-            })
-        })?;
+             LIMIT 16"
+        ))?;
+        let rows = stmt.query_map(rusqlite::params![now], scheduled_job_row)?;
         for row in rows {
             due_jobs.push(row?);
         }
@@ -588,76 +564,10 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
             continue;
         }
 
-        let mut payload =
-            serde_json::from_str::<Value>(&job.task_payload_json).unwrap_or_else(|_| json!({}));
-        // Jobs created before execution-policy inheritance was introduced have
-        // no policy stamp. Re-resolve the current key on every wakeup so an
-        // enabled admin keeps admin authority while a revoked key cannot.
-        stamp_current_admin_policy_for_legacy_scheduled_job(
-            state,
-            job.user_key.as_deref(),
-            &mut payload,
-        )?;
-        if let Value::Object(map) = &mut payload {
-            map.insert("channel".to_string(), Value::String(job.channel.clone()));
-            if let Some(v) = job.external_user_id.as_ref() {
-                map.insert("external_user_id".to_string(), Value::String(v.clone()));
-            }
-            if let Some(v) = job.external_chat_id.as_ref() {
-                map.insert("external_chat_id".to_string(), Value::String(v.clone()));
-            }
-            for (k, v) in crate::scheduled_run_contract::scheduled_run_policy_metadata(
-                &job.isolation_profile,
-                &job.permission_policy_json,
-            ) {
-                map.insert(k, v);
-            }
-            for (k, v) in crate::scheduled_run_contract::scheduled_run_thread_resume_metadata(
-                job.thread_resume_enabled,
-                job.last_thread_task_id.as_deref(),
-            ) {
-                map.insert(k, v);
-            }
-        }
-
-        let task_id = Uuid::new_v4().to_string();
         let run_id = format!("run_{}", Uuid::new_v4().simple());
-        let thread_ref = crate::scheduled_run_contract::scheduled_run_thread_ref(&job.job_id);
-        let now_text = now_ts();
-        if let Value::Object(map) = &mut payload {
-            for (k, v) in schedule_service::schedule_invocation_metadata(&job.job_id, &run_id) {
-                map.insert(k, v);
-            }
-        }
-        let mut db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+        let mut db = state.core.db.get()?;
         let tx = db.transaction()?;
-        tx.execute(
-            "INSERT INTO tasks (task_id, user_id, chat_id, user_key, principal_id, channel, external_user_id, external_chat_id, message_id, kind, payload_json, status, result_json, error_text, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?10, 'queued', NULL, NULL, ?11, ?11)",
-            rusqlite::params![
-                task_id,
-                job.user_id,
-                job.chat_id,
-                job.user_key,
-                job.principal_id,
-                job.channel,
-                job.external_user_id,
-                job.external_chat_id,
-                job.task_kind,
-                payload.to_string(),
-                now_text
-            ],
-        )?;
-        crate::scheduled_run_contract::insert_scheduled_run_enqueued(
-            &tx,
-            &crate::scheduled_run_contract::ScheduledRunEnqueued {
-                run_id: &run_id,
-                job_id: &job.job_id,
-                task_id: &task_id,
-                thread_ref: &thread_ref,
-                started_at: &now_text,
-            },
-        )?;
+        let task_id = enqueue_scheduled_run(&tx, &job, &run_id)?;
         if !advance_scheduled_job(&tx, &job, next_run, now, &task_id)? {
             continue;
         }

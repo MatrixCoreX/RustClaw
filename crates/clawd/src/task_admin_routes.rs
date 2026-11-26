@@ -625,6 +625,56 @@ pub(super) async fn list_task_history(
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct TriggerAutomationRunRequest {
+    job_id: String,
+    request_id: uuid::Uuid,
+}
+
+pub(super) async fn trigger_automation_run(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<TriggerAutomationRunRequest>,
+) -> TaskAdminApiResponse {
+    use crate::worker::runtime_support::{trigger_scheduled_run, ManualScheduledRun};
+    let identity = match crate::require_auth_identity_for_api::<Value>(&state, &headers) {
+        Ok(identity) => identity,
+        Err(response) => return response,
+    };
+    match tokio::task::spawn_blocking(move || {
+        trigger_scheduled_run(&state, &identity, &req.job_id, req.request_id)
+    })
+    .await
+    {
+        Ok(Ok(ManualScheduledRun::Queued {
+            task_id,
+            run_id,
+            replayed,
+        })) => super::api_ok(json!({"task_id":task_id,"run_id":run_id,"replayed":replayed})),
+        Ok(Ok(ManualScheduledRun::NotFound)) => {
+            super::api_err(StatusCode::NOT_FOUND, "scheduled_job_not_found")
+        }
+        Ok(Ok(ManualScheduledRun::Active)) => {
+            super::api_err(StatusCode::CONFLICT, "scheduled_job_already_active")
+        }
+        Ok(Err(error)) => {
+            error!(%error, "scheduled_run_trigger_failed");
+            super::api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "scheduled_run_trigger_failed",
+            )
+        }
+        Err(error) => {
+            error!(%error, "scheduled_run_trigger_join_failed");
+            super::api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "scheduled_run_trigger_failed",
+            )
+        }
+    }
+}
+
 pub(super) async fn list_automation_runs(
     State(state): State<AppState>,
     headers: HeaderMap,

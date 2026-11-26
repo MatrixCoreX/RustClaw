@@ -44,7 +44,7 @@ pub(crate) use session::{
 pub(crate) use skills::{run_capabilities, run_reload_skills, run_skills};
 pub(crate) use submit::{run_resume, run_submit};
 pub(crate) use task_control::{
-    run_active, run_automation_runs, run_cancel, run_cancel_index, run_cancel_task,
+    run_active, run_automation_now, run_automation_runs, run_cancel, run_cancel_index, run_cancel_task,
     run_continue_task, run_pause_task, run_resume_task,
 };
 pub(crate) use task_query::{

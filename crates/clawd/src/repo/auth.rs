@@ -1161,16 +1161,22 @@ pub(crate) fn resolve_auth_identity_by_key(
     state: &AppState,
     raw_user_key: &str,
 ) -> anyhow::Result<Option<AuthIdentity>> {
-    let user_key = normalize_user_key(raw_user_key);
-    if user_key.is_empty() {
-        return Ok(None);
-    }
     let db = state
         .core
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    let row = auth_principal::active_auth_key_identity(&db, &user_key)?;
+    resolve_auth_identity_on_connection(&db, raw_user_key)
+}
+
+pub(crate) fn resolve_auth_identity_on_connection(
+    db: &Connection, raw_user_key: &str,
+) -> anyhow::Result<Option<AuthIdentity>> {
+    let user_key = normalize_user_key(raw_user_key);
+    if user_key.is_empty() {
+        return Ok(None);
+    }
+    let row = auth_principal::active_auth_key_identity(db, &user_key)?;
     Ok(row.map(|(role, principal_id)| {
         build_auth_identity(&user_key, &principal_id, &role, "ui", None, Some("console"))
     }))

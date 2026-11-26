@@ -3,6 +3,27 @@ use super::*;
 #[path = "answer_verifier_runtime/citation_audit.rs"]
 mod citation_audit;
 
+// Insert values only into the trusted template. Evidence containing a literal
+// placeholder remains byte-for-byte intact and cannot alter another input.
+fn render_verifier_inputs(template: &str, inputs: &[(&str, &str)]) -> String {
+    static FIELD: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"__[A-Z_]+__").expect("verifier field syntax")
+    });
+    FIELD
+        .replace_all(
+            &crate::prompt_utils::project_prompt_template(template),
+            |hit: &regex::Captures<'_>| {
+                let name = hit.get(0).expect("matched field").as_str();
+                inputs
+                    .iter()
+                    .find_map(|(key, value)| (*key == name).then_some(*value))
+                    .unwrap_or(name)
+                    .to_owned()
+            },
+        )
+        .into_owned()
+}
+
 #[path = "answer_verifier_runtime/child_result_evidence.rs"]
 mod child_result_evidence;
 #[path = "answer_verifier_runtime/compacted_machine_ref_gap.rs"]
@@ -102,9 +123,17 @@ pub(crate) async fn verify_answer_observe_only(
     let user_request_for_prompt = answer_verifier_user_request_for_prompt(task, user_request);
     let request_language_hint =
         crate::language_policy::task_response_language_hint(state, task, user_request);
-    let prompt = crate::render_prompt_template(
+    let prompt = render_verifier_inputs(
         &resolved.template,
         &[
+            (
+                "__VERIFIER_INPUT_SIZES__",
+                &format!(
+                    "[{},{}]",
+                    user_request_for_prompt.trim().len(),
+                    candidate_answer.trim().len()
+                ),
+            ),
             ("__USER_REQUEST__", user_request_for_prompt.trim()),
             ("__REQUEST_LANGUAGE_HINT__", request_language_hint.as_str()),
             (

@@ -31,6 +31,7 @@
 "command.models" = "查看供应商和模型能力"
 "command.mcp" = "查看 MCP 服务和已发现工具"
 "command.active" = "列出运行中的任务"
+"command.automation-run-now" = "立即执行定时任务"
 "command.automation-runs" = "列出自动化运行记录"
 "command.cancel" = "取消匹配的运行中任务"
 "command.cancel-task" = "取消一个任务"

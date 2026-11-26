@@ -12,6 +12,7 @@ import urllib.error
 from jsonschema import Draft202012Validator
 from authenticated_probe_http import authenticated_urlopen
 from model_log_payload import decode_model_log_payload
+import verifier_replay_input as runtime_input
 
 
 def parse_verdict(content):
@@ -140,12 +141,7 @@ def revised_request(record, template, candidate=None, execution_snapshot=None, o
     if payload.get("stream") is not False or len(payload.get("messages", [])) != 1:
         raise ValueError("unsupported_captured_request_shape")
     message = payload["messages"][0]
-    start, end = section(message["content"], "Hard rejection checklist:\n", "\nRules:\n")
-    left, right = section(template, "Hard rejection checklist:\n", "\nRules:\n")
-    message["content"] = message["content"][:start] + template[left:right] + message["content"][end:]
-    if candidate is not None:
-        start, end = section(message["content"], "Candidate final answer:\n", "\n\nJudgment fields:")
-        message["content"] = message["content"][:start] + candidate + message["content"][end:]
+    operations = None
     if execution_snapshot is not None:
         data = execution_snapshot.get("data", {})
         if data.get("task_id") != record.get("task_id"):
@@ -158,6 +154,32 @@ def revised_request(record, template, candidate=None, execution_snapshot=None, o
                 "requested_capability", "requested_action_ref", "resolved_capability")
         operations = [{key: step.get(key) for key in keys} for step in steps
                       if step.get("executed_skill") not in ("respond", "think", "synthesize_answer", "answer_verifier")]
+    if runtime_input.START in template and runtime_input.START not in message["content"]:
+        # Import the older checklist layout before applying the current rules.
+        target = template.replace("verifier_input_v1 __VERIFIER_INPUT_SIZES__\n", "")
+        if runtime_input.CITATIONS in target:
+            left = target.index(runtime_input.CITATIONS)
+            right = target.index(runtime_input.CANDIDATE, left)
+            target = target[:left] + target[right:]
+        message["content"] = render_full_template(message["content"], target)
+    if runtime_input.START in message["content"]:
+        def transform(evidence):
+            if operations is not None:
+                evidence["executed_operations"] = {"source":"runtime_step_results","ordered":True,
+                                                   "truncated":False,"operations":operations}
+            return compact_evidence_projection(evidence) if compact_evidence else evidence
+        message["content"] = runtime_input.render_input(message["content"], template, candidate,
+            transform if operations is not None or compact_evidence else None)
+        if output_protocol:
+            message["content"] += "\n\nFinal verification output protocol:\n" + output_protocol
+        return payload
+    start, end = section(message["content"], "Hard rejection checklist:\n", "\nRules:\n")
+    left, right = section(template, "Hard rejection checklist:\n", "\nRules:\n")
+    message["content"] = message["content"][:start] + template[left:right] + message["content"][end:]
+    if candidate is not None:
+        start, end = section(message["content"], "Candidate final answer:\n", "\n\nJudgment fields:")
+        message["content"] = message["content"][:start] + candidate + message["content"][end:]
+    if operations is not None:
         start, end = section(message["content"], "Observed execution evidence:\n", "\nCurrent task context:")
         evidence = json.loads(message["content"][start:end])
         evidence["executed_operations"] = {"source": "runtime_step_results", "ordered": True,
@@ -260,6 +282,9 @@ def main():
         expected = args.expect_pass == "true"
         schema = json.loads(args.schema.read_text()) if args.schema else None
         accepted = matches_expectation(parsed, expected, args.expect_issue, schema)
+        if expected and runtime_input.START in payload["messages"][0]["content"]:
+            _, citations, _ = runtime_input.decode_input(payload["messages"][0]["content"])
+            accepted = accepted and runtime_input.citations_supported(citations or [], parsed)
         result = {"schema_version": 1, "llm_call_ref": "LLM#1", "provider": args.vendor,
                   "model": payload["model"], "prompt_label": record.get("prompt_source"),
                   "logical_prompt_path": record.get("prompt_source"),

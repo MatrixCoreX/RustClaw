@@ -63,6 +63,12 @@ pub(crate) fn ensure_channel_delivery_outbox_schema(
     db: &rusqlite::Connection,
 ) -> anyhow::Result<()> {
     db.execute_batch(INIT_CHANNEL_DELIVERY_OUTBOX_SQL)?;
+    if sqlite_table_exists(db, "scheduled_job_runs")? {
+        db.execute_batch("CREATE TRIGGER IF NOT EXISTS scheduled_run_owns_terminal_delivery
+            BEFORE INSERT ON channel_terminal_delivery_outbox
+            WHEN EXISTS(SELECT 1 FROM scheduled_job_runs WHERE task_id=NEW.task_id)
+            BEGIN SELECT RAISE(IGNORE); END;")?;
+    }
     if sqlite_table_exists(db, "channel_delivery_dispatch_claims")?
         && sqlite_table_exists(db, "channel_delivery_receipts")?
     {

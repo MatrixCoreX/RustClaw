@@ -268,3 +268,15 @@ the scan during generation with record IDs far above the per-turn sequence.
 Native response teaching distinguishes numbered presentation lists from bare
 newline-separated payloads. Bare identifiers use `free_text`; `list` adds ordinal
 numbers. Runtime response validation and bounded answer verification remain active.
+
+## Run a scheduled job immediately
+
+Use `clawcli automation-run-now --job-id JOB --request-id UUID` with the job owner's configured credential.
+The authenticated HTTP equivalent is `POST /v1/tasks/automation-runs/trigger` with `job_id` and a UUID `request_id`.
+Keep the same request ID when retrying a timed-out submission. A successful submission returns the registered run and task IDs. Check the task for completion and its schedule history for the separate channel receipt. A different request while a run is active returns HTTP 409. The scheduler uses the stored task, recipient and policy and preserves the next automatic run time.
+
+The history distinguishes provider acceptance, confirmed delivery, read and final failure. A pending or partial delivery can still require investigation. Reconcile the exact task's schedule-terminal receipt before considering another send. Old ad-hoc test tasks can have a separate ordinary-channel attempt; retain both original audit records.
+
+## Retaining deployment archives
+
+Keep the current deployment and the verified component rollback for each deployed platform. Before retiring a superseded full package, match its size and SHA-256 to the signed verification record. Verify the successor deployment and check that the original signed package remains recoverable from an unexpired artifact for that exact commit. Record its artifact ID, digest and expiry, hash the rollback archive, and check for open file handles. Retire only the identified archive and record the measured bytes and free space. Preserve manifests, signatures, provenance and verification records. Where long-term offline restoration is required, retain a durable archive beyond the artifact expiry.

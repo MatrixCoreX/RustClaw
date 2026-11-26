@@ -31,6 +31,7 @@
 "command.models" = "Inspect provider and model capabilities"
 "command.mcp" = "Inspect MCP servers and discovered tools"
 "command.active" = "List active tasks"
+"command.automation-run-now" = "Run a scheduled job now"
 "command.automation-runs" = "List automation runs"
 "command.cancel" = "Cancel matching active tasks"
 "command.cancel-task" = "Cancel one task"

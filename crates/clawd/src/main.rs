@@ -766,6 +766,7 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         repo::ensure_channel_event_admission_schema(&db)?;
         repo::ensure_channel_delivery_outbox_schema(&db)?;
         ensure_task_lease_schema(&db)?;
+        db.execute_batch(include_str!("scheduled_run_receipt_sync.sql"))?;
         let repaired_scheduled_runs =
             scheduled_run_contract::ensure_scheduled_run_terminal_sync(&db)?;
         if repaired_scheduled_runs > 0 {
@@ -1479,6 +1480,7 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         .route("/tasks/active", post(list_active_tasks))
         .route("/tasks/history", post(list_task_history))
         .route("/tasks/automation-runs", post(list_automation_runs))
+        .route("/tasks/automation-runs/trigger", post(task_admin_routes::trigger_automation_run))
         .route("/tasks/cancel", post(cancel_tasks))
         .route("/tasks/cancel-one", post(cancel_one_task))
         .route("/tasks/cancel-by-task-id", post(cancel_task_by_id_handler))
@@ -1616,6 +1618,9 @@ async fn submit_task(
     headers: HeaderMap,
     Json(mut req): Json<SubmitTaskRequest>,
 ) -> (StatusCode, Json<ApiResponse<SubmitTaskResponse>>) {
+    if req.payload.get("schedule_triggered") == Some(&serde_json::Value::Bool(true)) {
+        return api_err(StatusCode::BAD_REQUEST, "scheduled_run_requires_scheduler_endpoint");
+    }
     if worker::conversation_compaction::is_conversation_compaction_payload(&req.payload) {
         if !matches!(req.kind, claw_core::types::TaskKind::Ask) {
             return api_err::<SubmitTaskResponse>(

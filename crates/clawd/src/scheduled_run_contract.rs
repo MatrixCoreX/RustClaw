@@ -197,7 +197,7 @@ pub(crate) fn insert_scheduled_run_enqueued(
     record: &ScheduledRunEnqueued<'_>,
 ) -> anyhow::Result<()> {
     db.execute(
-        "INSERT OR IGNORE INTO scheduled_job_runs (
+        "INSERT INTO scheduled_job_runs (
             run_id, job_id, task_id, thread_ref, task_status, triage_status,
             result_json, started_at, finished_at, created_at, updated_at
         ) VALUES (?1, ?2, ?3, ?4, 'queued', NULL, '{}', ?5, NULL, ?5, ?5)",

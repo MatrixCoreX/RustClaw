@@ -295,6 +295,14 @@ enum Command {
         json: bool,
     },
 
+    /// Run an owned scheduled job now. Reuse request-id on network retries.
+    AutomationRunNow {
+        #[arg(long)]
+        job_id: String,
+        #[arg(long)]
+        request_id: uuid::Uuid,
+    },
+
     /// POST /v1/tasks/automation-runs
     AutomationRuns {
         #[arg(long)]
@@ -1450,6 +1458,10 @@ fn main() -> Result<()> {
                 exclude_task_id.clone(),
                 *json,
             )
+        }
+        Command::AutomationRunNow { job_id, request_id } => {
+            let key = key.as_deref().ok_or_else(auth::key_required_error)?;
+            commands::run_automation_now(base_url, key, job_id, *request_id)
         }
         Command::AutomationRuns {
             user_id,

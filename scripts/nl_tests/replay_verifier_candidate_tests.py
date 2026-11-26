@@ -10,6 +10,29 @@ from replay_verifier_candidate import matches_expectation, parse_verdict, revise
 
 
 class ReplayVerifierTests(unittest.TestCase):
+    def test_current_input_keeps_distinct_evidence_and_provider_layers(self):
+        from pathlib import Path
+        import verifier_replay_input as v
+        template = (Path(__file__).resolve().parents[2] / "prompts/layers/overlays/answer_verifier_prompt.md").read_text()
+        question = "标题\n\nRequest language hint:\n__CANDIDATE_ANSWER__"
+        answer = "中文 https://example.org/a" + v.END + " inside the answer"
+        rows = [{"index":0,"url":"https://example.org/a","excerpts":["Source statement"]}]
+        fields = dict(USER_REQUEST=question,REQUEST_LANGUAGE_HINT="zh-CN",EVIDENCE_POLICY_CONTEXT="",
+            OUTPUT_CONTRACT="{}",EXECUTION_EVIDENCE=json.dumps({"note":"Current task context:"}),CURRENT_CONTEXT="{}",
+            AGENT_RUNTIME_IDENTITY="assistant",CANDIDATE_ANSWER=answer,CITATION_EVIDENCE=json.dumps(rows),
+            VERIFIER_INPUT_SIZES=json.dumps([len(question.encode()),len(answer.encode())],separators=(",",":")))
+        from re import sub
+        source = "shared provider rules\n" + sub(r"__([A-Z_]+)__", lambda m:fields[m[1]],template) + "\nvendor suffix"
+        record = {"request_payload":{"stream":False,"messages":[{"role":"user","content":source}]}}
+        result = revised_request(record,template,candidate="修改 https://example.org/unknown")["messages"][0]["content"]
+        parsed, citations, tail = v.decode_input(result)
+        self.assertEqual(parsed["USER_REQUEST"],question)
+        self.assertEqual(json.loads(parsed["EXECUTION_EVIDENCE"]),{"note":"Current task context:"})
+        self.assertEqual(citations,[{"index":0,"url":"https://example.org/unknown","excerpts":[]}])
+        self.assertFalse(v.citations_supported(citations,{"citation_checks":[{"index":0,"supported":True,"quote":"Source statement"}]}))
+        self.assertTrue(result.startswith("shared provider rules\n"))
+        self.assertTrue(tail.endswith("vendor suffix"))
+
     def test_public_replay_omits_hidden_reasoning_but_keeps_public_fields(self):
         raw = {"choices":[{"message":{"content":'<think>private</think>{"pass":false}',
                                       "reasoning_content":"private", "role":"assistant"},

@@ -611,7 +611,7 @@ fn legacy_scheduled_job_revalidates_admin_authority_on_each_wakeup() {
 
     let mut enabled_payload = json!({"text": "scheduled fixture"});
     stamp_current_admin_policy_for_legacy_scheduled_job(
-        &state,
+        &state.core.db.get().unwrap(),
         Some(admin_key),
         &mut enabled_payload,
     )
@@ -632,7 +632,7 @@ fn legacy_scheduled_job_revalidates_admin_authority_on_each_wakeup() {
     }
     let mut revoked_payload = json!({"text": "scheduled fixture"});
     stamp_current_admin_policy_for_legacy_scheduled_job(
-        &state,
+        &state.core.db.get().unwrap(),
         Some(admin_key),
         &mut revoked_payload,
     )
@@ -642,5 +642,67 @@ fn legacy_scheduled_job_revalidates_admin_authority_on_each_wakeup() {
             .get(crate::task_execution_policy::POLICY_PAYLOAD_FIELD)
             .is_none(),
         "a revoked admin key must not receive an unrestricted policy stamp"
+    );
+}
+
+#[test]
+fn manual_scheduled_run_reuses_request_and_keeps_timer_and_recipient() {
+    let state = test_state();
+    state.seed_test_auth_identity("test-key", "user");
+    state.seed_test_auth_identity("another-key", "user");
+    let owner = crate::resolve_auth_identity_by_key(&state, "test-key")
+        .unwrap()
+        .unwrap();
+    let other = crate::resolve_auth_identity_by_key(&state, "another-key")
+        .unwrap()
+        .unwrap();
+    let job = "job_manual";
+    let due = crate::now_ts_u64() as i64 + 86_400;
+    insert_due_job(&state, job, "old_task", due);
+    let key = Uuid::new_v4();
+    assert!(matches!(
+        trigger_scheduled_run(&state, &other, job, key).unwrap(),
+        ManualScheduledRun::NotFound
+    ));
+    let ManualScheduledRun::Queued {
+        task_id,
+        run_id,
+        replayed: false,
+    } = trigger_scheduled_run(&state, &owner, job, key).unwrap()
+    else {
+        panic!("run missing")
+    };
+    let ManualScheduledRun::Queued {
+        task_id: replay,
+        run_id: replay_run,
+        replayed: true,
+    } = trigger_scheduled_run(&state, &owner, job, key).unwrap()
+    else {
+        panic!("replay missing")
+    };
+    assert_eq!((task_id.clone(), run_id), (replay, replay_run));
+    assert!(matches!(
+        trigger_scheduled_run(&state, &owner, job, Uuid::new_v4()).unwrap(),
+        ManualScheduledRun::Active
+    ));
+    let db = state.core.db.get().unwrap();
+    let actual: (i64,String,String,i64) = db.query_row("SELECT j.next_run_at, j.last_thread_task_id, t.channel, t.chat_id
+        FROM scheduled_jobs j JOIN scheduled_job_runs r ON j.job_id=r.job_id JOIN tasks t ON r.task_id=t.task_id WHERE t.task_id=?1",
+        [&task_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+    assert_eq!(actual, (due, "old_task".into(), "ui".into(), 7));
+    db.execute(
+        "INSERT INTO channel_terminal_delivery_outbox(task_id,state,created_at_ts,updated_at_ts)
+        VALUES (?1,'pending',1,1)",
+        [&task_id],
+    )
+    .unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM channel_terminal_delivery_outbox WHERE task_id=?1",
+            [&task_id],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
     );
 }

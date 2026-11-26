@@ -37,6 +37,34 @@ pub(crate) fn run_active(
     Ok(())
 }
 
+pub(crate) fn run_automation_now(
+    base_url: &str,
+    key: &str,
+    job_id: &str,
+    request_id: uuid::Uuid,
+) -> Result<()> {
+    let response = client::make_client()?
+        .post(format!(
+            "{}/tasks/automation-runs/trigger",
+            client::base_v1(base_url)
+        ))
+        .header("x-agent-key", key)
+        .json(&serde_json::json!({"job_id":job_id,"request_id":request_id}))
+        .send()
+        .context("trigger scheduled run")?;
+    let status = response.status();
+    let body: serde_json::Value = response.json().context("parse scheduled run response")?;
+    if !status.is_success() {
+        anyhow::bail!(
+            "trigger scheduled run returned {}: {:?}",
+            status,
+            body.get("error")
+        );
+    }
+    output::print_json_pretty(&body);
+    Ok(())
+}
+
 pub(crate) fn run_automation_runs(
     base_url: &str,
     key: &str,

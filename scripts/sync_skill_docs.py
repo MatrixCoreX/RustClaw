@@ -229,6 +229,14 @@ def prompt_template(skill: str, interface_md: str, interface_path: Path) -> str:
         params = mark_parameters(params)
 
     source_path = interface_path.relative_to(REPO_ROOT).as_posix()
+    # Packages can supply a small planning reference while retaining their full
+    # operator manual, examples and machine response contracts in INTERFACE.md.
+    playbook = _extract_section(interface_md, "Planner Playbook")
+    if playbook:
+        return (f"{PROMPT_MANAGED_MARKER}\n## Interface Source\n{source_path}\n\n"
+                f"{playbook}\n\n## Planner Selection Notes\n{planner_selection_notes}\n\n"
+                f"{MULTILINGUAL_REINFORCEMENT_BLOCK.rstrip()}\n")
+
     memory_section = ""
     if memory_entry_points:
         memory_section = f"""
