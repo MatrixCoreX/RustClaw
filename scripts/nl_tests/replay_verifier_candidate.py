@@ -60,6 +60,18 @@ def matches_expectation(parsed, expected_pass, expected_issue, schema=None):
     return isinstance(issues, list) and expected_issue in issues
 
 
+def evaluate_replay(parsed, expected, issue, schema, citations, finish):
+    # The host applies citation evidence after schema validation. A provider can
+    # correctly reject an attribution while omitting the standardized gap token.
+    valid = schema is None or Draft202012Validator(schema).is_valid(parsed)
+    effective = parsed.copy()
+    if citations and valid and finish == "stop" and not runtime_input.citations_supported(citations, parsed):
+        effective.update({"pass":False, "missing_evidence_fields":["unsupported_claims"],
+                          "answer_incomplete_reason":"citation_evidence_incomplete", "should_retry":True})
+    accepted = valid and (not citations or finish == "stop") and matches_expectation(effective, expected, issue)
+    return effective, accepted
+
+
 def section(text, start, end):
     if text.count(start) != 1 or text.count(end) != 1:
         raise ValueError("prompt_section_not_unique")
@@ -280,11 +292,16 @@ def main():
         content = choice["message"]["content"]
         clean, parsed = parse_verdict(content)
         expected = args.expect_pass == "true"
-        schema = json.loads(args.schema.read_text()) if args.schema else None
-        accepted = matches_expectation(parsed, expected, args.expect_issue, schema)
-        if expected and runtime_input.START in payload["messages"][0]["content"]:
+        schema_path = args.schema
+        schema = json.loads(schema_path.read_text()) if schema_path else None
+        citations = []
+        if runtime_input.START in payload["messages"][0]["content"]:
             _, citations, _ = runtime_input.decode_input(payload["messages"][0]["content"])
-            accepted = accepted and runtime_input.citations_supported(citations or [], parsed)
+            if schema is None and citations:
+                schema_path = Path(__file__).resolve().parents[2] / "prompts/schemas/answer_verifier.schema.json"
+                schema = json.loads(schema_path.read_text())
+        effective, accepted = evaluate_replay(parsed, expected, args.expect_issue, schema, citations,
+                                              choice.get("finish_reason"))
         result = {"schema_version": 1, "llm_call_ref": "LLM#1", "provider": args.vendor,
                   "model": payload["model"], "prompt_label": record.get("prompt_source"),
                   "logical_prompt_path": record.get("prompt_source"),
@@ -295,11 +312,11 @@ def main():
                   "output_protocol": str(args.output_protocol.resolve()) if args.output_protocol else None,
                   "full_template": args.full_template,
                   "compact_evidence": args.compact_evidence,
-                  "schema_path": str(args.schema.resolve()) if args.schema else None,
+                  "schema_path": str(schema_path.resolve()) if schema_path else None,
                   "schema_valid": Draft202012Validator(schema).is_valid(parsed) if schema else None,
                   "template_sha256": hashlib.sha256(args.template.read_bytes()).hexdigest(),
                   "request_sha256": hashlib.sha256(body).hexdigest(), "request_payload": payload,
-                  "response_text": clean, "parsed_json": parsed, "raw_response": raw,
+                  "response_text": clean, "parsed_json": parsed, "effective_verdict": effective, "raw_response": raw,
                   "finish_reason": choice.get("finish_reason"), "usage": raw.get("usage"),
                   "error": None, "accepted": accepted, "expected_pass": expected,
                   "expected_issue": None if expected else args.expect_issue}

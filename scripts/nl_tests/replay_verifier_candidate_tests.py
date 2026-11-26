@@ -10,6 +10,19 @@ from replay_verifier_candidate import matches_expectation, parse_verdict, revise
 
 
 class ReplayVerifierTests(unittest.TestCase):
+    def test_frozen_negative_uses_the_hosts_citation_gap(self):
+        from replay_verifier_candidate import evaluate_replay
+        raw = {"pass":False, "missing_evidence_fields":[], "citation_checks":[
+            {"index":0,"quote":"only $500","supported":False}]}
+        rows = [{"index":0,"url":"https://example.org","excerpts":["only $500"]}]
+        effective, accepted = evaluate_replay(raw, False, "unsupported_claims", None, rows, "stop")
+        self.assertTrue(accepted)
+        self.assertEqual(effective["missing_evidence_fields"],["unsupported_claims"])
+        self.assertEqual(raw["missing_evidence_fields"],[])
+        self.assertFalse(evaluate_replay(raw, False, "unsupported_claims", None, rows, "length")[1])
+        self.assertFalse(evaluate_replay(raw, True, "", None, rows, "stop")[1])
+        self.assertFalse(evaluate_replay(raw, False, "unsupported_claims", {"type":"array"}, rows, "stop")[1])
+
     def test_current_input_keeps_distinct_evidence_and_provider_layers(self):
         from pathlib import Path
         import verifier_replay_input as v
