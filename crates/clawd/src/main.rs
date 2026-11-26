@@ -1819,36 +1819,18 @@ async fn submit_task(
         }
     }
 
-    let attachment_root = match submit_ctx.resolved_identity.as_ref() {
-        Some(identity) if channel == ChannelKind::Ui => match state.identity_files_root(identity) {
-            Ok(root) => root,
-            Err(_) => return api_err::<SubmitTaskResponse>(StatusCode::SERVICE_UNAVAILABLE, "workspace_scope_unavailable"),
-        },
-        _ => state.skill_rt.workspace_root.clone(),
-    };
-    if let Some(ingress) = req.ingress.as_ref() {
-        if let Err(error_code) = ui_attachments::validate_channel_ingress_attachments(
-            &attachment_root,
-            &ingress.attachments,
-        ) {
-            return api_err::<SubmitTaskResponse>(StatusCode::BAD_REQUEST, error_code);
-        }
-    }
-
     let task_id = Uuid::new_v4();
     let call_id = task_id.to_string();
-    if let Err(err) = ui_attachments::materialize_ui_task_attachments_at(
-        &attachment_root,
-        &mut req.payload,
+    if let Err((status, error)) = ui_attachments::prepare_submission(
+        &state,
+        &mut req,
+        submit_ctx.resolved_identity.as_ref().filter(|_| channel == ChannelKind::Ui),
         effective_user_id,
         effective_chat_id,
         &call_id,
     ) {
-        warn!(
-            "ui attachment materialize failed call_id={} user_id={} chat_id={} err={}",
-            call_id, effective_user_id, effective_chat_id, err
-        );
-        return api_err::<SubmitTaskResponse>(StatusCode::BAD_REQUEST, err);
+        warn!(%call_id, %error, "task attachment preparation failed");
+        return api_err::<SubmitTaskResponse>(status, error);
     }
     let kind = task_kind_name(&req.kind);
     let mut ingress = build_channel_ingress_snapshot(

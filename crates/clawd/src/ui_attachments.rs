@@ -60,6 +60,30 @@ pub(crate) struct MaterializedAttachment {
     size: usize,
 }
 
+pub(crate) fn prepare_submission(
+    state: &AppState,
+    request: &mut claw_core::types::SubmitTaskRequest,
+    ui_identity: Option<&claw_core::types::AuthIdentity>,
+    user_id: i64,
+    chat_id: i64,
+    call_id: &str,
+) -> Result<(), (axum::http::StatusCode, String)> {
+    use axum::http::StatusCode;
+    let root = match ui_identity {
+        Some(identity) => state.identity_files_root(identity).map_err(|_| {
+            (StatusCode::SERVICE_UNAVAILABLE, "workspace_scope_unavailable".to_owned())
+        })?,
+        None => state.skill_rt.workspace_root.clone(),
+    };
+    if let Some(ingress) = request.ingress.as_ref() {
+        validate_channel_ingress_attachments(&root, &ingress.attachments)
+            .map_err(|code| (StatusCode::BAD_REQUEST, code.to_string()))?;
+    }
+    materialize_ui_task_attachments_at(&root, &mut request.payload, user_id, chat_id, call_id)
+        .map_err(|error| (StatusCode::BAD_REQUEST, error))
+}
+
+#[cfg(test)]
 pub(crate) fn materialize_ui_task_attachments(
     state: &AppState,
     payload: &mut Value,
