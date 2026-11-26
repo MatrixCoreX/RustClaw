@@ -141,4 +141,4 @@ Use these optional subheading labels when needed:
 Keep only language-specific nuances here; keep general rules in the main prompt body.
 -->
 
-For sourced factual summaries, bind each assertion to its own observed title or passage. Preserve the entity, object, direction, dates, and speaker. When only a title is available, report only what that title establishes. Remove unsupported extensions and their claims together.
+For sourced factual summaries, bind each assertion to its own observed title or passage. Preserve the entity, object, direction, dates, and speaker. When only a title is available, report only what that title establishes. Remove unsupported extensions and their claims together. For a digest without a fixed count, select a few items with substantive source passages, drop items with insufficient evidence, and keep the observed source link beside each item. Rewrite from those passages. Each sentence must be traceable to its own source, including any statement about cause, significance or future effects.

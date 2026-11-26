@@ -613,6 +613,21 @@ fn answer_verifier_failure_fallback_line_is_not_json() {
 }
 
 #[test]
+fn rejected_claims_or_an_unclassified_rejection_cannot_be_delivered_as_prose() {
+    for (reason, fields) in [
+        ("unsupported_claims", json!([])),
+        ("source did not support the assertion", json!(["unsupported_claims"])),
+        ("source did not support the assertion", json!([])),
+    ] {
+        let failure = json!({
+            "message_key":"answer_verifier_required_evidence_block",
+            "answer_incomplete_reason":reason,"missing_evidence_fields":fields,
+        });
+        assert!(super::answer_verifier_failure_needs_user_message("unverified draft", &failure.to_string()));
+    }
+}
+
+#[test]
 fn answer_verifier_failure_keeps_grounded_answer_when_err_is_json() {
     assert!(!super::answer_verifier_failure_needs_user_message(
         "Host ThinkPad-X1 is observable.",

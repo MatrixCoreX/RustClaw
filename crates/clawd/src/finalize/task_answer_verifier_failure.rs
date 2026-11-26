@@ -11,6 +11,11 @@ pub(super) fn compose_answer_verifier_failure_user_message(
     let language_hint =
         crate::language_policy::task_response_language_hint(state, task, user_request);
     let default_payload = answer_verifier_failure_default_payload(err_text);
+    if verification_rejects_answer_content(err_text) {
+        return crate::i18n_t_for_language_hint_with_default_vars(
+            state, &language_hint, "clawd.msg.answer_claims_unverified", &default_payload, &[],
+        );
+    }
     let missing_fields = answer_verifier_failure_missing_fields_text(err_text);
     crate::i18n_t_for_language_hint_with_default_vars(
         state,
@@ -243,13 +248,32 @@ fn answer_text_is_answer_verifier_machine_line(answer_text: &str) -> bool {
             || text.contains("reason_code=answer_verifier_required_evidence_block"))
 }
 
+fn verification_rejects_answer_content(err_text: &str) -> bool {
+    let Ok(record) = serde_json::from_str::<Value>(err_text) else {
+        return false;
+    };
+    if record["message_key"] != "answer_verifier_required_evidence_block" {
+        return false;
+    }
+    let reason = record["answer_incomplete_reason"].as_str();
+    let fields = record["missing_evidence_fields"].as_array();
+    if matches!(reason, Some("unsupported_claims" | "unsupported_claims_observed"))
+        || fields.is_some_and(|items| items.iter().any(|item| item == "unsupported_claims"))
+    {
+        return true;
+    }
+    // A rejected answer with an unclassified verdict has no evidence that its
+    // prose is safe to deliver. Preserve a known presentation-only failure.
+    fields.is_some_and(Vec::is_empty)
+        && !matches!(reason, Some("shape" | "output_format" | "requested_output_field_label_missing"))
+}
+
 pub(super) fn answer_verifier_failure_needs_user_message(
     answer_text: &str,
     err_text: &str,
 ) -> bool {
-    // Replace only when the user-visible answer itself is a machine control
-    // payload. Grounded prose must stay visible even if error_text is JSON.
-    answer_text_is_machine_json_payload(answer_text)
+    verification_rejects_answer_content(err_text)
+        || answer_text_is_machine_json_payload(answer_text)
         || answer_text_is_answer_verifier_machine_line(answer_text)
         || (answer_text.trim().is_empty()
             && (answer_text_is_machine_json_payload(err_text)

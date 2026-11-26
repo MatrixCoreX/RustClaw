@@ -95,6 +95,9 @@ fn direct_high_risk_skill_stops_at_one_shot_approval_boundary() {
 #[test]
 fn direct_write_confirmation_binds_the_verified_personal_target() {
     let mut state = state();
+    Arc::get_mut(&mut state.skill_rt.tools_policy)
+        .unwrap()
+        .approval_policy = claw_core::config::ToolApprovalPolicy::Always;
     let personal = tempfile::tempdir().unwrap();
     state.skill_rt.principal_workspace = Some(personal.path().to_owned());
     let path = personal.path().join("report.txt");
@@ -107,7 +110,11 @@ fn direct_write_confirmation_binds_the_verified_personal_target() {
             "fs_basic",
             json!({"action":"write_text","path":"report.txt","content":content}),
         );
-        assert!(verified.needs_confirmation());
+        assert!(
+            verified.needs_confirmation(),
+            "{:?}",
+            verified.verify.issues
+        );
         assert_eq!(verified.plan.steps[0].args["path"], path.to_str().unwrap());
         let ids = crate::approval_grant::confirmation_step_ids(&verified.verify.issues);
         let binding = crate::approval_grant::binding_for_confirmation_steps(
