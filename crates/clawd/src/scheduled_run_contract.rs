@@ -250,28 +250,29 @@ pub(crate) fn list_scheduled_run_history(
     job_id: Option<&str>,
     limit: usize,
 ) -> anyhow::Result<Vec<Value>> {
-    let (principal, key, user_id) = match owner {
+    // Standalone schedule databases can predate credential ownership columns.
+    // Only authenticated queries depend on the authentication schema.
+    let (owner_filter, principal, key, user_id) = match owner {
         ScheduleHistoryOwner::Authenticated(identity) => (
+            "j.principal_id=?3 OR (j.principal_id IS NULL AND
+                (j.user_key=?4 OR (j.user_key IS NULL AND j.user_id=?5)))",
             Some(identity.principal_id.as_str()),
             Some(identity.user_key.as_str()),
             identity.user_id,
         ),
-        ScheduleHistoryOwner::LocalUser(id) => (None, None, id),
+        ScheduleHistoryOwner::LocalUser(id) => ("j.user_id=?5", None, None, id),
     };
     let job = job_id
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(stable_machine_ref);
-    let mut stmt = db.prepare(
+    let mut stmt = db.prepare(&format!(
         "SELECT r.run_id, r.job_id, r.task_id, r.thread_ref, r.task_status,
                 r.triage_status, r.result_json, r.started_at, r.finished_at, r.updated_at
          FROM scheduled_job_runs r JOIN scheduled_jobs j ON j.job_id=r.job_id
-         WHERE j.chat_id=?1 AND (?2 IS NULL OR r.job_id=?2)
-           AND ((?3 IS NULL AND j.user_id=?5) OR
-                (?3 IS NOT NULL AND (j.principal_id=?3 OR
-                 (j.principal_id IS NULL AND (j.user_key=?4 OR (j.user_key IS NULL AND j.user_id=?5))))))
+         WHERE j.chat_id=?1 AND (?2 IS NULL OR r.job_id=?2) AND ({owner_filter})
          ORDER BY CAST(r.updated_at AS INTEGER) DESC, r.id DESC LIMIT ?6",
-    )?;
+    ))?;
     let rows = stmt.query_map(
         params![
             chat_id,
