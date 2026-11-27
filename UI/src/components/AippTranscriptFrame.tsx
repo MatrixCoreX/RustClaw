@@ -88,7 +88,7 @@ export function AippTranscriptFrame({ skill, version, lang, title, apiFetch }: P
             submitting = true;
             try {
               const [attachment] = await uploadTaskAttachments(fetchRef.current, id, [{
-                name: file.name, kind: kind === "video" ? "file" : "audio", mimeType: file.type, file, size: file.size,
+                name: file.name, kind, mimeType: file.type, file, size: file.size,
               }], controller.signal);
               if (!attachment) throw new Error("ui_attachment_content_missing");
               const response = await fetchRef.current(jobs, {
