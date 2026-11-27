@@ -172,6 +172,14 @@ class ProjectSiteTest(unittest.TestCase):
                     else:
                         repository = f"https://github.com/{owner}/{repo}"
                         self.assertEqual(set(nodes), {"WebPage", "WebSite", "SoftwareSourceCode"})
+                        alias = identity.get("alternate_name")
+                        for entity in ("WebSite", "SoftwareSourceCode"):
+                            self.assertEqual(nodes[entity].get("alternateName"), alias)
+                        intro_name = brand
+                        if alias:
+                            intro_name = f"{brand} ({alias})" if locale == "en" else f"{brand}（{alias}）"
+                        self.assertIn(f'<p class="intro">{intro_name} ', source)
+                        self.assertIn(intro_name, page.description)
                         self.assertEqual(nodes["WebSite"]["name"], brand)
                         self.assertEqual(nodes["WebSite"]["url"], base)
                         self.assertEqual(nodes["WebSite"]["about"]["@id"], nodes["SoftwareSourceCode"]["@id"])

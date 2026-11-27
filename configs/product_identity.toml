@@ -2,6 +2,7 @@ schema_version = 1
 
 # Change these values to rebrand the product without editing source code.
 display_name = "RustClaw"
+alternate_name = "Rust Claw"
 release_artifact_id = "rustclaw"
 release_repository = "MatrixCoreX/RustClaw"
 public_site_url = "https://rustclaw.matrixai.one/"

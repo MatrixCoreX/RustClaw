@@ -51,7 +51,9 @@ def structured_data(page: dict[str, str], breadcrumb: str | None) -> str:
     if breadcrumb is None:
         web_page["mainEntity"] = {"@id": source_id}
         maintainer = {"@id": page["profile"], "name": page["owner"], "url": page["profile"]}
+        alias = {"alternateName": page["alternate_name"]} if page["alternate_name"] else {}
         source = {
+            **alias,
             "@type": "SoftwareSourceCode",
             "@id": source_id,
             "name": page["brand"],
@@ -63,6 +65,7 @@ def structured_data(page: dict[str, str], breadcrumb: str | None) -> str:
         }
         graph.extend((
             {
+                **alias,
                 "@type": "WebSite",
                 "@id": website_id,
                 "name": page["brand"],
@@ -93,12 +96,13 @@ def read_product_identity():
     identity = subprocess.check_output(
         [
             "bash", "-c",
-            r'source "$1" && printf "%s\0%s\0%s" "$APP_DISPLAY_NAME" "$APP_RELEASE_REPOSITORY" "$(product_identity_config_value public_site_url)"',
+            r'source "$1" && printf "%s\0%s\0%s\0%s" "$APP_DISPLAY_NAME" "$APP_RELEASE_REPOSITORY" '
+            r'"$(product_identity_config_value public_site_url)" "$(product_identity_config_value alternate_name)"',
             "_", str(REPOSITORY_ROOT / "scripts/product_identity.sh"),
         ],
         text=True,
     )
-    return identity.split("\0", 2)
+    return identity.split("\0", 3)
 
 
 def write_mobile_previews(examples: Path):
@@ -114,7 +118,14 @@ def write_mobile_previews(examples: Path):
 
 
 def build(output: Path):
-    brand, release_repository, public_site_url = read_product_identity()
+    brand, release_repository, public_site_url, alternate_name = read_product_identity()
+    alternate_name = alternate_name.strip()
+    if alternate_name.casefold() == brand.casefold():
+        alternate_name = ""
+    intro_names = {
+        "en": f"{brand} ({alternate_name})" if alternate_name else brand,
+        "zh": f"{brand}（{alternate_name}）" if alternate_name else brand,
+    }
     owner, repository = release_repository.split("/", 1)
     site = f"https://{owner.lower()}.github.io/{repository}/"
     if public_site_url:
@@ -124,20 +135,20 @@ def build(output: Path):
         site = public_site_url.rstrip("/") + "/"
     github = f"https://github.com/{release_repository}"
     style_version = sha256((SOURCE / "assets/site.css").read_bytes()).hexdigest()[:12]
-    shared = {"brand": brand, "owner": owner, "site": site, "repo": github,
+    shared = {"brand": brand, "alternate_name": alternate_name, "owner": owner, "site": site, "repo": github,
               "release_repository": release_repository, "profile": f"https://github.com/{owner}",
               "style_version": style_version}
     page = Template((SOURCE / "page.html").read_text(encoding="utf-8"))
     pages = [
         (
             "en.html", "en", "", None, f"{brand} | Self-Hosted AI Agent by {owner}",
-            f"Self-host {brand} by {owner} on Raspberry Pi, Ubuntu, or macOS. Use MCP tools, search with RAG, and review media results in AiAPP.",
+            f"{intro_names['en']} is a self-hosted AI agent by {owner} for Raspberry Pi, Ubuntu, and macOS. Connect MCP tools, search with RAG, and review media in AiAPP.",
             f"The {brand} mascot beside an Agent chat about camping gear and the two posts it found, shown in AiAPP’s Media Discovery results.",
             "project-overview.jpg",
         ),
         (
             "zh.html", "zh-CN", "zh/", None, f"{brand} | 自托管 AI Agent · {owner}",
-            f"在树莓派、Ubuntu 或 macOS 上安装 {owner} 的 {brand}。接入 MCP 工具、检索 RAG 知识库，并在 AiAPP 查看媒体结果。",
+            f"{intro_names['zh']} 是 {owner} 开发的自托管 AI 智能体，支持树莓派、Ubuntu 和 macOS，可接入 MCP 工具、检索 RAG 知识库，并在 AiAPP 查看媒体结果。",
             f"{brand} 吉祥物旁，Agent 聊天页展示采集露营装备帖子的请求，AiAPP「媒体发现」页展示对应的两条结果。",
             "project-overview.jpg",
         ),
@@ -237,6 +248,7 @@ def build(output: Path):
             )
         local = shared | {
             "lang": lang,
+            "intro_name": intro_names[language],
             "title": title,
             "canonical": site + directory,
             "description": description,

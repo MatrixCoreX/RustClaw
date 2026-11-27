@@ -1,6 +1,6 @@
 # RustClaw by MatrixCoreX
 
-A self-hosted AI agent platform written in Rust for Raspberry Pi, Ubuntu, and macOS. Use the web console or a connected messaging app to ask questions, work with files, and follow tasks as they run.
+Also known as Rust Claw, this self-hosted AI agent platform is written in Rust for Raspberry Pi, Ubuntu, and macOS. Use the web console or a connected messaging app to ask questions, work with files, and follow tasks as they run.
 
 Connect external tools through the Model Context Protocol (MCP) and import your own documents into a retrieval-augmented generation (RAG) knowledge base. The agent can use a connected tool to look up a current order or cite your support handbook when answering a policy question.
 

@@ -1,6 +1,6 @@
 # RustClaw by MatrixCoreX
 
-这是一个用 Rust 编写的自托管 AI Agent 平台，可以部署在树莓派（Raspberry Pi）、Ubuntu 和 macOS 上。你可以在浏览器控制台或已绑定的消息应用里提问、发送文件、安排任务，并查看进度和结果。
+项目名也写作 Rust Claw。这是一个用 Rust 编写的自托管 AI Agent 平台，可以部署在树莓派（Raspberry Pi）、Ubuntu 和 macOS 上。你可以在浏览器控制台或已绑定的消息应用里提问、发送文件、安排任务，并查看进度和结果。
 
 通过 MCP（模型上下文协议）接入外部工具，通过 RAG（检索增强生成）让 Agent 查阅你导入的知识库。比如，Agent 可以调用工具查订单状态，也可以从售后手册里找规则并给出出处。
 
