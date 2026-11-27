@@ -13,6 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { NniOwnerAuthorizationChallenge } from "../hooks/useNniRuntime";
 import {
+  formatNniOwnerPublicKey,
   nniInsecureHttpPrivateKeyRiskAccepted,
   nniPrivateKeyOperationsAllowed,
   nniPrivateKeyOperationsRequireHttpRiskAcceptance,
@@ -314,7 +315,7 @@ export function NniAssetAccountDialog({
                 </div>
                 <label className="grid gap-1.5 text-xs text-white/60">
                   <span>{t("资产公钥", "Asset public key")}</span>
-                  <code className="break-all rounded-md bg-black/20 p-3 text-sm text-white/85">{generatedKeyPair.public_key}</code>
+                  <code className="break-all rounded-md bg-black/20 p-3 text-sm text-white/85">{formatNniOwnerPublicKey(generatedKeyPair.public_key)}</code>
                 </label>
                 <div className="grid gap-1.5">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -439,7 +440,7 @@ export function NniAssetAccountDialog({
                   {privateKeyValidation.ok ? (
                     <div className="rounded-md border border-white/10 bg-black/10 p-3">
                       <p className="text-xs text-white/50">{t("将绑定的资产公钥", "Asset public key to bind")}</p>
-                      <code className="mt-1 block break-all text-xs text-white/75">{privateKeyValidation.publicKey}</code>
+                      <code className="mt-1 block break-all text-xs text-white/75">{formatNniOwnerPublicKey(privateKeyValidation.publicKey)}</code>
                     </div>
                   ) : null}
                   <div className="flex justify-end gap-2">

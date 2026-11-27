@@ -8,6 +8,7 @@ const OWNER_PUBLIC_KEY_BYTES = 33;
 const OWNER_PRIVATE_KEY_BYTES = 32;
 const OWNER_CHECKSUM_BYTES = 4;
 const OWNER_KEY_SUFFIX = new TextEncoder().encode("K1");
+const OWNER_PUBLIC_KEY_PREFIX = "PUB_K1_";
 const OWNER_RANDOM_SEED_BYTES = 48;
 
 export const NNI_PRIVATE_KEY_INSECURE_TRANSPORT_ERROR = "nni_private_key_insecure_transport";
@@ -249,8 +250,11 @@ function bytesToHex(value: Uint8Array): string {
 }
 
 export function validateNniOwnerPublicKey(value: string): NniOwnerPublicKeyValidation {
-  const normalized = value.trim();
-  if (!normalized) return { ok: false, error: "required" };
+  const input = value.trim();
+  if (!input) return { ok: false, error: "required" };
+  const normalized = input.startsWith(OWNER_PUBLIC_KEY_PREFIX)
+    ? input.slice(OWNER_PUBLIC_KEY_PREFIX.length)
+    : input;
   if (/^(EOS|PUB_|PVT_)/.test(normalized)) {
     return { ok: false, error: "prefix_not_allowed" };
   }
@@ -277,6 +281,11 @@ export function validateNniOwnerPublicKey(value: string): NniOwnerPublicKeyValid
     return { ok: false, error: "curve_point_invalid" };
   }
   return { ok: true, normalized };
+}
+
+export function formatNniOwnerPublicKey(value: string): string {
+  const validation = validateNniOwnerPublicKey(value);
+  return validation.ok ? OWNER_PUBLIC_KEY_PREFIX + validation.normalized : value.trim();
 }
 
 export function validateNniOwnerPrivateKey(value: string): NniOwnerPrivateKeyValidation {

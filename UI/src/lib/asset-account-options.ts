@@ -1,4 +1,5 @@
 import { nniPublicKeyFormats, shortenHex } from "./nni-display";
+import { formatNniOwnerPublicKey } from "./nni-owner-public-key";
 
 type Translate = (zh: string, en: string) => string;
 
@@ -46,9 +47,10 @@ export function formatAssetAccountOption(
   const defaultLabel = account.source === "local_binding"
     ? t("硬件设备绑定账号", "Account bound to hardware device")
     : t("其他资产账户", "Other asset account");
-  const compactPublicKey = nniPublicKeyFormats(account.publicKey)?.compact ?? account.publicKey;
+  const devicePublicKey = nniPublicKeyFormats(account.publicKey)?.compact;
+  const displayedPublicKey = devicePublicKey ?? formatNniOwnerPublicKey(account.publicKey);
   const visiblePublicKey = options.fullPublicKey
-    ? compactPublicKey
-    : shortenHex(compactPublicKey, 8, 8);
+    ? displayedPublicKey
+    : shortenHex(displayedPublicKey, 15, 8);
   return `${account.label?.trim() || defaultLabel} · ${visiblePublicKey}`;
 }

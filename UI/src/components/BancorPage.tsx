@@ -52,7 +52,7 @@ import {
 } from "../lib/asset-account-options";
 import { resolveBancorMarketDirectionColors } from "../lib/bancor-market-colors";
 import { BANCOR_CANDLE_AUTO_REFRESH_SECONDS } from "../lib/bancor-refresh";
-import { nniPrivateKeyOperationsAllowed } from "../lib/nni-owner-public-key";
+import { formatNniOwnerPublicKey, nniPrivateKeyOperationsAllowed } from "../lib/nni-owner-public-key";
 import { appStorageKey } from "../lib/product-identity";
 import { BancorPriceChangePage } from "./BancorPriceChangePage";
 import { NniDecimalAmount } from "./NniDecimalAmount";
@@ -879,7 +879,7 @@ export function BancorPage({
                   ))}
                 </select>
                 <NniPublicKeyDisplay
-                  value={selectedAssetAccount.publicKey}
+                  value={formatNniOwnerPublicKey(selectedAssetAccount.publicKey)}
                   t={t}
                   className="mt-0.5"
                   valueClassName="text-[10px] leading-4 text-white/45"
@@ -1179,7 +1179,7 @@ export function BancorPage({
                       {record.side === "buy" ? t("买入 AIC", "Buy AIC") : t("卖出 AIC", "Sell AIC")}
                     </span>
                     <NniPublicKeyDisplay
-                      value={record.asset_owner_pubkey}
+                      value={formatNniOwnerPublicKey(record.asset_owner_pubkey)}
                       t={t}
                       shorten={{ head: 16, tail: 12 }}
                       allowFormatSwitch={false}

@@ -183,6 +183,9 @@ test("asset transfer history waits for the primary balance and loads external ac
 });
 
 test("asset wallet shows AIC, USD, account identity, and market estimate", () => {
+  const ownerKey = "5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M";
+  const identityMarkup = renderToStaticMarkup(<AssetsPage {...baseProps} assetOwnerPubkey={ownerKey} />);
+  assert.match(identityMarkup, new RegExp(`title="PUB_K1_${ownerKey}"`));
   const markup = renderToStaticMarkup(<AssetsPage {...baseProps} />);
 
   assert.match(markup, /data-assets-page="true"/);

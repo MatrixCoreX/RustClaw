@@ -367,7 +367,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.doesNotMatch(html, /ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C/);
   assert.doesNotMatch(html, /资产账号公钥/);
   assert.doesNotMatch(html, /Asset account public key/);
-  assert.match(html, /5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M/);
+  assert.match(html, /PUB_K1_5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M/);
   assert.doesNotMatch(html, /切换为原始十六进制公钥/);
   assert.match(html, /BANCOR 储备曲线公式/);
   assert.match(html, /role="math"/);
@@ -487,7 +487,7 @@ test("BANCOR page presents the forced-liquidity market and shows the 100 million
   assert.match(html, /data-bancor-trade-pagination="market"/);
   assert.match(html, /data-bancor-page-size="10"/);
   assert.doesNotMatch(html, /ePsnT8z2UzBzD9aB25B6EeqjKmBossaCCkxdoDQXLp5C/);
-  assert.match(html, /5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M/);
+  assert.match(html, /PUB_K1_5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M/);
   assert.doesNotMatch(html, /切换为原始十六进制公钥|切换为 Base58 编码公钥/);
   assert.doesNotMatch(html, /a2c887498554••••••••331016eb/);
   assert.doesNotMatch(html, /a2c887498554407638cbec1d0ccf11264aa1ab7749bd7913fc6753fac72cfbdb/);

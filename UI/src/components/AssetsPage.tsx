@@ -41,6 +41,7 @@ import {
   type AssetHistorySourceFilter,
 } from "../lib/asset-transfer-history";
 import { NniPublicKeyDisplay } from "./NniPublicKeyDisplay";
+import { formatNniOwnerPublicKey } from "../lib/nni-owner-public-key";
 import { AssetTransferDialog } from "./AssetTransferDialog";
 import type { AssetTransferInput } from "../hooks/useAssetTransferRuntime";
 import { FinancialServiceNodeSelector } from "./FinancialServiceNodeSelector";
@@ -458,7 +459,7 @@ export function AssetsPage({
                 ))}
               </select>
               <NniPublicKeyDisplay
-                value={selectedAssetAccount.publicKey}
+                value={formatNniOwnerPublicKey(selectedAssetAccount.publicKey)}
                 t={t}
                 className="mt-0.5"
                 valueClassName="text-[10px] leading-4 text-[var(--theme-text-muted)]"
@@ -678,7 +679,7 @@ export function AssetsPage({
             {transferHistoryEntries.map((entry) => {
               const incoming = entry.direction === "incoming";
               const DirectionIcon = incoming ? ArrowDownLeft : ArrowUpRight;
-              const counterparty = entry.counterparty || (
+              const counterparty = formatNniOwnerPublicKey(entry.counterparty) || (
                 entry.counterpartyKind === "system"
                   ? t("系统账户", "System account")
                   : entry.counterpartyKind === "pool"

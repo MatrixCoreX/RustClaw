@@ -18,6 +18,7 @@ import {
   type AssetTransferDraftError,
 } from "../lib/asset-transfer";
 import {
+  formatNniOwnerPublicKey,
   nniPrivateKeyOperationsAllowed,
   validateNniOwnerPrivateKey,
   validateNniOwnerPublicKey,
@@ -211,11 +212,11 @@ export function AssetTransferDialog({
               </div>
               <div>
                 <p className="text-xs text-[var(--theme-text-muted)]">{t("付款账户", "From")}</p>
-                <p className="mt-1 break-all font-mono text-xs text-[var(--theme-text-body)]">{sourcePublicKey}</p>
+                <p className="mt-1 break-all font-mono text-xs text-[var(--theme-text-body)]">{formatNniOwnerPublicKey(sourcePublicKey)}</p>
               </div>
               <div>
                 <p className="text-xs text-[var(--theme-text-muted)]">{t("收款账户", "To")}</p>
-                <p className="mt-1 break-all font-mono text-xs text-[var(--theme-text-body)]">{recipientPublicKey.trim()}</p>
+                <p className="mt-1 break-all font-mono text-xs text-[var(--theme-text-body)]">{formatNniOwnerPublicKey(recipientPublicKey)}</p>
               </div>
               {memo ? (
                 <div>

@@ -7,6 +7,7 @@ import { base58 } from "@scure/base";
 
 import {
   assertNniPrivateKeyOperationsAllowed,
+  formatNniOwnerPublicKey,
   generateNniOwnerKeyPair,
   NNI_INSECURE_HTTP_PRIVATE_KEY_SESSION_KEY,
   nniInsecureHttpPrivateKeyRiskAccepted,
@@ -44,10 +45,17 @@ test("NNI owner public key validation checks the full K1 envelope", () => {
     ok: true,
     normalized: VALID_OWNER_PUBLIC_KEY,
   });
-  assert.deepEqual(validateNniOwnerPublicKey(`PUB_K1_${VALID_OWNER_PUBLIC_KEY}`), {
-    ok: false,
-    error: "prefix_not_allowed",
+  const walletKey = `PUB_K1_${VALID_OWNER_PUBLIC_KEY}`;
+  assert.equal(formatNniOwnerPublicKey(VALID_OWNER_PUBLIC_KEY), walletKey);
+  assert.equal(formatNniOwnerPublicKey(walletKey), walletKey);
+  assert.deepEqual(validateNniOwnerPublicKey(` ${walletKey} `), {
+    ok: true,
+    normalized: VALID_OWNER_PUBLIC_KEY,
   });
+  for (const key of [`EOS${VALID_OWNER_PUBLIC_KEY}`, `PUB_R1_${VALID_OWNER_PUBLIC_KEY}`, `PUB_K1_${walletKey}`]) {
+    assert.deepEqual(validateNniOwnerPublicKey(key), { ok: false, error: "prefix_not_allowed" });
+  }
+  assert.equal(validateNniOwnerPublicKey(`${walletKey.slice(0, -1)}A`).ok, false);
   assert.equal(validateNniOwnerPublicKey(`${VALID_OWNER_PUBLIC_KEY.slice(0, -1)}A`).ok, false);
   assert.deepEqual(validateNniOwnerPublicKey(""), { ok: false, error: "required" });
 });

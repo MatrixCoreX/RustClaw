@@ -21,6 +21,7 @@ import { useEffect, useRef, useState } from "react";
 import { writeTextToClipboard } from "../lib/auth-keys";
 import { latestNniRewardRecord, latestVisibleNniRewardAic } from "../lib/nni-apr";
 import {
+  formatNniOwnerPublicKey,
   nniPrivateKeyOperationsAllowed,
   type NniOwnerKeyPair,
 } from "../lib/nni-owner-public-key";
@@ -273,6 +274,7 @@ export function NniPage({
     Boolean(nniOwnerKeyPair),
   );
   const nniPrimaryHex = nniPayloadHexField(nniActionResult?.payload);
+  const displayedOwnerPublicKey = nniAssetOwnerPubkey ? formatNniOwnerPublicKey(nniAssetOwnerPubkey) : "";
   const nniHeartbeatRecordsCanPrev = nniHeartbeatRecordsPage > 1;
   const nniHeartbeatRecordsCanNext = nniHeartbeatRecordsPage < nniHeartbeatRecordsTotalPages;
   const nniHeartbeatErrorsCanPrev = nniHeartbeatErrorsPage > 1;
@@ -544,8 +546,8 @@ export function NniPage({
             <div className="mt-4 rounded-xl border border-white/12 bg-black/10 p-3">
               <p className="text-xs text-white/55">{t("资产公钥", "Asset public key")}</p>
               <div className="mt-2 flex items-start gap-2">
-                <code className="min-w-0 flex-1 break-all text-sm text-white/85">{nniAssetOwnerPubkey}</code>
-                <button type="button" className="theme-secondary-btn shrink-0 px-2 py-1.5 text-xs" onClick={() => copyPrimaryHex(nniAssetOwnerPubkey)}>
+                <code className="min-w-0 flex-1 break-all text-sm text-white/85">{displayedOwnerPublicKey}</code>
+                <button type="button" className="theme-secondary-btn shrink-0 px-2 py-1.5 text-xs" onClick={() => copyPrimaryHex(displayedOwnerPublicKey)}>
                   <Copy className="h-3.5 w-3.5" /> {t("复制", "Copy")}
                 </button>
               </div>

@@ -27,7 +27,7 @@ test("asset transfer draft validates K1 accounts and exact eight-decimal units",
   const recipient = ownerPublicKey(41);
   assert.deepEqual(validateAssetTransferDraft({
     sourcePublicKey: source,
-    recipientPublicKey: recipient,
+    recipientPublicKey: `PUB_K1_${recipient}`,
     asset: "AIC",
     amount: "1.25",
     availableBalance: "2.00000000",
@@ -80,7 +80,7 @@ test("asset transfer draft rejects malformed recipients, self-transfer, precisio
   }), { ok: false, error: "recipient_invalid" });
   assert.deepEqual(validateAssetTransferDraft({
     ...common,
-    recipientPublicKey: source,
+    recipientPublicKey: `PUB_K1_${source}`,
     amount: "0.1",
   }), { ok: false, error: "same_account" });
   assert.deepEqual(validateAssetTransferDraft({ ...common, amount: "0.000000001" }), {
