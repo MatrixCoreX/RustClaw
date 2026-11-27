@@ -96,6 +96,9 @@ jobs:
 
       - name: Verify downloaded assets
         shell: bash
+        env:
+          ARCHITECTURE: ${{ inputs.architecture }}
+          SOURCE_SHA: ${{ steps.meta.outputs.source_sha }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -115,6 +118,14 @@ jobs:
           for checksum in "${checksums[@]}"; do
             (cd dist-release && sha256sum -c "$(basename "${checksum}")")
           done
+          source scripts/product_identity.sh
+          archive="${archives[0]}"
+          ssh-keygen -q -Y verify -f configs/release_allowed_signers -I release -n agent-runtime-release \
+            -s "$archive.manifest.json.sig" < "$archive.manifest.json"
+          python3 scripts/security/release_manifest.py verify --artifact "$archive" \
+            --sbom "$archive.spdx.json" --manifest "$archive.manifest.json" \
+            --expected-target "$ARCHITECTURE-apple-darwin" --expected-package-root "$APP_RELEASE_ARTIFACT_ID"
+          test "$(jq -r .release.commit "$archive.manifest.json")" = "$SOURCE_SHA"
 
       - name: Split assets above the GitHub Release limit
         shell: bash
@@ -137,6 +148,6 @@ jobs:
           else
             gh release create "${RELEASE_TAG}" "${assets[@]}" \
               --title "Agent runtime macOS ${{ inputs.architecture }} ${RELEASE_TAG}" \
-              --target "${SOURCE_SHA}" \
-              --notes "Verified full macOS package with PKG, DMG and app ZIP desktop installers, bundled Skill Store packages, AiAPP assets, and local multimedia dependencies. Assets above the GitHub Release limit are split with checksum metadata."
+              --target "${SOURCE_SHA}" --latest=false \
+              --notes "NNI, Bancor, and the local wallet now display and copy K1 public keys with the PUB_K1_ prefix. Verified full macOS package with PKG, DMG and app ZIP desktop installers, bundled Skill Store packages, AiAPP assets, and local multimedia dependencies. Assets above the GitHub Release limit are split with checksum metadata."
           fi

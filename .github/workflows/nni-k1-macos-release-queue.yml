@@ -1,0 +1,45 @@
+name: Queue verified macOS NNI K1 releases
+on:
+  push:
+    branches: [ci/nni-k1-macos-publish-20261127]
+permissions:
+  actions: write
+  contents: read
+jobs:
+  release:
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        source_run: [45945752182, 45945752728]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: aa1a0462e727d5cafa97f7b6fbcf45cd28253004
+      SOURCE_RUN: ${{ matrix.source_run }}
+    steps:
+      - name: Wait for the exact native package and dispatch publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN"
+          readout=
+          for ((poll=0; poll<210; poll++)); do
+            if readout=$(gh api "$endpoint"); then
+              test "$(jq -r '.head_sha' <<< "$readout")" = "$SOURCE_SHA"
+              test "$(jq -r '.path' <<< "$readout")" = ".github/workflows/macos-arm64-release-artifact.yml"
+              if [[ $(jq -r '.status' <<< "$readout") == completed ]]; then
+                break
+              fi
+            fi
+            sleep 60
+          done
+          test -n "$readout"
+          test "$(jq -r '.conclusion' <<< "$readout")" = success
+          version="${SOURCE_SHA:0:12}"
+          architecture="$(gh api "$endpoint/artifacts" --jq ".artifacts[].name | select(. == \"agent-runtime-macos-aarch64-$version\" or . == \"agent-runtime-macos-x86_64-$version\")" | cut -d- -f4)"
+          case "$architecture" in aarch64|x86_64) ;; *) exit 1 ;; esac
+          gh -R "$GITHUB_REPOSITORY" workflow run publish-macos-release-artifact.yml \
+            --ref "${GITHUB_REF_NAME}" -f source_run_id="$SOURCE_RUN" -f source_ref="$SOURCE_SHA" \
+            -f release_version="$version" -f architecture="$architecture"
+          printf 'Queued signed macOS release for %s from run %s\n' "$architecture" "$SOURCE_RUN"
