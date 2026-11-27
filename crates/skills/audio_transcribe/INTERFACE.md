@@ -119,4 +119,6 @@ The Audio and video transcription AiAPP accepts one audio or video file per job,
 The host checks the signed-in account's upload before queuing the job. Video jobs first use the
 installed audio extraction capability. Audio recognition uses the configured speech-to-text
 backend and displays its transcript directly. Signed-in users can reopen their own jobs,
-copy completed transcripts, and download them as UTF-8 TXT.
+copy completed transcripts, and download them as UTF-8 TXT. The same history also shows
+Agent transcripts owned by the signed-in account when a delivered transcript or a verifiable
+legacy inline result is retained. Each record identifies its origin.

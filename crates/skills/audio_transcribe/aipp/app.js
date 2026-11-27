@@ -4,6 +4,7 @@ const labels = {
     title: "音视频转写", intro: "把录音或视频里的语音转成文字。", uploadLabel: "选择音频或视频",
     start: "开始转写", resultTitle: "转写结果", copy: "复制文字", save: "下载 TXT",
     historyTitle: "我的转写记录", refresh: "刷新", more: "查看更多",
+    fromAgent: "来自 Agent", fromApp: "来自 AiAPP", historyFileUnavailable: "这条记录的转写文件已无法读取。",
     limit: "单个文件最大 {size} MB。", idle: "上传文件，或从历史记录打开转写结果。",
     opening: "正在连接…", listing: "正在加载记录…", empty: "还没有转写记录。",
     uploading: "正在上传…", queued: "等待转写", running: "正在转写", retry_wait: "等待重试",
@@ -20,6 +21,7 @@ const labels = {
     title: "Audio and video transcription", intro: "Turn speech from recordings or videos into text.",
     uploadLabel: "Choose an audio or video file", start: "Transcribe", resultTitle: "Transcript",
     copy: "Copy text", save: "Download TXT", historyTitle: "My transcripts", refresh: "Refresh", more: "Load more",
+    fromAgent: "From Agent", fromApp: "From AiAPP", historyFileUnavailable: "This transcript file is no longer available.",
     limit: "Maximum file size is {size} MB.", idle: "Upload a file or open a transcript from your history.",
     opening: "Connecting…", listing: "Loading history…", empty: "No transcripts yet.", uploading: "Uploading…",
     queued: "Waiting to transcribe", running: "Transcribing", retry_wait: "Waiting to retry", succeeded: "Complete",
@@ -110,7 +112,8 @@ function redrawHistory() {
     const date = Number.isNaN(created.valueOf()) ? "" : new Intl.DateTimeFormat(language, {
       dateStyle: "short", timeStyle: "short",
     }).format(created);
-    detail.textContent = [statusLabel(job.status), date].filter(Boolean).join(" · ");
+    const sourceLabel = job.source === "agent" ? words.fromAgent : words.fromApp;
+    detail.textContent = [sourceLabel, statusLabel(job.status), date].filter(Boolean).join(" · ");
     button.append(title, detail);
     button.addEventListener("click", () => { void openJob(job.task_id); });
     item.append(button);
@@ -169,9 +172,10 @@ async function openJob(taskId, fromPoll = false, failures = 0) {
     if (job.status === "failed") status("resultStatus", jobError(job.error_code), true);
     else status("resultStatus", [job.name, statusLabel(job.status)].filter(Boolean).join(" · "));
     if (!settled.has(job.status)) pollTimer = setTimeout(() => { void openJob(taskId, true); }, 2000);
-  } catch {
+  } catch (error) {
     if (selected !== taskId) return;
-    status("resultStatus", words.unreadable, true);
+    const message = error.message === "aipp_transcript_file_unavailable" ? words.historyFileUnavailable : words.unreadable;
+    status("resultStatus", message, true);
     if (fromPoll && failures < 2) {
       pollTimer = setTimeout(() => { void openJob(taskId, true, failures + 1); }, 3500);
     }

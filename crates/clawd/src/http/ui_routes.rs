@@ -584,6 +584,7 @@ include!("ui_routes/aipp_editions.rs");
 mod edition_tests;
 include!("ui_routes/aipp.rs");
 include!("ui_routes/aipp_transcripts.rs");
+include!("ui_routes/aipp_transcript_history.rs");
 include!("ui_routes/aipp_transcript_frame.rs");
 include!("ui_routes/aipp_assets.rs");
 #[path = "ui_routes/aipp_accounts.rs"]

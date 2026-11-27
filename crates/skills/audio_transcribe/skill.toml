@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "audio_transcribe"
-version = "0.1.10"
+version = "0.1.11"
 description = "Preview or transcribe local or remote audio through a provider-neutral adapter."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

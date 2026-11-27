@@ -344,7 +344,7 @@ async fn transcript_aipp_binds_assets_and_keeps_history_account_owned() {
     assert_eq!(
         list.data.unwrap()["items"],
         json!([{
-            "task_id": task_id, "name": "fixture.wav", "status": "succeeded", "created_at": 100
+            "task_id": task_id, "name": "fixture.wav", "status": "succeeded", "created_at": 100, "source": "aipp"
         }])
     );
 
@@ -361,7 +361,7 @@ async fn transcript_aipp_binds_assets_and_keeps_history_account_owned() {
         result.data.unwrap(),
         json!({
             "task_id": task_id, "name": "fixture.wav", "status": "succeeded",
-            "text": "A test sentence.", "error_code": null,
+            "text": "A test sentence.", "error_code": null, "source": "aipp",
         })
     );
     assert_eq!(read(admin).await.0, StatusCode::NOT_FOUND);
@@ -373,4 +373,133 @@ async fn transcript_aipp_binds_assets_and_keeps_history_account_owned() {
     assert_eq!(read(user.clone()).await.0, StatusCode::OK);
     fs::write(install.join("aipp/index.html"), b"tampered").unwrap();
     assert!(prepare_aipp_transcript_frame(state, &user, "fixture_view", &version).is_err());
+}
+
+#[tokio::test]
+async fn aipp_history_reads_owned_agent_delivery_and_legacy_transcripts() {
+    let fixture = SurfaceFixture::new(Surface::Bundle);
+    let path = fixture.manifest_path();
+    let mut manifest = skill_sdk::PackageManifest::load(&path).unwrap();
+    manifest.aipp.as_mut().unwrap().data_contract = TRANSCRIPT_CONTRACT.into();
+    fs::write(path, manifest.to_toml_string().unwrap()).unwrap();
+    let state = &fixture.state;
+    let release_view = state.get_skill_views_snapshot();
+    fixture.admitted_bundle();
+    *state.core.skill_views_snapshot.write().unwrap() = release_view;
+
+    let user = auth_headers(Some("aipp-view-user"));
+    let admin = auth_headers(Some("aipp-view-admin"));
+    let identity = require_ui_identity(state, &user).unwrap();
+    let workspace = state.identity_files_root(&identity).unwrap();
+    let id = uuid::Uuid::new_v4();
+    let text = "An actual retained transcript.\n";
+    let artifact = crate::skill_output_artifact::publish_task_text_artifact(
+        &workspace,
+        &id.to_string(),
+        "transcript-review",
+        "transcript.txt",
+        text,
+        json!({"artifact_role":"transcript_text"}),
+    )
+    .unwrap();
+    let artifacts =
+        json!({"text":"Unrelated accompanying reply", "artifacts":[artifact.artifact_ref]});
+    let result = crate::task_artifacts::materialize_scoped_task_artifacts(
+        &workspace,
+        &fixture.workspace.0,
+        &id.to_string(),
+        &artifacts.to_string(),
+    )
+    .unwrap();
+    let result: Value = serde_json::from_str(&result).unwrap();
+    let manifest =
+        crate::task_artifacts::transcript_delivery_manifest(&id.to_string(), &result).unwrap();
+    let delivered = crate::task_artifacts::validated_delivery_artifact_path(
+        &fixture.workspace.0,
+        &id.to_string(),
+        &manifest,
+    )
+    .unwrap();
+    let inline = uuid::Uuid::new_v4();
+    let other = uuid::Uuid::new_v4();
+    let legacy = json!({
+        "text": "旧转写",
+        "task_journal":{"trace":{"capability_results":[{
+            "status":"ok",
+            "data":{"extra":{"transcription_delivery":{"mode":"inline","character_count":3,"reviewed_by_model":true},
+                             "transcription_review":{"schema_version":1,"raw_text":"原识别"}}}
+        }]}}
+    });
+    {
+        let db = state.core.db.get().unwrap();
+        for (task, status, result) in [
+            (id, "succeeded", result.clone()),
+            (inline, "succeeded", legacy.clone()),
+            (other, "succeeded", result),
+            (uuid::Uuid::new_v4(), "failed", legacy),
+            (
+                uuid::Uuid::new_v4(),
+                "succeeded",
+                json!({"text": "transcript-review: is just a string."}),
+            ),
+        ] {
+            db.execute(
+                "INSERT INTO tasks(task_id,user_id,chat_id,principal_id,channel,kind,payload_json,
+                                   status,result_json,created_at,updated_at)
+                VALUES (?1,?2,?3,?4,'wechat','ask','{}',?5,?6,'100','101')",
+                rusqlite::params![
+                    task.to_string(),
+                    identity.user_id,
+                    identity.chat_id,
+                    identity.principal_id,
+                    status,
+                    result.to_string()
+                ],
+            )
+            .unwrap();
+        }
+    }
+
+    let (status, Json(list)) = list_aipp_transcripts(
+        State(state.clone()),
+        user.clone(),
+        AxumPath("fixture_view".into()),
+        Query(AippTranscriptQuery::default()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        list.data.unwrap()["items"],
+        json!([
+            {"task_id": inline, "status":"succeeded","created_at":100,"name":"transcript.txt","source":"agent"},
+            {"task_id": id, "status":"succeeded","created_at":100,"name":"transcript.txt","source":"agent"}
+        ])
+    );
+
+    let read = |headers, task| {
+        read_aipp_transcript(
+            State(state.clone()),
+            headers,
+            AxumPath(("fixture_view".into(), task)),
+        )
+    };
+    assert_eq!(read(admin, id).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(read(user.clone(), other).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(
+        read(user.clone(), inline).await.1 .0.data.unwrap()["text"],
+        "旧转写"
+    );
+    assert_eq!(
+        read(user.clone(), id).await.1 .0.data.unwrap()["text"],
+        text
+    );
+
+    fs::remove_file(delivered).unwrap();
+    assert_eq!(
+        read(user.clone(), id).await.1 .0.data.unwrap()["text"],
+        text
+    );
+    let original = workspace.join(artifact.artifact_ref["path"].as_str().unwrap());
+    fs::write(original, "corrupt transcript").unwrap();
+    assert_eq!(read(user, id).await.0, StatusCode::GONE);
 }
