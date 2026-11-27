@@ -132,13 +132,13 @@ def build(output: Path):
         (
             "en.html", "en", "", None, f"{brand} | Self-Hosted AI Agent by {owner}",
             f"Self-host {brand} by {owner} on Raspberry Pi, Ubuntu, or macOS. Use MCP tools, search with RAG, and review media results in AiAPP.",
-            f"The {brand} mascot and a Raspberry Pi next to the Media Discovery screen with two example camping posts.",
+            f"The {brand} mascot beside an Agent chat about camping gear and the two posts it found, shown in AiAPP’s Media Discovery results.",
             "project-overview.jpg",
         ),
         (
             "zh.html", "zh-CN", "zh/", None, f"{brand} | 自托管 AI Agent · {owner}",
             f"在树莓派、Ubuntu 或 macOS 上安装 {owner} 的 {brand}。接入 MCP 工具、检索 RAG 知识库，并在 AiAPP 查看媒体结果。",
-            f"{brand} 的吉祥物和树莓派旁边是媒体采集界面，展示两条露营主题的示例帖。",
+            f"{brand} 吉祥物旁，Agent 聊天页展示采集露营装备帖子的请求，AiAPP「媒体发现」页展示对应的两条结果。",
             "project-overview.jpg",
         ),
         (

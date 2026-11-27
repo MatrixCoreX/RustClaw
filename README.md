@@ -10,7 +10,9 @@ Connect external tools through the Model Context Protocol (MCP) and import your 
 
 Use the [signed Release installation guide](docs/release_installation.md) to select a package for a 64-bit Raspberry Pi, Ubuntu x86_64, or an Apple silicon or Intel Mac. The source is available under a [non-commercial license](LICENSE). Commercial use requires prior written permission from the copyright holders.
 
-![The project mascot holds a Raspberry Pi board beside the Media Discovery app showing two example camping posts.](site/assets/examples/en/project-overview.jpg)
+![The project mascot beside an Agent chat about camping gear and the two posts it found, shown in AiAPP’s Media Discovery results.](site/assets/examples/en/project-overview.jpg)
+
+[View the original cover](site/assets/examples/en/project-overview-original.jpg)
 
 <!-- ai-learning-stage: foundations -->
 - Host free-space admission and growth estimates, supervised jobs, typed memory failures, model-reviewed unchanged-summary reuse, incremental encrypted backups with retry recovery, and restart-safe log retention: [operations protection](docs/runtime_operations_protection.md).

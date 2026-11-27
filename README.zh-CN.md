@@ -10,7 +10,9 @@
 
 按[签名发布包安装说明](docs/release_installation.zh-CN.md)选择与设备匹配的安装包，支持 64 位树莓派、Ubuntu x86_64，以及配备 Apple 芯片或 Intel 处理器的 Mac。项目采用[非商业源码可用许可](LICENSE)，商业使用须事先取得版权所有者的书面许可。
 
-![项目吉祥物手持树莓派开发板，旁边的媒体采集界面展示了两条露营帖子的示例结果。](site/assets/examples/zh/project-overview.jpg)
+![项目吉祥物旁，Agent 聊天页展示采集露营装备帖子的请求，AiAPP「媒体发现」页展示对应的两条结果。](site/assets/examples/zh/project-overview.jpg)
+
+[查看原版封面](site/assets/examples/zh/project-overview-original.jpg)
 
 <!-- ai-learning-stage: foundations -->
 - 磁盘写入保护与增长预测、后台任务监督、记忆错误分类、模型审核后的未变化摘要复用、增量加密备份与失败补跑、重启日志留存：[运行保护说明](docs/runtime_operations_protection.md)。
