@@ -2,8 +2,9 @@ import type { ChatAttachment, ApiResponse } from "../types/api";
 import { readTaskSubmissionResponse } from "./api-response";
 export type UploadedTaskAttachment = { name: string; mime_type: string; size: number; kind: string; path: string };
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
+type UploadAttachment = Omit<ChatAttachment, "kind"> & { kind: ChatAttachment["kind"] | "video" };
 export async function uploadTaskAttachments(apiFetch: ApiFetch, clientId: string,
-  attachments: ChatAttachment[], signal?: AbortSignal): Promise<UploadedTaskAttachment[]> {
+  attachments: UploadAttachment[], signal?: AbortSignal): Promise<UploadedTaskAttachment[]> {
   if (!attachments.length) return [];
   const form = new FormData();
   for (const attachment of attachments) {
