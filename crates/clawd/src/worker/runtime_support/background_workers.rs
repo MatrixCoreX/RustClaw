@@ -671,7 +671,13 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
 
     // Retention is not cancellation: active execution and durable consumers own
     // their task rows until settled, even when an age or row limit is exceeded.
+    let edition_refs = crate::http::ui_routes::edition_retention_refs(state, &db)?;
     let eligible = "kind != 'ask'
+        AND NOT EXISTS (SELECT 1 FROM json_each(?3) AS retained
+            WHERE tasks.kind='run_skill' AND CASE WHEN json_valid(tasks.payload_json) THEN
+                retained.value IN (json_extract(tasks.payload_json,'$.skill_name'),
+                    json_extract(tasks.payload_json,'$.skill_name') || '.' || json_extract(tasks.payload_json,'$.args.action'))
+            ELSE 0 END)
         AND status IN ('succeeded', 'failed', 'canceled', 'timeout')
         AND (status != 'canceled' OR COALESCE(
             CASE WHEN json_valid(result_json)
@@ -706,7 +712,7 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
              LIMIT ?2
          )"
         ),
-        rusqlite::params![task_cutoff, MAINTENANCE_DELETE_BATCH_SIZE],
+        rusqlite::params![task_cutoff, MAINTENANCE_DELETE_BATCH_SIZE, edition_refs],
     )?;
 
     db.execute(
@@ -720,7 +726,7 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
         ),
         rusqlite::params![
             state.policy.maintenance.tasks_max_rows as i64,
-            MAINTENANCE_DELETE_BATCH_SIZE
+            MAINTENANCE_DELETE_BATCH_SIZE, edition_refs
         ],
     )?;
     db.execute(

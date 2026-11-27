@@ -87,3 +87,36 @@ fn edition_sources(raw: Option<&str>, skill: &str, action_refs: &[String]) -> Ve
     sources
 }
 
+/// Direct skill tasks normally expire. While a package presents their saved results as editions,
+/// they have a durable reader just like conversation turns. Read only manifests for skills with
+/// actual direct invocations, not every installed package at every maintenance tick.
+pub(crate) fn edition_retention_refs(
+    state: &AppState,
+    db: &rusqlite::Connection,
+) -> anyhow::Result<String> {
+    let view = state.get_skill_views_snapshot();
+    let mut stmt = db.prepare(
+        "SELECT DISTINCT json_extract(payload_json,'$.skill_name') FROM tasks
+         WHERE kind='run_skill' AND CASE WHEN json_valid(payload_json)
+               THEN json_type(payload_json,'$.skill_name')='text' ELSE 0 END",
+    )?;
+    let names = stmt.query_map([], |r| r.get::<_, String>(0))?;
+    let mut refs = BTreeSet::new();
+    for name in names {
+        let name = name?;
+        match active_aipp_package_in_view(state, &name, &view) {
+            Ok(Some(package)) if package.aipp.data_contract == "owned_skill_editions_v1" => {
+                refs.extend(package.aipp.edition_action_refs.into_iter().filter(|r| {
+                    r.strip_prefix(&name)
+                        .is_some_and(|suffix| suffix.starts_with('.'))
+                }));
+            }
+            // Defer deletion for this producer until its admission state can be verified.
+            Err(_) => {
+                refs.insert(name);
+            }
+            _ => {}
+        }
+    }
+    Ok(serde_json::to_string(&refs)?)
+}
