@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "doc_parse"
-version = "0.1.8"
+version = "0.2.0"
 description = "Extract semantic content from supported local documents for reading, summaries, key points, sections, and tables; not for OOXML package integrity or Office artifact revision inspection."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "package_manager"
-version = "0.1.8"
+version = "0.2.0"
 description = "Detect native package managers and preview or perform policy-gated package installation."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

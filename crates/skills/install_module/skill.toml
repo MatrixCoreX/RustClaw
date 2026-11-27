@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "install_module"
-version = "0.1.8"
+version = "0.2.0"
 description = "Use module.preview_install for every preview-only request; module.install is the separate high-risk mutating capability."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

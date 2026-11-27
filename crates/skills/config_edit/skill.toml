@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "config_edit"
-version = "0.1.8"
+version = "0.2.0"
 description = "Planner-facing structured config mutation tool. Use for plan/apply/validate/guard/read-back workflows when changing host runtime config fields."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

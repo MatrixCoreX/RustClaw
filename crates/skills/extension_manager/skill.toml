@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "extension_manager"
-version = "0.1.8"
+version = "0.2.0"
 description = "Assess capability gaps and scaffold, validate, register, or remove external skills."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

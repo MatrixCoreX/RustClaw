@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "nni"
-version = "0.1.8"
+version = "0.2.0"
 description = "Inspect NNI device and heartbeat state, manage heartbeat participation, read network rewards and Bancor data, and estimate evidence-based reward APR without executing trades."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

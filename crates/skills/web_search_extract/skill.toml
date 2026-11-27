@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "web_search_extract"
-version = "0.1.8"
+version = "0.2.0"
 description = "Search multiple available web backends by default, merge normalized result metadata, snippets, citations, and extract-ready URLs, and honor explicit user source restrictions. For source-unspecified current-information research, pair web evidence with a matching configured RSS category."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

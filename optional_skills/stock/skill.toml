@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "stock"
-version = "0.1.8"
+version = "0.2.0"
 description = "Query China A-share and US stock quotes by ticker, code, or company name with provider fallback."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

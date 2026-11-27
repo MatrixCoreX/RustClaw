@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "invest_copy"
-version = "0.1.8"
+version = "0.2.0"
 description = "Turn grounded research data into investment-oriented copy with explicit risk context."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
