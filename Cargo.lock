@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "agent-skill-sdk"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "flate2",
  "fs2",
@@ -161,7 +161,7 @@ dependencies = [
 
 [[package]]
 name = "archive-basic-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "agent-skill-sdk",
  "anyhow",
@@ -218,7 +218,7 @@ dependencies = [
 
 [[package]]
 name = "audio-synthesize-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -232,7 +232,7 @@ dependencies = [
 
 [[package]]
 name = "audio-transcribe-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -484,7 +484,7 @@ dependencies = [
 
 [[package]]
 name = "browser-web-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "agent-skill-sdk",
  "anyhow",
@@ -597,7 +597,7 @@ dependencies = [
 
 [[package]]
 name = "chinese-almanac-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -739,7 +739,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "claw-core"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "config",
@@ -763,7 +763,7 @@ dependencies = [
 
 [[package]]
 name = "clawcli"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -785,7 +785,7 @@ dependencies = [
 
 [[package]]
 name = "clawd"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "agent-skill-sdk",
  "anyhow",
@@ -901,7 +901,7 @@ dependencies = [
 
 [[package]]
 name = "config-edit-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -912,7 +912,7 @@ dependencies = [
 
 [[package]]
 name = "config-guard-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -1084,7 +1084,7 @@ dependencies = [
 
 [[package]]
 name = "crypto-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1162,7 +1162,7 @@ checksum = "d7a1e2f27636f116493b8b860f5546edb47c8d8f8ea73e1d2a20be88e28d1fea"
 
 [[package]]
 name = "db-basic-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "rusqlite",
@@ -1298,7 +1298,7 @@ dependencies = [
 
 [[package]]
 name = "doc-parse-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "agent-skill-sdk",
  "anyhow",
@@ -1312,7 +1312,7 @@ dependencies = [
 
 [[package]]
 name = "docker-basic-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -1460,7 +1460,7 @@ checksum = "dea2df4cf52843e0452895c455a1a2cfbb842a1e7329671acf418fdc53ed4c59"
 
 [[package]]
 name = "extension-manager-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "agent-skill-sdk",
  "anyhow",
@@ -1492,7 +1492,7 @@ checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 
 [[package]]
 name = "feishud"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -1589,7 +1589,7 @@ dependencies = [
 
 [[package]]
 name = "fs-discovery"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "globset",
  "ignore",
@@ -1601,7 +1601,7 @@ dependencies = [
 
 [[package]]
 name = "fs-search-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1770,7 +1770,7 @@ dependencies = [
 
 [[package]]
 name = "git-basic-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "claw-core",
@@ -1782,7 +1782,7 @@ dependencies = [
 
 [[package]]
 name = "git-forge-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "git-remote-common",
@@ -1791,7 +1791,7 @@ dependencies = [
 
 [[package]]
 name = "git-remote-common"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "claw-core",
@@ -1808,7 +1808,7 @@ dependencies = [
 
 [[package]]
 name = "git-remote-publish-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "git-remote-common",
@@ -1817,7 +1817,7 @@ dependencies = [
 
 [[package]]
 name = "git-remote-read-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "git-remote-common",
@@ -1904,7 +1904,7 @@ dependencies = [
 
 [[package]]
 name = "health-check-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -1971,7 +1971,7 @@ dependencies = [
 
 [[package]]
 name = "http-basic-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -2256,7 +2256,7 @@ dependencies = [
 
 [[package]]
 name = "image-edit-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2273,7 +2273,7 @@ dependencies = [
 
 [[package]]
 name = "image-generate-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "agent-skill-sdk",
  "anyhow",
@@ -2287,7 +2287,7 @@ dependencies = [
 
 [[package]]
 name = "image-vision-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2354,7 +2354,7 @@ dependencies = [
 
 [[package]]
 name = "install-module-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "agent-skill-sdk",
  "anyhow",
@@ -2365,7 +2365,7 @@ dependencies = [
 
 [[package]]
 name = "invest-copy-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "regex",
@@ -2591,7 +2591,7 @@ dependencies = [
 
 [[package]]
 name = "kb-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "agent-skill-sdk",
  "anyhow",
@@ -2618,7 +2618,7 @@ dependencies = [
 
 [[package]]
 name = "larkd"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -2718,7 +2718,7 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "log-analyze-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "agent-skill-sdk",
  "anyhow",
@@ -2747,7 +2747,7 @@ dependencies = [
 
 [[package]]
 name = "map-merchant-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -2862,7 +2862,7 @@ checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
 name = "music-generate-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "claw-core",
@@ -2914,7 +2914,7 @@ dependencies = [
 
 [[package]]
 name = "nni-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "claw-core",
@@ -3003,7 +3003,7 @@ dependencies = [
 
 [[package]]
 name = "office-workspace-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "hex",
@@ -3084,7 +3084,7 @@ dependencies = [
 
 [[package]]
 name = "package-manager-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "agent-skill-sdk",
  "anyhow",
@@ -3264,7 +3264,7 @@ dependencies = [
 
 [[package]]
 name = "photo-organize-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3451,7 +3451,7 @@ dependencies = [
 
 [[package]]
 name = "process-basic-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "agent-skill-sdk",
  "anyhow",
@@ -4504,7 +4504,7 @@ dependencies = [
 
 [[package]]
 name = "service-control-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -4639,7 +4639,7 @@ checksum = "b2aa850e253778c88a04c3d7323b043aeda9d3e30d5971937c1855769763678e"
 
 [[package]]
 name = "skill-runner"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "agent-skill-sdk",
  "anyhow",
@@ -4739,7 +4739,7 @@ dependencies = [
 
 [[package]]
 name = "stock-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "encoding_rs",
@@ -4835,7 +4835,7 @@ dependencies = [
 
 [[package]]
 name = "system-basic-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4888,7 +4888,7 @@ dependencies = [
 
 [[package]]
 name = "telegramd"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "claw-core",
@@ -5390,7 +5390,7 @@ dependencies = [
 
 [[package]]
 name = "transform-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "serde_json",
@@ -5629,7 +5629,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "video-generate-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "agent-skill-sdk",
  "anyhow",
@@ -5643,7 +5643,7 @@ dependencies = [
 
 [[package]]
 name = "video-transcribe-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -5823,7 +5823,7 @@ dependencies = [
 
 [[package]]
 name = "weather-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -5835,7 +5835,7 @@ dependencies = [
 
 [[package]]
 name = "web-search-extract-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "regex",
@@ -5869,7 +5869,7 @@ dependencies = [
 
 [[package]]
 name = "webd"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -5907,7 +5907,7 @@ dependencies = [
 
 [[package]]
 name = "wechat-ilink"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "aes",
  "axum 0.7.9",
@@ -5929,7 +5929,7 @@ dependencies = [
 
 [[package]]
 name = "wechatd"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -5952,7 +5952,7 @@ dependencies = [
 
 [[package]]
 name = "whatsapp_webd"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -5965,7 +5965,7 @@ dependencies = [
 
 [[package]]
 name = "whatsappd"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -6425,7 +6425,7 @@ checksum = "9edde0db4769d2dc68579893f2306b26c6ecfbe0ef499b013d731b7b9247e0b9"
 
 [[package]]
 name = "x-skill"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "serde",
