@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "audio_transcribe"
-version = "0.1.9"
+version = "0.1.10"
 description = "Preview or transcribe local or remote audio through a provider-neutral adapter."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
@@ -73,3 +73,14 @@ output_fields = []
 [capability_request.evidence_contract]
 required = false
 selectors = []
+
+[aipp]
+schema_version = 1
+renderer = "sandbox_bundle_v1"
+data_contract = "owned_transcript_jobs_v1"
+icon = "audio_lines"
+default_locale = "en"
+titles = { zh = "音视频转写", en = "Audio and video transcription" }
+descriptions = { zh = "上传录音或视频，查看转写进度，复制或下载文字。", en = "Upload audio or video, follow progress, and copy or download your transcript." }
+asset_root = "aipp"
+entrypoint = "aipp/index.html"

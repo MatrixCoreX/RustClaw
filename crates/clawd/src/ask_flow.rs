@@ -341,6 +341,47 @@ pub(crate) async fn transcribe_attached_videos_for_ask(
     }))
 }
 
+/// Transcribe one already authenticated upload for a typed attachment job.
+pub(crate) async fn transcribe_single_attachment(
+    state: &AppState,
+    task: &ClaimedTask,
+    attachment: &Value,
+    video: bool,
+) -> Result<String, String> {
+    let input = audio_arg_from_payload(attachment)
+        .filter(|value| value.get("path").is_some())
+        .ok_or("aipp_transcript_attachment_invalid")?;
+    let audio = if video {
+        let extracted = run_resolved_skill_capability(
+            state,
+            task,
+            "video.extract_audio",
+            json!({"action": "extract_audio", "video": input}),
+            "video",
+        )
+        .await
+        .map_err(|error| {
+            video_failure_record(0, "extract_audio", &error)["error_code"]
+                .as_str()
+                .unwrap_or("video_transcription_unavailable")
+                .to_owned()
+        })?;
+        let path = extracted
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.pointer("/extracted_audio/path"))
+            .and_then(Value::as_str)
+            .ok_or("extracted_audio_missing")?;
+        json!({"path": path})
+    } else {
+        input
+    };
+    transcribe_with_configured_stt(state, task, audio, &json!({}))
+        .await
+        .map(|evidence| evidence.text)
+        .map_err(|error| audio_failure_fields(&error).0)
+}
+
 async fn transcribe_with_configured_stt(
     state: &AppState,
     task: &ClaimedTask,

@@ -18,6 +18,8 @@ HOST_FILES = (
     "crates/clawd/src/http/ui_routes/aipp_assets.rs",
     "crates/clawd/src/http/ui_routes/aipp_activity_query.rs",
     "crates/clawd/src/http/ui_routes/aipp_editions.rs",
+    "crates/clawd/src/http/ui_routes/aipp_transcripts.rs",
+    "UI/src/components/AippTranscriptFrame.tsx",
     "UI/src/components/AippEditionList.tsx",
     "UI/src/components/AippPage.tsx",
 )
@@ -29,6 +31,7 @@ SUPPORTED_HOST_PAIRS = {
 }
 SUPPORTED_SANDBOX_CONTRACTS = {
     "capability_bridge_v1",
+    "owned_transcript_jobs_v1",
 }
 
 

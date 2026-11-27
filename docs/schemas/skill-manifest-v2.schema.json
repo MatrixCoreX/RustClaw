@@ -138,7 +138,7 @@
       "properties": {
         "schema_version": { "const": 1 },
         "renderer": { "enum": ["collection_feed_v1", "task_activity_v1", "schedule_history_v1", "edition_list_v1", "sandbox_bundle_v1"] },
-        "data_contract": { "enum": ["media_collection_v1", "skill_task_activity_v1", "owned_schedule_runs_v1", "owned_skill_editions_v1", "capability_bridge_v1"] },
+        "data_contract": { "enum": ["media_collection_v1", "skill_task_activity_v1", "owned_schedule_runs_v1", "owned_skill_editions_v1", "capability_bridge_v1", "owned_transcript_jobs_v1"] },
         "icon": { "$ref": "#/$defs/name" },
         "default_locale": { "$ref": "#/$defs/locale" },
         "titles": {
@@ -172,7 +172,10 @@
           }
         }
       },
-      "allOf": [{"if":{"required":["edition_action_refs"]},"then":{"properties":{"renderer":{"const":"edition_list_v1"}}}}],
+      "allOf": [
+        { "if": { "required": ["edition_action_refs"] }, "then": { "properties": { "renderer": { "const": "edition_list_v1" } } } },
+        { "if": { "properties": { "data_contract": { "const": "owned_transcript_jobs_v1" } } }, "then": { "properties": { "bridge_capabilities": { "maxItems": 0 } } } }
+      ],
       "oneOf": [
         {
           "properties": {
@@ -216,7 +219,7 @@
           "required": ["asset_root", "entrypoint"],
           "properties": {
             "renderer": { "const": "sandbox_bundle_v1" },
-            "data_contract": { "const": "capability_bridge_v1" }
+            "data_contract": { "enum": ["capability_bridge_v1", "owned_transcript_jobs_v1"] }
           },
           "not": { "required": ["task_channel_scope"] }
         }

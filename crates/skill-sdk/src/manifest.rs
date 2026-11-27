@@ -411,7 +411,13 @@ impl AippSpec {
                     ));
                 }
             }
-            ("sandbox_bundle_v1", "capability_bridge_v1") => {
+            ("sandbox_bundle_v1", "capability_bridge_v1" | "owned_transcript_jobs_v1") => {
+                if self.data_contract == "owned_transcript_jobs_v1" && !self.bridge_capabilities.is_empty() {
+                    return Err(SkillSdkError::new(
+                        "manifest_aipp_transcript_capabilities_invalid",
+                        "transcript jobs use the host task contract",
+                    ));
+                }
                 if self.task_channel_scope.is_some() {
                     return Err(SkillSdkError::new(
                         "manifest_aipp_task_channel_scope_invalid",

@@ -168,6 +168,10 @@ fn active_aipp_package_in_view(
         {
             return Err("aipp_generation_binding_mismatch".to_string());
         }
+        // The attachment bridge is enabled only for release-reviewed bundles.
+        if verified.manifest.aipp.as_ref().is_some_and(|aipp| aipp.data_contract == TRANSCRIPT_CONTRACT) {
+            return Err("aipp_bundle_requires_release_approval".to_string());
+        }
         let package_root = verified.install_dir;
         (verified.manifest, package_root)
     } else {
@@ -179,10 +183,20 @@ fn active_aipp_package_in_view(
         };
         let manifest = skill_sdk::PackageManifest::load(&manifest_path)
             .map_err(|_| "aipp_manifest_invalid".to_string())?;
-        let package_root = manifest_path
-            .parent()
-            .ok_or_else(|| "aipp_install_path_invalid".to_string())?
-            .to_path_buf();
+        let package_root = if manifest.aipp.as_ref().is_some_and(|aipp| aipp.data_contract == TRANSCRIPT_CONTRACT) {
+            let verified = skill_sdk::InstallReceiptStore::new(skill_package_root(state))
+                .verified_current_metadata(skill_name)
+                .map_err(|_| "aipp_install_receipt_invalid".to_string())?;
+            if verified.manifest != manifest {
+                return Err("aipp_generation_binding_mismatch".to_string());
+            }
+            verified.install_dir
+        } else {
+            manifest_path
+                .parent()
+                .ok_or_else(|| "aipp_install_path_invalid".to_string())?
+                .to_path_buf()
+        };
         (manifest, package_root)
     };
     let Some(aipp) = manifest.aipp.clone() else {
@@ -241,7 +255,7 @@ fn read_aipp_catalog(
     let view = state.get_skill_views_snapshot();
     let mut apps = project_aipp_catalog(state, &view);
     if !actor.role.eq_ignore_ascii_case("admin") {
-        apps.retain(|app| app.installed && matches!(app.data_contract.as_str(), "owned_schedule_runs_v1" | "owned_skill_editions_v1"));
+        apps.retain(|app| app.installed && matches!(app.data_contract.as_str(), "owned_schedule_runs_v1" | "owned_skill_editions_v1" | "owned_transcript_jobs_v1"));
     }
     crate::api_ok(json!({ "schema_version": 1, "apps": apps }))
 

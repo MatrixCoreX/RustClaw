@@ -41,6 +41,7 @@ async fn request(
                 State(state.clone()),
                 headers,
                 AxumPath(("fixture_view".into(), asset.into())),
+                Query(AippBundleQuery::default()),
             )
             .await
         }
@@ -266,3 +267,134 @@ mod security;
 
 #[path = "aipp_read_surfaces_tests/generation.rs"]
 mod generation;
+
+#[tokio::test]
+async fn transcript_aipp_binds_assets_and_keeps_history_account_owned() {
+    let fixture = SurfaceFixture::new(Surface::Bundle);
+    let manifest_path = fixture.manifest_path();
+    let mut manifest = skill_sdk::PackageManifest::load(&manifest_path).unwrap();
+    manifest.aipp.as_mut().unwrap().data_contract = TRANSCRIPT_CONTRACT.to_owned();
+    fs::write(&manifest_path, manifest.to_toml_string().unwrap()).unwrap();
+    let state = &fixture.state;
+    let release_view = state.get_skill_views_snapshot();
+    let install = fixture.admitted_bundle();
+    assert_eq!(
+        active_aipp_package(state, "fixture_view").err().as_deref(),
+        Some("aipp_bundle_requires_release_approval")
+    );
+    *state.core.skill_views_snapshot.write().unwrap() = release_view.clone();
+    let user = auth_headers(Some("aipp-view-user"));
+    let admin = auth_headers(Some("aipp-view-admin"));
+    let version = manifest.package.version.clone();
+    assert_eq!(
+        prepare_aipp_bundle_asset(
+            state,
+            &user,
+            "fixture_view",
+            "aipp/index.html",
+            Some("0.0.0")
+        )
+        .unwrap_err()
+        .0,
+        StatusCode::CONFLICT,
+    );
+    let (path, mime) = prepare_aipp_bundle_asset(
+        state,
+        &user,
+        "fixture_view",
+        "aipp/index.html",
+        Some(&version),
+    )
+    .unwrap();
+    assert_eq!(
+        path,
+        install.join("aipp/index.html").canonicalize().unwrap()
+    );
+    assert_eq!(mime, "text/html; charset=utf-8");
+    assert!(prepare_aipp_bundle_asset(
+        state,
+        &user,
+        "fixture_view",
+        "aipp/../skill.toml",
+        Some(&version),
+    )
+    .is_err());
+
+    let (status, _) = submit_aipp_transcript(
+        State(state.clone()),
+        user.clone(),
+        AxumPath("fixture_view".into()),
+        Json(AippTranscriptRequest {
+            request_id: uuid::Uuid::new_v4(),
+            package_version: version.clone(),
+            attachment: json!({"name": "wrong.wav", "kind": "audio", "size": 16,
+                                "mime_type": "audio/wav", "path": "other/owner.wav"}),
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let identity = require_ui_identity(state, &user).unwrap();
+    let task_id = uuid::Uuid::new_v4();
+    {
+        let db = state.core.db.get().unwrap();
+        db.execute(
+            "INSERT INTO tasks(task_id, user_id, chat_id, principal_id, channel, kind, payload_json,
+                               status, result_json, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 'ui', 'ask', ?5, 'succeeded', ?6, '100', '101')",
+            rusqlite::params![
+                task_id.to_string(), identity.user_id, identity.chat_id, identity.principal_id,
+                json!({"entrypoint": TRANSCRIPT_ENTRYPOINT, "aipp_skill": "fixture_view",
+                       "attachments": [{"name": "fixture.wav", "path": "private/upload"}]}).to_string(),
+                json!({"text": "A test sentence.", "private_path": "private/export"}).to_string(),
+            ],
+        ).unwrap();
+    }
+    let (status, Json(list)) = list_aipp_transcripts(
+        State(state.clone()),
+        user.clone(),
+        AxumPath("fixture_view".into()),
+        Query(AippTranscriptQuery::default()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        list.data.unwrap()["items"],
+        json!([{
+            "task_id": task_id, "name": "fixture.wav", "status": "succeeded", "created_at": 100
+        }])
+    );
+
+    let read = |headers| {
+        read_aipp_transcript(
+            State(state.clone()),
+            headers,
+            AxumPath(("fixture_view".into(), task_id)),
+        )
+    };
+    let (status, Json(result)) = read(user.clone()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        result.data.unwrap(),
+        json!({
+            "task_id": task_id, "name": "fixture.wav", "status": "succeeded",
+            "text": "A test sentence.", "error_code": null,
+        })
+    );
+    assert_eq!(read(admin).await.0, StatusCode::NOT_FOUND);
+
+    let service = aipp_admission_service(state).unwrap();
+    service.set_aipp_installed("fixture_view", false).unwrap();
+    assert_eq!(read(user.clone()).await.0, StatusCode::NOT_FOUND);
+    service.set_aipp_installed("fixture_view", true).unwrap();
+    assert_eq!(read(user.clone()).await.0, StatusCode::OK);
+    fs::write(install.join("aipp/index.html"), b"tampered").unwrap();
+    assert!(prepare_aipp_bundle_asset(
+        state,
+        &user,
+        "fixture_view",
+        "aipp/index.html",
+        Some(&version),
+    )
+    .is_err());
+}

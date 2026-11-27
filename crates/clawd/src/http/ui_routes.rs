@@ -236,6 +236,8 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             get(get_aipp_bundle_asset),
         )
         .route("/aipps/:skill_name/items", get(get_aipp_items))
+        .route("/aipps/:skill_name/transcripts", get(list_aipp_transcripts).post(submit_aipp_transcript))
+        .route("/aipps/:skill_name/transcripts/:task_id", get(read_aipp_transcript))
         .route(
             "/aipps/:skill_name/account-control",
             post(control_aipp_account),
@@ -579,6 +581,7 @@ include!("ui_routes/aipp_editions.rs");
 #[path = "ui_routes/aipp_editions_tests.rs"]
 mod edition_tests;
 include!("ui_routes/aipp.rs");
+include!("ui_routes/aipp_transcripts.rs");
 include!("ui_routes/aipp_assets.rs");
 #[path = "ui_routes/aipp_accounts.rs"]
 mod aipp_accounts;
