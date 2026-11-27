@@ -1,0 +1,81 @@
+name: Publish verified NNI K1 releases
+on:
+  push:
+    branches: [ci/nni-k1-publish-20261127]
+permissions:
+  actions: read
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    env:
+      SOURCE_SHA: 08261a9e0a0fe5a4eb35d3faffc79cebb2da0429
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+      - name: Verify both signed packages before creating either release
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          source scripts/product_identity.sh
+          short_sha="${SOURCE_SHA:0:12}"
+          for platform in pi-aarch64 ubuntu-x86_64; do
+            case "$platform" in
+              pi-aarch64)
+                build=45941881216
+                target=aarch64-unknown-linux-gnu
+                artifact=agent-runtime-pi-aarch64
+                ;;
+              ubuntu-x86_64)
+                build=45941881458
+                target=x86_64-unknown-linux-gnu
+                artifact=agent-runtime-ubuntu-x86_64
+                ;;
+            esac
+            test "$(gh run view "$build" --json headSha,conclusion --jq '.headSha + " " + .conclusion')" = "$SOURCE_SHA success"
+            directory="$RUNNER_TEMP/$platform"
+            gh run download "$build" --name "$artifact" --dir "$directory"
+            package="${APP_RELEASE_ARTIFACT_ID}-$platform-$short_sha.tar.gz"
+            manifest="$directory/$package.manifest.json"
+            (cd "$directory" && sha256sum --check "$package.sha256")
+            ssh-keygen -q -Y verify -f configs/release_allowed_signers -I release -n agent-runtime-release -s "$manifest.sig" < "$manifest"
+            python3 scripts/security/release_manifest.py verify --artifact "$directory/$package" \
+              --sbom "$directory/$package.spdx.json" --manifest "$manifest" \
+              --expected-target "$target" --expected-package-root "$APP_RELEASE_ARTIFACT_ID" > "$directory/verified-manifest.txt"
+            test "$(jq -r .release.commit "$manifest")" = "$SOURCE_SHA"
+          done
+      - name: Publish Pi and mark Ubuntu as latest
+        shell: bash
+        run: |
+          set -euo pipefail
+          source scripts/product_identity.sh
+          short_sha="${SOURCE_SHA:0:12}"
+          for platform in pi-aarch64 ubuntu-x86_64; do
+            tag="$platform-$short_sha"
+            directory="$RUNNER_TEMP/$platform"
+            archive="$directory/${APP_RELEASE_ARTIFACT_ID}-$tag.tar.gz"
+            notes="$directory/release-notes.md"
+            cat > "$notes" <<'NOTES'
+          NNI、Bancor 和资产页面统一以 `PUB_K1_` 显示并复制资产账户公钥。绑定账户和填写收款地址时支持粘贴带前缀或原有格式的 K1 公钥。
+
+          NNI, Bancor, and Assets now display and copy asset-account public keys with the `PUB_K1_` prefix. Account binding and recipient fields accept either spelling.
+          NOTES
+            printf '\nCommit `%s`\n' "$SOURCE_SHA" >> "$notes"
+            if gh release view "$tag" --json targetCommitish,isDraft,assets > "$directory/release.json" 2>/dev/null; then
+              jq -e --arg sha "$SOURCE_SHA" '.targetCommitish == $sha and (.assets | length) == 5' "$directory/release.json" >/dev/null
+            else
+              gh release create "$tag" --draft --target "$SOURCE_SHA" --title "$APP_DISPLAY_NAME $platform $short_sha" \
+                --notes-file "$notes" "$archive" "$archive.sha256" "$archive.spdx.json" "$archive.manifest.json" "$archive.manifest.json.sig"
+            fi
+          done
+          gh release edit "pi-aarch64-$short_sha" --draft=false --latest=false
+          gh release edit "ubuntu-x86_64-$short_sha" --draft=false --latest
+          for platform in pi-aarch64 ubuntu-x86_64; do
+            tag="$platform-$short_sha"
+            test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq .object.sha)" = "$SOURCE_SHA"
+            gh release view "$tag" --json url,isDraft,assets --jq '{url,isDraft,assets:(.assets|length)}'
+          done
