@@ -78,7 +78,7 @@ selectors = []
 schema_version = 1
 renderer = "edition_list_v1"
 data_contract = "owned_skill_editions_v1"
-edition_action_refs = ["rss.latest_news", "rss.fetch_feed", "rss.preview_category", "rss.latest", "rss_fetch.latest", "rss_fetch.news", "rss_fetch.fetch", "rss_fetch.preview_category"]
+edition_action_refs = ["rss.latest_news", "rss.fetch_feed", "rss.preview_category", "rss.latest", "rss.news", "rss.fetch", "rss_fetch.latest", "rss_fetch.news", "rss_fetch.fetch", "rss_fetch.preview_category"]
 icon = "newspaper"
 default_locale = "en"
 titles = { zh = "新闻简报", en = "News bulletins" }
