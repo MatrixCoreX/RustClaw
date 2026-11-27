@@ -382,6 +382,83 @@ pub(crate) fn validated_delivery_artifact_path(
         })
 }
 
+pub(crate) const MAX_HISTORY_TRANSCRIPT_BYTES: usize = 4 * 1024 * 1024;
+const TRANSCRIPT_NAMESPACES: [&str; 2] = ["transcript-review", "transcript-fallback"];
+
+fn transcript_namespace(task_id: &str, manifest: &TaskArtifactManifest) -> Option<&'static str> {
+    let (namespace, short_digest) = manifest.id.split_once(':')?;
+    let namespace = TRANSCRIPT_NAMESPACES
+        .into_iter()
+        .find(|value| *value == namespace)?;
+    (manifest_task_id(manifest) == Some(task_id)
+        && manifest.sha256.get(..24) == Some(short_digest)
+        && manifest.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+        && manifest
+            .mime_type
+            .split(';')
+            .next()?
+            .trim()
+            .eq_ignore_ascii_case("text/plain")
+        && (1..=MAX_HISTORY_TRANSCRIPT_BYTES as u64).contains(&manifest.size_bytes))
+    .then_some(namespace)
+}
+
+pub(crate) fn transcript_delivery_manifest(
+    task_id: &str,
+    result: &Value,
+) -> Option<TaskArtifactManifest> {
+    manifests_from_result(Some(result))
+        .into_iter()
+        .filter_map(|manifest| Some((transcript_namespace(task_id, &manifest)?, manifest)))
+        .min_by_key(|(namespace, _)| *namespace != TRANSCRIPT_NAMESPACES[0])
+        .map(|(_, manifest)| manifest)
+}
+
+/// Read a single authenticated task artifact. Earlier deliveries can still have
+/// the original published file after the delivery copy is retired. Both copies
+/// must match the task's receipt before any bytes leave the host.
+pub(crate) fn read_history_transcript(
+    workspace: &Path,
+    owner_workspace: Option<&Path>,
+    task_id: &str,
+    manifest: &TaskArtifactManifest,
+) -> Option<String> {
+    let namespace = transcript_namespace(task_id, manifest)?;
+    let verify = |root: &Path, path: &Path| {
+        let mut bytes = Vec::new();
+        crate::secure_workspace_fs::open_workspace_file(root, path)
+            .ok()?
+            .take(manifest.size_bytes + 1)
+            .read_to_end(&mut bytes)
+            .ok()?;
+        if bytes.len() as u64 != manifest.size_bytes
+            || format!("{:x}", Sha256::digest(&bytes)) != manifest.sha256
+        {
+            return None;
+        }
+        let text = String::from_utf8(bytes).ok()?;
+        (!text.trim().is_empty()).then_some(text)
+    };
+    if let Some(path) = validated_delivery_artifact_path(workspace, task_id, manifest) {
+        let root = workspace.canonicalize().ok()?;
+        if let Some(text) = verify(&root, &path) {
+            return Some(text);
+        }
+    }
+    let task_component = claw_core::task_delivery_artifacts::task_path_component(task_id)?;
+    owner_workspace
+        .into_iter()
+        .chain(std::iter::once(workspace))
+        .find_map(|root| {
+            let root = root.canonicalize().ok()?;
+            let path = claw_core::workspace_state::workspace_artifacts_root(&root)
+                .join(namespace)
+                .join(&task_component)
+                .join(safe_filename(&manifest.filename));
+            verify(&root, &path)
+        })
+}
+
 pub(crate) fn cleanup_orphaned_delivery_artifacts(
     workspace_root: &Path,
     db: &Connection,
