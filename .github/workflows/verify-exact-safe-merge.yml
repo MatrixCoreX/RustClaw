@@ -1,0 +1,75 @@
+name: Verify exact safe merge candidate
+on:
+  push:
+    branches: [ci/safe-merge-check-20261127]
+permissions:
+  contents: read
+jobs:
+  runtime:
+    runs-on: ubuntu-22.04
+    env:
+      CARGO_BUILD_JOBS: "3"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: fe2819be5cd5347f7092ba551bb6b06272848bd4
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - name: Install native test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq pkg-config clang libclang-dev protobuf-compiler ripgrep bubblewrap
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          key: linux-runtime-read
+          prefix-key: v1-rust-cargo-profiles
+          cache-targets: "false"
+          cache-directories: target/debug
+          cache-bin: "false"
+          save-if: "false"
+      - name: Validate exact runtime and skill source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = fe2819be5cd5347f7092ba551bb6b06272848bd4
+          bash scripts/version_info_tests.sh
+          bash -c 'source scripts/version_info.sh; test "$(app_version_from_root "$PWD")" = 0.2.0'
+          python3 scripts/sync_skill_manifests.py --check
+          python3 scripts/check_skill_prompts.py
+          python3 scripts/check_aipp_decoupling.py --self-test
+          python3 scripts/check_aipp_decoupling.py
+          cargo test --locked -p agent-skill-sdk
+          cargo test --locked -p skill-runner
+          cargo test --locked -p clawd --bin clawd aipp -- --test-threads=1
+          cargo test --locked -p clawd --bin clawd run_skill -- --test-threads=1
+      - name: Verify the updated transcript package and protocol
+        run: |
+          set -euo pipefail
+          cargo build --locked -p agent-skill-sdk --bin skillctl -p audio-transcribe-skill --bin audio-transcribe-skill
+          manifest=crates/skills/audio_transcribe/skill.toml
+          target/debug/skillctl validate "$manifest"
+          target/debug/skillctl adopt-built "$manifest" "$PWD" "$RUNNER_TEMP/transcript-packages" "$PWD/target/debug/audio-transcribe-skill"
+          target/debug/skillctl receipt-verify "$RUNNER_TEMP/transcript-packages" audio_transcribe
+  console:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: fe2819be5cd5347f7092ba551bb6b06272848bd4
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: UI/package-lock.json
+      - name: Verify exact console source and build
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = fe2819be5cd5347f7092ba551bb6b06272848bd4
+          npm ci --prefix UI
+          npm run lint --prefix UI
+          npm test --prefix UI
+          bash scripts/product_identity_tests.sh --with-ui
+          npm run build --prefix UI
