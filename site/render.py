@@ -34,7 +34,17 @@ class PageImages(HTMLParser):
 
 
 def structured_data(page: dict[str, str], breadcrumb: str | None) -> str:
-    data = {"@context": "https://schema.org"}
+    website_id = page["site"] + "#website"
+    web_page = {
+        "@type": "WebPage",
+        "@id": page["canonical"] + "#webpage",
+        "url": page["canonical"],
+        "name": page["title"],
+        "inLanguage": page["lang"],
+        "isPartOf": {"@id": website_id},
+        "primaryImageOfPage": page["preview_image"],
+    }
+    graph = [web_page]
     if breadcrumb is None:
         source = {
             "@type": "SoftwareSourceCode",
@@ -45,26 +55,30 @@ def structured_data(page: dict[str, str], breadcrumb: str | None) -> str:
             "programmingLanguage": "Rust",
             "license": page["repo"] + "/blob/main/LICENSE",
         }
-        data["@graph"] = [
+        graph.extend((
             {
                 "@type": "WebSite",
-                "@id": page["site"] + "#website",
+                "@id": website_id,
                 "name": page["brand"],
                 "url": page["site"],
                 "about": {"@id": source["@id"]},
                 "inLanguage": ["en", "zh-CN"],
             },
             source,
-        ]
+        ))
     else:
         home = page["site"] if page["lang"] == "en" else page["site"] + "zh/"
-        data |= {
+        breadcrumb_id = page["canonical"] + "#breadcrumb"
+        web_page["breadcrumb"] = {"@id": breadcrumb_id}
+        graph.append({
             "@type": "BreadcrumbList",
+            "@id": breadcrumb_id,
             "itemListElement": [
                 {"@type": "ListItem", "position": 1, "name": page["brand"], "item": home},
                 {"@type": "ListItem", "position": 2, "name": breadcrumb, "item": page["canonical"]},
             ],
-        }
+        })
+    data = {"@context": "https://schema.org", "@graph": graph}
     return json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")
 
 
@@ -83,7 +97,9 @@ def read_product_identity():
 def write_mobile_previews(examples: Path):
     from PIL import Image
 
-    for source in examples.glob("*/*.png"):
+    for source in examples.glob("*/*"):
+        if source.suffix not in {".jpg", ".png"}:
+            continue
         with Image.open(source) as original:
             preview = original.convert("RGBA" if original.has_transparency_data else "RGB")
             preview.thumbnail((720, original.height), Image.Resampling.LANCZOS)
@@ -109,14 +125,14 @@ def build(output: Path):
         (
             "en.html", "en", "", None, f"{brand} | Self-Hosted AI Agent by {owner}",
             f"Self-host {brand} by {owner} on Raspberry Pi, Ubuntu, or macOS. Use MCP tools, search with RAG, and review media results in AiAPP.",
-            "Agent chat showing the status, location, and tracking number of a sample order.",
-            "mcp.png",
+            f"The {brand} mascot and a Raspberry Pi next to the Media Discovery screen with two example camping posts.",
+            "project-overview.jpg",
         ),
         (
             "zh.html", "zh-CN", "zh/", None, f"{brand} | 自托管 AI Agent · {owner}",
             f"在树莓派、Ubuntu 或 macOS 上安装 {owner} 的 {brand}。接入 MCP 工具、检索 RAG 知识库，并在 AiAPP 查看媒体结果。",
-            "Agent 对话窗口展示模拟订单的状态、物流位置和快递单号。",
-            "mcp.png",
+            f"{brand} 的吉祥物和树莓派旁边是媒体采集界面，展示两条露营主题的示例帖。",
+            "project-overview.jpg",
         ),
         (
             "guides/raspberry-pi-install.en.html", "en", "raspberry-pi-install/", "Raspberry Pi installation",
@@ -205,6 +221,8 @@ def build(output: Path):
             "description": description,
             "preview_alt": preview_alt,
             "preview_image": site + "assets/" + example_path + preview_file,
+            "preview_src": assets_path + example_path + preview_file,
+            "preview_mobile_src": assets_path + example_path + Path(preview_file).stem + ".mobile.webp",
             "assets": assets_path,
             "examples": assets_path + example_path,
         }

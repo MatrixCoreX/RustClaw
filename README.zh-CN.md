@@ -4,6 +4,8 @@
 
 [项目官网](https://rustclaw.matrixai.one/zh/) · [树莓派安装指南](https://rustclaw.matrixai.one/zh/raspberry-pi-install/) · [MCP 接入指南](https://rustclaw.matrixai.one/zh/mcp/) · [RAG 知识库指南](https://rustclaw.matrixai.one/zh/rag/)
 
+![项目吉祥物手持树莓派开发板，旁边的媒体采集界面展示了两条露营帖子的示例结果。](site/assets/examples/zh/project-overview.jpg)
+
 通过 MCP（模型上下文协议）接入外部工具，通过 RAG（检索增强生成）让 Agent 查阅你导入的知识库。比如，Agent 可以调用工具查订单状态，也可以从售后手册里找规则并给出处。
 
 [快速开始](#快速开始) · [知识库使用步骤](#知识库设计流程) · [English](README.md)

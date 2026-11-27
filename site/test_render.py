@@ -13,6 +13,8 @@ from urllib.parse import urljoin, urlsplit
 from xml.etree import ElementTree
 from zipfile import ZipFile
 
+from PIL import Image
+
 
 SOURCE = Path(__file__).resolve().parent
 FIXTURES = SOURCE.parent / "scripts/fixtures/product_identity"
@@ -30,6 +32,8 @@ class Page(HTMLParser):
         self.description = ""
         self.title = ""
         self.preview_image = ""
+        self.preview_alt = ""
+        self.project_preview = None
         self.links = []
         self.assets = []
         self.mobile_previews = []
@@ -68,14 +72,19 @@ class Page(HTMLParser):
             self.description = attributes["content"]
         if tag == "meta" and attributes.get("property") == "og:image":
             self.preview_image = attributes["content"]
+        if tag == "meta" and attributes.get("property") == "og:image:alt":
+            self.preview_alt = attributes["content"]
         if tag in ("link", "a"):
             self.links.append(attributes)
         if tag == "source" and attributes.get("type") == "image/webp":
             self.mobile_previews.append((attributes["media"], attributes["srcset"]))
         if tag == "img":
-            self.assets.append(attributes["src"])
+            src = attributes["src"]
+            self.assets.append(src)
+            if src.endswith("/project-overview.jpg"):
+                self.project_preview = attributes
             if self.open_sections and self.open_sections[-1]:
-                self.section_assets.setdefault(self.open_sections[-1], []).append(attributes["src"])
+                self.section_assets.setdefault(self.open_sections[-1], []).append(src)
 
     def handle_endtag(self, tag):
         if tag == "section":
@@ -140,9 +149,17 @@ class ProjectSiteTest(unittest.TestCase):
                     canonical = base + part
                     metadata = json.loads(page.structured_data)
                     self.assertEqual(metadata["@context"], "https://schema.org")
+                    nodes = {node["@type"]: node for node in metadata["@graph"]}
+                    web_page = nodes["WebPage"]
+                    self.assertEqual(web_page["url"], canonical)
+                    self.assertEqual(web_page["inLanguage"], locale)
+                    self.assertEqual(web_page["isPartOf"], {"@id": base + "#website"})
+                    self.assertEqual(web_page["primaryImageOfPage"], page.preview_image)
                     if topic:
-                        self.assertEqual(metadata["@type"], "BreadcrumbList")
-                        trail = metadata["itemListElement"]
+                        self.assertEqual(set(nodes), {"WebPage", "BreadcrumbList"})
+                        breadcrumb = nodes["BreadcrumbList"]
+                        self.assertEqual(web_page["breadcrumb"], {"@id": breadcrumb["@id"]})
+                        trail = breadcrumb["itemListElement"]
                         self.assertEqual([item["position"] for item in trail], [1, 2])
                         self.assertEqual(trail[0]["name"], brand)
                         self.assertEqual(trail[0]["item"], base + ("zh/" if locale == "zh-CN" else ""))
@@ -150,8 +167,7 @@ class ProjectSiteTest(unittest.TestCase):
                         self.assertEqual(trail[1]["item"], canonical)
                     else:
                         repository = f"https://github.com/{owner}/{repo}"
-                        nodes = {node["@type"]: node for node in metadata["@graph"]}
-                        self.assertEqual(set(nodes), {"WebSite", "SoftwareSourceCode"})
+                        self.assertEqual(set(nodes), {"WebPage", "WebSite", "SoftwareSourceCode"})
                         self.assertEqual(nodes["WebSite"]["name"], brand)
                         self.assertEqual(nodes["WebSite"]["url"], base)
                         self.assertEqual(nodes["WebSite"]["about"]["@id"], nodes["SoftwareSourceCode"]["@id"])
@@ -163,7 +179,10 @@ class ProjectSiteTest(unittest.TestCase):
                         urljoin(canonical, src) for src in page.assets if "assets/examples/" in src
                     }
                     preview = {
-                        "skills/": "media-discovery.png", "rag/": "rag.png", pi_guide: "pi-first-task.png",
+                        "": "project-overview.jpg",
+                        "skills/": "media-discovery.png",
+                        "rag/": "rag.png",
+                        pi_guide: "pi-first-task.png",
                     }.get(topic, "mcp.png")
                     example_dir = f"assets/examples/{locale.split('-')[0]}/"
                     example_path = "../" * part.count("/") + example_dir
@@ -171,6 +190,8 @@ class ProjectSiteTest(unittest.TestCase):
                     for section in media_examples:
                         example_images[section].insert(0, f"{example_path}{section}-agent.png")
                     self.assertEqual(page.preview_image, base + example_dir + preview)
+                    self.assertTrue(page.preview_alt)
+                    self.assertIn(page.preview_image, sitemap_images[canonical])
                     self.assertGreater((output / example_dir / preview).stat().st_size, 0)
                     alternates = {"en": base + topic, "zh-CN": base + "zh/" + topic, "x-default": base + topic}
                     if topic == pi_guide:
@@ -213,9 +234,19 @@ class ProjectSiteTest(unittest.TestCase):
                         self.assertIn("MCP", page.description)
                         self.assertIn("RAG", page.description)
                         self.assertIn("AiAPP", page.description)
+                        cover = page.project_preview
+                        self.assertIsNotNone(cover)
+                        self.assertEqual(cover["src"], example_path + preview)
+                        self.assertEqual(cover["alt"], page.preview_alt)
+                        self.assertIn(brand, cover["alt"])
+                        self.assertNotEqual(cover.get("loading"), "lazy")
+                        with Image.open(output / example_dir / preview) as image:
+                            self.assertEqual(image.format, "JPEG")
+                            self.assertEqual(image.size, (1280, 640))
+                            self.assertEqual(tuple(int(cover[key]) for key in ("width", "height")), image.size)
                         self.assertCountEqual(
                             [asset for asset in page.assets if "assets/examples/" in asset],
-                            [image for images in example_images.values() for image in images],
+                            [cover["src"], *(image for images in example_images.values() for image in images)],
                         )
                         for section_id in example_sections:
                             self.assertEqual(page.section_assets[section_id], example_images[section_id])
@@ -306,7 +337,7 @@ class ProjectSiteTest(unittest.TestCase):
                     screenshots = [asset for asset in page.assets if "assets/examples/" in asset]
                     self.assertCountEqual(
                         page.mobile_previews,
-                        [("(max-width: 36rem)", asset.removesuffix(".png") + ".mobile.webp") for asset in screenshots],
+                        [("(max-width: 36rem)", str(Path(asset).with_suffix(".mobile.webp"))) for asset in screenshots],
                     )
                     for _, preview in page.mobile_previews:
                         self.assertEqual((path.parent / preview).read_bytes()[8:12], b"WEBP")

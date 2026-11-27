@@ -51,6 +51,8 @@ h1 span { display: block; margin-top: .4rem; font-size: clamp(1.35rem, 2.5vw, 2.
 .intro { max-width: 64ch; margin: 1rem auto; color: var(--muted); font-size: 1.08rem; }
 :lang(zh-CN) .intro { max-width: 34em; }
 .hero .actions { justify-content: center; margin-top: 1.45rem; }
+.project-preview { display: block; margin-top: clamp(1.5rem, 4vw, 2.75rem); }
+.project-preview img { display: block; width: 100%; height: auto; border-radius: 1rem; }
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: .7rem; }
 .button { display: inline-flex; justify-content: center; align-items: center; min-height: 2.8rem; border: 1px solid transparent; border-radius: .65rem; padding: .58rem 1rem; font-weight: 685; text-decoration: none; }
 .primary { background: var(--accent); color: var(--accent-ink); }

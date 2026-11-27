@@ -4,6 +4,8 @@ A self-hosted AI agent platform written in Rust for Raspberry Pi, Ubuntu, and ma
 
 [Official website](https://rustclaw.matrixai.one/) · [Raspberry Pi installation](https://rustclaw.matrixai.one/raspberry-pi-install/) · [MCP setup](https://rustclaw.matrixai.one/mcp/) · [RAG guide](https://rustclaw.matrixai.one/rag/)
 
+![The project mascot holds a Raspberry Pi board beside the Media Discovery app showing two example camping posts.](site/assets/examples/en/project-overview.jpg)
+
 Connect external tools through the Model Context Protocol (MCP) and import your own documents into a retrieval-augmented generation (RAG) knowledge base. The agent can use a connected tool to look up a current order or cite your support handbook when answering a policy question.
 
 [Quick start](#quick-start) · [Knowledge base setup](#knowledge-base-design-flow) · [简体中文](README.zh-CN.md)
