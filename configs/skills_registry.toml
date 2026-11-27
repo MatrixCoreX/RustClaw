@@ -1258,6 +1258,7 @@ kind = "runner"
 planner_kind = "skill"
 group = "news/web"
 package_manifest = "crates/skills/rss_fetch/skill.toml"
+package_version = "0.1.10"
 supported_os = ["linux", "macos"]
 storage = { kind = "sqlite", schema_version = 1, migration_owner = "rss_fetch" }
 aliases = ["rss", "rss_reader", "rss_fetcher", "news", "news_fetcher"]

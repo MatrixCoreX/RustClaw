@@ -17,12 +17,15 @@ HOST_FILES = (
     "crates/clawd/src/http/ui_routes/aipp.rs",
     "crates/clawd/src/http/ui_routes/aipp_assets.rs",
     "crates/clawd/src/http/ui_routes/aipp_activity_query.rs",
+    "crates/clawd/src/http/ui_routes/aipp_editions.rs",
+    "UI/src/components/AippEditionList.tsx",
     "UI/src/components/AippPage.tsx",
 )
 SUPPORTED_HOST_PAIRS = {
     ("collection_feed_v1", "media_collection_v1"),
     ("task_activity_v1", "skill_task_activity_v1"),
     ("schedule_history_v1", "owned_schedule_runs_v1"),
+    ("edition_list_v1", "owned_skill_editions_v1"),
 }
 SUPPORTED_SANDBOX_CONTRACTS = {
     "capability_bridge_v1",

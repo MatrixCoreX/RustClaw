@@ -79,6 +79,7 @@ struct AippItemsRemoveRequest {
 
 #[derive(Debug, Deserialize, Default)]
 struct AippMediaQuery {
+    trigger: Option<String>,
     limit: Option<usize>,
     before_sequence: Option<u64>,
     cursor_sequence: Option<u64>,
@@ -240,7 +241,7 @@ fn read_aipp_catalog(
     let view = state.get_skill_views_snapshot();
     let mut apps = project_aipp_catalog(state, &view);
     if !actor.role.eq_ignore_ascii_case("admin") {
-        apps.retain(|app| app.installed && app.data_contract == "owned_schedule_runs_v1");
+        apps.retain(|app| app.installed && matches!(app.data_contract.as_str(), "owned_schedule_runs_v1" | "owned_skill_editions_v1"));
     }
     crate::api_ok(json!({ "schema_version": 1, "apps": apps }))
 
@@ -1106,7 +1107,7 @@ fn read_aipp_items(
         Ok(Some(active)) => active,
         _ => return aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_available"),
     };
-    if active.aipp.data_contract != "owned_schedule_runs_v1" && !actor.role.eq_ignore_ascii_case("admin") {
+    if !matches!(active.aipp.data_contract.as_str(), "owned_schedule_runs_v1" | "owned_skill_editions_v1") && !actor.role.eq_ignore_ascii_case("admin") {
         return aipp_api_error(StatusCode::FORBIDDEN, "admin_required");
     }
     let view = match aipp_admission_service(state).and_then(|service| {
@@ -1117,6 +1118,22 @@ fn read_aipp_items(
         Ok(view) if view.installed => view,
         _ => return aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_available"),
     };
+    if active.aipp.data_contract == "owned_skill_editions_v1" {
+        if !matches!(query.trigger.as_deref(), None | Some("manual" | "scheduled")) {
+            return aipp_api_error(StatusCode::BAD_REQUEST, "aipp_edition_trigger_invalid");
+        }
+        let db = match state.core.db.get() {
+            Ok(db) => db,
+            Err(_) => return aipp_api_error(StatusCode::INTERNAL_SERVER_ERROR, "aipp_edition_read_failed"),
+        };
+        return match skill_edition_page(&db, &actor, skill_name, &active.aipp.edition_action_refs, query) {
+            Ok(page) => crate::api_ok(page),
+            Err(error) => {
+                tracing::warn!(%error, "aipp_edition_read_failed");
+                aipp_api_error(StatusCode::INTERNAL_SERVER_ERROR, "aipp_edition_read_failed")
+            }
+        };
+    }
     if active.aipp.data_contract == "owned_schedule_runs_v1" {
         let db = match state.core.db.get() {
             Ok(db) => db,

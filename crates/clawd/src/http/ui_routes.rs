@@ -574,6 +574,10 @@ include!("ui_routes/skill_store_installation.rs");
 include!("ui_routes/skill_store.rs");
 include!("ui_routes/skill_store_operations.rs");
 include!("ui_routes/aipp_activity_query.rs");
+include!("ui_routes/aipp_editions.rs");
+#[cfg(test)]
+#[path = "ui_routes/aipp_editions_tests.rs"]
+mod edition_tests;
 include!("ui_routes/aipp.rs");
 include!("ui_routes/aipp_assets.rs");
 #[path = "ui_routes/aipp_accounts.rs"]

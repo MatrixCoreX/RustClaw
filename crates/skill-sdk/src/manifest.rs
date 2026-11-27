@@ -144,6 +144,8 @@ pub struct AippSpec {
     pub bridge_capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_channel_scope: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edition_action_refs: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account_controls: Option<AippAccountControls>,
 }
@@ -367,8 +369,17 @@ impl AippSpec {
                 format!("schema_version={}", self.schema_version),
             ));
         }
+        let editions = self.data_contract == "owned_skill_editions_v1";
+        if editions == self.edition_action_refs.is_empty()
+            || self.edition_action_refs.iter().collect::<BTreeSet<_>>().len() != self.edition_action_refs.len()
+            || self.edition_action_refs.len() > 32
+            || self.edition_action_refs.iter().any(|name| !valid_aipp_capability_name(name))
+        {
+            return Err(SkillSdkError::new("manifest_aipp_edition_actions_invalid",
+                "edition views require a bounded set of action references"));
+        }
         match (self.renderer.as_str(), self.data_contract.as_str()) {
-            ("collection_feed_v1", "media_collection_v1") | ("schedule_history_v1", "owned_schedule_runs_v1") => {
+            ("collection_feed_v1", "media_collection_v1") | ("schedule_history_v1", "owned_schedule_runs_v1") | ("edition_list_v1", "owned_skill_editions_v1") => {
                 if self.asset_root.is_some()
                     || self.entrypoint.is_some()
                     || !self.bridge_capabilities.is_empty()

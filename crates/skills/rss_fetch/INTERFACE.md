@@ -3,6 +3,9 @@
 > This file is managed by `scripts/sync_skill_docs.py`.
 > Keep this spec aligned with the rss_fetch implementation.
 
+## AiAPP
+The optional News bulletins view lists stored manual and scheduled fetch results newest first. Open an edition for its original response, captured publisher sources and recorded delivery status. Refreshing this view does not fetch or summarize again.
+
 ## Capability Summary
 - `rss_fetch` reads RSS/Atom feeds and returns normalized news items.
 - Successful responses include user-visible `text` plus machine-readable `extra` evidence. Runtime quality checks consume `extra.field_value` / `extra.items`; do not require downstream code to parse localized `text`.

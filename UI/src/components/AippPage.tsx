@@ -1,7 +1,9 @@
+import { AippEditionList } from "./AippEditionList";
 import { AippScheduledHistory } from "./AippScheduledHistory";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  Newspaper,
   Bot,
   BookOpen,
   Bookmark,
@@ -197,6 +199,7 @@ function AippIcon({ icon, className }: { icon: string; className?: string }) {
   if (icon === "gallery_vertical_end") {
     return <GalleryVerticalEnd className={className} />;
   }
+  if (icon === "newspaper") return <Newspaper className={className} />;
   if (icon === "download") {
     return <Download className={className} />;
   }
@@ -1567,6 +1570,7 @@ export function AippPage({ canManage = true, lang, t, apiFetch, requestScope, on
         title={localizedAippCopy(selectedApp.titles, lang, selectedApp.default_locale)}
         description={localizedAippCopy(selectedApp.descriptions, lang, selectedApp.default_locale)}
         platforms={platforms} t={t} onOpenAgent={onOpenAgent} /> : <>
+      {selectedApp.renderer === "edition_list_v1" && <AippEditionList key={requestScope + selectedSkill} skill={selectedSkill} apiFetch={apiFetch} lang={lang} t={t} />}
       {selectedApp.renderer === "schedule_history_v1" && <AippScheduledHistory key={requestScope + selectedSkill} skill={selectedSkill} apiFetch={apiFetch} t={t} />}
       {selectedApp.renderer === "sandbox_bundle_v1" ? (
         <SandboxedAipp app={selectedApp} lang={lang} apiFetch={apiFetch} requestScope={requestScope} />
