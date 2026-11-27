@@ -13,7 +13,8 @@ export function displayUnits(value: string | undefined): string {
   return `${n / 100000000n}.${(n % 100000000n).toString().padStart(8, "0")}`;
 }
 export function shortPublic(value: string): string {
-  return `${value.slice(0, 8)}…${value.slice(-8)}`;
+  const head = value.startsWith("PUB_K1_") ? 15 : 8;
+  return `${value.slice(0, head)}…${value.slice(-8)}`;
 }
 
 export function movementSign(kind: string, asset: string): string {
