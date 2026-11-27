@@ -82,7 +82,18 @@ export function sharedUiAdapter(root: string): Plugin {
       }
       if (id === uiRoot + 'components/ChatPage.tsx') {
         imports.add('desktopDownload'); imports.add('desktopMediaUrl'); imports.add('desktopCloseMedia');
-        text = once(text, 'const blob = await fetchTaskArtifactBlob(artifactFetchRef.current, artifact.download_url, controller.signal);\n      if (!controller.signal.aborted) saveTaskArtifactBlob(blob, artifact.filename);', 'await desktopDownload(artifact.download_url, artifact.filename);', id);
+        text = once(text, `const fetcher = artifactFetchRef.current;
+      const native = fetcher.nativeMediaUrl?.(artifact.download_url, "attachment");
+      if (native) {
+        const response = await fetcher(artifact.download_url, { method: "HEAD", signal: controller.signal });
+        controller.signal.throwIfAborted();
+        if (!response.ok) throw new Error(\`task_artifact_http_\${response.status}\`);
+        if (fetcher.nativeMediaUrl?.(artifact.download_url, "attachment") !== native) return;
+        saveTaskArtifactUrl(native, artifact.filename);
+        return;
+      }
+      const blob = await fetchTaskArtifactBlob(fetcher, artifact.download_url, controller.signal);
+      if (!controller.signal.aborted) saveTaskArtifactBlob(blob, artifact.filename);`, 'await desktopDownload(artifact.download_url, artifact.filename);', id);
         text = once(text, 'const source = previewKind === "video"', `if (previewKind === "video" || previewKind === "audio") {
       let mediaUrl: string | undefined;
       void desktopMediaUrl(mediaPreviewUrl).then(url => {

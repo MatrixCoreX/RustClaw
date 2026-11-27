@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "video_transcribe"
-version = "0.1.8"
+version = "0.2.0"
 description = "Verify a local video attachment and extract its first audio stream as a private transcription input for the configured STT pipeline."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "git_basic"
-version = "0.1.8"
+version = "0.2.0"
 description = "Inspect workspace Git repositories and perform confirmation-gated local stage, commit, branch-create, and safe checkout actions. Remote mutations are unavailable."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

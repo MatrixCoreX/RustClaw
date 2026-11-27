@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "video_generate"
-version = "0.1.8"
+version = "0.2.0"
 description = "Create provider-backed video generation tasks from text and optional frame images, then optionally poll and save the generated video file."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

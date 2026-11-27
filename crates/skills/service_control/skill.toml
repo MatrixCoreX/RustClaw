@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "service_control"
-version = "0.1.8"
+version = "0.2.0"
 description = "Check, verify, diagnose, and control the agent runtime, systemd/service, Homebrew services, and launchd services with structured status evidence."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

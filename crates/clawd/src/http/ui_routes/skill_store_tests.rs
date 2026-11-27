@@ -961,7 +961,15 @@ async fn skill_store_http_api_removes_and_reinstalls_optional_skill() {
     assert_eq!(installed["data"]["enabled"], true);
     assert_eq!(installed["data"]["package_installed"], true);
     assert_eq!(installed["data"]["adapter"], "cargo");
-    assert_eq!(installed["data"]["installed_version"], "0.1.8");
+    let expected_version =
+        skill_sdk::PackageManifest::load(&workspace.join("optional_skills/weather/skill.toml"))
+            .expect("load the bundled weather manifest")
+            .package
+            .version;
+    assert_eq!(
+        installed["data"]["installed_version"].as_str(),
+        Some(expected_version.as_str())
+    );
     assert_eq!(
         installed["data"]["reused_config_files"][0],
         "configs/weather.toml"

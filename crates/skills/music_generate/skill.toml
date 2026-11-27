@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "music_generate"
-version = "0.1.8"
+version = "0.2.0"
 description = "Generate provider-backed music/audio files from a musical prompt, lyrics, instrumental mode, or cover-generation inputs."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

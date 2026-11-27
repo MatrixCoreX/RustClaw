@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "git_remote_read"
-version = "0.1.8"
+version = "0.2.0"
 description = "Observe an allowlisted GitHub remote or fetch exactly one approved remote-tracking branch. Public and authenticated actions are separate."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

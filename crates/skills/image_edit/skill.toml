@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "image_edit"
-version = "0.1.8"
+version = "0.2.0"
 description = "Edit, extend, or transform images through provider-neutral media adapters."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

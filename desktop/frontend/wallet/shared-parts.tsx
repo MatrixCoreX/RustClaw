@@ -1,3 +1,4 @@
+import { formatNniOwnerPublicKey } from "../../../UI/src/lib/nni-owner-public-key";
 import { displayUnits, shortPublic, movementSign } from "./amounts";
 import { useDesktopAssetAccount } from "./context";
 import { getLanguage } from "../i18n";
@@ -140,7 +141,7 @@ export function LocalAccountHistory({
                 <p className="mt-1 text-xs text-[var(--theme-text-muted)]">
                   {new Date(record.created_at_unix * 1000).toLocaleString(getLanguage() === "zh" ? "zh-CN" : "en-US")}
                   {record.counterparty &&
-                    ` · ${shortPublic(record.counterparty)}`}
+                    ` · ${shortPublic(formatNniOwnerPublicKey(record.counterparty))}`}
                 </p>
               </div>
               <span className="font-mono text-[var(--theme-text-body)]">

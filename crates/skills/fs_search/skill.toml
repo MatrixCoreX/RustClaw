@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "fs_search"
-version = "0.1.8"
+version = "0.2.0"
 description = "Typed recursive path/glob and literal/regex content search with opaque snapshot pages, explicit completeness, verified ripgrep fast paths, and a safe Rust fallback."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

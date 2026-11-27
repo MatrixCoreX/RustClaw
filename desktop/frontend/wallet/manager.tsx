@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { PRODUCT_DISPLAY_NAME } from "../../../UI/src/lib/product-identity";
+import { formatNniOwnerPublicKey } from "../../../UI/src/lib/nni-owner-public-key";
 import { displayUnits } from "./amounts";
 import { walletError } from "./errors";
 import type { Confirmation, Outcome, WalletStatus } from "./types";
@@ -186,7 +187,7 @@ function Manager() {
                 <dt>{copy("账户")}</dt>
                 <dd>{pending.account_name}</dd>
                 <dt>{copy("完整公钥")}</dt>
-                <dd className="wallet-public">{pending.public_key}</dd>
+                <dd className="wallet-public">{formatNniOwnerPublicKey(pending.public_key)}</dd>
                 <dt>{copy("连接目标")}</dt>
                 <dd>
                   {pending.device_label === pending.origin ? pending.origin : `${pending.device_label} · ${pending.origin}`}
@@ -198,7 +199,7 @@ function Manager() {
                 {terms.kind === "transfer" ? (
                   <>
                     <dt>{copy("收款账户")}</dt>
-                    <dd className="wallet-public">{terms.recipient}</dd>
+                    <dd className="wallet-public">{formatNniOwnerPublicKey(terms.recipient)}</dd>
                     <dt>{copy("转出金额")}</dt>
                     <dd>
                       {displayUnits(terms.amount_units)} {terms.asset}
@@ -358,7 +359,7 @@ function Manager() {
                   {status.backup_upgrade_accounts.includes(account.id) && <p className="wallet-note" data-wallet-backup-upgrade>
                     {copy("建议更新备份：此账号使用旧版备份。请保存一份新版加密备份，原备份仍可恢复。")}
                   </p>}
-                  <p className="wallet-public">{account.public_key}</p>
+                  <p className="wallet-public">{formatNniOwnerPublicKey(account.public_key)}</p>
                   <button
                     disabled={busy}
                     onClick={() => {

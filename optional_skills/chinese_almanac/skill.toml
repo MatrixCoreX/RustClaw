@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "chinese_almanac"
-version = "0.1.8"
+version = "0.2.0"
 description = "Query offline traditional Chinese almanac information for a Gregorian date, including lunar date, solar terms, festivals, auspicious/inauspicious activities, clashes, and traditional day indicators."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

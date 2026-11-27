@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "crypto"
-version = "0.1.8"
+version = "0.2.0"
 description = "Query crypto market data and read account positions through the agent. Exchange trading and order mutations exist only for explicit direct/admin skill calls."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "http_basic"
-version = "0.1.8"
+version = "0.2.0"
 description = "Raw HTTP/API request tool for status checks, response previews, validation, and downloads; use browser_web for browser-rendered page titles, readable page text, page summaries, screenshots, or extraction artifacts."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

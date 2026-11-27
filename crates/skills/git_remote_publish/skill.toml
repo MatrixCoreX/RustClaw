@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "git_remote_publish"
-version = "0.1.8"
+version = "0.2.0"
 description = "Push one approved commit SHA to one allowlisted GitHub branch, then verify the exact remote SHA. Force, deletion, tags, and multi-ref publication are unavailable."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

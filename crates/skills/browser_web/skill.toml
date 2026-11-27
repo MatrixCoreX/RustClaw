@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "browser_web"
-version = "0.1.8"
+version = "0.2.0"
 description = "Open exact public URLs through a policy-guarded headless browser and return bounded untrusted page evidence, canonical metadata, citations, screenshots, and structured partial/failure results."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]

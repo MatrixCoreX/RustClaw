@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "git_forge"
-version = "0.1.8"
+version = "0.2.0"
 description = "Create and inspect GitHub pull requests only for a repository and head SHA proven by a verified push receipt."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
