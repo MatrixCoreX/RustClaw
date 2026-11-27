@@ -39,7 +39,9 @@ page AS MATERIALIZED (
 )
 SELECT page.sequence,t.task_id,t.channel,t.status,t.created_at,page.trigger_kind,
        json_extract(page.scheduled_result,'$.notification.delivery_status'),
-       json_extract(page.scheduled_result,'$.error_code'),
-       json_extract(t.result_json,'$.text'),json_extract(t.result_json,'$.task_journal.trace.capability_results'),
+       COALESCE(json_extract(page.scheduled_result,'$.error_code'),
+            CASE WHEN json_valid(t.error_text) THEN COALESCE(json_extract(t.error_text,'$.error_code'),
+                json_extract(t.error_text,'$.message_key')) END),
+       CASE WHEN t.status='succeeded' THEN json_extract(t.result_json,'$.text') END,json_extract(t.result_json,'$.task_journal.trace.capability_results'),
        substr(json_extract(t.payload_json,'$.text'),1,120)
 FROM page JOIN tasks t ON t.rowid=page.sequence ORDER BY page.sequence DESC

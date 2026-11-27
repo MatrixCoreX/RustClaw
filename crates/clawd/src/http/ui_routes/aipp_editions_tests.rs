@@ -6,7 +6,7 @@ fn editions_isolate_owners_actions_and_manual_retries_before_pagination() {
     db.execute_batch("
         CREATE TABLE tasks(task_id TEXT PRIMARY KEY, principal_id TEXT, kind TEXT, channel TEXT DEFAULT 'ui',
              status TEXT DEFAULT 'succeeded', created_at TEXT DEFAULT '123', idempotency_key TEXT,
-             payload_json TEXT DEFAULT '{}', result_json TEXT DEFAULT '{}');
+             payload_json TEXT DEFAULT '{}', result_json TEXT DEFAULT '{}', error_text TEXT);
         CREATE TABLE task_event_archive(task_id TEXT,event_json TEXT);
         CREATE TABLE task_event_stream(task_id TEXT,event_json TEXT);
         CREATE TABLE scheduled_job_runs(id INTEGER PRIMARY KEY,run_id TEXT,task_id TEXT,result_json TEXT);
@@ -14,6 +14,7 @@ fn editions_isolate_owners_actions_and_manual_retries_before_pagination() {
           ('manual','u','run_skill','{\"skill_name\":\"reader\",\"args\":{\"action\":\"fetch\"}}'),
           ('timer','u','ask','{}'),('retry','u','ask','{}'),('unrelated','u','ask','{}'),
           ('foreign','v','ask','{}'),('probe','u','ask','{}');
+        UPDATE tasks SET status='failed',result_json='{\"text\":\"withheld draft\"}',error_text='{\"message_key\":\"evidence_missing\"}' WHERE task_id='retry';
         INSERT INTO scheduled_job_runs VALUES(1,'timer_run','timer','{\"notification\":{\"delivery_status\":\"accepted\"}}'),
           (2,'manual_123','retry','{}');
     ").unwrap();
@@ -52,6 +53,8 @@ fn editions_isolate_owners_actions_and_manual_retries_before_pagination() {
     };
     let first = page(Some("manual"), None);
     assert_eq!(first["items"][0]["task_id"], "retry");
+    assert!(first["items"][0]["text"].is_null());
+    assert_eq!(first["items"][0]["error_code"], "evidence_missing");
     let last = page(Some("manual"), first["next_cursor"].as_u64());
     assert_eq!(last["items"][0]["task_id"], "manual");
     assert!(last["next_cursor"].is_null());
