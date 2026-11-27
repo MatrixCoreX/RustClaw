@@ -1,0 +1,51 @@
+name: Verify NNI K1 web UI candidate
+on:
+  push:
+    branches: [ci/nni-k1-web-artifact-20261127]
+permissions:
+  contents: read
+jobs:
+  web-ui:
+    runs-on: ubuntu-22.04
+    env:
+      SOURCE_SHA: 08261a9e0a0fe5a4eb35d3faffc79cebb2da0429
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: UI/package-lock.json
+      - name: Verify and build the exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          npm ci --ignore-scripts --prefix UI
+          npm test --prefix UI
+          npm run lint --prefix UI
+          npm run build --prefix UI
+          python3 scripts/check_product_identity_coupling.py --self-test
+          python3 scripts/check_product_identity_coupling.py
+          bash scripts/product_identity_tests.sh --with-ui
+      - name: Package verified static web files
+        shell: bash
+        run: |
+          set -euo pipefail
+          node UI/build-fingerprint.mjs UI configs/product_identity.toml > UI/dist/.agent-ui-build-fingerprint
+          printf '%s\n' "$SOURCE_SHA" > UI/dist/.agent-ui-source-commit
+          mkdir "$RUNNER_TEMP/web-ui"
+          tar -czf "$RUNNER_TEMP/web-ui/web-ui-$SOURCE_SHA.tar.gz" -C UI dist
+          cd "$RUNNER_TEMP/web-ui"
+          sha256sum "web-ui-$SOURCE_SHA.tar.gz" > "web-ui-$SOURCE_SHA.tar.gz.sha256"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: verified-web-ui-${{ env.SOURCE_SHA }}
+          path: ${{ runner.temp }}/web-ui/*
+          if-no-files-found: error
