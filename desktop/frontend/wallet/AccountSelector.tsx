@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
 import { NniPublicKeyDisplay } from "../../../UI/src/components/NniPublicKeyDisplay";
+import { formatNniOwnerPublicKey } from "../../../UI/src/lib/nni-owner-public-key";
 import { lockWallet, openWallet, selectAccount, useWallet } from "./store";
 import { shortPublic } from "./amounts";
 import { walletError } from "./errors";
@@ -62,19 +63,19 @@ export function AccountSelector({
         {!standaloneActive() && <option value="">
           {t("硬件设备绑定账号", "Hardware-bound account")} ·{" "}
           {hardwarePublicKey
-            ? shortPublic(hardwarePublicKey)
+            ? shortPublic(formatNniOwnerPublicKey(hardwarePublicKey))
             : t("未绑定", "Not bound")}
         </option>}
         {wallet.accounts.map((a) => (
           <option key={a.id} value={a.id}>
             {t("桌面本地账号", "Local account")} · {a.name} ·{" "}
-            {shortPublic(a.public_key)}
+            {shortPublic(formatNniOwnerPublicKey(a.public_key))}
           </option>
         ))}
       </select>
       {publicKey && (
         <NniPublicKeyDisplay
-          value={publicKey}
+          value={formatNniOwnerPublicKey(publicKey)}
           t={t}
           className="mt-0.5"
           valueClassName="text-[10px] leading-4 text-[var(--theme-text-muted)]"

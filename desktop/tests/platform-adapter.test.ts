@@ -82,8 +82,9 @@ test('chat media keeps the native authenticated bridge ahead of browser-session 
   const source = fs.readFileSync(filename, 'utf8');
   for (const id of [filename, filename.replaceAll('\\', '/')]) for (const newline of ['\n', '\r\n']) {
     const output = transform(source.replaceAll(/\r?\n/g, newline), id)?.code ?? '';
-    assert.ok(output.includes('await desktopDownload(artifact.download_url, artifact.filename);'));
-    assert.ok(!output.includes('fetchTaskArtifactBlob(artifactFetchRef.current, artifact.download_url'));
+    const download = output.slice(output.indexOf('const downloadArtifact = async () =>'), output.indexOf('const requestPreview ='));
+    assert.ok(download.includes('await desktopDownload(artifact.download_url, artifact.filename);'));
+    assert.doesNotMatch(download, /nativeMediaUrl|fetchTaskArtifactBlob|saveTaskArtifactUrl/);
     assert.ok(output.includes('downloadRequest.current?.abort()'));
     const native = output.indexOf('if (previewKind === "video" || previewKind === "audio")');
     const browser = output.indexOf('const source = previewKind === "video"');

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { amountUnits, displayUnits, movementSign } from "../frontend/wallet/amounts";
+import { amountUnits, displayUnits, movementSign, shortPublic } from "../frontend/wallet/amounts";
 
 test("asset amounts preserve all eight decimals without floating point rounding", () => {
   assert.equal(amountUnits("0.00000001"), "1");
@@ -17,6 +17,13 @@ test("asset amounts preserve all eight decimals without floating point rounding"
     assert.equal(amountUnits(value), null);
   assert.equal(displayUnits(undefined), "—");
   assert.equal(displayUnits("0"), "0.00000000");
+});
+
+test("abbreviated account keys keep the K1 prefix and identifying characters", () => {
+  assert.equal(
+    shortPublic("PUB_K1_5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M"),
+    "PUB_K1_5p78kHbL…ovLY8E9M",
+  );
 });
 
 test("history marks each trade asset movement, not two positive receipts", () => {

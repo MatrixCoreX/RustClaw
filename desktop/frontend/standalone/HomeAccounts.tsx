@@ -1,6 +1,7 @@
 import { copy, useLanguage } from "../i18n";
 import { useRef, useState } from "react";
 import { NniPublicKeyDisplay } from "../../../UI/src/components/NniPublicKeyDisplay";
+import { formatNniOwnerPublicKey } from "../../../UI/src/lib/nni-owner-public-key";
 import { openWallet, selectAccount, useWallet } from "../wallet/store";
 import { walletError } from "../wallet/errors";
 import { shortPublic } from "../wallet/amounts";
@@ -39,10 +40,10 @@ export function HomeAccounts({ onOpen, busy = false }: {
           <span className="desktop-badge">{account.backed_up ? copy("备份已验证") : copy("尚未备份")}</span></div>
         <select id="home-asset-account" className="desktop-home-account-select" aria-label={copy("首页本地资产账户")}
           value={account.id} disabled={disabled} onChange={e => void choose(e.target.value)}>
-          {wallet.accounts.map(a => <option key={a.id} value={a.id}>{t(`桌面本地账号（共 ${wallet.accounts.length} 个）`, `Local account (${wallet.accounts.length} total)`)} · {a.name} · {shortPublic(a.public_key)}</option>)}
+          {wallet.accounts.map(a => <option key={a.id} value={a.id}>{t(`桌面本地账号（共 ${wallet.accounts.length} 个）`, `Local account (${wallet.accounts.length} total)`)} · {a.name} · {shortPublic(formatNniOwnerPublicKey(a.public_key))}</option>)}
         </select>
         <span className="desktop-home-key-label">{copy("账户公钥 · 收款地址")}</span>
-        <NniPublicKeyDisplay key={account.id} value={account.public_key} t={t} allowFormatSwitch={false} copyButton="compact"
+        <NniPublicKeyDisplay key={account.id} value={formatNniOwnerPublicKey(account.public_key)} t={t} allowFormatSwitch={false} copyButton="compact"
           className="desktop-home-public-key" valueClassName="text-xs" />
         <div className="desktop-home-account-footer"><small>{copy("私钥已在本机加密保存")}{!account.backed_up ? copy("，交易前请先备份。") : t("。", ".")}</small>
           <div className="desktop-actions"><button type="button" className="primary" disabled={disabled} data-home-open="assets" onClick={() => onOpen(account.id)}>{copy("进入资产")}</button></div></div>
