@@ -2,6 +2,7 @@ use super::*;
 
 #[path = "answer_verifier_runtime/citation_audit.rs"]
 mod citation_audit;
+pub(crate) use citation_audit::repair_sources;
 
 // Insert values only into the trusted template. Evidence containing a literal
 // placeholder remains byte-for-byte intact and cannot alter another input.
@@ -57,6 +58,7 @@ pub(crate) async fn verify_answer_observe_only(
     candidate_answer: &str,
 ) -> AnswerVerificationOutcome {
     if let Some(gap) = delivery_manifest_gap::missing_delivery_manifest_gap(
+        state.skill_rt.files_root(),
         &state.skill_rt.workspace_root,
         &task.task_id,
         route_result,
@@ -223,6 +225,16 @@ pub(crate) async fn verify_answer_observe_only(
     };
     let validation = match parsed {
         Ok(mut model) => {
+            // Quotes from the draft identify what needs editing. Other verifier
+            // prose must never enter the synthesis request as an instruction.
+            let spans: Vec<_> = model
+                .unsupported_claims
+                .iter()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty() && s.len() <= 1024 && candidate_answer.contains(*s))
+                .take(8)
+                .map(str::to_owned)
+                .collect();
             let missing = citation_audit::missing_checks(&citations, &model.citation_checks);
             if !missing.is_empty() {
                 // A structurally complete answer can still misstate a cited fact.
@@ -230,7 +242,7 @@ pub(crate) async fn verify_answer_observe_only(
                     pass: false,
                     missing_evidence_fields: vec!["unsupported_claims".into()],
                     answer_incomplete_reason: "citation_evidence_incomplete".into(),
-                    retry_instruction: serde_json::json!({"repair_kind":"revise_unsupported_claims","citations":missing,
+                    retry_instruction: serde_json::json!({"repair_kind":"revise_unsupported_claims","citations":missing,"candidate_spans":spans,
                         "verifier_guidance":model.verdict.retry_instruction}).to_string(),
                     should_retry: true,
                     confidence: 1.0,
@@ -244,7 +256,13 @@ pub(crate) async fn verify_answer_observe_only(
             // verifier may audit them, but it cannot create new label
             // obligations by interpreting prose from the user request.
             model.output_field_checks = output_field_checks.clone();
-            let verdict = operation_audit::validate_operation_audit(model, journal);
+            let mut verdict = operation_audit::validate_operation_audit(model, journal);
+            if !verdict.pass && !spans.is_empty() {
+                verdict.retry_instruction = serde_json::json!({
+                    "repair_kind":"revise_unsupported_claims", "candidate_spans":spans,
+                    "verifier_guidance":verdict.retry_instruction,
+                }).to_string();
+            }
             if verdict.answer_incomplete_reason == "verification_audit_invalid" {
                 // A contradictory audit is a verifier protocol failure, not
                 // evidence that the candidate or completed operations are wrong.

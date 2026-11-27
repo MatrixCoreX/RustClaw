@@ -80,9 +80,12 @@ def citation_rows(candidate, evidence, captured):
     # Modern captures already contain the host's redacted excerpts. Never expand
     # that set with lower-trust fields when an edited candidate changes URLs.
     sources = {}
+    dates = {}
     if captured is not None:
         for row in captured:
             sources[row["url"]] = row["excerpts"]
+            if row.get("source_dates"):
+                dates[row["url"]] = row["source_dates"]
     else:
         def collect(node, depth):
             if depth > 12:
@@ -96,7 +99,7 @@ def citation_rows(candidate, evidence, captured):
                 url = node.get(key)
                 if not isinstance(url,str) or not url.startswith(("https://","http://")):
                     continue
-                for field in ("title","content_excerpt","snippet","description","text"):
+                for field in ("title","excerpt","content_excerpt","snippet","description","text"):
                     value = node.get(field)
                     if isinstance(value,str) and value.strip():
                         snippets = sources.setdefault(url, [])
@@ -121,7 +124,9 @@ def citation_rows(candidate, evidence, captured):
         # A historical empty host index may also mean the original candidate had no links.
         # Newly introduced URLs have no captured binding and must fail closed.
         return [{"index":i,"url":url,"excerpts":[]} for i,url in enumerate(urls)]
-    return [{"index":i,"url":url,"excerpts":sources.get(url,[])} for i,url in enumerate(urls)] if sources else []
+    return [{"index":i,"url":url,"excerpts":sources.get(url,[]),
+             **({"source_dates":dates[url]} if url in dates else {})}
+            for i,url in enumerate(urls)] if sources else []
 
 
 def render_input(content, template, candidate, evidence_transform):

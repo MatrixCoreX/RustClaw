@@ -311,7 +311,7 @@ fn materialize_context_source_artifacts(
             continue;
         };
         let Ok(published) = crate::skill_output_artifact::publish_canonical_evidence_artifact(
-            &state.skill_rt.workspace_root,
+            state.skill_rt.files_root(),
             &task.task_id,
             evidence_id,
             &bytes,

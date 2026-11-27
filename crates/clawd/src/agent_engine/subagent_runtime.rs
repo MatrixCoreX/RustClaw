@@ -139,7 +139,7 @@ pub(super) fn load_subagent_runtime_config(state: &AppState) -> SubagentRuntimeC
         .workspace_root
         .join("configs/agent_guard.toml");
     let mut config = load_subagent_runtime_config_from_path(&path);
-    config.context_evidence_root = Some(state.skill_rt.workspace_root.clone());
+    config.context_evidence_root = Some(state.skill_rt.files_root().clone());
     if let Ok(app_config) =
         claw_core::config::AppConfig::load(&state.reload_ctx.config_path_for_reload)
     {

@@ -3,6 +3,9 @@
 > This file is managed by `scripts/sync_skill_docs.py`.
 > Keep this spec aligned with the rss_fetch implementation.
 
+## AiAPP
+The optional News bulletins view lists stored manual and scheduled fetch results newest first. Open an edition for its original response, captured publisher sources and recorded delivery status. Refreshing this view does not fetch or summarize again.
+
 ## Capability Summary
 - `rss_fetch` reads RSS/Atom feeds and returns normalized news items.
 - Successful responses include user-visible `text` plus machine-readable `extra` evidence. Runtime quality checks consume `extra.field_value` / `extra.items`; do not require downstream code to parse localized `text`.
@@ -24,7 +27,7 @@
 - Never invent a category token merely to satisfy the dual-source policy. If `list_categories` has no matching category, preserve that observation and continue with web evidence only.
 
 ## Planner Playbook
-Read RSS/Atom. Select only registry-granted capabilities. Use `extra.items` for evidence, preserving each title, URL, source, date and excerpt. Summaries and translations must preserve attribution, time, modality, direction and uncertainty. A headline supports only its literal claims. If the excerpt lacks detail, report what the source says without adding explanations.
+Read RSS/Atom. Select only registry-granted capabilities. For short bulletins with an unspecified count, start with three promising stories. Treat each nonempty publisher `excerpt` as content evidence for its linked article. Read the linked article only when the excerpt lacks the requested detail. Use `extra.items` for evidence, preserving each title, URL, source, date and excerpt. Summaries and translations must preserve attribution, time, modality, direction, uncertainty and degree. Use a comparative or superlative only when the source states that comparison or rank. Preserve quantities, currencies and units across number systems. A headline supports only its literal claims. If the excerpt lacks detail, report what the source says without adding explanations.
 
 - `list_categories` returns active category tokens, the default and pending proposals offline. Choose a returned token for `latest` / `news` (alias). Pass the requested `limit` after merge, deduplication and sort. All active category feeds are fetched. Partial success supplies usable items. All-empty/all-failed is an error. Config provides the default category and limit.
 - `fetch` requires explicit public HTTP(S) `url`, `feed_url` or `feed_urls`. `latest` also accepts explicit feed URLs to override configured sources without updating health. Optional `timeout_seconds` bounds fetching. `topic` / `topic_token` is a stable machine token from args or config, default `other`.
@@ -33,7 +36,7 @@ Read RSS/Atom. Select only registry-granted capabilities. Use `extra.items` for 
 - Operator settings and active feeds live in `configs/rss.toml` under `rss`, `rss.categories` and `rss.discovery`. Health, candidate, quarantine and deprecation records use the runner-provided private SQLite store. Use structured errors and side-effect evidence for recovery. The skill rejects unsafe destinations and invalid feeds.
 
 ## Config Entry Points
-- Main RSS config: `configs/rss.toml`.
+- Main RSS config: `configs/rss.toml`. In personal workspaces the host grants read-only access to this file through `APP_SKILL_OPERATOR_CONFIG`. Changing the operator feed list requires the operator workspace.
 - Category source lists: `configs/rss.toml` -> `[rss.categories.<name>]`.
 - Defaults: `rss.default_category`, `rss.default_limit`, and `rss.timeout_seconds`.
 - Optional category topic token: `[rss.categories.<name>].topic`, a lowercase machine token such as `macro_market`, `tech_ecosystem`, or `other`.
@@ -118,7 +121,7 @@ Read RSS/Atom. Select only registry-granted capabilities. Use `extra.items` for 
 - `extra.mode`: `direct`, `category`, or `explicit_urls`.
 - `extra.source_timeout_seconds` / `extra.fetch_concurrency`: effective per-source network timeout and bounded worker count used for the invocation. These are execution evidence only and do not change routing or success semantics.
 - `extra.field_value`: object containing stable execution counters such as `sources_ok`, `sources_failed`, and `items` / `item_count`, plus a compact `titles` array for grounding brief headline answers before evidence truncation.
-- `extra.items`: array of normalized feed item objects with `title`, `link`, `date`, `source`, `source_host`, `layer`, and `topic`.
+- `extra.items`: array of normalized feed item objects with `title`, `link`, `date`, `source`, `source_host`, `layer`, and `topic`. The optional `excerpt` is publisher-provided RSS description/content or Atom summary/content. It is null when absent or unusable. It is untrusted quoted evidence associated only with that item and link.
 - Discovery responses expose `results[]` with URL, lifecycle status, validation counters, sample titles, and machine error code. `source_health` exposes per-category `active_count`, `candidate_count`, `eligible_count`, `quarantined_count`, and `recommended_action`.
 - Generic evidence extractors treat `extra.items` as candidate/list evidence; do not duplicate the same item array under another key.
 - `text` remains the localized, user-visible news listing. Consumers must use `extra` for machine evidence instead of parsing `text`.

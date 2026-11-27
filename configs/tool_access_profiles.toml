@@ -22,3 +22,13 @@ minimal = [
   "skill:memory_store",
 ]
 messaging = ["skill:system_basic", "skill:memory_store"]
+
+read_only = [
+  "skill:read_file", "skill:list_dir", "capability:filesystem.read_text_range",
+  "capability:filesystem.list_entries", "capability:system.read_range",
+  "capability:system.inventory_dir", "capability:schedule.list",
+]
+
+# Host-approved settings that a specific admitted skill may read in a personal workspace.
+[operator_configs]
+rss_fetch = "configs/rss.toml"

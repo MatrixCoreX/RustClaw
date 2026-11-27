@@ -166,7 +166,7 @@ fn resolve_aipp_bundle_asset(
     requested: &str,
 ) -> Result<(PathBuf, &'static str), String> {
     if active.aipp.renderer != "sandbox_bundle_v1"
-        || active.aipp.data_contract != "capability_bridge_v1"
+        || !matches!(active.aipp.data_contract.as_str(), "capability_bridge_v1" | "owned_transcript_jobs_v1")
     {
         return Err("aipp_bundle_not_available".to_string());
     }
@@ -216,6 +216,15 @@ fn verify_aipp_bundle_artifacts(
     skill_name: &str,
     active: &ActiveAippPackage,
 ) -> Result<(), String> {
+    if active.aipp.data_contract == TRANSCRIPT_CONTRACT {
+        let verified = skill_sdk::InstallReceiptStore::new(skill_package_root(state))
+            .verified_current_install(skill_name)
+            .map_err(|_| "aipp_install_receipt_invalid".to_string())?;
+        if verified.install_dir != active.package_root || verified.manifest != active.manifest {
+            return Err("aipp_generation_binding_mismatch".to_string());
+        }
+        return Ok(());
+    }
     let Some(binding) = active.admission_binding.as_ref() else {
         // Repository-maintained base packages are trusted source artifacts and have no
         // admission receipt in the captured view. A later view change must not turn an
@@ -285,6 +294,9 @@ fn prepare_aipp_bundle_asset(
         Ok(Some(active)) => active,
         _ => return Err(aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_available")),
     };
+    if active.aipp.data_contract == TRANSCRIPT_CONTRACT {
+        return Err(aipp_api_error(StatusCode::NOT_FOUND, "aipp_bundle_not_available"));
+    }
     if !aipp_is_installed(state, skill_name) {
         return Err(aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_installed"));
     }

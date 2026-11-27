@@ -518,16 +518,40 @@ pub(super) fn bounded_answer_retry_prompt(
     user_request: &str,
     output_contract: &crate::IntentOutputContract,
     context: &str,
-    observed_trace: &str,
+    journal: &crate::task_journal::TaskJournal,
     rejected_answer: &str,
     verifier: &crate::answer_verifier::AnswerVerifierOut,
 ) -> String {
-    let issue = json!({
+    let observed_trace = answer_verifier_retry_observed_trace(journal);
+    let mut issue = json!({
         "issue_kind": "answer_contract_gap",
         "missing_evidence_fields": verifier.missing_evidence_fields,
         "should_retry": verifier.should_retry,
         "confidence": verifier.confidence,
     });
+    if verifier
+        .missing_evidence_fields
+        .iter()
+        .any(|field| field == "unsupported_claims")
+    {
+        issue["cited_sources"] = json!(crate::answer_verifier::repair_sources(
+            rejected_answer,
+            journal
+        ));
+        if let Ok(diagnostic) = serde_json::from_str::<Value>(&verifier.retry_instruction) {
+            if diagnostic["repair_kind"] == "revise_unsupported_claims" {
+                let spans: Vec<_> = diagnostic["candidate_spans"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .filter(|s| !s.is_empty() && s.len() <= 1024 && rejected_answer.contains(*s))
+                    .take(8)
+                    .collect();
+                issue["candidate_spans"] = json!(spans);
+            }
+        }
+    }
     let output_contract =
         serde_json::to_string(output_contract).unwrap_or_else(|_| "{}".to_string());
     crate::render_prompt_template(
@@ -539,7 +563,7 @@ pub(super) fn bounded_answer_retry_prompt(
             ("__OUTPUT_CONTRACT__", &output_contract),
             ("__VERIFIER_ISSUE__", &issue.to_string()),
             ("__TASK_CONTEXT__", context),
-            ("__OBSERVED_TRACE__", observed_trace),
+            ("__OBSERVED_TRACE__", &observed_trace),
             ("__REJECTED_ANSWER__", rejected_answer.trim()),
         ],
     )
@@ -560,7 +584,6 @@ pub(crate) async fn retry_answer_after_verifier(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("<none>");
-    let observed_trace = answer_verifier_retry_observed_trace(journal);
     let request_language_hint =
         crate::language_policy::task_response_language_hint(state, task, user_request);
     let resolved = match crate::bootstrap::load_required_prompt_template_for_state_with_meta(
@@ -583,7 +606,7 @@ pub(crate) async fn retry_answer_after_verifier(
         user_request,
         output_contract,
         context,
-        &observed_trace,
+        journal,
         rejected_answer,
         verifier,
     );

@@ -14,7 +14,8 @@ fn path_only_delivery_requires_an_actual_published_manifest() {
     std::fs::write(&file, "actual content").unwrap();
     let candidate = format!("FILE:{}", file.display());
     assert!(
-        missing_delivery_manifest_gap(&root, task_id, &contract, &journal, &candidate).is_some()
+        missing_delivery_manifest_gap(&root, &root, task_id, &contract, &journal, &candidate)
+            .is_some()
     );
     journal
         .capability_results
@@ -24,7 +25,8 @@ fn path_only_delivery_requires_an_actual_published_manifest() {
             serde_json::json!({"extra":{"artifacts":[{"path":file}]}}),
         ));
     assert!(
-        missing_delivery_manifest_gap(&root, task_id, &contract, &journal, &candidate).is_none()
+        missing_delivery_manifest_gap(&root, &root, task_id, &contract, &journal, &candidate)
+            .is_none()
     );
     std::fs::remove_dir_all(root).unwrap();
 }

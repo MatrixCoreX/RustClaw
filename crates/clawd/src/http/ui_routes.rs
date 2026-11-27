@@ -236,6 +236,10 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             get(get_aipp_bundle_asset),
         )
         .route("/aipps/:skill_name/items", get(get_aipp_items))
+        .route("/aipps/:skill_name/transcripts", get(list_aipp_transcripts).post(submit_aipp_transcript))
+        .route("/aipps/:skill_name/transcripts/:task_id", get(read_aipp_transcript))
+        .route("/aipps/:skill_name/transcripts/frame", post(issue_aipp_transcript_frame))
+        .route("/aipps/:skill_name/transcripts/script/:ticket", get(get_aipp_transcript_script))
         .route(
             "/aipps/:skill_name/account-control",
             post(control_aipp_account),
@@ -542,6 +546,8 @@ include!("ui_routes/nni_bancor.rs");
 include!("ui_routes/nni_bancor_candles.rs");
 include!("ui_routes/nni_asset_transfer.rs");
 include!("ui_routes/nni_skill_gateway.rs");
+#[path = "ui_routes/pending_bound_files.rs"]
+mod pending_bound_files;
 include!("ui_routes/auth_feishu_bind.rs");
 include!("ui_routes/channel_registration_transport.rs");
 include!("ui_routes/channel_registration_guard.rs");
@@ -572,7 +578,13 @@ include!("ui_routes/skill_store_installation.rs");
 include!("ui_routes/skill_store.rs");
 include!("ui_routes/skill_store_operations.rs");
 include!("ui_routes/aipp_activity_query.rs");
+include!("ui_routes/aipp_editions.rs");
+#[cfg(test)]
+#[path = "ui_routes/aipp_editions_tests.rs"]
+mod edition_tests;
 include!("ui_routes/aipp.rs");
+include!("ui_routes/aipp_transcripts.rs");
+include!("ui_routes/aipp_transcript_frame.rs");
 include!("ui_routes/aipp_assets.rs");
 #[path = "ui_routes/aipp_accounts.rs"]
 mod aipp_accounts;

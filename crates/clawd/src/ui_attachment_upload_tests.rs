@@ -4,7 +4,7 @@ fn input(bytes: &[u8]) -> UploadInput {
         name: "sample.txt".into(),
         mime_type: "text/plain".into(),
         kind: "file".into(),
-        bytes: bytes.into(),
+        bytes: std::io::Cursor::new(bytes.to_vec()),
     }
 }
 

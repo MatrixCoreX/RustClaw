@@ -52,6 +52,7 @@ import {
   fetchTaskArtifactVideoSource,
   MAX_AUTOMATIC_ARTIFACT_PREVIEW_BYTES,
   saveTaskArtifactBlob,
+  saveTaskArtifactUrl,
   taskArtifactBrowserVideoUrl,
   taskArtifactVideoPosterUrl,
   type ArtifactFetch,
@@ -124,6 +125,9 @@ export interface ChatPageProps {
   chatCanStop?: boolean;
   chatStopping?: boolean;
   chatDeliveryMode?: "auto" | "defer";
+  failedDeferredInputs?: { id: string; text: string; filenames: string[] }[];
+  onRetryDeferredDraft?: (id: string) => Promise<void>;
+  onDiscardDeferredDraft?: (id: string) => void;
   chatDeferredInputs?: ChatDeferredInputSummary[];
   chatDeferredActionInputId?: string | null;
   onChatDeliveryModeChange?: (value: "auto" | "defer") => void;
@@ -193,6 +197,7 @@ export function ChatPage({
   chatCanStop = false,
   chatStopping = false,
   chatDeliveryMode = "auto",
+  failedDeferredInputs = [], onRetryDeferredDraft, onDiscardDeferredDraft,
   chatDeferredInputs = [],
   chatDeferredActionInputId = null,
   onChatDeliveryModeChange = () => undefined,
@@ -902,6 +907,14 @@ export function ChatPage({
         <ChatWorkingIndicator t={t} activity={chatActivity} />
       ) : null}
 
+      {failedDeferredInputs.map(draft => (
+        <div key={draft.id} className="mt-2 flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2 text-sm">
+          <span>{t("延后消息未保存", "Deferred message was not saved")}</span>
+          <span className="min-w-0 flex-1 break-words">{[draft.text, ...draft.filenames].filter(Boolean).join(" · ")}</span>
+          <button type="button" onClick={() => void onRetryDeferredDraft?.(draft.id)}>{t("重试", "Retry")}</button>
+          <button type="button" onClick={() => onDiscardDeferredDraft?.(draft.id)}>{t("丢弃", "Discard")}</button>
+        </div>
+      ))}
       {chatDeferredInputs.length > 0 ? (
         <div
           data-testid="chat-deferred-inputs"
@@ -1509,10 +1522,20 @@ function AttachmentPreview({
   t: Translate;
   compact?: boolean;
 }) {
+  const previewFile = (attachmentIsImage(attachment) || attachmentIsAudio(attachment))
+    ? attachment.file : undefined;
+  const [preview, setPreview] = useState<{ file: Blob; url: string } | null>(null);
+  useEffect(() => {
+    if (!previewFile) return;
+    const url = URL.createObjectURL(previewFile);
+    setPreview({ file: previewFile, url });
+    return () => URL.revokeObjectURL(url);
+  }, [previewFile]);
+  const src = preview && preview.file === previewFile ? preview.url : attachment.dataUrl;
   if (attachmentIsImage(attachment)) {
     return (
       <img
-        src={attachment.dataUrl}
+        src={src}
         alt={attachment.name}
         className={
           compact
@@ -1539,7 +1562,7 @@ function AttachmentPreview({
         </div>
         <audio
           controls
-          src={attachment.dataUrl}
+          src={src}
           className="h-8 w-full"
           title={t("语音预览", "Voice preview")}
         />
@@ -1689,7 +1712,17 @@ export function TaskArtifactCard({
     setDownloadLoading(true);
     setDownloadError(null);
     try {
-      const blob = await fetchTaskArtifactBlob(artifactFetchRef.current, artifact.download_url, controller.signal);
+      const fetcher = artifactFetchRef.current;
+      const native = fetcher.nativeMediaUrl?.(artifact.download_url, "attachment");
+      if (native) {
+        const response = await fetcher(artifact.download_url, { method: "HEAD", signal: controller.signal });
+        controller.signal.throwIfAborted();
+        if (!response.ok) throw new Error(`task_artifact_http_${response.status}`);
+        if (fetcher.nativeMediaUrl?.(artifact.download_url, "attachment") !== native) return;
+        saveTaskArtifactUrl(native, artifact.filename);
+        return;
+      }
+      const blob = await fetchTaskArtifactBlob(fetcher, artifact.download_url, controller.signal);
       if (!controller.signal.aborted) saveTaskArtifactBlob(blob, artifact.filename);
     } catch {
       if (!controller.signal.aborted) setDownloadError(t("下载失败，请重试。", "Download failed. Try again."));

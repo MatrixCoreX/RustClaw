@@ -73,6 +73,7 @@ impl Fixture {
 
     fn request<'a>(&'a self, private: &'a [PathBuf]) -> ProcessSandboxRequest<'a> {
         ProcessSandboxRequest {
+            principal_readonly: None,
             mode: ToolSandboxMode::WorkspaceWrite,
             backend: ToolSandboxBackend::Auto,
             workspace_root: &self.root,
@@ -296,6 +297,7 @@ async fn temporary_execution_fixture_needs_an_explicit_readonly_mapping() {
     let public = directory.path().join("public");
     fs::write(&public, b"public-temporary-marker").unwrap();
     let request = ProcessSandboxRequest {
+        principal_readonly: None,
         mode: ToolSandboxMode::ReadOnly,
         backend: ToolSandboxBackend::Auto,
         workspace_root: std::path::Path::new("/proc"),
@@ -330,6 +332,7 @@ async fn shared_memory_data_workspace_preserves_scoped_read_and_write() {
         .unwrap();
     fs::write(directory.path().join("public"), b"public-marker").unwrap();
     let request = ProcessSandboxRequest {
+        principal_readonly: None,
         mode: ToolSandboxMode::WorkspaceWrite,
         backend: ToolSandboxBackend::Auto,
         workspace_root: directory.path(),

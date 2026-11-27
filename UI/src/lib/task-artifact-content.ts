@@ -68,13 +68,17 @@ export async function fetchTaskArtifactVideoSource(
 
 export function saveTaskArtifactBlob(blob: Blob, filename: string): void {
   const objectUrl = URL.createObjectURL(blob);
+  saveTaskArtifactUrl(objectUrl, filename);
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+}
+
+export function saveTaskArtifactUrl(url: string, filename: string): void {
   const link = document.createElement("a");
-  link.href = objectUrl;
+  link.href = url;
   link.download = filename;
   link.rel = "noopener";
   link.style.display = "none";
   document.body.appendChild(link);
   link.click();
   link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
 }

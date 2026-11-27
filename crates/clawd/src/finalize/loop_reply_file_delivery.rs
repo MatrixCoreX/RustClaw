@@ -148,16 +148,13 @@ fn observed_file_path_for_payload(
     let candidate = if path.is_absolute() {
         path.to_path_buf()
     } else {
-        state.skill_rt.workspace_root.join(path)
+        state.skill_rt.files_root().join(path)
     };
     let file_name = candidate.file_name()?.to_string_lossy();
     if file_name != payload {
         return None;
     }
-    if !candidate.is_file() {
-        return None;
-    }
-    Some(candidate.canonicalize().unwrap_or(candidate))
+    state.skill_rt.delivery_file(&candidate)
 }
 
 fn collect_observed_file_paths(
@@ -884,7 +881,7 @@ fn observed_find_entries_file_candidates(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| state.skill_rt.workspace_root.clone());
+        .unwrap_or_else(|| state.skill_rt.files_root().clone());
     let mut candidates = value
         .get("results")
         .and_then(|value| value.as_array())?
@@ -899,9 +896,7 @@ fn observed_find_entries_file_candidates(
             } else {
                 root.join(candidate)
             };
-            resolved
-                .is_file()
-                .then(|| resolved.canonicalize().unwrap_or(resolved))
+            state.skill_rt.delivery_file(&resolved)
         })
         .collect::<Vec<_>>();
     candidates.sort();

@@ -357,33 +357,8 @@ fn sanitize_status_name(raw: &str) -> String {
         .collect()
 }
 
-fn safe_telegram_storage_segment(raw: &str, fallback: &str) -> String {
-    let sanitized = sanitize_status_name(raw);
-    if sanitized.trim_matches('_').is_empty() {
-        fallback.to_string()
-    } else {
-        sanitized
-    }
-}
+use claw_core::channel_workspace::telegram_inbox_path as build_telegram_inbox_rel_path;
 
-fn build_telegram_inbox_rel_path(
-    root_dir: &str,
-    bot_name: &str,
-    chat_id: i64,
-    user_id: i64,
-    provider_message_id: &str,
-    ext: &str,
-) -> String {
-    let base = root_dir.trim().trim_end_matches('/');
-    let safe_bot = safe_telegram_storage_segment(bot_name, "bot");
-    let safe_message_id = safe_telegram_storage_segment(provider_message_id, "message");
-    let safe_ext = ext.trim().trim_start_matches('.');
-    if base.is_empty() {
-        format!("{safe_bot}/{chat_id}/{user_id}/{safe_message_id}.{safe_ext}")
-    } else {
-        format!("{base}/{safe_bot}/{chat_id}/{user_id}/{safe_message_id}.{safe_ext}")
-    }
-}
 
 async fn write_bot_runtime_status(path: &Path, status: &TelegramBotRuntimeStatus) {
     let Some(parent) = path.parent() else {

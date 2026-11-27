@@ -43,6 +43,7 @@ struct PrivateDirectory {
 // prove process/descriptor/survivor admission or authorize loading key material.
 pub(crate) struct HostFilesystemPolicy {
     directories: Vec<PrivateDirectory>,
+    pub(crate) personal_root: Option<PathBuf>,
 }
 
 impl HostFilesystemPolicy {
@@ -55,6 +56,7 @@ impl HostFilesystemPolicy {
     pub(crate) fn without_private_authority() -> Self {
         Self {
             directories: Vec::new(),
+            personal_root: None,
         }
     }
 
@@ -87,7 +89,13 @@ impl HostFilesystemPolicy {
                 identity: (identity.st_dev as u64, identity.st_ino as u64),
             });
         }
-        Ok(Self { directories })
+        Ok(Self { directories, personal_root: None })
+    }
+
+    pub(crate) fn scoped_to(&self, root: &Path) -> io::Result<Self> {
+        let mut policy = Self::pin_directories(&self.process_directories()?, root)?;
+        policy.personal_root = Some(root.canonicalize()?);
+        Ok(policy)
     }
 
     pub(crate) fn process_directories(&self) -> io::Result<Vec<PathBuf>> {
@@ -168,6 +176,9 @@ impl HostFilesystemPolicy {
     }
 
     fn check_declared_path(&self, path: &Path) -> io::Result<()> {
+        if self.personal_root.as_ref().is_some_and(|root| !path.starts_with(root)) {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, PrivateAccessDenied));
+        }
         if self
             .directories
             .iter()

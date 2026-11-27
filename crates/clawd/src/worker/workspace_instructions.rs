@@ -24,7 +24,7 @@ pub(super) fn prepare_workspace_instructions(
         return Ok(None);
     }
     let discovery =
-        discover_workspace_instructions(&state.skill_rt.workspace_root, config, payload)?;
+        discover_workspace_instructions(state.skill_rt.files_root(), config, payload)?;
     let (rendered_context, wrapper_prompt) = if discovery.rendered_sources.is_empty() {
         (None, None)
     } else {

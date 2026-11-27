@@ -32,18 +32,6 @@ export class ChatAttachmentConstraintError extends Error {
   }
 }
 
-export function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") resolve(reader.result);
-      else reject(new Error("读取文件失败"));
-    };
-    reader.onerror = () => reject(new Error("读取文件失败"));
-    reader.readAsDataURL(file);
-  });
-}
-
 export function chatAttachmentKindForFile(file: File, forcedKind?: ChatAttachmentKind): ChatAttachmentKind {
   if (forcedKind) return forcedKind;
   if (file.type.startsWith("image/")) return "image";
@@ -61,7 +49,7 @@ export async function fileToChatAttachment(
   }
   return {
     name: file.name || defaultAttachmentName(chatAttachmentKindForFile(file, forcedKind), file.type),
-    dataUrl: await fileToDataUrl(file),
+    file,
     mimeType: file.type || "application/octet-stream",
     size: file.size,
     kind: chatAttachmentKindForFile(file, forcedKind),

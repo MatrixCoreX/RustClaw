@@ -140,7 +140,7 @@ fn step_permission_decision_json(
         "sandbox": verifier_sandbox_summary(registry_policy.as_ref(), &sandbox_profile, effect),
         "workspace_scope": verifier_workspace_scope_summary(
             &step.args,
-            &state.skill_rt.workspace_root,
+            state.skill_rt.files_root(),
             crate::execution_recipe::action_targets_external_workspace(
                 state,
                 &normalized_skill,
@@ -508,7 +508,7 @@ pub(super) fn workspace_filesystem_mutation_can_run_autonomously(
     if fs_basic_action(args).as_deref() == Some("replace_text") {
         return path_args(args)
             .into_iter()
-            .any(|path| path_value_is_workspace_scoped(path, &state.skill_rt.workspace_root));
+            .any(|path| path_value_is_workspace_scoped(path, state.skill_rt.files_root()));
     }
     if !matches!(
         fs_basic_action(args).as_deref(),
@@ -518,7 +518,7 @@ pub(super) fn workspace_filesystem_mutation_can_run_autonomously(
     }
     path_args(args)
         .into_iter()
-        .any(|path| path_value_is_workspace_scoped(path, &state.skill_rt.workspace_root))
+        .any(|path| path_value_is_workspace_scoped(path, state.skill_rt.files_root()))
 }
 
 fn workspace_patch_can_run_autonomously(state: &AppState, args: &Value) -> bool {
@@ -556,7 +556,7 @@ fn workspace_patch_can_run_autonomously(state: &AppState, args: &Value) -> bool 
             .strip_prefix("a/")
             .or_else(|| raw_path.strip_prefix("b/"))
             .unwrap_or(raw_path);
-        if path.is_empty() || !path_value_is_workspace_scoped(path, &state.skill_rt.workspace_root)
+        if path.is_empty() || !path_value_is_workspace_scoped(path, state.skill_rt.files_root())
         {
             return false;
         }

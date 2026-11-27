@@ -55,6 +55,7 @@ pub(crate) fn ensure_scheduled_run_terminal_sync(db: &Connection) -> anyhow::Res
            )",
         [],
     )?;
+    db.execute_batch(include_str!("scheduled_run_failure_sync.sql"))?;
     Ok(repaired)
 }
 
@@ -285,6 +286,41 @@ pub(crate) fn list_scheduled_run_history(
         scheduled_run_row,
     )?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+pub(crate) fn scheduled_history_page(
+    db: &Connection,
+    actor: &claw_core::types::AuthIdentity,
+    before_id: Option<u64>,
+    limit: usize,
+    status: Option<&str>,
+) -> anyhow::Result<Value> {
+    let limit = limit.clamp(1, 100);
+    let cursor = before_id.map(i64::try_from).transpose()?;
+    let mut statement = db.prepare(
+        "SELECT r.run_id,r.job_id,r.task_id,r.thread_ref,r.task_status,r.triage_status,
+                r.result_json,r.started_at,r.finished_at,r.updated_at,r.id
+         FROM scheduled_job_runs r LEFT JOIN scheduled_run_owners o ON o.run_id=r.run_id
+         WHERE (?1 OR o.principal_id=?2) AND (?3 IS NULL OR r.id<?3)
+           AND (?4 IS NULL OR r.task_status=?4) ORDER BY r.id DESC LIMIT ?5",
+    )?;
+    let rows = statement.query_map(
+        params![
+            actor.role.eq_ignore_ascii_case("admin"),
+            actor.principal_id,
+            cursor,
+            status,
+            limit as i64 + 1
+        ],
+        |row| Ok((row.get::<_, i64>(10)?, scheduled_run_row(row)?)),
+    )?;
+    let mut items = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    let has_more = items.len() > limit;
+    items.truncate(limit);
+    let next = items.last().filter(|_| has_more).map(|(id, _)| *id);
+    Ok(
+        json!({"schema_version":1,"items":items.into_iter().map(|(_,item)| item).collect::<Vec<_>>(),"next_cursor":next}),
+    )
 }
 
 pub(crate) fn scheduled_run_terminal_result(

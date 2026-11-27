@@ -513,7 +513,7 @@ async fn synthesize_reviewed_transcript(
     }
     let character_count = reviewed_text.chars().count();
     let published = crate::skill_output_artifact::publish_task_text_artifact(
-        &state.skill_rt.workspace_root,
+        state.skill_rt.files_root(),
         &task.task_id,
         "transcript-review",
         &contract.text_filename,
@@ -854,7 +854,7 @@ fn synthesize_unreviewed_transcript_fallback(
         normalize_transcript_script_for_language(&contract.raw_text, target_language);
     let character_count = normalized_text.chars().count();
     let artifact = crate::skill_output_artifact::publish_task_text_artifact(
-        &state.skill_rt.workspace_root,
+        state.skill_rt.files_root(),
         &task.task_id,
         "transcript-fallback",
         &contract.text_filename,
@@ -1178,7 +1178,7 @@ pub(super) fn synthesis_evidence_catalog(
         } else {
             complete_model_view = false;
             let published = crate::skill_output_artifact::publish_model_view_evidence_artifact(
-                &state.skill_rt.workspace_root,
+                state.skill_rt.files_root(),
                 &task.task_id,
                 &identity.evidence_id,
                 &model_serialized,

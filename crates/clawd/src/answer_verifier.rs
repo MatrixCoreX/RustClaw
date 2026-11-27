@@ -21,7 +21,7 @@ use answer_verifier_evidence_policy::*;
 pub(crate) use answer_verifier_runtime::local_missing_evidence_verifier_gap;
 use answer_verifier_runtime::*;
 pub(crate) use answer_verifier_runtime::{
-    post_write_content_evidence_missing_before_verifier, verify_answer_observe_only,
+    post_write_content_evidence_missing_before_verifier, repair_sources, verify_answer_observe_only,
 };
 use answer_verifier_scalar::*;
 #[path = "answer_verification.rs"]

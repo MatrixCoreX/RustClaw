@@ -37,15 +37,30 @@ class RemoteTransport:
     def command(self, operation, *args):
         return ['ssh',*ssh_options(),self.host,shlex.join(['python3','-I','-B','-c',self.code,operation,self.directory,*args])]
 
+    @staticmethod
+    def check_remote_exit(operation, status):
+        if status == os.EX_TEMPFAIL:
+            raise RuntimeError('vault_remote_busy')
+        if status == 255:
+            raise RuntimeError('vault_remote_transport_unavailable')
+        if status:
+            raise RuntimeError(f'vault_remote_{operation}_failed')
+
+    def read_remote(self, operation, timeout, limit, *args):
+        try:
+            result = subprocess.run(self.command(operation, *args), capture_output=True, timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError(f'vault_remote_{operation}_timeout') from error
+        self.check_remote_exit(operation, result.returncode)
+        if len(result.stdout) > limit:
+            raise RuntimeError(f'vault_remote_{operation}_too_large')
+        return result.stdout
+
     def inventory(self):
-        result=subprocess.run(self.command('inventory'),capture_output=True,timeout=300,check=True)
-        if len(result.stdout)>MAX_MANIFEST_BYTES: raise RuntimeError('vault_remote_inventory_too_large')
-        return json.loads(result.stdout)
+        return json.loads(self.read_remote('inventory', 300, MAX_MANIFEST_BYTES))
 
     def load_manifest(self, name):
-        result=subprocess.run(self.command('manifest',name),capture_output=True,timeout=120,check=True)
-        if len(result.stdout)>MAX_MANIFEST_BYTES+32: raise RuntimeError('vault_manifest_too_large')
-        return result.stdout
+        return self.read_remote('manifest', 120, MAX_MANIFEST_BYTES + 32, name)
 
     @contextlib.contextmanager
     def writer(self):
@@ -55,8 +70,17 @@ class RemoteTransport:
                 yield process.stdin
                 process.stdin.close(); process.stdin=None
                 stdout,_=process.communicate(timeout=1800)
-                if process.returncode: raise RuntimeError('vault_remote_receive_failed')
+                self.check_remote_exit('receive', process.returncode)
                 self.report=json.loads(stdout)
+            except BrokenPipeError as error:
+                try:
+                    status = process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                    raise RuntimeError('vault_remote_receive_timeout') from error
+                self.check_remote_exit('receive', status)
+                raise RuntimeError('vault_remote_receive_failed') from error
             except BaseException:
                 if process.poll() is None: process.terminate()
                 try: process.wait(timeout=10)

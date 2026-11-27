@@ -1527,6 +1527,18 @@ async fn resume_pending_channel_request_after_bind(
         )
         .map(Some);
     }
+    if request.ingress.as_ref().is_some_and(|ingress| !ingress.attachments.is_empty()) {
+        let restored = {
+            let (host, actor, pending) = (state.clone(), identity.clone(), request.clone());
+            let (channel, user, chat) = (binding_channel.to_owned(), external_user_id.map(str::to_owned), external_chat_id.map(str::to_owned));
+            tokio::task::spawn_blocking(move || pending_bound_files::restore_bound_files(
+                &host, &channel, user.as_deref(), chat.as_deref(), &actor, &pending,
+            )).await?
+        };
+        if let Err(code) = restored {
+            return finish_pending_channel_resume(state, candidate.status.pending_request_id, None, Some(code)).map(Some);
+        }
+    }
     request.user_id = Some(identity.user_id);
     request.chat_id = Some(identity.chat_id);
     request.user_key = Some(identity.user_key.clone());

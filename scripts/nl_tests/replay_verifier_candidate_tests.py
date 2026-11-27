@@ -46,6 +46,15 @@ class ReplayVerifierTests(unittest.TestCase):
         self.assertTrue(result.startswith("shared provider rules\n"))
         self.assertTrue(tail.endswith("vendor suffix"))
 
+    def test_reordered_sources_keep_only_their_own_recorded_dates(self):
+        from verifier_replay_input import citation_rows
+        first, second = "https://example.org/a", "https://example.org/b"
+        captured = [{"index": 0, "url": first, "excerpts": ["A"], "source_dates": ["2026-11-25"]},
+                    {"index": 1, "url": second, "excerpts": ["B"], "source_dates": ["2026-10-28"]}]
+        rows = citation_rows(second + " https://example.org/unknown " + first, {}, captured)
+        self.assertEqual([entry.get("source_dates") for entry in rows],
+                         [["2026-10-28"], None, ["2026-11-25"]])
+
     def test_public_replay_omits_hidden_reasoning_but_keeps_public_fields(self):
         raw = {"choices":[{"message":{"content":'<think>private</think>{"pass":false}',
                                       "reasoning_content":"private", "role":"assistant"},

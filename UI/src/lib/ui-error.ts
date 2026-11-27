@@ -24,6 +24,7 @@ export function formatUiError(
     : typeof cause === "string"
       ? cause.trim()
       : "";
+  if (message === "task_mutation_outcome_unconfirmed") return t("上一次操作的结果无法确认。请先查看任务状态，再决定是否执行其他操作。", "The previous action could not be confirmed. Check the task status before taking further action.");
   if (!message || MACHINE_ERROR_TOKEN.test(message)) return t(fallbackZh, fallbackEn);
   return message;
 }

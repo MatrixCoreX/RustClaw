@@ -483,7 +483,7 @@ fn permission_workspace_scope_summary(
     let path_values = permission_path_arg_values(args);
     let untrusted_path_present = path_values
         .iter()
-        .any(|path| !permission_path_stays_in_workspace(&state.skill_rt.workspace_root, path));
+        .any(|path| !permission_path_stays_in_workspace(state.skill_rt.files_root(), path));
     let external_workspace =
         crate::execution_recipe::action_targets_external_workspace(state, canonical_skill, args);
     let scope = if untrusted_path_present || external_workspace {
@@ -638,7 +638,7 @@ pub(super) fn capability_isolation_artifact_refs(
         return Vec::new();
     };
     let Ok(plan) = crate::execution_isolation::plan_execution_isolation(
-        &state.skill_rt.workspace_root,
+        state.skill_rt.files_root(),
         task_id,
         profile,
     ) else {

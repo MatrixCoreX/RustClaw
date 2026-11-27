@@ -3,7 +3,7 @@ schema_version = 2
 
 [package]
 name = "rss_fetch"
-version = "0.1.8"
+version = "0.1.10"
 description = "Fetch configured RSS/Atom feeds and maintain a verified source-candidate lifecycle. For source-unspecified current-information research, pair the RSS category catalog and matching feed evidence with web_search_extract; honor explicit RSS-only or web-only boundaries."
 protocol = "agent-jsonl-v1"
 supported_os = ["linux", "macos"]
@@ -29,7 +29,7 @@ launcher = "native"
 entrypoint = "runtime/bin/rss-fetch-skill"
 working_directory = "."
 timeout_seconds = 30
-environment_allowlist = ["HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
+environment_allowlist = ["APP_SKILL_OPERATOR_CONFIG", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LOGNAME", "PATH", "SKILL_TIMEOUT_SECONDS", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TMP", "TMPDIR", "TZ", "USER", "WORKSPACE_ROOT"]
 smoke_args = {}
 
 [security]
@@ -73,3 +73,13 @@ output_fields = []
 [capability_request.evidence_contract]
 required = false
 selectors = []
+
+[aipp]
+schema_version = 1
+renderer = "edition_list_v1"
+data_contract = "owned_skill_editions_v1"
+edition_action_refs = ["rss.latest_news", "rss.fetch_feed", "rss.preview_category", "rss.latest", "rss.news", "rss.fetch", "rss_fetch.latest", "rss_fetch.news", "rss_fetch.fetch", "rss_fetch.preview_category"]
+icon = "newspaper"
+default_locale = "en"
+titles = { zh = "新闻简报", en = "News bulletins" }
+descriptions = { zh = "查看定时与手动抓取的简报、报道来源和投递状态。", en = "Read scheduled and manual bulletins, their sources and delivery status." }

@@ -164,7 +164,7 @@ impl Drop for TempDirGuard {
 fn test_state(locale: &str) -> AppState {
     let agent = AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new());
     let agents_by_id = HashMap::from([(DEFAULT_AGENT_ID.to_string(), agent)]);
-    AppState {
+    let state = AppState {
         core: crate::CoreServices {
             agents_by_id: Arc::new(std::sync::RwLock::new(Arc::new(agents_by_id))),
             agent_runtime_leases: Arc::new(std::sync::RwLock::new(HashMap::new())),
@@ -201,7 +201,9 @@ fn test_state(locale: &str) -> AppState {
         channels: crate::ChannelConfig::default(),
         reload_ctx: crate::ReloadContext::default(),
         ask_states: crate::AskStateRegistry::default(),
-    }
+    };
+    state.seed_test_auth_identity("rk-test", "admin");
+    state
 }
 
 fn install_real_registry(state: &mut AppState) {
@@ -273,149 +275,9 @@ fn init_git_fixture_repo(root: &Path) {
     run(&["commit", "-q", "-m", "init"]);
 }
 
-fn insert_kb_doc_row(
-    db: &rusqlite::Connection,
-    user_key: &str,
-    source_ref: &str,
-    text: &str,
-    ts: i64,
-) {
-    db.execute(
-            "INSERT INTO memory_retrieval_index (
-                source_kind, source_memory_id, source_pref_key, source_ref, user_id, chat_id, user_key,
-                memory_kind, role, search_text, trigger_text, topic_tags, vector_json, metadata_json,
-                salience, success_state, tool_or_skill_name, created_at_ts, updated_at_ts
-             )
-             VALUES (?1, NULL, NULL, ?2, 0, 0, ?3, ?4, NULL, ?5, NULL, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
-            rusqlite::params![
-                crate::memory::RETRIEVAL_SOURCE_KB_DOC,
-                source_ref,
-                user_key,
-                crate::memory::RETRIEVAL_KIND_KNOWLEDGE_DOC,
-                text,
-                crate::memory::retrieval::build_topic_tags(text),
-                crate::memory::retrieval::vector_to_json(
-                    &crate::memory::embedding::embed_text_locally(text),
-                ),
-                r#"{"scope_kind":"user","namespace":"photo_docs","path":"photo_rules.md"}"#,
-                0.78_f32,
-                crate::memory::RETRIEVAL_SUCCESS_STATE_SUCCEEDED,
-                crate::memory::RETRIEVAL_PRODUCER_KB,
-                ts,
-            ],
-        )
-        .expect("insert kb doc row");
-    db.execute(
-        "INSERT INTO memory_retrieval_index_fts(rowid, search_text, topic_tags)
-         VALUES (?1, ?2, ?3)",
-        rusqlite::params![
-            db.last_insert_rowid(),
-            text,
-            crate::memory::retrieval::build_topic_tags(text)
-        ],
-    )
-    .expect("insert fixture KB lexical projection");
-}
-
-fn seed_photo_organize_policy_memory(state: &AppState, user_id: i64, chat_id: i64, user_key: &str) {
-    let db = state.core.db.get().expect("db pool");
-    db.execute_batch(crate::INIT_SQL).expect("init base schema");
-    crate::ensure_memory_schema(&db).expect("ensure memory schema");
-    crate::repo::auth::ensure_key_auth_schema(&db).expect("ensure fixture authentication schema");
-    crate::memory::indexing::ensure_retrieval_schema(&db).expect("ensure retrieval schema");
-    let ts = 1_775_301_800_i64;
-
-    db.execute(
-            "INSERT INTO user_preferences (user_id, chat_id, user_key, pref_key, pref_value, confidence, source, updated_at, updated_at_ts)
-             VALUES (?1, ?2, ?3, 'photo_grouping', 'PHOTO_ALLOWED_PREF_by_year_month', 0.95, 'test', '1775301800', ?4)",
-            rusqlite::params![user_id, chat_id, user_key, ts],
-        )
-        .expect("insert preference");
-    db.execute(
-            "INSERT INTO long_term_memories (user_id, chat_id, user_key, summary, source_memory_id, created_at, updated_at, created_at_ts, updated_at_ts)
-             VALUES (?1, ?2, ?3, 'PHOTO_BLOCKED_LONG_TERM_SUMMARY', 1, '1775301800', '1775301800', ?4, ?4)",
-            rusqlite::params![user_id, chat_id, user_key, ts],
-        )
-        .expect("insert long term summary");
-
-    crate::memory::indexing::upsert_knowledge_fact(
-        &db,
-        user_id,
-        user_key,
-        "photo_profile",
-        crate::memory::RETRIEVAL_KIND_SEMANTIC_FACT,
-        "test:photo:allowed-fact",
-        "PHOTO_ALLOWED_FACT 请准备照片整理候选目录 prefer grouping travel photos by capture date",
-        ts,
-    )
-    .expect("insert knowledge fact");
-    let kb_db = state
-        .core
-        .skill_storage
-        .pool_for("kb")
-        .expect("KB storage owner")
-        .get()
-        .expect("KB db pool");
-    // Indexed KB recall requires an owner-matching namespace and source reference.
-    kb_db
-        .execute(
-            "INSERT INTO kb_namespaces
-            (owner_user_key, namespace, updated_at_epoch, next_chunk_seq,
-             revision, parser_version, chunker_version, embedding_version)
-         VALUES (?1, 'photo_docs', ?2, 1, 1, 'plain-v1', 'chars-v1', 'none')",
-            rusqlite::params![user_key, ts],
-        )
-        .expect("insert fixture KB namespace");
-    insert_kb_doc_row(
-        &kb_db,
-        user_key,
-        &format!("kb:{user_key}:photo_docs:photo_rules:0"),
-        "PHOTO_ALLOWED_KB_DOC 请准备照片整理候选目录 preserve original EXIF timestamp during organization",
-        ts,
-    );
-    crate::memory::indexing::index_memory_row(
-        &db,
-        user_id,
-        chat_id,
-        user_key,
-        101,
-        crate::memory::MEMORY_ROLE_USER,
-        "PHOTO_BLOCKED_RECENT_EVENT previous photo operation command",
-        crate::memory::MEMORY_TYPE_GENERIC,
-        0.9,
-        true,
-        ts + 1,
-    )
-    .expect("insert recent event memory");
-    crate::memory::indexing::index_memory_row(
-        &db,
-        user_id,
-        chat_id,
-        user_key,
-        102,
-        crate::memory::MEMORY_ROLE_ASSISTANT,
-        "PHOTO_BLOCKED_ASSISTANT_RESULT previous classified folder result",
-        crate::memory::MEMORY_TYPE_ASSISTANT_OUTCOME,
-        0.9,
-        false,
-        ts + 2,
-    )
-    .expect("insert assistant result memory");
-    crate::memory::indexing::index_memory_row(
-        &db,
-        user_id,
-        chat_id,
-        user_key,
-        103,
-        crate::memory::MEMORY_ROLE_USER,
-        "PHOTO_BLOCKED_UNFINISHED_GOAL continue moving all photos now",
-        crate::memory::MEMORY_TYPE_UNFINISHED_GOAL,
-        0.9,
-        false,
-        ts + 3,
-    )
-    .expect("insert unfinished goal memory");
-}
+#[path = "skills_photo_memory_tests.rs"]
+mod photo_memory;
+use photo_memory::seed_photo_organize_policy_memory;
 
 fn test_task(payload: serde_json::Value) -> ClaimedTask {
     ClaimedTask {
@@ -948,7 +810,7 @@ fn extract_task_request_text_reads_nested_request_text() {
 #[tokio::test]
 async fn run_skill_photo_organize_injects_registry_cropped_memory_args() {
     let temp = TempDirGuard::new("skill_memory_echo_runner");
-    let mut state = test_state("zh-CN");
+    let mut state = test_state("zh-CN").with_seeded_db_schema();
     install_real_registry(&mut state);
     allow_test_skills(&mut state, &["photo_organize"]);
     state.skill_rt.skill_runner_path = make_echo_skill_runner(temp.path());
@@ -956,9 +818,10 @@ async fn run_skill_photo_organize_injects_registry_cropped_memory_args() {
     state.skill_rt.skill_timeout_seconds = 5;
     receipt_support::install_verified_test_package(temp.path(), "photo_organize");
 
-    let user_id = 91;
     let chat_id = 92;
     let user_key = "user:photo-policy";
+    state.seed_test_auth_identity(user_key, "user");
+    let user_id = crate::resolve_auth_identity_by_key(&state, user_key).unwrap().unwrap().user_id;
     seed_photo_organize_policy_memory(&state, user_id, chat_id, user_key);
     let recalled = crate::memory::retrieval::retrieve_indexed_memories_for_scope(
         &state,
@@ -1156,11 +1019,10 @@ fn task_allows_privileged_tools_for_admin_only() {
     state.policy.allow_sudo = true;
     state.policy.allow_path_outside_workspace = true;
 
-    insert_auth_key(&state, "rk-admin", "admin");
     insert_auth_key(&state, "rk-user", "user");
 
     let mut admin_task = test_task(json!({ "text": "run privileged command" }));
-    admin_task.user_key = Some("rk-admin".to_string());
+    admin_task.user_key = Some("rk-test".to_string());
     assert!(task_allows_sudo(&state, Some(&admin_task)));
     assert!(task_allows_path_outside_workspace(
         &state,
@@ -1181,10 +1043,9 @@ fn authenticated_admin_yolo_keeps_host_permission_switches() {
     let state = test_state("zh-CN");
     assert!(!state.policy.allow_sudo);
     assert!(!state.policy.allow_path_outside_workspace);
-    insert_auth_key(&state, "rk-admin-yolo", "admin");
     insert_auth_key(&state, "rk-user-yolo", "user");
 
-    let admin_identity = crate::resolve_auth_identity_by_key(&state, "rk-admin-yolo")
+    let admin_identity = crate::resolve_auth_identity_by_key(&state, "rk-test")
         .expect("resolve admin identity")
         .expect("admin identity");
     let mut admin_payload = json!({"text": "inspect the host"});
@@ -1196,7 +1057,7 @@ fn authenticated_admin_yolo_keeps_host_permission_switches() {
     )
     .expect("stamp admin policy");
     let mut admin_task = test_task(admin_payload);
-    admin_task.user_key = Some("rk-admin-yolo".to_string());
+    admin_task.user_key = Some("rk-test".to_string());
     assert!(!task_allows_sudo(&state, Some(&admin_task)));
     assert!(!task_allows_path_outside_workspace(
         &state,
@@ -1214,7 +1075,7 @@ fn authenticated_admin_yolo_keeps_host_permission_switches() {
     let db = state.core.db.get().expect("db pool");
     db.execute(
         "UPDATE auth_keys SET enabled = 0 WHERE user_key = ?1",
-        params!["rk-admin-yolo"],
+        params!["rk-test"],
     )
     .expect("revoke admin key");
     drop(db);

@@ -98,6 +98,16 @@ fn enqueue_scheduled_run(
     Ok(task_id)
 }
 
+fn active_scheduled_run(db: &rusqlite::Connection, job_id: &str) -> rusqlite::Result<Option<String>> {
+    db.query_row(
+        "SELECT r.task_id FROM scheduled_job_runs r JOIN tasks t ON t.task_id=r.task_id
+         WHERE r.job_id=?1 AND t.status IN ('queued','running') ORDER BY r.id DESC LIMIT 1",
+        [job_id],
+        |row| row.get(0),
+    )
+    .optional()
+}
+
 pub(crate) enum ManualScheduledRun {
     Queued {
         task_id: String,
@@ -146,12 +156,7 @@ pub(crate) fn trigger_scheduled_run(
             replayed: true,
         });
     }
-    if tx.query_row(
-        "SELECT EXISTS(SELECT 1 FROM scheduled_job_runs r JOIN tasks t ON t.task_id=r.task_id
-        WHERE r.job_id=?1 AND t.status IN ('queued','running'))",
-        [job_id],
-        |r| r.get::<_, bool>(0),
-    )? {
+    if active_scheduled_run(&tx, job_id)?.is_some() {
         return Ok(ManualScheduledRun::Active);
     }
     let task_id = enqueue_scheduled_run(&tx, &job, &run_id)?;

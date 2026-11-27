@@ -95,6 +95,17 @@ output_usd_per_million = 1.20
 cache_read_usd_per_million = 0.06
 cache_write_usd_per_million = 0.375
 
+[[llm.pricing]]
+provider = "minimax"
+model = "MiniMax-M2.7-highspeed"
+effective_from = "2026-11-26"
+currency = "USD"
+source = "https://platform.minimax.io/subscribe/token-plan?tab=api-enterprise"
+input_usd_per_million = 0.60
+output_usd_per_million = 2.40
+cache_read_usd_per_million = 0.06
+cache_write_usd_per_million = 0.375
+
 # 用途/Purpose: Anthropic 提供商连接与模型池.
 # 建议修改/Recommended change: 可改，需保证 key/base_url/model 对齐.
 # 风险/Risk: key 无效或 URL 错误会直接失败；并发过高可能触发限流.
@@ -433,6 +444,10 @@ note = "placeholder"
 # 建议修改/Recommended change: 只在明确需要时扩展 allow 或开启高权限开关.
 # 风险/Risk: 扩展到 `allow=["*"]`、sudo 或工作区外路径会显著放大误调用影响.
 [tools]
+# Role and principal entries select host-defined profiles. Principal IDs are durable
+# identities, independent of API-key rotation. An individual assignment takes priority.
+role_profiles = { guest = "read_only" }
+principal_profiles = {}
 allow = []
 access_profile = "coding"
 admin_access_profile = "full"

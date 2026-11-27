@@ -370,7 +370,7 @@ fn canonicalize_for_context(path: &Path) -> PathBuf {
 }
 
 pub(crate) fn build_runtime_context(state: &AppState) -> String {
-    let workspace_root = canonicalize_for_context(&state.skill_rt.workspace_root);
+    let workspace_root = canonicalize_for_context(state.skill_rt.files_root());
     let current_process_cwd = std::env::current_dir()
         .map(|path| canonicalize_for_context(&path))
         .unwrap_or_else(|_| workspace_root.clone());

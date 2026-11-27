@@ -1,6 +1,11 @@
+import { AippTranscriptFrame } from "./AippTranscriptFrame";
+import { AippEditionList } from "./AippEditionList";
+import { AippScheduledHistory } from "./AippScheduledHistory";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  AudioLines,
+  Newspaper,
   Bot,
   BookOpen,
   Bookmark,
@@ -174,6 +179,7 @@ export function writeCachedAippCatalog(
 }
 
 export interface AippPageProps {
+  canManage?: boolean;
   requestScope: string;
   lang: "zh" | "en";
   t: Translate;
@@ -195,6 +201,8 @@ function AippIcon({ icon, className }: { icon: string; className?: string }) {
   if (icon === "gallery_vertical_end") {
     return <GalleryVerticalEnd className={className} />;
   }
+  if (icon === "audio_lines") return <AudioLines className={className} />;
+  if (icon === "newspaper") return <Newspaper className={className} />;
   if (icon === "download") {
     return <Download className={className} />;
   }
@@ -1061,7 +1069,7 @@ export function AippMediaItemCard({
   );
 }
 
-export function AippPage({ lang, t, apiFetch, requestScope, onOpenAgent, onOpenSkillStore, onSkillsChanged }: AippPageProps) {
+export function AippPage({ canManage = true, lang, t, apiFetch, requestScope, onOpenAgent, onOpenSkillStore, onSkillsChanged }: AippPageProps) {
   const isCurrent = useRequestOwner(requestScope);
   const { confirm, choose } = useUiDialog();
   const initialCatalog = useRef(
@@ -1493,7 +1501,7 @@ export function AippPage({ lang, t, apiFetch, requestScope, onOpenAgent, onOpenS
             <p className="text-xs font-medium text-white/45">AiAPP</p>
             <h1 className="mt-1 text-xl font-semibold text-white">{t("应用", "Apps")}</h1>
           </div>
-          {availableApps.length > 0 ? (
+          {canManage && availableApps.length > 0 ? (
             <button type="button" className="theme-secondary-btn px-3 py-2 text-sm" onClick={() => void chooseAppToInstall()} disabled={installActionSkill !== null}>
               {installActionSkill ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <PackagePlus className="h-4 w-4" />}
               {t("安装应用", "Install app")}
@@ -1545,7 +1553,7 @@ export function AippPage({ lang, t, apiFetch, requestScope, onOpenAgent, onOpenS
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </button>
           ) : null}
-          <button
+          {canManage && <button
             type="button"
             className="theme-icon-btn h-9 w-9 text-red-200"
             onClick={() => void updateAippInstallState(selectedApp, false)}
@@ -1553,7 +1561,7 @@ export function AippPage({ lang, t, apiFetch, requestScope, onOpenAgent, onOpenS
             title={t("卸载应用和技能", "Uninstall app and skill")}
           >
             {installActionSkill === selectedApp.skill_name ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-          </button>
+          </button>}
         </div>
       </header>
 
@@ -1565,8 +1573,14 @@ export function AippPage({ lang, t, apiFetch, requestScope, onOpenAgent, onOpenS
         title={localizedAippCopy(selectedApp.titles, lang, selectedApp.default_locale)}
         description={localizedAippCopy(selectedApp.descriptions, lang, selectedApp.default_locale)}
         platforms={platforms} t={t} onOpenAgent={onOpenAgent} /> : <>
+      {selectedApp.renderer === "edition_list_v1" && <AippEditionList key={requestScope + selectedSkill} skill={selectedSkill} apiFetch={apiFetch} lang={lang} t={t} />}
+      {selectedApp.renderer === "schedule_history_v1" && <AippScheduledHistory key={requestScope + selectedSkill} skill={selectedSkill} apiFetch={apiFetch} t={t} />}
       {selectedApp.renderer === "sandbox_bundle_v1" ? (
-        <SandboxedAipp app={selectedApp} lang={lang} apiFetch={apiFetch} requestScope={requestScope} />
+        selectedApp.data_contract === "owned_transcript_jobs_v1" ? (
+          <AippTranscriptFrame key={`${selectedSkill}:${selectedApp.package_version}:${requestScope}`} skill={selectedSkill}
+            version={selectedApp.package_version} lang={lang}
+            title={localizedAippCopy(selectedApp.titles, lang, selectedApp.default_locale)} apiFetch={apiFetch} />
+        ) : <SandboxedAipp app={selectedApp} lang={lang} apiFetch={apiFetch} requestScope={requestScope} />
       ) : null}
 
       {selectedApp.account_controls?.schema_version === 1 ? <AippAccountsPanel

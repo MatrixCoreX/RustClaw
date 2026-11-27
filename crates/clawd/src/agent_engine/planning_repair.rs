@@ -21,7 +21,7 @@ pub(super) async fn repair_plan_actions(
 ) -> Result<String, String> {
     let runtime_os = runtime_os_label();
     let runtime_shell = runtime_shell_label();
-    let workspace_root = state.skill_rt.workspace_root.display().to_string();
+    let workspace_root = state.skill_rt.files_root().display().to_string();
     let resolved_prompt = crate::bootstrap::load_required_prompt_template_for_state_with_meta(
         state,
         PLAN_REPAIR_PROMPT_LOGICAL_PATH,

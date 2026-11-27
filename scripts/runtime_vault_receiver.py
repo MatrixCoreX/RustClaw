@@ -182,7 +182,10 @@ def main():
     for signum in (signal.SIGTERM,signal.SIGHUP,signal.SIGINT):signal.signal(signum,lambda *_:sys.exit(143))
     root = private_root(sys.argv[2])
     with (root / '.vault.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            sys.exit(os.EX_TEMPFAIL)
         recover(root)
         if sys.argv[1] == 'inventory': value = inventory(root)
         elif sys.argv[1] == 'receive': value = receive(root, sys.stdin.buffer)

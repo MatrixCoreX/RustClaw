@@ -2046,7 +2046,8 @@ export type ChatAttachmentKind = "image" | "audio" | "file";
 
 export interface ChatAttachment {
   name: string;
-  dataUrl: string;
+  dataUrl?: string;
+  file?: Blob;
   mimeType: string;
   size: number;
   kind: ChatAttachmentKind;
@@ -2234,8 +2235,8 @@ export type ChannelName = "telegram" | "whatsapp" | "ui" | "wechat" | "feishu" |
 export interface AippCatalogItem {
   skill_name: string;
   package_version: string;
-  renderer: "collection_feed_v1" | "task_activity_v1" | "sandbox_bundle_v1";
-  data_contract: "media_collection_v1" | "skill_task_activity_v1" | "capability_bridge_v1";
+  renderer: "collection_feed_v1" | "task_activity_v1" | "schedule_history_v1" | "edition_list_v1" | "sandbox_bundle_v1";
+  data_contract: "media_collection_v1" | "skill_task_activity_v1" | "owned_schedule_runs_v1" | "owned_skill_editions_v1" | "capability_bridge_v1" | "owned_transcript_jobs_v1";
   icon: string;
   default_locale: string;
   titles: Record<string, string>;

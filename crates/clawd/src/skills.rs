@@ -873,6 +873,17 @@ pub(crate) fn canonical_skill_name(name: &str) -> &str {
     name.trim()
 }
 
+fn task_tools_allowed(state: &AppState, task: Option<&ClaimedTask>, tokens: &[&str]) -> bool {
+    let identity = match task.and_then(|task| task.user_key.as_deref()) {
+        Some(key) => match crate::resolve_auth_identity_by_key(state,key) {
+            Ok(Some(identity)) => Some(identity),
+            _ => return false,
+        },
+        None => None,
+    };
+    state.skill_rt.tools_policy.allowed_for_identity(tokens, state.core.active_provider_type.as_deref(), identity.as_ref())
+}
+
 fn current_task_auth_role(state: &AppState, task: &ClaimedTask) -> Option<String> {
     task.user_key
         .as_deref()
@@ -1487,6 +1498,10 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
             ],
         ));
     }
+    let scoped = state.scope_task_workspace(task).map_err(|error|
+        structured_skill_error_from_parts(skill_name, "workspace_scope_unavailable", "workspace_scope_unavailable",
+            Some(std::env::consts::OS), Some(json!({"retryable":false,"failure_phase":"pre_dispatch","detail":error.to_string()}))))?;
+    let state = scoped.as_ref().unwrap_or(state);
     let execution_policy = crate::task_execution_policy::effective_policy_for_task(state, task);
     let mut skill_name = state.resolve_canonical_skill_name(skill_name);
     if skill_name.is_empty() {
@@ -1526,36 +1541,7 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
         ));
     }
 
-    let policy_token = format!("skill:{skill_name}");
-    let capability_policy_token = action_scoped_planner_mapping(state, &skill_name, &args)
-        .map(|mapping| format!("capability:{}", mapping.name));
-    let mut policy_tokens = vec![policy_token.as_str()];
-    if let Some(capability_policy_token) = capability_policy_token.as_deref() {
-        policy_tokens.push(capability_policy_token);
-    }
-    if !state
-        .skill_rt
-        .tools_policy
-        .is_any_allowed_for_execution_for_actor(
-            &policy_tokens,
-            state.core.active_provider_type.as_deref(),
-            crate::task_execution_policy::task_has_current_admin_identity(state, task),
-        )
-    {
-        let observed_facts = vec![
-            format!("skill: {skill_name}"),
-            format!("policy_token: {policy_token}"),
-        ];
-        return Err(policy_block_error(
-            "skill_policy_denied",
-            observed_facts,
-            vec![
-                "action=execute_skill".to_string(),
-                "policy=tools_policy".to_string(),
-                "required_decision=allow".to_string(),
-            ],
-        ));
-    }
+    ensure_task_skill_access(state, task, &skill_name, &args)?;
 
     if !state.get_skills_list().contains(&skill_name) {
         let mut allowed: Vec<String> = state.get_skills_list().iter().cloned().collect();
@@ -1697,14 +1683,14 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
         SkillKind::Builtin => {
             if skill_name == "run_cmd" {
                 prepare_builtin_run_cmd_async_start_args(
-                    &execution_state.skill_rt.workspace_root,
+                    execution_state.skill_rt.files_root(),
                     execution_state.skill_rt.cmd_async_retention_seconds,
                     execution_state.skill_rt.cmd_terminate_grace_seconds,
                     &mut args,
                 );
             }
             let mut extra = append_extra_artifact_refs(
-                builtin_success_extra(&execution_state.skill_rt.workspace_root, &skill_name, &args),
+                builtin_success_extra(execution_state.skill_rt.files_root(), &skill_name, &args),
                 isolation_artifact_refs,
             );
             let mut text = execute_builtin_skill_for_task_with_resource_lease(
@@ -1716,7 +1702,7 @@ pub(crate) async fn run_skill_with_runner_outcome_with_context(
             )
             .await?;
             generated_file_delivery::publish(
-                &state.skill_rt.workspace_root,
+                state.skill_rt.files_root(),
                 &task.task_id,
                 &args,
                 &mut extra,

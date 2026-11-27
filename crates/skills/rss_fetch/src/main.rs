@@ -1,3 +1,4 @@
+mod excerpts;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::{self, BufRead, Write};
@@ -97,6 +98,7 @@ struct Resp {
 
 #[derive(Debug, Clone)]
 struct FeedItem {
+    excerpt: Option<String>,
     title: String,
     link: String,
     date: String,
@@ -1353,6 +1355,7 @@ fn parse_rss_items(xml: &str, limit: usize) -> Vec<FeedItem> {
             .or_else(|| extract_tag_text(blk, "dc:date"))
             .unwrap_or_default();
         items.push(FeedItem {
+            excerpt: excerpts::from_tags(blk, &["description", "content:encoded"]),
             title,
             link,
             date,
@@ -1374,6 +1377,7 @@ fn parse_atom_items(xml: &str, limit: usize) -> Vec<FeedItem> {
             .or_else(|| extract_tag_text(blk, "published"))
             .unwrap_or_default();
         items.push(FeedItem {
+            excerpt: excerpts::from_tags(blk, &["summary", "content"]),
             title,
             link,
             date,
@@ -1438,6 +1442,7 @@ fn format_layered_news_output(
 fn feed_item_extra(item: &FeedItem, topic: &str) -> Value {
     json!({
         "title": compact_text(&item.title),
+        "excerpt": item.excerpt,
         "link": compact_text(&item.link),
         "date": compact_text(&item.date),
         "source": compact_text(&item.source),
@@ -1577,44 +1582,14 @@ fn render_rss(xml: &str, limit: usize) -> String {
     let channel = extract_first_block(xml, "channel").unwrap_or(xml);
     let feed_title = extract_tag_text(channel, "title").unwrap_or_else(|| "(untitled)".to_string());
     let feed_link = extract_tag_text(channel, "link").unwrap_or_default();
-    let mut items = Vec::new();
-    for blk in extract_blocks(channel, "item").into_iter().take(limit) {
-        let title = extract_tag_text(blk, "title").unwrap_or_else(|| "(no title)".to_string());
-        let link = extract_tag_text(blk, "link").unwrap_or_default();
-        let date = extract_tag_text(blk, "pubDate")
-            .or_else(|| extract_tag_text(blk, "dc:date"))
-            .unwrap_or_default();
-        items.push(FeedItem {
-            title,
-            link,
-            date,
-            source: String::new(),
-            layer: String::new(),
-        });
-    }
+    let items = parse_rss_items(xml, limit);
     format_feed_output(feed_title, feed_link, items)
 }
 
 fn render_atom(xml: &str, limit: usize) -> String {
     let feed_title = extract_tag_text(xml, "title").unwrap_or_else(|| "(untitled)".to_string());
     let feed_link = extract_atom_link(xml).unwrap_or_default();
-    let mut items = Vec::new();
-    for blk in extract_blocks(xml, "entry").into_iter().take(limit) {
-        let title = extract_tag_text(blk, "title").unwrap_or_else(|| "(no title)".to_string());
-        let link = extract_atom_link(blk)
-            .or_else(|| extract_tag_text(blk, "id"))
-            .unwrap_or_default();
-        let date = extract_tag_text(blk, "updated")
-            .or_else(|| extract_tag_text(blk, "published"))
-            .unwrap_or_default();
-        items.push(FeedItem {
-            title,
-            link,
-            date,
-            source: String::new(),
-            layer: String::new(),
-        });
-    }
+    let items = parse_atom_items(xml, limit);
     format_feed_output(feed_title, feed_link, items)
 }
 
@@ -1824,7 +1799,8 @@ fn load_external_i18n(path: &Path) -> Option<HashMap<String, String>> {
 
 fn load_root_config() -> Result<RootConfig, String> {
     let root = workspace_root();
-    let rss_path = root.join("configs/rss.toml");
+    let rss_path = std::env::var_os("APP_SKILL_OPERATOR_CONFIG").map(PathBuf::from)
+        .unwrap_or_else(|| root.join("configs/rss.toml"));
     load_root_config_at(&rss_path)
 }
 
@@ -1838,6 +1814,9 @@ fn load_root_config_at(rss_path: &Path) -> Result<RootConfig, String> {
 }
 
 fn save_config(cfg: &RootConfig, expected_config: &RootConfig) -> Result<(), String> {
+    if std::env::var_os("APP_SKILL_OPERATOR_CONFIG").is_some() {
+        return Err("config_operator_required".into());
+    }
     let path = workspace_root().join("configs/rss.toml");
     save_config_if_unchanged_at(&path, cfg, expected_config)
 }

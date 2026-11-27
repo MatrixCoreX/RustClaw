@@ -95,6 +95,7 @@ fn direct_recipe_materializes_without_changing_payload_or_process_defaults() {
 
     let root = TestDir::new("direct_recipe");
     let request = ProcessSandboxRequest {
+        principal_readonly: None,
         mode: ToolSandboxMode::DangerFull,
         backend: ToolSandboxBackend::Auto,
         workspace_root: root.path(),
@@ -138,6 +139,7 @@ fn bubblewrap_recipe_keeps_lifetime_namespace_network_and_mount_arguments_exact(
         for host_visible in [false, true] {
             for network_deny in [false, true] {
                 let request = ProcessSandboxRequest {
+                    principal_readonly: None,
                     mode: ToolSandboxMode::WorkspaceWrite,
                     backend: ToolSandboxBackend::Bubblewrap,
                     workspace_root: root.path(),
@@ -210,6 +212,7 @@ async fn danger_full_uses_direct_backend() {
     let prepared = super::prepare_process_invocation(
         "bash",
         ProcessSandboxRequest {
+            principal_readonly: None,
             mode: ToolSandboxMode::DangerFull,
             backend: ToolSandboxBackend::Auto,
             workspace_root: root.path(),
@@ -252,6 +255,7 @@ fn remote_container_contract_is_explicit_and_fail_closed() {
     let result = prepare_process_command(
         "bash",
         ProcessSandboxRequest {
+            principal_readonly: None,
             mode: ToolSandboxMode::WorkspaceWrite,
             backend: ToolSandboxBackend::RemoteContainer,
             workspace_root: root.path(),
@@ -313,6 +317,7 @@ fn browser_subprocess_seatbelt_permissions_are_explicit_and_temp_scoped() {
         let prepared = prepare_process_command(
             "bash",
             ProcessSandboxRequest {
+                principal_readonly: None,
                 mode: ToolSandboxMode::WorkspaceWrite,
                 backend: ToolSandboxBackend::Auto,
                 workspace_root: root.path(),
@@ -357,6 +362,7 @@ async fn browser_subprocess_can_terminate_its_direct_child() {
     let mut prepared = prepare_process_command(
         "/bin/sh",
         ProcessSandboxRequest {
+            principal_readonly: None,
             mode: ToolSandboxMode::WorkspaceWrite,
             backend: ToolSandboxBackend::Auto,
             workspace_root: root.path(),
@@ -393,6 +399,7 @@ fn durable_sandbox_omits_parent_death_while_foreground_keeps_it() {
     }
     let root = TestDir::new("durable_lifetime");
     let request = || ProcessSandboxRequest {
+        principal_readonly: None,
         mode: ToolSandboxMode::WorkspaceWrite,
         backend: ToolSandboxBackend::Auto,
         workspace_root: root.path(),
@@ -436,6 +443,7 @@ fn host_process_sandbox_keeps_host_pid_view_and_other_boundaries() {
     let prepared = prepare_host_process_command(
         "bash",
         ProcessSandboxRequest {
+            principal_readonly: None,
             mode: ToolSandboxMode::ReadOnly,
             backend: ToolSandboxBackend::Auto,
             workspace_root: root.path(),
@@ -473,6 +481,7 @@ fn host_process_sandbox_inherits_network_only_when_explicitly_requested() {
     let prepared = prepare_host_process_command(
         "bash",
         ProcessSandboxRequest {
+            principal_readonly: None,
             mode: ToolSandboxMode::ReadOnly,
             backend: ToolSandboxBackend::Auto,
             workspace_root: root.path(),
@@ -510,6 +519,7 @@ async fn read_only_backend_rejects_workspace_mutation() {
     let mut prepared = prepare_process_command(
         "bash",
         ProcessSandboxRequest {
+            principal_readonly: None,
             mode: ToolSandboxMode::ReadOnly,
             backend: ToolSandboxBackend::Auto,
             workspace_root: root.path(),
@@ -545,6 +555,7 @@ async fn workspace_backend_writes_only_inside_bound_workspace() {
     let mut prepared = prepare_process_command(
         "bash",
         ProcessSandboxRequest {
+            principal_readonly: None,
             mode: ToolSandboxMode::WorkspaceWrite,
             backend: ToolSandboxBackend::Auto,
             workspace_root: root.path(),
@@ -584,6 +595,7 @@ async fn read_only_backend_can_execute_inside_system_temp_workspace() {
     let mut prepared = prepare_process_command(
         "bash",
         ProcessSandboxRequest {
+            principal_readonly: None,
             mode: ToolSandboxMode::ReadOnly,
             backend: ToolSandboxBackend::Auto,
             workspace_root: root.path(),
@@ -618,6 +630,7 @@ async fn workspace_backend_can_write_inside_system_temp_workspace() {
     let mut prepared = prepare_process_command(
         "bash",
         ProcessSandboxRequest {
+            principal_readonly: None,
             mode: ToolSandboxMode::WorkspaceWrite,
             backend: ToolSandboxBackend::Auto,
             workspace_root: root.path(),
@@ -658,6 +671,7 @@ async fn read_only_backend_limits_writes_to_explicit_internal_path() {
     let mut prepared = prepare_process_command(
         "bash",
         ProcessSandboxRequest {
+            principal_readonly: None,
             mode: ToolSandboxMode::ReadOnly,
             backend: ToolSandboxBackend::Auto,
             workspace_root: root.path(),
@@ -707,6 +721,7 @@ async fn explicit_writable_mount_preserves_system_resolver_configuration() {
     let mut prepared = prepare_process_command(
         "bash",
         ProcessSandboxRequest {
+            principal_readonly: None,
             mode: ToolSandboxMode::ReadOnly,
             backend: ToolSandboxBackend::Auto,
             workspace_root: root.path(),

@@ -116,9 +116,7 @@ async fn serve_task_artifact(
         return api_error(StatusCode::NOT_FOUND, "task_artifact_not_found");
     };
     let Some(path) = task_artifacts::validated_delivery_artifact_path(
-        &state.skill_rt.workspace_root,
-        &task_id.to_string(),
-        &manifest,
+        &state.skill_rt.workspace_root, &task_id.to_string(), &manifest,
     ) else {
         return api_error(StatusCode::GONE, "task_artifact_unavailable");
     };

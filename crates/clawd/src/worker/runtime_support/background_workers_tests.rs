@@ -720,3 +720,28 @@ fn manual_scheduled_run_reuses_request_and_keeps_timer_and_recipient() {
         0
     );
 }
+
+#[test]
+fn due_schedule_coalesces_with_a_manual_run_that_has_not_finished() {
+    let state = test_state();
+    state.seed_test_auth_identity("test-key", "user");
+    let owner = crate::resolve_auth_identity_by_key(&state, "test-key").unwrap().unwrap();
+    let job = "manual_then_due";
+    let now = crate::now_ts_u64() as i64;
+    insert_due_job(&state, job, "previous_thread", now - 1);
+    let ManualScheduledRun::Queued { task_id, .. } =
+        trigger_scheduled_run(&state, &owner, job, Uuid::new_v4()).unwrap()
+    else {
+        panic!("manual run was not queued");
+    };
+    schedule_once(&state).unwrap();
+    let db = state.core.db.get().unwrap();
+    let (count, active, next): (i64, String, i64) = db.query_row(
+        "SELECT count(*),j.last_thread_task_id,j.next_run_at FROM scheduled_jobs j
+         JOIN scheduled_job_runs r ON r.job_id=j.job_id WHERE j.job_id=?1 GROUP BY j.job_id",
+        [job], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).unwrap();
+    assert_eq!(count, 1);
+    assert_eq!(active, task_id);
+    assert!(next > now);
+}

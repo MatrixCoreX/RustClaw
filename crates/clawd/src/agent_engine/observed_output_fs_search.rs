@@ -822,7 +822,7 @@ fn absolutize_fs_search_result_path(
     if path_obj.is_absolute() {
         return canonical_existing_path(path_obj);
     }
-    let workspace_root = &state.skill_rt.workspace_root;
+    let workspace_root = state.skill_rt.files_root();
     let workspace_candidate = workspace_root.join(path);
     if workspace_candidate.exists() {
         return canonical_existing_path(&workspace_candidate);

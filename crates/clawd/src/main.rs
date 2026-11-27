@@ -26,6 +26,7 @@ mod app_helpers;
 mod approval_grant;
 mod ask_flow;
 mod assistant_delivery_policy;
+mod answer_verification_failure_presentation;
 mod assistant_presentation;
 mod assistant_presentation_stream;
 mod async_job_contract;
@@ -759,6 +760,10 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
             .get()
             .map_err(|e| anyhow::anyhow!("get db conn for setup: {e}"))?;
         seed_users(&db, &config)?;
+        let (repriced, unknown) = runtime::reconcile_cost_catalog(&db, &config.llm.pricing)?;
+        if unknown > 0 {
+            warn!(repriced, unknown, "llm_historical_pricing_unavailable");
+        }
         ensure_schedule_schema(&db)?;
         ensure_memory_schema(&db)?;
         ensure_channel_schema(&db)?;
@@ -780,6 +785,7 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
         repo::task_plan::ensure_task_plan_schema(&db)?;
         memory::indexing::ensure_retrieval_schema(&db)?;
         repo::ensure_principal_ownership_schema(&db)?;
+        db.execute_batch(include_str!("scheduled_run_ownership.sql"))?;
         repo::ensure_conversation_input_schema(&db)?;
         repo::ensure_conversation_reply_item_schema(&db)?;
         memory::scope::ensure_memory_scope_schema(&db)?;
@@ -1232,6 +1238,7 @@ async fn run(allocator_tuning: runtime_memory::AllocatorTuning) -> anyhow::Resul
             cmd_terminate_grace_seconds: config.tools.cmd_terminate_grace_seconds.max(1),
             cmd_max_output_bytes: config.tools.cmd_max_output_bytes.max(128),
             max_cmd_length: config.tools.max_cmd_length.max(16),
+            principal_workspace: None,
             workspace_root,
             default_locator_search_dir,
         },
@@ -1813,29 +1820,18 @@ async fn submit_task(
         }
     }
 
-    if let Some(ingress) = req.ingress.as_ref() {
-        if let Err(error_code) = ui_attachments::validate_channel_ingress_attachments(
-            &state.skill_rt.workspace_root,
-            &ingress.attachments,
-        ) {
-            return api_err::<SubmitTaskResponse>(StatusCode::BAD_REQUEST, error_code);
-        }
-    }
-
     let task_id = Uuid::new_v4();
     let call_id = task_id.to_string();
-    if let Err(err) = ui_attachments::materialize_ui_task_attachments(
+    if let Err((status, error)) = ui_attachments::prepare_submission(
         &state,
-        &mut req.payload,
+        &mut req,
+        submit_ctx.resolved_identity.as_ref(),
         effective_user_id,
         effective_chat_id,
         &call_id,
     ) {
-        warn!(
-            "ui attachment materialize failed call_id={} user_id={} chat_id={} err={}",
-            call_id, effective_user_id, effective_chat_id, err
-        );
-        return api_err::<SubmitTaskResponse>(StatusCode::BAD_REQUEST, err);
+        warn!(%call_id, %error, "task attachment preparation failed");
+        return api_err::<SubmitTaskResponse>(status, error);
     }
     let kind = task_kind_name(&req.kind);
     let mut ingress = build_channel_ingress_snapshot(

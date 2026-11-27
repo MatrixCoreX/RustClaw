@@ -244,17 +244,10 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
         .map(|task| crate::task_execution_policy::effective_policy_for_task(state, task))
         .unwrap_or_else(|| crate::task_execution_policy::configured_policy(state));
     let policy_token = format!("skill:{skill_name}");
-    if !state
-        .skill_rt
-        .tools_policy
-        .is_any_allowed_for_execution_for_actor(
-            &[&policy_token],
-            state.core.active_provider_type.as_deref(),
-            task.is_some_and(|task| {
-                crate::task_execution_policy::task_has_current_admin_identity(state, task)
-            }),
-        )
-    {
+    let capability_token = super::action_scoped_planner_mapping(state, skill_name, args)
+        .map(|mapping| format!("capability:{}", mapping.name));
+    let tokens: Vec<&str> = std::iter::once(policy_token.as_str()).chain(capability_token.as_deref()).collect();
+    if !crate::skills::task_tools_allowed(state, task, &tokens) {
         return Err(crate::skills::policy_block_error(
             "skill_policy_denied",
             vec![
@@ -276,7 +269,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
         }
         "memory_store" => builtin_memory_store::execute(state, task, map).await,
         "code_index" => {
-            let workspace_root = state.skill_rt.workspace_root.clone();
+            let workspace_root = state.skill_rt.files_root().clone();
             let filesystem = state.skill_rt.host_filesystem.clone();
             let backend = state.skill_rt.tools_policy.sandbox_backend;
             let args = args.clone();
@@ -309,7 +302,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
             ensure_only_keys(map, &["path", "start_byte", "max_bytes"])?;
             let path = required_string(map, "path")?;
             let real_path = resolve_workspace_path(
-                &state.skill_rt.workspace_root,
+                state.skill_rt.files_root(),
                 path,
                 builtin_allows_path_outside_workspace(state, task),
             )?;
@@ -329,11 +322,11 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
             let start_byte = map.get("start_byte").and_then(Value::as_u64).unwrap_or(0);
             let max_bytes = optional_usize(map, "max_bytes");
             let workspace_scoped =
-                builtin_path_is_workspace_scoped(&state.skill_rt.workspace_root, &real_path);
+                builtin_path_is_workspace_scoped(state.skill_rt.files_root(), &real_path);
             let value = builtin_read_file::read_file_page(
                 path,
                 &real_path,
-                workspace_scoped.then_some(state.skill_rt.workspace_root.as_path()),
+                workspace_scoped.then_some(state.skill_rt.files_root().as_path()),
                 &state.skill_rt.host_filesystem,
                 start_byte,
                 max_bytes,
@@ -373,15 +366,15 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
             let create_parents =
                 write_file_create_parents_flag(map).map_err(pre_dispatch_replan_error)?;
             let effective_path =
-                crate::ensure_default_file_path(&state.skill_rt.workspace_root, path);
+                crate::ensure_default_file_path(state.skill_rt.files_root(), path);
             let real_path = resolve_workspace_path(
-                &state.skill_rt.workspace_root,
+                state.skill_rt.files_root(),
                 &effective_path,
                 builtin_allows_path_outside_workspace(state, task),
             )?;
             let action = if append { "append_text" } else { "write_text" };
             run_authorized_mutation_with_policy(
-                &state.skill_rt.workspace_root,
+                state.skill_rt.files_root(),
                 builtin_task_id(task),
                 action,
                 &real_path,
@@ -390,12 +383,12 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 &state.skill_rt.host_filesystem,
                 || {
                     let workspace_scoped = builtin_path_is_workspace_scoped(
-                        &state.skill_rt.workspace_root,
+                        state.skill_rt.files_root(),
                         &real_path,
                     );
                     if append {
                         let mut bytes = match state.skill_rt.host_filesystem.read_file(
-                            workspace_scoped.then_some(state.skill_rt.workspace_root.as_path()),
+                            workspace_scoped.then_some(state.skill_rt.files_root().as_path()),
                             &real_path,
                         ) {
                             Ok(bytes) => bytes,
@@ -415,7 +408,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                         }
                         bytes.extend_from_slice(content.as_bytes());
                         atomic_write_builtin_file(
-                            &state.skill_rt.workspace_root,
+                            state.skill_rt.files_root(),
                             &real_path,
                             &bytes,
                             create_parents,
@@ -433,7 +426,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                         })?;
                     } else {
                         atomic_write_builtin_file(
-                            &state.skill_rt.workspace_root,
+                            state.skill_rt.files_root(),
                             &real_path,
                             content.as_bytes(),
                             create_parents,
@@ -465,7 +458,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 .map(|value| value.clamp(1, 200))
                 .unwrap_or(200);
             let requested_path = resolve_workspace_path(
-                &state.skill_rt.workspace_root,
+                state.skill_rt.files_root(),
                 path,
                 builtin_allows_path_outside_workspace(state, task),
             )?;
@@ -546,7 +539,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 )
             })?;
             let workspace_scope = (!builtin_allows_path_outside_workspace(state, task))
-                .then_some(state.skill_rt.workspace_root.as_path());
+                .then_some(state.skill_rt.files_root().as_path());
             match builtin_list_dir::list_directory_page(
                 path,
                 &real_path,
@@ -676,7 +669,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
             }
             if builtin_pty_session::is_existing_session_action(action) {
                 return builtin_pty_session::execute_existing_session_action(
-                    &state.skill_rt.workspace_root,
+                    state.skill_rt.files_root(),
                     task,
                     action,
                     map,
@@ -700,7 +693,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
             })?;
             let cwd = optional_string(map, "cwd").unwrap_or(".");
             let cwd_path = resolve_workspace_path(
-                &state.skill_rt.workspace_root,
+                state.skill_rt.files_root(),
                 cwd,
                 builtin_allows_path_outside_workspace(state, task),
             )?;
@@ -848,8 +841,9 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                     &command,
                     execution_policy.sandbox_mode,
                     state.skill_rt.tools_policy.sandbox_backend,
-                    &state.skill_rt.workspace_root,
+                    state.skill_rt.files_root(),
                     &host_private_directories,
+                    state.skill_rt.principal_workspace.is_some(),
                 )
                 .map_err(|err| match err {
                     RunSafeCommandError::Policy(text) => text,
@@ -882,7 +876,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                     .and_then(Value::as_u64)
                     .unwrap_or(64 * 1024 * 1024);
                 return builtin_pty_session::start_session(
-                    &state.skill_rt.workspace_root,
+                    state.skill_rt.files_root(),
                     task,
                     &prepared,
                     rows,
@@ -953,7 +947,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 if let Some(task) = task {
                     crate::async_job_contract::persist_prepared_direct_start(
                         state, task,
-                        super::builtin_success_extra(&state.skill_rt.workspace_root, skill_name, args),
+                        super::builtin_success_extra(state.skill_rt.files_root(), skill_name, args),
                     ).await.map_err(|_| super::structured_skill_error_from_parts(
                         skill_name, "async_start_checkpoint_unavailable", "async_start_checkpoint_unavailable",
                         Some(std::env::consts::OS),
@@ -972,8 +966,9 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                     Path::new(&job_dir),
                     execution_policy.sandbox_mode,
                     state.skill_rt.tools_policy.sandbox_backend,
-                    &state.skill_rt.workspace_root,
+                    state.skill_rt.files_root(),
                     &host_private_directories,
+                    state.skill_rt.principal_workspace.is_some(),
                 )
                 .await
                 .map_err(|err| match err {
@@ -1000,8 +995,9 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 crate::skills::task_allows_sudo(state, task),
                 execution_policy.sandbox_mode,
                 state.skill_rt.tools_policy.sandbox_backend,
-                &state.skill_rt.workspace_root,
+                state.skill_rt.files_root(),
                 &host_private_directories,
+                state.skill_rt.principal_workspace.is_some(),
                 builtin_task_id(task),
             )
             .await
@@ -1024,7 +1020,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
             ensure_only_keys(map, &["path", "parents", "recursive"])?;
             let path = required_string(map, "path")?;
             let real_path = resolve_workspace_path(
-                &state.skill_rt.workspace_root,
+                state.skill_rt.files_root(),
                 path,
                 builtin_allows_path_outside_workspace(state, task),
             )?;
@@ -1034,8 +1030,8 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
             // An idempotent mkdir does not change an existing directory or its
             // children, so it needs no recursive mutation checkpoint.
             let scope =
-                builtin_path_is_workspace_scoped(&state.skill_rt.workspace_root, &real_path)
-                    .then_some(state.skill_rt.workspace_root.as_path());
+                builtin_path_is_workspace_scoped(state.skill_rt.files_root(), &real_path)
+                    .then_some(state.skill_rt.files_root().as_path());
             let metadata = match state.skill_rt.host_filesystem.metadata(scope, &real_path) {
                 Ok(value) => Some(value),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
@@ -1074,7 +1070,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 .to_string());
             }
             run_authorized_mutation_with_policy(
-                &state.skill_rt.workspace_root,
+                state.skill_rt.files_root(),
                 builtin_task_id(task),
                 "make_dir",
                 &real_path,
@@ -1107,13 +1103,13 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 .trim();
             let recursive = optional_bool(map, "recursive").unwrap_or(false);
             let real_path = resolve_workspace_path(
-                &state.skill_rt.workspace_root,
+                state.skill_rt.files_root(),
                 path,
                 builtin_allows_path_outside_workspace(state, task),
             )?;
             let scope =
-                builtin_path_is_workspace_scoped(&state.skill_rt.workspace_root, &real_path)
-                    .then_some(state.skill_rt.workspace_root.as_path());
+                builtin_path_is_workspace_scoped(state.skill_rt.files_root(), &real_path)
+                    .then_some(state.skill_rt.files_root().as_path());
             let metadata = state
                 .skill_rt
                 .host_filesystem
@@ -1143,7 +1139,7 @@ async fn execute_builtin_skill_with_task_and_resource_lease(
                 )));
             }
             run_authorized_mutation_with_policy(
-                &state.skill_rt.workspace_root,
+                state.skill_rt.files_root(),
                 builtin_task_id(task),
                 "remove_path",
                 &real_path,

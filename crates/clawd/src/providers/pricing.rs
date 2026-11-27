@@ -49,19 +49,37 @@ pub(crate) fn resolve_model_pricing(
     provider_type: &str,
     model: &str,
 ) -> Option<LlmModelPricingConfig> {
-    let provider_alias = provider_name
-        .trim()
-        .strip_prefix("vendor-")
-        .unwrap_or(provider_name.trim());
+    let today = chrono::Utc::now().date_naive();
+    model_pricing_on(
+        catalog,
+        provider_name,
+        provider_type,
+        model,
+        &today.to_string(),
+    )
+    .cloned()
+}
+
+pub(crate) fn model_pricing_on<'a>(
+    catalog: &'a [LlmModelPricingConfig],
+    provider_name: &str,
+    provider_type: &str,
+    model: &str,
+    date: &str,
+) -> Option<&'a LlmModelPricingConfig> {
+    let name = provider_name.trim();
+    let alias = name.strip_prefix("vendor-").unwrap_or(name);
     catalog
         .iter()
-        .find(|entry| {
-            entry.model.trim().eq_ignore_ascii_case(model.trim())
-                && [provider_name.trim(), provider_alias, provider_type.trim()]
-                    .iter()
-                    .any(|candidate| entry.provider.trim().eq_ignore_ascii_case(candidate))
+        .filter(|entry| {
+            !entry.effective_from.is_empty()
+                && entry.effective_from.as_str() <= date
+                && entry.model.trim().eq_ignore_ascii_case(model.trim())
+                && [name, alias, provider_type.trim()].iter().any(|candidate| {
+                    !candidate.is_empty() && entry.provider.trim().eq_ignore_ascii_case(candidate)
+                })
         })
-        .cloned()
+        .max_by(|left, right| left.effective_from.cmp(&right.effective_from))
 }
 
 pub(crate) fn build_cost_record(

@@ -392,6 +392,11 @@ def sync_manifests(skills: dict[str, CargoSkill], entries: list[dict[str, object
                     "lifecycle_scripts = false\nruntime_files = " + toml_literal(runtime_files),
                     1,
                 )
+        # The application belongs to the skill, including its localized tables.
+        if current is not None:
+            sections = re.findall(r"(?ms)^\[aipp(?:\.[^\]\n]+)?\]\s*\n.*?(?=^\[|\Z)", current)
+            if sections:
+                expected = expected.rstrip() + "\n\n" + "\n\n".join(s.strip() for s in sections) + "\n"
         if current is not None and MARKER not in current:
             raise ValueError(f"refusing to overwrite unmanaged manifest: {path}")
         if current != expected:

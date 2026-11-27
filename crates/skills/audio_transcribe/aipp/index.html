@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>音视频转写</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --surface: #f6f8fb; --panel: #fff; --ink: #18243a; --muted: #526278;
+      --line: #d6deea; --accent: #1a55ad; --on-accent: #fff; --soft: #eaf2fd; --error: #962b38;
+      font-family: system-ui, -apple-system, "Microsoft YaHei", sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --surface: #141b26; --panel: #1b2432; --ink: #ecf1f8; --muted: #b1bed0;
+        --line: #38465a; --accent: #a7c8ff; --on-accent: #15223a; --soft: #273a54; --error: #ffadb7; }
+    }
+    :root[data-theme="light"] { color-scheme: light; --surface: #f6f8fb; --panel: #fff; --ink: #18243a;
+      --muted: #526278; --line: #d6deea; --accent: #1a55ad; --on-accent: #fff; --soft: #eaf2fd; --error: #962b38; }
+    :root[data-theme="dark"] { color-scheme: dark; --surface: #141b26; --panel: #1b2432; --ink: #ecf1f8;
+      --muted: #b1bed0; --line: #38465a; --accent: #a7c8ff; --on-accent: #15223a; --soft: #273a54; --error: #ffadb7; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--surface); color: var(--ink); font-size: 14px; line-height: 1.6; }
+    [hidden] { display: none !important; }
+    main { max-width: 1100px; margin: auto; padding: clamp(16px, 4vw, 40px); }
+    h1, h2, p { margin: 0; }
+    h1 { font-size: clamp(24px, 4vw, 32px); line-height: 1.25; font-weight: 680; }
+    h2 { font-size: 17px; font-weight: 650; }
+    header p, .note, .job small { color: var(--muted); }
+    header p { margin-top: 6px; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, 0.48fr); gap: 16px; margin-top: 22px; align-items: start; }
+    article, aside { display: grid; gap: 16px; min-width: 0; }
+    section, aside { border: 1px solid var(--line); border-radius: 13px; background: var(--panel); padding: 18px; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .between { justify-content: space-between; }
+    #uploadControls { margin-top: 12px; }
+    button, input, textarea { font: inherit; }
+    button { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink);
+      padding: 7px 12px; line-height: 1.4; cursor: pointer; }
+    button:hover:enabled { background: var(--soft); }
+    button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
+    button.primary:hover:enabled { opacity: .88; }
+    button:disabled { opacity: .48; cursor: default; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    input[type="file"] { min-width: 0; max-width: 100%; flex: 1 1 225px; color: var(--muted); }
+    input[type="file"]::file-selector-button { background: var(--soft); color: var(--ink); border: 1px solid var(--line);
+      border-radius: 8px; font: inherit; padding: 6px 10px; margin-inline-end: 8px; cursor: pointer; }
+    #uploadStatus, #resultStatus { margin-top: 9px; overflow-wrap: anywhere; }
+    .error { color: var(--error); }
+    textarea { display: block; width: 100%; min-height: 230px; resize: vertical; border: 1px solid var(--line);
+      border-radius: 8px; background: var(--surface); color: var(--ink); padding: 12px; margin-top: 12px; line-height: 1.75; }
+    ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+    .job { display: grid; gap: 3px; width: 100%; text-align: start; }
+    .job[aria-current="true"] { border-color: var(--accent); background: var(--soft); }
+    .job span { overflow-wrap: anywhere; }
+    .job small { font-size: 12px; }
+    @media (max-width: 640px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1 id="title">音视频转写</h1>
+      <p id="intro">把录音或视频里的语音转成文字。</p>
+    </header>
+    <div class="layout">
+      <article>
+        <section aria-labelledby="uploadTitle">
+          <h2 id="uploadTitle"><label for="file" id="uploadLabel">选择音频或视频</label></h2>
+          <div class="row" id="uploadControls">
+            <input type="file" id="file" accept="audio/*,video/*" aria-describedby="limit" disabled>
+            <button class="primary" id="start" type="button" disabled>开始转写</button>
+          </div>
+          <p id="limit" class="note"></p>
+          <p id="uploadStatus" role="status"></p>
+        </section>
+        <section aria-labelledby="resultTitle">
+          <div class="row between">
+            <h2 id="resultTitle">转写结果</h2>
+            <div class="row">
+              <button id="copy" type="button" disabled>复制文字</button>
+              <button id="save" type="button" disabled>下载 TXT</button>
+            </div>
+          </div>
+          <p id="resultStatus" class="note" role="status"></p>
+          <textarea id="transcript" readonly aria-labelledby="resultTitle" hidden></textarea>
+        </section>
+      </article>
+      <aside aria-labelledby="historyTitle">
+        <div class="row between">
+          <h2 id="historyTitle">我的转写记录</h2>
+          <button id="refresh" type="button" disabled>刷新</button>
+        </div>
+        <p id="historyStatus" class="note" role="status"></p>
+        <ul id="history"></ul>
+        <button id="more" type="button" hidden>查看更多</button>
+      </aside>
+    </div>
+  </main>
+  <!-- AIPP_SCRIPT -->
+</body>
+</html>

@@ -60,6 +60,7 @@ async function setup(options: {
   terminalRaceOnExpectedTarget?: boolean;
   holdConversationInputResponses?: boolean;
   holdHistoryResponse?: boolean;
+  rejectFirstDeferred?: boolean;
 } = {}) {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const requests: Array<{ payload: { text: string; conversation_id: string; agent_id: string; attachments?: Array<{ name: string; base64?: string; path?: string }> }; idempotency_key: string }> = [];
@@ -164,6 +165,12 @@ async function setup(options: {
         const submitted = JSON.parse(String(init.body));
         const input = submitted.input ?? submitted;
         if (submitted.input) clientTasks.push(submitted);
+        if (options.rejectFirstDeferred && input.delivery_mode === "defer" && clientTasks.length === 1) {
+          return new Response(JSON.stringify({ ok: false, error: "invalid_temporary_input" }), {
+            status: 400, headers: { "content-type": "application/json" },
+          });
+        }
+
         conversationInputs.push(input);
         if (options.terminalRaceOnExpectedTarget && input.expected_task_id) {
           const expiredTaskId = input.expected_task_id as string;
@@ -660,4 +667,25 @@ test("an HTML gateway failure after acceptance recovers the existing receipt wit
     assert.equal(app.conversationInputs.length,1);assert.equal(app.conversationInputRecoveryQueries(),1);
     assert.equal(app.runtime().chatTeachingRuns[0].taskId,"task-1");await app.complete("task-1");
   } finally {await app.unmount();}
+});
+
+test("retry a failed deferred attachment with the original client id while preserving a new draft", async () => {
+  const app = await setup({ rejectFirstDeferred: true });
+  try {
+    await act(async () => {
+      await app.runtime().handleChatAttachmentSelection([new File(["sample"], "sample.txt", { type: "text/plain" })] as unknown as FileList);
+      app.runtime().setChatDeliveryMode("defer");
+    });
+    await app.send("keep this draft");
+    const [draft] = app.runtime().failedDeferredInputs;
+    assert.deepEqual(draft.filenames, ["sample.txt"]);
+    await act(async () => { app.runtime().setChatInput("next draft"); });
+    await act(async () => { await app.runtime().retryDeferredInput(draft.id); });
+    assert.equal(app.runtime().chatInput, "next draft");
+    assert.deepEqual(app.runtime().failedDeferredInputs, []);
+    assert.equal(app.clientTasks.length, 2);
+    assert.deepEqual(app.clientTasks[0], app.clientTasks[1]);
+  } finally {
+    await app.unmount();
+  }
 });

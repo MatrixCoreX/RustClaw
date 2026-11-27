@@ -620,7 +620,7 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
         .and_then(|descriptor| descriptor.browser_authentication.as_ref())
         .map(|authentication| PathBuf::from(&authentication.directory_path));
     let artifact_output_directory = invocation_artifact_output_directory(
-        &state.skill_rt.workspace_root,
+        state.skill_rt.files_root(),
         &task.task_id,
         canonical_skill_name,
     );
@@ -634,7 +634,7 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
             "repair_runtime_installation",
             json!({
                 "runner_path": state.skill_rt.skill_runner_path.display().to_string(),
-                "workspace_root": state.skill_rt.workspace_root.display().to_string(),
+                "workspace_root": state.skill_rt.files_root().display().to_string(),
             }),
         ));
     }
@@ -922,7 +922,7 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
         || internal_admission_token.is_some()
         || !selected_provider_key_tokens.is_empty()
         || !tokenized_secret_envs.is_empty();
-    let warm_reuse_allowed = pinned_execution_binding.is_none()
+    let warm_reuse_allowed = state.skill_rt.principal_workspace.is_none() && pinned_execution_binding.is_none()
         && !durable_background
         && stateless_readonly_reuse_allowed(
             installed_launch.execution_profile,
@@ -957,6 +957,14 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
             Some(serde_json::json!({"side_effect_applied":false,"failure_phase":"pre_dispatch","retryable":false})),
         )
     })?;
+    let mut personal_grants = vec![
+        state.skill_rt.skill_runner_path.clone(),
+        installed_launch.install_root.clone(),
+    ];
+    let operator_config = if installed_launch.environment_allowlist.iter().any(|variable| variable == "APP_SKILL_OPERATOR_CONFIG") {
+        state.granted_operator_config(canonical_skill_name).map_err(|_| "operator_config_grant_unavailable".to_string())?
+    } else { None };
+    personal_grants.extend(operator_config.iter().cloned());
     let prepared = if warm_reuse_allowed {
         // The outer runner is trusted host code. Keeping it outside a sandbox
         // lets it create a fresh receipt-controlled sandbox (and fresh /tmp on
@@ -968,10 +976,11 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
         }
     } else {
         let request = crate::process_sandbox::ProcessSandboxRequest {
+            principal_readonly: state.skill_rt.principal_workspace.as_ref().map(|_| personal_grants.as_slice()),
             mode: sandbox_mode,
             backend: state.skill_rt.tools_policy.sandbox_backend,
-            workspace_root: &state.skill_rt.workspace_root,
-            execution_root: &state.skill_rt.workspace_root,
+            workspace_root: state.skill_rt.files_root(),
+            execution_root: state.skill_rt.files_root(),
             network,
             additional_writable_paths: &additional_writable_paths,
             host_private_directories: &host_private_directories,
@@ -1100,7 +1109,7 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
     );
     let mut launch = RunnerLaunch::new(
         prepared.invocation,
-        &state.skill_rt.workspace_root,
+        state.skill_rt.files_root(),
         inherited_environment.into_pairs(),
     )
     .map_err(|error| launch_spec::launch_error(canonical_skill_name, error))?;
@@ -1146,12 +1155,17 @@ pub(crate) async fn run_skill_with_runner_once_pinned(
         .env("APP_SKILL_VERSION_LEASE_MODE", "host_held")
         .env(
             "WORKSPACE_ROOT",
-            state.skill_rt.workspace_root.display().to_string(),
+            state.skill_rt.files_root().display().to_string(),
         )
         .env(
             "APP_WORKSPACE_STATE_DIR",
             claw_core::workspace_state::WORKSPACE_STATE_DIR_NAME,
         );
+    if let Some(path) = operator_config {
+        launch.env("APP_SKILL_OPERATOR_CONFIG", path.as_os_str());
+    } else {
+        launch.env_remove("APP_SKILL_OPERATOR_CONFIG");
+    }
     if let Some(token_store_dir) = sandbox_token_store_dir {
         launch.env(
             "APP_SECRET_TOKEN_DIR",
@@ -1805,7 +1819,7 @@ pub(crate) fn build_runner_skill_context(
     ctx.insert("language".to_string(), Value::String(locale_tag));
     ctx.insert(
         "workspace_root".to_string(),
-        Value::String(state.skill_rt.workspace_root.display().to_string()),
+        Value::String(state.skill_rt.files_root().display().to_string()),
     );
     let recent_images = crate::collect_recent_image_candidates(
         state,

@@ -60,8 +60,50 @@ pub(crate) struct MaterializedAttachment {
     size: usize,
 }
 
+pub(crate) fn prepare_submission(
+    state: &AppState,
+    request: &mut claw_core::types::SubmitTaskRequest,
+    identity: Option<&claw_core::types::AuthIdentity>,
+    user_id: i64,
+    chat_id: i64,
+    call_id: &str,
+) -> Result<(), (axum::http::StatusCode, String)> {
+    use axum::http::StatusCode;
+    let root = match identity {
+        Some(identity) => state.identity_files_root(identity).map_err(|_| {
+            (StatusCode::SERVICE_UNAVAILABLE, "workspace_scope_unavailable".to_owned())
+        })?,
+        None => claw_core::channel_workspace::private_directory(
+            &state.skill_rt.workspace_root, &format!("legacy-task:{call_id}"),
+        ).map_err(|_| (StatusCode::SERVICE_UNAVAILABLE, "workspace_scope_unavailable".to_owned()))?,
+    };
+    if let Some(ingress) = request.ingress.as_ref() {
+        validate_channel_ingress_attachments(&root, &ingress.attachments)
+            .map_err(|code| (StatusCode::BAD_REQUEST, code.to_string()))?;
+    }
+    materialize_ui_task_attachments_at(&root, &mut request.payload, user_id, chat_id, call_id)
+        .map_err(|error| (StatusCode::BAD_REQUEST, error))
+}
+
+#[cfg(test)]
 pub(crate) fn materialize_ui_task_attachments(
     state: &AppState,
+    payload: &mut Value,
+    effective_user_id: i64,
+    effective_chat_id: i64,
+    call_id: &str,
+) -> Result<(), String> {
+    materialize_ui_task_attachments_at(
+        state.skill_rt.files_root(),
+        payload,
+        effective_user_id,
+        effective_chat_id,
+        call_id,
+    )
+}
+
+pub(crate) fn materialize_ui_task_attachments_at(
+    workspace_root: &Path,
     payload: &mut Value,
     effective_user_id: i64,
     effective_chat_id: i64,
@@ -87,12 +129,12 @@ pub(crate) fn materialize_ui_task_attachments(
                 } else {
                     input.mime_type
                 },
-                bytes,
+                bytes: std::io::Cursor::new(bytes),
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
     let materialized = commit_upload_batch(
-        &state.skill_rt.workspace_root,
+        workspace_root,
         effective_user_id,
         effective_chat_id,
         call_id,

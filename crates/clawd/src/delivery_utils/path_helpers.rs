@@ -22,10 +22,10 @@ pub(crate) fn resolve_existing_path_under_root_case_insensitive(
     raw_path: &str,
 ) -> Option<PathBuf> {
     let candidate = candidate_path_from_root(root, raw_path)?;
-    if let Ok(canonical) = candidate.canonicalize() {
-        return Some(canonical);
-    }
-    resolve_case_insensitive_candidate_path(root, raw_path)
+    let canonical_root = root.canonicalize().ok()?;
+    let candidate = candidate.canonicalize().ok()
+        .or_else(|| resolve_case_insensitive_candidate_path(root, raw_path))?;
+    candidate.starts_with(canonical_root).then_some(candidate)
 }
 
 fn candidate_path_from_root(root: &Path, raw_path: &str) -> Option<PathBuf> {

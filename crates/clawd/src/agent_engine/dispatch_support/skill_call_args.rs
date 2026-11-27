@@ -67,7 +67,7 @@ pub(super) fn write_file_effective_path(
         return None;
     }
     args.get("path").and_then(|v| v.as_str()).map(|path| {
-        let effective = crate::ensure_default_file_path(&state.skill_rt.workspace_root, path);
+        let effective = crate::ensure_default_file_path(state.skill_rt.files_root(), path);
         let user_visible = if Path::new(&effective).is_absolute() {
             effective.clone()
         } else {

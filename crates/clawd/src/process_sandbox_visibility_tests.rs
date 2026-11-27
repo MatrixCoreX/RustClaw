@@ -90,6 +90,7 @@ fn request<'a>(
     writable: &'a [PathBuf],
 ) -> ProcessSandboxRequest<'a> {
     ProcessSandboxRequest {
+        principal_readonly: None,
         mode: ToolSandboxMode::WorkspaceWrite,
         backend: ToolSandboxBackend::Auto,
         workspace_root: root,

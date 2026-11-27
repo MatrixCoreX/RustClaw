@@ -41,11 +41,11 @@ pub(super) fn try_handle_directory_lookup_request(
     let request = resolve_directory_locator_input(
         output_contract,
         user_request,
-        &state.skill_rt.workspace_root,
+        state.skill_rt.files_root(),
     )?;
     let resolved = resolve_directory_target(
         request,
-        Path::new("/"),
+        state.skill_rt.principal_workspace.as_deref().unwrap_or(Path::new("/")),
         &state.skill_rt.default_locator_search_dir,
     );
     match resolved {

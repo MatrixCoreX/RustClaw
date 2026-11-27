@@ -3,7 +3,7 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 use anyhow::{bail, Context, Result};
 use claw_core::skill_registry::CapabilityIsolationProfile;
@@ -219,7 +219,7 @@ pub(crate) fn child_patch_base_is_parent_ancestor(
     if !is_git_object_id(base_commit) {
         bail!("child_patch_base_commit_invalid");
     }
-    let status = Command::new("git")
+    let status = super::workspace_git(workspace_root)?
         .arg("-C")
         .arg(workspace_root)
         .args(["merge-base", "--is-ancestor", base_commit, "HEAD"])
@@ -353,7 +353,7 @@ fn is_git_object_id(value: &str) -> bool {
 }
 
 fn run_git(plan: &ExecutionIsolationPlan, args: &[&str]) -> Result<Output> {
-    let output = Command::new("git")
+    let output = super::workspace_git(&plan.workspace_root)?
         .arg("-C")
         .arg(&plan.execution_root)
         .args(args)
@@ -371,7 +371,7 @@ fn run_git_with_index(
     index_path: &Path,
     args: &[&str],
 ) -> Result<Output> {
-    let output = Command::new("git")
+    let output = super::workspace_git(&plan.workspace_root)?
         .arg("-C")
         .arg(&plan.execution_root)
         .env("GIT_INDEX_FILE", index_path)

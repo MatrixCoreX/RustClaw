@@ -47,7 +47,7 @@ pub(super) fn local_primitive_path(state: &AppState, action: &AgentAction) -> Op
         return None;
     }
     let requested = Path::new(args.get("path")?.as_str()?);
-    let root = &state.skill_rt.workspace_root;
+    let root = state.skill_rt.files_root();
     let canonical_root = root.canonicalize().ok()?;
     let relative = if requested.is_absolute() {
         requested

@@ -24,7 +24,33 @@ pub(crate) struct SkillRuntime {
     pub(crate) cmd_max_output_bytes: usize,
     pub(crate) max_cmd_length: usize,
     pub(crate) workspace_root: PathBuf,
+    pub(crate) principal_workspace: Option<PathBuf>,
     pub(crate) default_locator_search_dir: PathBuf,
+}
+
+impl SkillRuntime {
+    pub(crate) fn files_root(&self) -> &PathBuf {
+        self.principal_workspace
+            .as_ref()
+            .unwrap_or(&self.workspace_root)
+    }
+
+    pub(crate) fn delivery_file(&self, path: &std::path::Path) -> Option<PathBuf> {
+        let canonical = path.canonicalize().ok()?;
+        if self.principal_workspace.as_ref().is_some_and(|root| !canonical.starts_with(root)) {
+            return None;
+        }
+        canonical.is_file().then_some(canonical)
+    }
+
+    pub(crate) fn select_execution_directory(&mut self, directory: PathBuf) {
+        self.default_locator_search_dir = directory.clone();
+        if self.principal_workspace.is_some() {
+            self.principal_workspace = Some(directory);
+        } else {
+            self.workspace_root = directory;
+        }
+    }
 }
 
 pub(crate) struct SkillConcurrencyGates {

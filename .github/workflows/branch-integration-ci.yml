@@ -81,6 +81,7 @@ jobs:
           set -euo pipefail
           python3 scripts/nl_tests/replay_verifier_candidate_tests.py
           python3 scripts/nl_tests/scheduled_run_receipt_sync_tests.py
+          python3 scripts/nl_tests/scheduled_run_failure_sync_tests.py
           python3 -m unittest discover -s scripts/tests -p test_retire_superseded_release_archives.py
           python3 scripts/check_long_files.py
           python3 scripts/check_cross_platform_contracts.py
@@ -113,6 +114,7 @@ jobs:
           python3 scripts/nl_tests/summarize_rollout_metrics.py --self-test
           python3 -m unittest discover -s scripts/tests -p test_runtime_latency_statistics.py -v
           python3 -m unittest discover -s scripts/tests -p test_deduplicate_task_deliveries.py -v
+          python3 -m unittest discover -s scripts/tests -p test_review_delivery_claims.py -v
           python3 -m unittest discover -s scripts/tests -p test_skill_action_doc_sections.py -v
           python3 -m unittest discover -s scripts/tests -p test_deployment_staging_deduplication.py -v
           npm ci --ignore-scripts --prefix UI
@@ -123,6 +125,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cargo test --locked -p rss-fetch-skill
           cargo test --locked -p agent-skill-sdk -p skill-runner -p claw-core -p clawd --no-run
       - name: Build exact native host consumers
         id: native_build

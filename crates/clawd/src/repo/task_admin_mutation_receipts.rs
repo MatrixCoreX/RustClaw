@@ -5,6 +5,9 @@ use sha2::{Digest, Sha256};
 
 use crate::AppState;
 
+#[path = "task_admin_mutation_recovery.rs"]
+mod recovery;
+
 const INIT_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS task_admin_mutation_receipts (
     actor_digest TEXT NOT NULL,
@@ -35,6 +38,7 @@ pub(crate) enum TaskAdminMutationClaim {
     Acquired(TaskAdminMutationLease),
     Replay(Value),
     InProgress,
+    OutcomeUnknown,
     Conflict,
 }
 
@@ -83,7 +87,7 @@ pub(crate) fn claim_task_admin_mutation(
     )?;
     let row = tx
         .query_row(
-            "SELECT action, target_id, request_digest, phase, lease_token, response_json
+            "SELECT action, target_id, request_digest, phase, lease_token, response_json, updated_at
              FROM task_admin_mutation_receipts
              WHERE actor_digest = ?1 AND idempotency_key = ?2",
             params![actor_digest, idempotency_key],
@@ -95,12 +99,12 @@ pub(crate) fn claim_task_admin_mutation(
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
                     row.get::<_, Option<String>>(5)?,
+                    row.get::<_, i64>(6)?,
                 ))
             },
         )
         .optional()?
         .context("task_admin_mutation_receipt_missing")?;
-    tx.commit()?;
 
     if row.0 != action || row.1 != target_id || row.2 != request_digest {
         return Ok(TaskAdminMutationClaim::Conflict);
@@ -115,8 +119,25 @@ pub(crate) fn claim_task_admin_mutation(
         return Ok(TaskAdminMutationClaim::Replay(response));
     }
     if row.4 != lease_token {
-        return Ok(TaskAdminMutationClaim::InProgress);
+        // Slow/active handlers retain their lease. An old timestamp by itself is
+        // never proof that a side effect did or did not happen.
+        if now.saturating_sub(row.6) < 300 {
+            return Ok(TaskAdminMutationClaim::InProgress);
+        }
+        if let Some(response) =
+            recovery::observed_outcome(&tx, &action, &target_id, &idempotency_key)?
+        {
+            tx.execute(
+                "UPDATE task_admin_mutation_receipts SET phase='completed',response_json=?3,updated_at=?4
+                 WHERE actor_digest=?1 AND idempotency_key=?2 AND phase='in_progress'",
+                params![actor_digest,idempotency_key,response.to_string(),now],
+            )?;
+            tx.commit()?;
+            return Ok(TaskAdminMutationClaim::Replay(response));
+        }
+        return Ok(TaskAdminMutationClaim::OutcomeUnknown);
     }
+    tx.commit()?;
     Ok(TaskAdminMutationClaim::Acquired(TaskAdminMutationLease {
         actor_digest,
         idempotency_key,

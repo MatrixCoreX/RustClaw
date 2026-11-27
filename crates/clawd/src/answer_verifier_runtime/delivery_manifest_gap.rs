@@ -4,6 +4,7 @@ use super::*;
 /// Reuse the actual publication contract before accepting a delivery claim.
 pub(super) fn missing_delivery_manifest_gap(
     workspace: &std::path::Path,
+    delivery: &std::path::Path,
     task_id: &str,
     contract: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
@@ -15,8 +16,9 @@ pub(super) fn missing_delivery_manifest_gap(
         return None;
     }
     let result = serde_json::json!({"task_journal":{"trace":{"capability_results":journal.capability_results}}});
-    let published = crate::task_artifacts::materialize_task_result_artifacts(
+    let published = crate::task_artifacts::materialize_scoped_task_artifacts(
         workspace,
+        delivery,
         task_id,
         &result.to_string(),
     )

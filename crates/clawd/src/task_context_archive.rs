@@ -67,7 +67,7 @@ pub(crate) fn capture(
         {
             return Err("context_archive_stale_claim");
         }
-        publish(&state.skill_rt.workspace_root, &task.task_id, items)
+        publish(state.skill_rt.files_root(), &task.task_id, items)
     })();
     result
         .unwrap_or_else(|code| json!({"schema_version":1,"status":"unavailable","error_code":code}))

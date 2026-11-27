@@ -98,12 +98,13 @@ impl SurfaceFixture {
         )
         .unwrap();
         fs::write(install.join("aipp/index.html"), BUNDLE).unwrap();
+        fs::write(install.join("aipp/app.js"), b"/* fixture script */").unwrap();
         fs::write(
             install.join("skill.toml"),
             manifest.to_toml_string().unwrap(),
         )
         .unwrap();
-        let artifacts = ["runtime/bin/fixture", "aipp/index.html"]
+        let artifacts = ["runtime/bin/fixture", "aipp/index.html", "aipp/app.js"]
             .into_iter()
             .map(|name| {
                 let path = install.join(name);

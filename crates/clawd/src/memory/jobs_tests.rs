@@ -114,6 +114,10 @@ fn outbox_reconciliation_uses_the_canonical_task_schema_and_terminal_status() {
         missing_turn_task_ids(&db).expect("canonical reconciliation query"),
         vec!["task-reconcile"]
     );
+    db.execute("INSERT INTO memory_turn_evidence_deferrals VALUES ('task-reconcile','principal-fixture',2,100,'memory_job_source_binding_unverified')", []).unwrap();
+    assert!(missing_turn_task_ids(&db).unwrap().is_empty());
+    db.execute("UPDATE memories SET content='new evidence' WHERE memory_id='memory-reconcile'", []).unwrap();
+    assert_eq!(missing_turn_task_ids(&db).unwrap(), vec!["task-reconcile"]);
     db.execute(
         "UPDATE tasks SET status = 'failed' WHERE task_id = 'task-reconcile'",
         [],

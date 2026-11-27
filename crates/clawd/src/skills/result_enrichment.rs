@@ -16,7 +16,7 @@ pub(crate) fn validate_and_spill_output(
         extra.as_ref(),
     );
     if let Err(err) = crate::skill_output_artifact::spill_skill_text_if_needed(
-        &state.skill_rt.workspace_root,
+        state.skill_rt.files_root(),
         task_id,
         skill_name,
         text,

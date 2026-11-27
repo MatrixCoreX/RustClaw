@@ -256,8 +256,8 @@ pub(crate) fn claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
         return Ok(None);
     }
     drop(db);
-    match crate::task_artifacts::preserve_async_completion_artifacts(
-        &state.skill_rt.workspace_root,
+    match crate::task_artifacts::preserve_stored_async_artifacts(
+        state,
         task_id,
         &recorded.execution_result_payload,
     ) {
@@ -1011,7 +1011,7 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
     let updated_result_json = terminal_result.to_string();
     drop(db);
     let updated_result_json = if db_status == "succeeded" {
-        crate::repo::tasks::prepare_succeeded_result_json(state, task_id, &updated_result_json)
+        crate::repo::tasks::prepare_succeeded_result_json(state, task_id, &updated_result_json)?
     } else {
         updated_result_json
     };

@@ -1,4 +1,4 @@
-use tracing::warn;
+use anyhow::Context;
 
 use crate::AppState;
 
@@ -10,19 +10,15 @@ pub(crate) fn prepare_succeeded_result_json(
     state: &AppState,
     task_id: &str,
     result_json: &str,
-) -> String {
-    match crate::task_artifacts::materialize_task_result_artifacts(
+) -> anyhow::Result<String> {
+    let root = state
+        .stored_task_files_root(task_id)
+        .context("artifact_workspace_owner_unavailable")?;
+    crate::task_artifacts::materialize_scoped_task_artifacts(
+        &root,
         &state.skill_rt.workspace_root,
         task_id,
         result_json,
-    ) {
-        Ok(delivered) => delivered,
-        Err(error) => {
-            warn!(
-                "task artifact materialization failed task_id={} error={}",
-                task_id, error
-            );
-            result_json.to_string()
-        }
-    }
+    )
+    .context("artifact_publication_failed")
 }

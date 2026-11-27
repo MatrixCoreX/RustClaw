@@ -63,7 +63,7 @@ impl ChildTaskExecutionScope {
             }),
             "local_worktree" => {
                 let plan = crate::execution_isolation::plan_execution_isolation(
-                    &state.skill_rt.workspace_root,
+                    state.skill_rt.files_root(),
                     &task.task_id,
                     CapabilityIsolationProfile::LocalWorktree,
                 )
@@ -74,9 +74,7 @@ impl ChildTaskExecutionScope {
                 )
                 .context("child_worktree_allocation_failed")?;
                 let mut scoped_state = state.clone();
-                scoped_state.skill_rt.workspace_root = runtime.plan.execution_root.clone();
-                scoped_state.skill_rt.default_locator_search_dir =
-                    runtime.plan.execution_root.clone();
+                scoped_state.skill_rt.select_execution_directory(runtime.plan.execution_root.clone());
                 Ok(Self {
                     scoped_state: Some(scoped_state),
                     permission_profile: Some(permission_profile.to_string()),
@@ -100,7 +98,7 @@ impl ChildTaskExecutionScope {
             .runtime
             .as_ref()
             .map(|runtime| runtime.plan.execution_root.as_path())
-            .unwrap_or(fallback.skill_rt.workspace_root.as_path());
+            .unwrap_or(fallback.skill_rt.files_root().as_path());
         let patch_artifact = self.runtime.as_ref().map(|runtime| {
             crate::execution_isolation::build_child_worktree_patch_artifact(&runtime.plan)
                 .unwrap_or_else(|_| {

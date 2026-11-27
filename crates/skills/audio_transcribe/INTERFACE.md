@@ -112,3 +112,11 @@ Response:
 ```json
 {"request_id":"demo-3","status":"ok","text":"AUDIO_TRANSCRIBE_PREVIEW","extra":{"provider":"custom","provider_location":"local","recommended_capability":"local_asr.transcribe","fallback_recommended":false,"model":"local-whisper","model_kind":"compat","input_path":"recordings/chinese.wav"},"error_text":null}
 ```
+
+## AiAPP
+
+The Audio and video transcription AiAPP accepts one audio or video file per job, up to 20 MiB.
+The host checks the signed-in account's upload before queuing the job. Video jobs first use the
+installed audio extraction capability. Audio recognition uses the configured speech-to-text
+backend and displays its transcript directly. Signed-in users can reopen their own jobs,
+copy completed transcripts, and download them as UTF-8 TXT.

@@ -966,6 +966,12 @@ async fn handle_text_message_to_clawd(
     let (task_id, owns_terminal_delivery) = if let Some(task_id) = existing_task_id {
         (task_id, true)
     } else {
+        if let Err(error) = claw_core::channel_workspace::stage_received_attachments(
+            &core_client, &state.config.feishu.clawd_base_url, &submit_req,
+        ).await {
+            tracing::warn!(%error, "could not prepare incoming attachments");
+            return false;
+        }
         let use_conversation_input = submit_req
             .payload
             .get("text")

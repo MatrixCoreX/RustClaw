@@ -48,6 +48,15 @@ class ReleaseSkillSourcesTests(unittest.TestCase):
         source = (ROOT / "package-release.sh").read_text()
         self.assertLess(source.index("stage_release_skill_sources.py"), source.index('tar -czf "$OUT"'))
 
+    def test_news_app_accepts_canonical_and_recorded_fetch_actions(self):
+        manifest = tomllib.loads((ROOT / "crates/skills/rss_fetch/skill.toml").read_text())
+        refs = set(manifest["aipp"]["edition_action_refs"])
+        for action in ("news", "latest", "fetch", "preview_category"):
+            for producer in ("rss", "rss_fetch"):
+                self.assertIn(f"{producer}.{action}", refs)
+        self.assertTrue({"rss.latest_news", "rss.fetch_feed"} <= refs)
+        self.assertTrue({"rss.list_categories", "rss.source_health"}.isdisjoint(refs))
+
     def test_local_asr_heavy_dependencies_are_isolated(self):
         media_requirements = (ROOT / "optional_skills/media_download/requirements.in").read_text().lower()
         local_asr_requirements = (ROOT / "optional_skills/local_asr/requirements.in").read_text().lower()

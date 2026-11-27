@@ -39,7 +39,7 @@ fn review_child_patch(state: &AppState, record: &ChildPatchRecord) -> Result<Str
     let artifact = validated_artifact(state, record)?;
     let base_commit = required_artifact_string(&artifact.metadata, "base_commit")?;
     let base_is_parent_ancestor =
-        child_patch_base_is_parent_ancestor(&state.skill_rt.workspace_root, base_commit)
+        child_patch_base_is_parent_ancestor(state.skill_rt.files_root(), base_commit)
             .map_err(|err| child_patch_runtime_error(&err))?;
     let patch = if artifact.patch.is_empty() {
         Value::Null
@@ -89,7 +89,7 @@ fn apply_child_patch(
     }
     let artifact = validated_artifact(state, record)?;
     let base_commit = required_artifact_string(&artifact.metadata, "base_commit")?;
-    if !child_patch_base_is_parent_ancestor(&state.skill_rt.workspace_root, base_commit)
+    if !child_patch_base_is_parent_ancestor(state.skill_rt.files_root(), base_commit)
         .map_err(|err| child_patch_runtime_error(&err))?
     {
         return Err(child_patch_error(
@@ -189,7 +189,7 @@ fn finish_cleanup(
     mut disposition: Value,
 ) -> Result<String, String> {
     let cleanup =
-        cleanup_child_worktree_artifacts(&state.skill_rt.workspace_root, &record.child_task_id);
+        cleanup_child_worktree_artifacts(state.skill_rt.files_root(), &record.child_task_id);
     let object = disposition
         .as_object_mut()
         .ok_or_else(|| child_patch_error("patch_disposition_invalid", Value::Null))?;
@@ -250,7 +250,7 @@ fn validated_artifact(
     record: &ChildPatchRecord,
 ) -> Result<ValidatedChildPatchArtifact, String> {
     load_validated_child_worktree_patch_artifact(
-        &state.skill_rt.workspace_root,
+        state.skill_rt.files_root(),
         &record.child_task_id,
         &record.patch_artifact,
     )

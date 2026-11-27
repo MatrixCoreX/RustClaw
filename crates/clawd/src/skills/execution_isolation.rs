@@ -54,7 +54,7 @@ pub(super) fn prepare_skill_execution_isolation(
         ));
     }
     if let Some(current_profile) =
-        crate::execution_isolation::execution_isolation_root_profile(&state.skill_rt.workspace_root)
+        crate::execution_isolation::execution_isolation_root_profile(state.skill_rt.files_root())
     {
         let compatible = matches!(
             (current_profile.as_str(), profile),
@@ -75,7 +75,7 @@ pub(super) fn prepare_skill_execution_isolation(
         }
     }
     let plan = crate::execution_isolation::plan_execution_isolation(
-        &state.skill_rt.workspace_root,
+        state.skill_rt.files_root(),
         &task.task_id,
         profile,
     )
@@ -87,8 +87,7 @@ pub(super) fn prepare_skill_execution_isolation(
         crate::execution_isolation::create_execution_isolation(&plan, crate::now_ts_u64())
             .map_err(|error| setup_error(skill_name, error.to_string()))?;
     let mut isolated_state = state.clone();
-    isolated_state.skill_rt.workspace_root = runtime.plan.execution_root.clone();
-    isolated_state.skill_rt.default_locator_search_dir = runtime.plan.execution_root.clone();
+    isolated_state.skill_rt.select_execution_directory(runtime.plan.execution_root.clone());
     Ok(Some(SkillExecutionIsolation {
         state: isolated_state,
         artifact_refs: runtime.artifact_refs,

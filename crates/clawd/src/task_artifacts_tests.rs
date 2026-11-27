@@ -8,6 +8,29 @@ use super::*;
 
 struct TempWorkspace(PathBuf);
 
+#[test]
+fn scoped_publication_remains_downloadable_after_account_changes_its_copy() {
+    let host = TempWorkspace::new();
+    let personal = host.path().join("personal");
+    fs::create_dir(&personal).unwrap();
+    fs::write(personal.join("report.txt"), b"original").unwrap();
+    let raw = json!({"output_path":"report.txt"}).to_string();
+    let result = materialize_scoped_task_artifacts(&personal, host.path(), "task-owned", &raw).unwrap();
+    let value = serde_json::from_str(&result).unwrap();
+    let manifest = manifests_from_result(Some(&value)).pop().unwrap();
+    let download = validated_delivery_artifact_path(host.path(), "task-owned", &manifest).unwrap();
+    fs::write(personal.join("report.txt"), b"edited").unwrap();
+    assert_eq!(fs::read(&download).unwrap(), b"original");
+    assert!(validated_delivery_artifact_path(&personal, "task-owned", &manifest).is_none());
+    fs::remove_file(personal.join("report.txt")).unwrap();
+    let replay = materialize_scoped_task_artifacts(&personal, host.path(), "task-owned", "{}").unwrap();
+    let value = serde_json::from_str(&replay).unwrap();
+    assert_eq!(manifests_from_result(Some(&value))[0].sha256, manifest.sha256);
+    assert!(manifests_from_result(Some(&serde_json::from_str(
+        &materialize_scoped_task_artifacts(&personal, host.path(), "other-task", "{}").unwrap(),
+    ).unwrap())).is_empty());
+}
+
 fn generated_revision(workspace: &Path, task_id: &str, text: &str, replaces: Vec<String>) -> Value {
     let digest = format!("{:x}", Sha256::digest(text.as_bytes()));
     let snapshot_filename = format!("{digest}.txt");
@@ -148,7 +171,7 @@ fn invalid_candidate_never_overwrites_an_existing_valid_delivery() {
         size_bytes: None,
         sha256: Some(sha256_file(&destination).unwrap()),
     };
-    assert!(publish_artifact_file(&source, &destination, &expected)
+    assert!(publish_artifact_file(workspace.path(), workspace.path(), &source, &destination, &expected)
         .unwrap()
         .is_none());
     assert_eq!(fs::read(&destination).unwrap(), b"valid previous delivery");
@@ -329,7 +352,7 @@ fn async_poll_completion_preserves_artifact_before_resume_projection() {
     });
 
     assert!(
-        preserve_async_completion_artifacts(workspace.path(), "task-async-preserve", &payload,)
+        preserve_async_completion_artifacts(workspace.path(), workspace.path(), "task-async-preserve", &payload,)
             .unwrap()
     );
     let delivered = delivery_artifact_path(
@@ -369,7 +392,7 @@ fn final_projection_restores_every_artifact_preserved_before_journal_compaction(
         "final_result_json": skill_result
     });
     let task_id = "task-compacted-artifacts";
-    assert!(preserve_async_completion_artifacts(workspace.path(), task_id, &payload).unwrap());
+    assert!(preserve_async_completion_artifacts(workspace.path(), workspace.path(), task_id, &payload).unwrap());
     fs::remove_file(&first).unwrap();
     fs::remove_file(&second).unwrap();
     fs::remove_file(&article).unwrap();

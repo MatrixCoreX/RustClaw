@@ -566,8 +566,13 @@ fn schedule_once(state: &AppState) -> anyhow::Result<()> {
 
         let run_id = format!("run_{}", Uuid::new_v4().simple());
         let mut db = state.core.db.get()?;
-        let tx = db.transaction()?;
-        let task_id = enqueue_scheduled_run(&tx, &job, &run_id)?;
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        // A manual submission can commit after the due-job scan. Check again
+        // under the same write lock used by the manual endpoint.
+        let task_id = match active_scheduled_run(&tx, &job.job_id)? {
+            Some(active_id) => active_id,
+            None => enqueue_scheduled_run(&tx, &job, &run_id)?,
+        };
         if !advance_scheduled_job(&tx, &job, next_run, now, &task_id)? {
             continue;
         }
@@ -640,7 +645,7 @@ fn advance_scheduled_job(
         Some(next_run_at) => db.execute(
             "UPDATE scheduled_jobs
              SET last_run_at = ?2, next_run_at = ?3, last_thread_task_id = ?5, updated_at = ?2
-             WHERE job_id = ?1 AND next_run_at = ?4",
+             WHERE job_id = ?1 AND enabled = 1 AND next_run_at = ?4",
             rusqlite::params![
                 job.job_id,
                 now_ts.to_string(),
@@ -652,7 +657,7 @@ fn advance_scheduled_job(
         None => db.execute(
             "UPDATE scheduled_jobs
              SET enabled = 0, last_run_at = ?2, next_run_at = NULL, last_thread_task_id = ?4, updated_at = ?2
-             WHERE job_id = ?1 AND next_run_at = ?3",
+             WHERE job_id = ?1 AND enabled = 1 AND next_run_at = ?3",
             rusqlite::params![job.job_id, now_ts.to_string(), job.next_run_at, task_id],
         )?,
     };
@@ -666,7 +671,13 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
 
     // Retention is not cancellation: active execution and durable consumers own
     // their task rows until settled, even when an age or row limit is exceeded.
+    let edition_refs = crate::http::ui_routes::edition_retention_refs(state, &db)?;
     let eligible = "kind != 'ask'
+        AND NOT EXISTS (SELECT 1 FROM json_each(?3) AS retained
+            WHERE tasks.kind='run_skill' AND CASE WHEN json_valid(tasks.payload_json) THEN
+                retained.value IN (json_extract(tasks.payload_json,'$.skill_name'),
+                    json_extract(tasks.payload_json,'$.skill_name') || '.' || json_extract(tasks.payload_json,'$.args.action'))
+            ELSE 0 END)
         AND status IN ('succeeded', 'failed', 'canceled', 'timeout')
         AND (status != 'canceled' OR COALESCE(
             CASE WHEN json_valid(result_json)
@@ -701,7 +712,7 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
              LIMIT ?2
          )"
         ),
-        rusqlite::params![task_cutoff, MAINTENANCE_DELETE_BATCH_SIZE],
+        rusqlite::params![task_cutoff, MAINTENANCE_DELETE_BATCH_SIZE, edition_refs],
     )?;
 
     db.execute(
@@ -715,7 +726,7 @@ fn cleanup_once(state: &AppState) -> anyhow::Result<()> {
         ),
         rusqlite::params![
             state.policy.maintenance.tasks_max_rows as i64,
-            MAINTENANCE_DELETE_BATCH_SIZE
+            MAINTENANCE_DELETE_BATCH_SIZE, edition_refs
         ],
     )?;
     db.execute(

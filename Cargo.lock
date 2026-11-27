@@ -745,7 +745,9 @@ dependencies = [
  "config",
  "fs2",
  "hmac 0.12.1",
+ "libc",
  "reqwest 0.12.28",
+ "rustix 1.1.6",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -3995,7 +3997,7 @@ dependencies = [
 
 [[package]]
 name = "rss-fetch-skill"
-version = "0.1.8"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "fs2",
@@ -4872,7 +4874,7 @@ dependencies = [
 
 [[package]]
 name = "task-control-skill"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "anyhow",
  "claw-core",
