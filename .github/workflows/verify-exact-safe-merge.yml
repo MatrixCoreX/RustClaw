@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: fe2819be5cd5347f7092ba551bb6b06272848bd4
+          ref: e279cc68c63676ddac26853db983454b84888f84
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.13"
@@ -31,17 +31,19 @@ jobs:
       - name: Validate exact runtime and skill source
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = fe2819be5cd5347f7092ba551bb6b06272848bd4
+          test "$(git rev-parse HEAD)" = e279cc68c63676ddac26853db983454b84888f84
           bash scripts/version_info_tests.sh
           bash -c 'source scripts/version_info.sh; test "$(app_version_from_root "$PWD")" = 0.2.0'
           python3 scripts/sync_skill_manifests.py --check
           python3 scripts/check_skill_prompts.py
+          python3 scripts/check_cross_platform_contracts.py
           python3 scripts/check_aipp_decoupling.py --self-test
           python3 scripts/check_aipp_decoupling.py
           cargo test --locked -p agent-skill-sdk
           cargo test --locked -p skill-runner
           cargo test --locked -p clawd --bin clawd aipp -- --test-threads=1
           cargo test --locked -p clawd --bin clawd run_skill -- --test-threads=1
+          cargo test --locked -p clawd --bin clawd skill_store_http_api_removes_and_reinstalls_optional_skill -- --test-threads=1
       - name: Verify the updated transcript package and protocol
         run: |
           set -euo pipefail
@@ -55,7 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: fe2819be5cd5347f7092ba551bb6b06272848bd4
+          ref: e279cc68c63676ddac26853db983454b84888f84
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.13"
@@ -67,9 +69,16 @@ jobs:
       - name: Verify exact console source and build
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = fe2819be5cd5347f7092ba551bb6b06272848bd4
+          test "$(git rev-parse HEAD)" = e279cc68c63676ddac26853db983454b84888f84
           npm ci --prefix UI
           npm run lint --prefix UI
           npm test --prefix UI
           bash scripts/product_identity_tests.sh --with-ui
           npm run build --prefix UI
+      - name: Verify the native desktop UI transport
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --prefix desktop
+          npm run lint --prefix desktop
+          npm test --prefix desktop
+          npm run build:ui --prefix desktop
