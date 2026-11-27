@@ -2,7 +2,8 @@ import { browserStageError } from "./browser_diagnostics.mjs";
 import { stopsCollection } from "./browser_flow_control.mjs";
 import { boundedBrowserOperation } from "./browser_search.mjs";
 import { collectOrderedPages, publishCollectionPage } from "./collection_progress.mjs";
-import { isDetailUrl } from "./platforms.mjs";
+import { ACCOUNT_COOKIES } from "./account_cookie_state.mjs";
+import { isDetailUrl, platformSpec } from "./platforms.mjs";
 
 export const KUAISHOU_LOGIN_MODAL = [
   ".login-popup .login-modal:visible",
@@ -23,6 +24,23 @@ export async function kuaishouLoadMoreLoginVisible(page) {
 
 export async function kuaishouToolbarLoginVisible(page) {
   return await page.locator(KUAISHOU_TOOLBAR_LOGIN).count() > 0;
+}
+
+export async function kuaishouToolbarNeedsLogin(page) {
+  if (!await kuaishouToolbarLoginVisible(page)) return false;
+  const cookies = await page.context().cookies(platformSpec("kuaishou").homeUrl).catch(() => []);
+  const [, sessionNames] = ACCOUNT_COOKIES.kuaishou;
+  const now = Date.now() / 1000;
+  if (cookies.some(cookie => sessionNames.includes(cookie.name) && cookie.value
+    && (cookie.expires === -1 || cookie.expires > now))) {
+    // The server-rendered toolbar can show a guest while the saved session hydrates.
+    // Let the site's own account UI settle before opening its login dialog.
+    await page.locator(KUAISHOU_TOOLBAR_LOGIN).first().waitFor({ state: "hidden", timeout: 4_000 })
+      .catch(error => {
+        if (error.name !== "TimeoutError") throw error;
+      });
+  }
+  return kuaishouToolbarLoginVisible(page);
 }
 
 export async function kuaishouAccessError(page) {

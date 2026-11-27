@@ -22,7 +22,7 @@ import {
   collectKuaishouSearchResults,
   kuaishouAccessError,
   kuaishouLoadMoreLoginVisible,
-  kuaishouToolbarLoginVisible,
+  kuaishouToolbarNeedsLogin,
   revealKuaishouLoginSurface,
 } from "./browser_kuaishou_search.mjs";
 import { collectDouyinSearchResults } from "./browser_douyin_search.mjs";
@@ -498,7 +498,7 @@ export async function accessErrorAfterExplicitVisibleWait(page, platform, config
 }
 
 async function requireKuaishouAuthentication(page, config, shouldStop, stage) {
-  if (!await kuaishouToolbarLoginVisible(page)) return;
+  if (!await kuaishouToolbarNeedsLogin(page)) return;
   await revealKuaishouLoginSurface(page);
   const accessError = await accessErrorAfterExplicitVisibleWait(
     page, "kuaishou", config, shouldStop,
