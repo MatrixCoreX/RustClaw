@@ -187,8 +187,7 @@ file.addEventListener("change", () => {
   status("uploadStatus", "");
   updateSubmit();
 });
-document.querySelector("form").addEventListener("submit", async (event) => {
-  event.preventDefault();
+get("start").addEventListener("click", async () => {
   const chosen = file.files[0];
   if (!chosen || uploading) return;
   if (!/^(audio|video)\//.test(chosen.type) || !chosen.size) {

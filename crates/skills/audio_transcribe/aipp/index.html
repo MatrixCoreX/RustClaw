@@ -33,7 +33,7 @@
     section, aside { border: 1px solid var(--line); border-radius: 13px; background: var(--panel); padding: 18px; }
     .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .between { justify-content: space-between; }
-    form { margin-top: 12px; }
+    #uploadControls { margin-top: 12px; }
     button, input, textarea { font: inherit; }
     button { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink);
       padding: 7px 12px; line-height: 1.4; cursor: pointer; }
@@ -67,10 +67,10 @@
       <article>
         <section aria-labelledby="uploadTitle">
           <h2 id="uploadTitle"><label for="file" id="uploadLabel">选择音频或视频</label></h2>
-          <form class="row">
+          <div class="row" id="uploadControls">
             <input type="file" id="file" accept="audio/*,video/*" aria-describedby="limit" disabled>
-            <button class="primary" id="start" disabled>开始转写</button>
-          </form>
+            <button class="primary" id="start" type="button" disabled>开始转写</button>
+          </div>
           <p id="limit" class="note"></p>
           <p id="uploadStatus" role="status"></p>
         </section>
