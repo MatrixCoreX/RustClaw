@@ -41,7 +41,6 @@ async fn request(
                 State(state.clone()),
                 headers,
                 AxumPath(("fixture_view".into(), asset.into())),
-                Query(AippBundleQuery::default()),
             )
             .await
         }
@@ -287,38 +286,22 @@ async fn transcript_aipp_binds_assets_and_keeps_history_account_owned() {
     let admin = auth_headers(Some("aipp-view-admin"));
     let version = manifest.package.version.clone();
     assert_eq!(
-        prepare_aipp_bundle_asset(
-            state,
-            &user,
-            "fixture_view",
-            "aipp/index.html",
-            Some("0.0.0")
-        )
-        .unwrap_err()
-        .0,
+        prepare_aipp_transcript_frame(state, &user, "fixture_view", "0.0.0")
+            .unwrap_err()
+            .0,
         StatusCode::CONFLICT,
     );
-    let (path, mime) = prepare_aipp_bundle_asset(
-        state,
-        &user,
-        "fixture_view",
-        "aipp/index.html",
-        Some(&version),
-    )
-    .unwrap();
+    let frame = prepare_aipp_transcript_frame(state, &user, "fixture_view", &version).unwrap();
+    let ticket: uuid::Uuid = serde_json::from_value(frame["script_ticket"].clone()).unwrap();
+    assert_eq!(frame["html"], std::str::from_utf8(BUNDLE).unwrap());
     assert_eq!(
-        path,
-        install.join("aipp/index.html").canonicalize().unwrap()
+        redeem_aipp_transcript_script(state, "fixture_view", ticket).unwrap(),
+        b"/* fixture script */"
     );
-    assert_eq!(mime, "text/html; charset=utf-8");
-    assert!(prepare_aipp_bundle_asset(
-        state,
-        &user,
-        "fixture_view",
-        "aipp/../skill.toml",
-        Some(&version),
-    )
-    .is_err());
+    assert!(redeem_aipp_transcript_script(state, "fixture_view", ticket).is_none());
+    assert!(
+        prepare_aipp_transcript_frame(state, &HeaderMap::new(), "fixture_view", &version).is_err()
+    );
 
     let (status, _) = submit_aipp_transcript(
         State(state.clone()),
@@ -389,12 +372,5 @@ async fn transcript_aipp_binds_assets_and_keeps_history_account_owned() {
     service.set_aipp_installed("fixture_view", true).unwrap();
     assert_eq!(read(user.clone()).await.0, StatusCode::OK);
     fs::write(install.join("aipp/index.html"), b"tampered").unwrap();
-    assert!(prepare_aipp_bundle_asset(
-        state,
-        &user,
-        "fixture_view",
-        "aipp/index.html",
-        Some(&version),
-    )
-    .is_err());
+    assert!(prepare_aipp_transcript_frame(state, &user, "fixture_view", &version).is_err());
 }

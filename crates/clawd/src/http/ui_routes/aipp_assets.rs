@@ -283,29 +283,19 @@ fn apply_aipp_bundle_headers(response: &mut axum::response::Response, content_ty
     }
 }
 
-#[derive(Deserialize, Default)]
-struct AippBundleQuery {
-    package_version: Option<String>,
-}
-
 fn prepare_aipp_bundle_asset(
     state: &AppState,
     headers: &HeaderMap,
     skill_name: &str,
     asset_path: &str,
-    package_version: Option<&str>,
 ) -> AippAssetResolution {
-    let identity = require_ui_identity(state, headers)?;
+    require_ui_admin(state, headers)?;
     let active = match active_aipp_package(state, skill_name) {
         Ok(Some(active)) => active,
         _ => return Err(aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_available")),
     };
     if active.aipp.data_contract == TRANSCRIPT_CONTRACT {
-        if package_version != Some(active.manifest.package.version.as_str()) {
-            return Err(aipp_api_error(StatusCode::CONFLICT, "aipp_package_changed"));
-        }
-    } else if !identity.role.eq_ignore_ascii_case("admin") {
-        return Err(aipp_api_error(StatusCode::FORBIDDEN, "admin_required"));
+        return Err(aipp_api_error(StatusCode::NOT_FOUND, "aipp_bundle_not_available"));
     }
     if !aipp_is_installed(state, skill_name) {
         return Err(aipp_api_error(StatusCode::NOT_FOUND, "aipp_not_installed"));
@@ -320,10 +310,9 @@ async fn get_aipp_bundle_asset(
     State(state): State<AppState>,
     headers: HeaderMap,
     AxumPath((skill_name, asset_path)): AxumPath<(String, String)>,
-    Query(query): Query<AippBundleQuery>,
 ) -> axum::response::Response {
     let resolved = tokio::task::spawn_blocking(move || {
-        prepare_aipp_bundle_asset(&state, &headers, &skill_name, &asset_path, query.package_version.as_deref())
+        prepare_aipp_bundle_asset(&state, &headers, &skill_name, &asset_path)
     })
     .await;
     let (path, content_type) = match resolved {

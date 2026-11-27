@@ -1578,7 +1578,7 @@ export function AippPage({ canManage = true, lang, t, apiFetch, requestScope, on
       {selectedApp.renderer === "sandbox_bundle_v1" ? (
         selectedApp.data_contract === "owned_transcript_jobs_v1" ? (
           <AippTranscriptFrame key={`${selectedSkill}:${selectedApp.package_version}:${requestScope}`} skill={selectedSkill}
-            version={selectedApp.package_version} entrypoint={selectedApp.entrypoint || ""} lang={lang}
+            version={selectedApp.package_version} lang={lang}
             title={localizedAippCopy(selectedApp.titles, lang, selectedApp.default_locale)} apiFetch={apiFetch} />
         ) : <SandboxedAipp app={selectedApp} lang={lang} apiFetch={apiFetch} requestScope={requestScope} />
       ) : null}

@@ -19,6 +19,7 @@ HOST_FILES = (
     "crates/clawd/src/http/ui_routes/aipp_activity_query.rs",
     "crates/clawd/src/http/ui_routes/aipp_editions.rs",
     "crates/clawd/src/http/ui_routes/aipp_transcripts.rs",
+    "crates/clawd/src/http/ui_routes/aipp_transcript_frame.rs",
     "UI/src/components/AippTranscriptFrame.tsx",
     "UI/src/components/AippEditionList.tsx",
     "UI/src/components/AippPage.tsx",
