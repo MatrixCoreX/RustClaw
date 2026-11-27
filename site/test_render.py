@@ -116,6 +116,7 @@ class ProjectSiteTest(unittest.TestCase):
                     env=os.environ | {"APP_PRODUCT_IDENTITY_CONFIG": str(config)},
                     check=True,
                 )
+                install_guide = "installation/"
                 pi_guide = "raspberry-pi-install/"
                 media_examples = ("media-discovery", "media-download")
                 skill_examples = (*media_examples, "weather", "speech-transcription")
@@ -125,6 +126,7 @@ class ProjectSiteTest(unittest.TestCase):
                     "mcp/": {"connect", "demo", "permissions", "test", "troubleshooting"},
                     "rag/": {"prepare", "import", "ask", "test", "scenarios", "troubleshooting"},
                     "order-support/": {"setup", "ask", "verify", "troubleshooting"},
+                    install_guide: {"platforms", "ubuntu", "macos", "install", "console"},
                     pi_guide: {"requirements", "install", "console", "troubleshooting"},
                 }
                 pages = [("", "en"), ("zh/", "zh-CN")]
@@ -152,6 +154,8 @@ class ProjectSiteTest(unittest.TestCase):
                     nodes = {node["@type"]: node for node in metadata["@graph"]}
                     web_page = nodes["WebPage"]
                     self.assertEqual(web_page["url"], canonical)
+                    self.assertEqual(web_page["description"], page.description)
+                    self.assertEqual(web_page["about"], {"@id": base + "#source-code"})
                     self.assertEqual(web_page["inLanguage"], locale)
                     self.assertEqual(web_page["isPartOf"], {"@id": base + "#website"})
                     self.assertEqual(web_page["primaryImageOfPage"], page.preview_image)
@@ -172,6 +176,11 @@ class ProjectSiteTest(unittest.TestCase):
                         self.assertEqual(nodes["WebSite"]["url"], base)
                         self.assertEqual(nodes["WebSite"]["about"]["@id"], nodes["SoftwareSourceCode"]["@id"])
                         self.assertEqual(nodes["SoftwareSourceCode"]["codeRepository"], repository)
+                        self.assertEqual(web_page["mainEntity"], {"@id": nodes["SoftwareSourceCode"]["@id"]})
+                        maintainer = nodes["SoftwareSourceCode"]["maintainer"]
+                        self.assertEqual(maintainer["name"], owner)
+                        self.assertEqual(maintainer["url"], f"https://github.com/{owner}")
+                        self.assertEqual(nodes["WebSite"]["publisher"], {"@id": maintainer["@id"]})
                         self.assertEqual(nodes["SoftwareSourceCode"]["name"], brand)
                         self.assertEqual(nodes["SoftwareSourceCode"]["url"], base)
                         self.assertEqual(nodes["SoftwareSourceCode"]["license"], repository + "/blob/main/LICENSE")
@@ -182,6 +191,7 @@ class ProjectSiteTest(unittest.TestCase):
                         "": "project-overview.jpg",
                         "skills/": "media-discovery.png",
                         "rag/": "rag.png",
+                        install_guide: "pi-first-task.png",
                         pi_guide: "pi-first-task.png",
                     }.get(topic, "mcp.png")
                     example_dir = f"assets/examples/{locale.split('-')[0]}/"
@@ -194,7 +204,17 @@ class ProjectSiteTest(unittest.TestCase):
                     self.assertIn(page.preview_image, sitemap_images[canonical])
                     self.assertGreater((output / example_dir / preview).stat().st_size, 0)
                     alternates = {"en": base + topic, "zh-CN": base + "zh/" + topic, "x-default": base + topic}
-                    if topic == pi_guide:
+                    if topic == install_guide:
+                        self.assertLessEqual(topic_sections[topic], page.ids)
+                        self.assertIn("Ubuntu", page.title)
+                        self.assertIn("macOS", page.title)
+                        for prefix in ("ubuntu-x86_64-", "macos-aarch64-", "macos-x86_64-", "pi-aarch64-"):
+                            self.assertIn(f"<code>{prefix}</code>", source)
+                        self.assertIn(f"install-latest-release.sh --repo {identity['release_repository']} --check-only", source)
+                        self.assertIn('df -h "$HOME"', source)
+                        self.assertEqual(page.section_assets["console"], [example_path + "pi-first-task.png"])
+                        self.assertIn("../" + pi_guide, {link["href"] for link in page.links})
+                    elif topic == pi_guide:
                         self.assertLessEqual(topic_sections[topic], page.ids)
                         self.assertIn("Raspberry Pi", page.title)
                         self.assertIn(f"install-latest-release.sh --repo {identity['release_repository']} --check-only", source)
@@ -219,13 +239,12 @@ class ProjectSiteTest(unittest.TestCase):
                             ["install-pi"],
                         )
                         doc = "release_installation.md" if locale == "en" else "release_installation.zh-CN.md"
-                        guide_url = f"https://github.com/{owner}/{repo}/blob/main/docs/{doc}"
                         self.assertEqual(
                             {link["data-platform"]: link["href"] for link in page.links if "data-platform" in link},
                             {
                                 "pi": pi_guide,
-                                "ubuntu": guide_url + "#ubuntu",
-                                "macos": guide_url + "#macos",
+                                "ubuntu": install_guide + "#ubuntu",
+                                "macos": install_guide + "#macos",
                             },
                         )
                         documentation = (SOURCE.parent / "docs" / doc).read_text(encoding="utf-8")

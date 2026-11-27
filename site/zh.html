@@ -15,7 +15,7 @@
     <div>
       <p class="byline"><a href="$profile">由 $owner 开发</a></p>
       <h1 id="name">$brand <span>自托管 AI Agent</span></h1>
-      <p class="intro">在树莓派、Ubuntu 或 macOS 上运行用 Rust 编写的 AI Agent。你可以在网页控制台配置模型、上传文件和查看任务进度，也可以绑定 Telegram、微信或飞书，在常用的聊天软件里发起任务。</p>
+      <p class="intro">$brand 是 $owner 维护的自托管 AI 智能体，用 Rust 编写，可在树莓派、Ubuntu 和 macOS 上运行。你可以在网页控制台选择模型、查看任务进度，也可以通过微信、飞书或 Telegram 发起任务。</p>
       <p class="intro">比如，发一份 PDF 请 Agent 提炼要点，用 MCP 查订单物流，或从 RAG 知识库找出售后条款并给出处。采集或下载的媒体结果，可以在技能配套的 AiAPP 里回看。</p>
       <div class="actions">
         <a class="button primary" href="#install">下载安装</a>
@@ -188,10 +188,19 @@
       <div class="actions platform-actions">
         <a class="button primary" href="$repo/releases">下载签名安装包</a>
         <a class="button secondary" data-platform="pi" href="raspberry-pi-install/">树莓派安装说明</a>
-        <a class="button secondary" data-platform="ubuntu" href="$repo/blob/main/docs/release_installation.zh-CN.md#ubuntu">Ubuntu 安装说明</a>
-        <a class="button secondary" data-platform="macos" href="$repo/blob/main/docs/release_installation.zh-CN.md#macos">macOS 安装说明</a>
+        <a class="button secondary" data-platform="ubuntu" href="installation/#ubuntu">Ubuntu 安装说明</a>
+        <a class="button secondary" data-platform="macos" href="installation/#macos">macOS 安装说明</a>
       </div>
     </fieldset>
+    <p><a href="installation/">查看各平台的安装要求</a></p>
+  </section>
+  <section class="page-section" id="project-details" aria-labelledby="project-details-heading">
+    <h2 id="project-details-heading">模型、源码与使用许可</h2>
+    <h3 id="model-providers">$brand 可以接入哪些模型？</h3>
+    <p>你可以在网页控制台选择模型。项目提供了 DeepSeek、通义千问（Qwen）、MiniMax、OpenAI 和 Anthropic 等服务的配置。智能体运行在自己的设备上。选择云端模型时，模型请求会发送到相应服务商的接口。</p>
+    <p><a href="$repo/blob/main/configs/config.toml">查看仓库里的模型服务配置</a></p>
+    <h3 id="source-and-license">官方源码和安装包在哪里？可以商用吗？</h3>
+    <p>$owner 在 GitHub 上发布<a href="$repo">项目源码</a>和<a href="$repo/releases">签名安装包</a>。<a href="$repo/blob/main/LICENSE.zh-CN.md">项目许可证</a>允许个人学习、研究等非商业用途。商业使用需要事先获得著作权人的书面许可。</p>
   </section>
 </main>
 <footer class="wrap footer">

@@ -1,0 +1,80 @@
+    <p class="byline"><a href="$profile">由 $owner 维护</a></p>
+    <h1 id="guide-title">在 Ubuntu、macOS 或树莓派上安装 $brand</h1>
+    <p class="guide-intro">按系统和处理器选择签名发布包。先确认脚本选中的版本，安装后打开网页控制台并发送第一个任务。</p>
+    <nav class="guide-nav" aria-label="本页目录">
+      <a href="#platforms">支持的平台</a>
+      <a href="#ubuntu">Ubuntu</a>
+      <a href="#macos">macOS</a>
+      <a href="#install">校验并安装</a>
+      <a href="#console">打开网页控制台</a>
+    </nav>
+
+    <section id="platforms" aria-labelledby="platforms-title">
+      <h2 id="platforms-title">按系统和架构选择发布包</h2>
+      <table class="setup-fields">
+        <thead><tr><th scope="col">平台</th><th scope="col">架构</th><th scope="col">发布标签前缀</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><a href="#ubuntu">Ubuntu 电脑或服务器</a></th><td><code>x86_64</code></td><td><code>ubuntu-x86_64-</code></td></tr>
+          <tr><th scope="row"><a href="#macos">Apple 芯片 Mac</a></th><td><code>arm64</code></td><td><code>macos-aarch64-</code></td></tr>
+          <tr><th scope="row"><a href="#macos">Intel 芯片 Mac</a></th><td><code>x86_64</code></td><td><code>macos-x86_64-</code></td></tr>
+          <tr><th scope="row"><a href="../raspberry-pi-install/">64 位 Raspberry Pi OS</a></th><td><code>aarch64</code></td><td><code>pi-aarch64-</code></td></tr>
+        </tbody>
+      </table>
+      <p>请查看对应版本的发布说明，确认系统要求。安装脚本需要 Bash、Python 3.11 或更新版本、curl、tar 以及 OpenSSH 的 <code>ssh-keygen</code>。磁盘需要留出下载、解压和安装的空间。</p>
+      <pre><code>uname -s
+uname -m
+python3 --version
+df -h "$$HOME"</code></pre>
+    </section>
+
+    <section id="ubuntu" aria-labelledby="ubuntu-title">
+      <h2 id="ubuntu-title">在 Ubuntu 上安装</h2>
+      <p>在 Ubuntu 电脑或服务器上执行上面的检查。如果架构显示 <code>x86_64</code>，请确认脚本选中的发布标签以 <code>ubuntu-x86_64-</code> 开头。安装脚本会配置 systemd 自启动。</p>
+      <p><a href="#install">校验并运行安装脚本</a></p>
+    </section>
+
+    <section id="macos" aria-labelledby="macos-title">
+      <h2 id="macos-title">在 macOS 上安装</h2>
+      <p>在 Mac 上打开「终端」。Apple 芯片 Mac 的原生终端显示 <code>arm64</code>，使用 <code>macos-aarch64-</code> 发布包。Intel 芯片 Mac 显示 <code>x86_64</code>，使用 <code>macos-x86_64-</code> 发布包。安装脚本会为当前账号注册 LaunchAgent。</p>
+      <p><a href="#install">校验并运行安装脚本</a></p>
+    </section>
+
+    <section id="install" aria-labelledby="install-title">
+      <h2 id="install-title">校验并安装签名发布包</h2>
+      <p>从项目的 GitHub 仓库下载安装脚本，再用 <code>--check-only</code> 查看脚本选中的发布包。</p>
+      <pre><code>curl -fL -o install-latest-release.sh \
+  https://raw.githubusercontent.com/$release_repository/main/install-latest-release.sh
+bash install-latest-release.sh --repo $release_repository --check-only</code></pre>
+      <p>把选中的发布标签与上表对照。匹配后运行安装脚本，它会检查发布签名和校验和，默认安装到 <code>~/agent-runtime</code> 并启动服务。</p>
+      <pre><code>bash install-latest-release.sh --repo $release_repository
+"$$HOME/.local/bin/agentctl" -status
+"$$HOME/.local/bin/agentctl" -health</code></pre>
+      <p class="detail-links">
+        <a href="$repo/releases">查看 GitHub 发布列表</a>
+        <a href="$repo/blob/main/docs/release_installation.zh-CN.md">完整的安装、签名校验和更新说明</a>
+      </p>
+    </section>
+
+    <section id="console" aria-labelledby="console-title">
+      <h2 id="console-title">打开网页控制台并发送第一个任务</h2>
+      <ol>
+        <li>在运行 $brand 的设备上打开 <code>http://127.0.0.1:8788</code>。如果服务装在远程服务器上，可从自己的电脑通过 SSH 转发端口。</li>
+        <li>在安装目录的 <code>data/bootstrap-credentials.txt</code> 中查看初始登录信息，登录后修改初始密码。</li>
+        <li>打开「大模型」，保存并测试一个文本模型，然后在「Agent」里发送一条简短指令。收到回复后，可以确认控制台、后台服务和模型能正常通信。</li>
+      </ol>
+      <figure class="example-shot">
+        <a href="${examples}pi-first-task.png">
+          <picture>
+            <source media="(max-width: 36rem)" type="image/webp" srcset="${examples}pi-first-task.mobile.webp">
+            <img src="${examples}pi-first-task.png" alt="$preview_alt" width="714" height="175" loading="lazy" decoding="async">
+          </picture>
+        </a>
+        <figcaption>$brand 网页控制台中的第一条提问和回复。</figcaption>
+      </figure>
+      <p class="detail-links">
+        <a href="../raspberry-pi-install/#console">查看控制台访问和 SSH 转发示例</a>
+        <a href="../skills/#install">安装 Agent 技能</a>
+        <a href="../mcp/#connect">连接 MCP 服务器</a>
+        <a href="../rag/#prepare">准备知识库</a>
+      </p>
+    </section>

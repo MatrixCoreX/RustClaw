@@ -2,13 +2,15 @@
 
 A self-hosted AI agent platform written in Rust for Raspberry Pi, Ubuntu, and macOS. Use the web console or a connected messaging app to ask questions, work with files, and follow tasks as they run.
 
-[Official website](https://rustclaw.matrixai.one/) · [Raspberry Pi installation](https://rustclaw.matrixai.one/raspberry-pi-install/) · [MCP setup](https://rustclaw.matrixai.one/mcp/) · [RAG guide](https://rustclaw.matrixai.one/rag/)
-
-![The project mascot holds a Raspberry Pi board beside the Media Discovery app showing two example camping posts.](site/assets/examples/en/project-overview.jpg)
-
 Connect external tools through the Model Context Protocol (MCP) and import your own documents into a retrieval-augmented generation (RAG) knowledge base. The agent can use a connected tool to look up a current order or cite your support handbook when answering a policy question.
 
+[Official website](https://rustclaw.matrixai.one/) · [Installation guides](https://rustclaw.matrixai.one/installation/) · [Raspberry Pi installation](https://rustclaw.matrixai.one/raspberry-pi-install/) · [MCP setup](https://rustclaw.matrixai.one/mcp/) · [RAG guide](https://rustclaw.matrixai.one/rag/) · [Order support example](https://rustclaw.matrixai.one/order-support/)
+
 [Quick start](#quick-start) · [Knowledge base setup](#knowledge-base-design-flow) · [简体中文](README.zh-CN.md)
+
+Use the [signed Release installation guide](docs/release_installation.md) to select a package for a 64-bit Raspberry Pi, Ubuntu x86_64, or an Apple silicon or Intel Mac. The source is available under a [non-commercial license](LICENSE). Commercial use requires prior written permission from the copyright holders.
+
+![The project mascot holds a Raspberry Pi board beside the Media Discovery app showing two example camping posts.](site/assets/examples/en/project-overview.jpg)
 
 <!-- ai-learning-stage: foundations -->
 - Host free-space admission and growth estimates, supervised jobs, typed memory failures, model-reviewed unchanged-summary reuse, incremental encrypted backups with retry recovery, and restart-safe log retention: [operations protection](docs/runtime_operations_protection.md).
@@ -1466,6 +1468,6 @@ or create a second login session.
 
 This project uses a non-commercial source-available license.
 
-- English legal text: `LICENSE`
-- Chinese reference translation: `LICENSE.zh-CN.md`
+- [English license text](LICENSE)
+- [Simplified Chinese reference translation](LICENSE.zh-CN.md)
 <!-- ai-learning-exclude:end -->

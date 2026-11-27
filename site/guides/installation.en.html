@@ -1,0 +1,80 @@
+    <p class="byline"><a href="$profile">Maintained by $owner</a></p>
+    <h1 id="guide-title">Install $brand on Ubuntu, macOS, or Raspberry Pi</h1>
+    <p class="guide-intro">Choose the signed release that matches your system and processor. Check the selected package before installing, then open the web console and run your first task.</p>
+    <nav class="guide-nav" aria-label="On this page">
+      <a href="#platforms">Supported platforms</a>
+      <a href="#ubuntu">Ubuntu</a>
+      <a href="#macos">macOS</a>
+      <a href="#install">Verify and install</a>
+      <a href="#console">Open the web console</a>
+    </nav>
+
+    <section id="platforms" aria-labelledby="platforms-title">
+      <h2 id="platforms-title">Match your system to a release</h2>
+      <table class="setup-fields">
+        <thead><tr><th scope="col">Platform</th><th scope="col">Architecture</th><th scope="col">Release tag prefix</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><a href="#ubuntu">Ubuntu PC or server</a></th><td><code>x86_64</code></td><td><code>ubuntu-x86_64-</code></td></tr>
+          <tr><th scope="row"><a href="#macos">macOS with Apple silicon</a></th><td><code>arm64</code></td><td><code>macos-aarch64-</code></td></tr>
+          <tr><th scope="row"><a href="#macos">macOS with Intel</a></th><td><code>x86_64</code></td><td><code>macos-x86_64-</code></td></tr>
+          <tr><th scope="row"><a href="../raspberry-pi-install/">64-bit Raspberry Pi OS</a></th><td><code>aarch64</code></td><td><code>pi-aarch64-</code></td></tr>
+        </tbody>
+      </table>
+      <p>Check the operating system requirements in the release notes. The installer needs Bash, Python 3.11 or later, curl, tar, and OpenSSH’s <code>ssh-keygen</code>. Leave space for the downloaded package, extracted files, and installed copy.</p>
+      <pre><code>uname -s
+uname -m
+python3 --version
+df -h "$$HOME"</code></pre>
+    </section>
+
+    <section id="ubuntu" aria-labelledby="ubuntu-title">
+      <h2 id="ubuntu-title">Install on Ubuntu</h2>
+      <p>Run the checks on the Ubuntu PC or server. For <code>x86_64</code>, confirm that the installer selects a tag beginning with <code>ubuntu-x86_64-</code>. The installer registers systemd startup.</p>
+      <p><a href="#install">Verify and run the installer</a></p>
+    </section>
+
+    <section id="macos" aria-labelledby="macos-title">
+      <h2 id="macos-title">Install on macOS</h2>
+      <p>Open Terminal on the Mac. An Apple silicon Mac running Terminal natively reports <code>arm64</code> and uses <code>macos-aarch64-</code>. An Intel Mac reports <code>x86_64</code> and uses <code>macos-x86_64-</code>. The installer registers a LaunchAgent for your account.</p>
+      <p><a href="#install">Verify and run the installer</a></p>
+    </section>
+
+    <section id="install" aria-labelledby="install-title">
+      <h2 id="install-title">Verify and install the signed release</h2>
+      <p>Download the installer from the project’s GitHub repository. Run <code>--check-only</code> to see which package it selects before you install.</p>
+      <pre><code>curl -fL -o install-latest-release.sh \
+  https://raw.githubusercontent.com/$release_repository/main/install-latest-release.sh
+bash install-latest-release.sh --repo $release_repository --check-only</code></pre>
+      <p>Compare the selected tag with the table. If it matches, run the installer. It verifies the signed release and checksums, installs to <code>~/agent-runtime</code> by default, and starts the services.</p>
+      <pre><code>bash install-latest-release.sh --repo $release_repository
+"$$HOME/.local/bin/agentctl" -status
+"$$HOME/.local/bin/agentctl" -health</code></pre>
+      <p class="detail-links">
+        <a href="$repo/releases">View GitHub Releases</a>
+        <a href="$repo/blob/main/docs/release_installation.md">Full installation, signature verification, and update instructions</a>
+      </p>
+    </section>
+
+    <section id="console" aria-labelledby="console-title">
+      <h2 id="console-title">Open the web console and run a first task</h2>
+      <ol>
+        <li>Open <code>http://127.0.0.1:8788</code> on the machine running $brand. If you installed on a remote server, use SSH port forwarding from your own computer.</li>
+        <li>Find the initial sign-in details in <code>data/bootstrap-credentials.txt</code> inside the install directory. Sign in and change the initial password.</li>
+        <li>Open <strong>Models</strong>, save and test a text model, then open <strong>Agent</strong> and send a short prompt. A reply confirms the console, service, and model are working together.</li>
+      </ol>
+      <figure class="example-shot">
+        <a href="${examples}pi-first-task.png">
+          <picture>
+            <source media="(max-width: 36rem)" type="image/webp" srcset="${examples}pi-first-task.mobile.webp">
+            <img src="${examples}pi-first-task.png" alt="$preview_alt" width="714" height="198" loading="lazy" decoding="async">
+          </picture>
+        </a>
+        <figcaption>A first question and reply in the $brand web console.</figcaption>
+      </figure>
+      <p class="detail-links">
+        <a href="../raspberry-pi-install/#console">Console access and SSH forwarding example</a>
+        <a href="../skills/#install">Install agent skills</a>
+        <a href="../mcp/#connect">Connect an MCP server</a>
+        <a href="../rag/#prepare">Prepare a knowledge base</a>
+      </p>
+    </section>

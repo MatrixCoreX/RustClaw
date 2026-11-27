@@ -2,13 +2,15 @@
 
 这是一个用 Rust 编写的自托管 AI Agent 平台，可以部署在树莓派（Raspberry Pi）、Ubuntu 和 macOS 上。你可以在浏览器控制台或已绑定的消息应用里提问、发送文件、安排任务，并查看进度和结果。
 
-[项目官网](https://rustclaw.matrixai.one/zh/) · [树莓派安装指南](https://rustclaw.matrixai.one/zh/raspberry-pi-install/) · [MCP 接入指南](https://rustclaw.matrixai.one/zh/mcp/) · [RAG 知识库指南](https://rustclaw.matrixai.one/zh/rag/)
+通过 MCP（模型上下文协议）接入外部工具，通过 RAG（检索增强生成）让 Agent 查阅你导入的知识库。比如，Agent 可以调用工具查订单状态，也可以从售后手册里找规则并给出出处。
 
-![项目吉祥物手持树莓派开发板，旁边的媒体采集界面展示了两条露营帖子的示例结果。](site/assets/examples/zh/project-overview.jpg)
-
-通过 MCP（模型上下文协议）接入外部工具，通过 RAG（检索增强生成）让 Agent 查阅你导入的知识库。比如，Agent 可以调用工具查订单状态，也可以从售后手册里找规则并给出处。
+[项目官网](https://rustclaw.matrixai.one/zh/) · [安装指南](https://rustclaw.matrixai.one/zh/installation/) · [树莓派安装指南](https://rustclaw.matrixai.one/zh/raspberry-pi-install/) · [MCP 接入指南](https://rustclaw.matrixai.one/zh/mcp/) · [RAG 知识库指南](https://rustclaw.matrixai.one/zh/rag/) · [订单售后案例](https://rustclaw.matrixai.one/zh/order-support/)
 
 [快速开始](#快速开始) · [知识库使用步骤](#知识库设计流程) · [English](README.md)
+
+按[签名发布包安装说明](docs/release_installation.zh-CN.md)选择与设备匹配的安装包，支持 64 位树莓派、Ubuntu x86_64，以及配备 Apple 芯片或 Intel 处理器的 Mac。项目采用[非商业源码可用许可](LICENSE)，商业使用须事先取得版权所有者的书面许可。
+
+![项目吉祥物手持树莓派开发板，旁边的媒体采集界面展示了两条露营帖子的示例结果。](site/assets/examples/zh/project-overview.jpg)
 
 <!-- ai-learning-stage: foundations -->
 - 磁盘写入保护与增长预测、后台任务监督、记忆错误分类、模型审核后的未变化摘要复用、增量加密备份与失败补跑、重启日志留存：[运行保护说明](docs/runtime_operations_protection.md)。
@@ -1237,6 +1239,6 @@ cd pi_app && ./open-small-screen.sh
 
 本项目使用非商用、源码可见许可。
 
-- 英文法律文本：`LICENSE`
-- 中文参考翻译：`LICENSE.zh-CN.md`
+- [英文许可原文](LICENSE)
+- [简体中文参考说明](LICENSE.zh-CN.md)
 <!-- ai-learning-exclude:end -->

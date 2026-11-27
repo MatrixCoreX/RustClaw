@@ -15,7 +15,7 @@
     <div>
       <p class="byline"><a href="$profile">Built by $owner</a></p>
       <h1 id="name">$brand <span>Self-hosted AI agent</span></h1>
-      <p class="intro">Run this Rust-based AI agent on Raspberry Pi, Ubuntu, or macOS. Set up a model, upload files, and follow tasks in the web console. Connect Telegram, WeChat, or Feishu to send requests from your messaging app.</p>
+      <p class="intro">$brand is a self-hosted AI agent written in Rust and maintained by $owner. Run it on Raspberry Pi, Ubuntu, or macOS. Use the web console to choose a model and follow tasks, or send requests through Telegram, WeChat, or Feishu.</p>
       <p class="intro">Ask the agent to summarize a PDF, check an order through MCP, or cite a returns policy from your RAG knowledge base. For media tasks, review collected posts and downloaded files in the skill’s companion AiAPP.</p>
       <div class="actions">
         <a class="button primary" href="#install">Install</a>
@@ -188,10 +188,19 @@
       <div class="actions platform-actions">
         <a class="button primary" href="$repo/releases">Download a signed release</a>
         <a class="button secondary" data-platform="pi" href="raspberry-pi-install/">Raspberry Pi installation guide</a>
-        <a class="button secondary" data-platform="ubuntu" href="$repo/blob/main/docs/release_installation.md#ubuntu">Ubuntu installation guide</a>
-        <a class="button secondary" data-platform="macos" href="$repo/blob/main/docs/release_installation.md#macos">macOS installation guide</a>
+        <a class="button secondary" data-platform="ubuntu" href="installation/#ubuntu">Ubuntu installation guide</a>
+        <a class="button secondary" data-platform="macos" href="installation/#macos">macOS installation guide</a>
       </div>
     </fieldset>
+    <p><a href="installation/">Compare installation requirements for all platforms</a></p>
+  </section>
+  <section class="page-section" id="project-details" aria-labelledby="project-details-heading">
+    <h2 id="project-details-heading">Models, source code, and licensing</h2>
+    <h3 id="model-providers">Which model does $brand use?</h3>
+    <p>You choose the model in the web console. The project includes configurations for OpenAI, Anthropic, DeepSeek, Qwen, and MiniMax. The agent runs on your device. When you choose a hosted model, it sends model requests to that provider’s endpoint.</p>
+    <p><a href="$repo/blob/main/configs/config.toml">View the supported provider configurations</a></p>
+    <h3 id="source-and-license">Where can I find the official source and releases?</h3>
+    <p>$owner publishes the <a href="$repo">source code</a> and <a href="$repo/releases">signed releases</a> on GitHub. The <a href="$repo/blob/main/LICENSE">project license</a> permits non-commercial use, including personal use, education, and research. Commercial use requires prior written permission from the copyright holder.</p>
   </section>
 </main>
 <footer class="wrap footer">

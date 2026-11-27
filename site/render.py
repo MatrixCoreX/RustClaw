@@ -35,23 +35,29 @@ class PageImages(HTMLParser):
 
 def structured_data(page: dict[str, str], breadcrumb: str | None) -> str:
     website_id = page["site"] + "#website"
+    source_id = page["site"] + "#source-code"
     web_page = {
         "@type": "WebPage",
         "@id": page["canonical"] + "#webpage",
         "url": page["canonical"],
         "name": page["title"],
+        "description": page["description"],
         "inLanguage": page["lang"],
         "isPartOf": {"@id": website_id},
+        "about": {"@id": source_id},
         "primaryImageOfPage": page["preview_image"],
     }
     graph = [web_page]
     if breadcrumb is None:
+        web_page["mainEntity"] = {"@id": source_id}
+        maintainer = {"@id": page["profile"], "name": page["owner"], "url": page["profile"]}
         source = {
             "@type": "SoftwareSourceCode",
-            "@id": page["site"] + "#source-code",
+            "@id": source_id,
             "name": page["brand"],
             "url": page["site"],
             "codeRepository": page["repo"],
+            "maintainer": maintainer,
             "programmingLanguage": "Rust",
             "license": page["repo"] + "/blob/main/LICENSE",
         }
@@ -61,6 +67,7 @@ def structured_data(page: dict[str, str], breadcrumb: str | None) -> str:
                 "@id": website_id,
                 "name": page["brand"],
                 "url": page["site"],
+                "publisher": {"@id": page["profile"]},
                 "about": {"@id": source["@id"]},
                 "inLanguage": ["en", "zh-CN"],
             },
@@ -133,6 +140,20 @@ def build(output: Path):
             f"在树莓派、Ubuntu 或 macOS 上安装 {owner} 的 {brand}。接入 MCP 工具、检索 RAG 知识库，并在 AiAPP 查看媒体结果。",
             f"{brand} 的吉祥物和树莓派旁边是媒体采集界面，展示两条露营主题的示例帖。",
             "project-overview.jpg",
+        ),
+        (
+            "guides/installation.en.html", "en", "installation/", "Installation",
+            f"Install {brand} on Ubuntu, macOS, or Raspberry Pi",
+            f"Choose a signed {brand} package for Ubuntu x86_64, macOS Apple silicon or Intel, or Raspberry Pi OS. Verify it and run your first task.",
+            "First question and answer in the Agent web console.",
+            "pi-first-task.png",
+        ),
+        (
+            "guides/installation.zh.html", "zh-CN", "zh/installation/", "安装指南",
+            f"在 Ubuntu、macOS 或树莓派上安装 {brand}",
+            f"按系统和架构选择 {brand} 的签名发布包，支持 Ubuntu x86_64、Apple 芯片或 Intel 芯片 Mac，以及 64 位树莓派系统。",
+            "网页控制台的 Agent 对话展示第一条提问和回复。",
+            "pi-first-task.png",
         ),
         (
             "guides/raspberry-pi-install.en.html", "en", "raspberry-pi-install/", "Raspberry Pi installation",
