@@ -449,7 +449,7 @@ fn run_query(
         )
     })?;
     let col_count = stmt.column_count();
-    let columns: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+    let columns: Vec<String> = stmt.column_names().map(str::to_owned).collect();
     let mut rows = stmt.query([]).map_err(|err| {
         SkillError::new("sqlite_query_failed", format!("run query failed: {err}"))
     })?;
