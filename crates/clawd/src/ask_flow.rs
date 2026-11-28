@@ -342,6 +342,22 @@ pub(crate) async fn transcribe_attached_videos_for_ask(
 }
 
 /// Transcribe one already authenticated upload for a typed attachment job.
+pub(crate) fn transcript_submission_allowed(
+    state: &AppState,
+    identity: &claw_core::types::AuthIdentity,
+    video: bool,
+) -> bool {
+    let allowed = |tokens: &[&str]| {
+        state.skill_rt.tools_policy.allowed_for_identity(
+            tokens,
+            state.core.active_provider_type.as_deref(),
+            Some(identity),
+        )
+    };
+    allowed(&["skill:audio_transcribe", "capability:audio.preview_transcribe"])
+        && (!video || allowed(&["skill:video_transcribe", "capability:video.extract_audio"]))
+}
+
 pub(crate) struct TranscriptJobError {
     pub(crate) error_code: String,
     pub(crate) message_key: String,

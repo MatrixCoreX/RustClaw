@@ -81,17 +81,7 @@ async fn submit_aipp_transcript(
     ) {
         return aipp_api_error(StatusCode::BAD_REQUEST, &code);
     }
-    let allowed = |tokens: &[&str]| {
-        state.skill_rt.tools_policy.allowed_for_identity(
-            tokens,
-            state.core.active_provider_type.as_deref(),
-            Some(&identity),
-        )
-    };
-    if !allowed(&["skill:audio_transcribe", "capability:audio.preview_transcribe"])
-        || (video
-            && !allowed(&["skill:video_transcribe", "capability:video.extract_audio"]))
-    {
+    if !crate::ask_flow::transcript_submission_allowed(&state, &identity, video) {
         return aipp_api_error(StatusCode::FORBIDDEN, "skill_policy_denied");
     }
     let submit = claw_core::types::SubmitTaskRequest {
