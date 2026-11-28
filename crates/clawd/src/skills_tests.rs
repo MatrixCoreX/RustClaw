@@ -132,6 +132,7 @@ mod receipt_support;
 
 #[path = "skills_test_runner_support.rs"]
 mod runner_support;
+#[cfg(target_os = "linux")]
 use runner_support::make_echo_skill_runner;
 #[cfg(target_os = "linux")]
 use runner_support::make_sandbox_probe_skill_runner;
@@ -809,14 +810,18 @@ fn extract_task_request_text_reads_nested_request_text() {
 
 #[tokio::test]
 async fn run_skill_photo_organize_injects_registry_cropped_memory_args() {
+    #[cfg(target_os = "linux")]
     let temp = TempDirGuard::new("skill_memory_echo_runner");
     let mut state = test_state("zh-CN").with_seeded_db_schema();
     install_real_registry(&mut state);
     allow_test_skills(&mut state, &["photo_organize"]);
-    state.skill_rt.skill_runner_path = make_echo_skill_runner(temp.path());
-    state.skill_rt.workspace_root = temp.path().to_path_buf();
-    state.skill_rt.skill_timeout_seconds = 5;
-    receipt_support::install_verified_test_package(temp.path(), "photo_organize");
+    #[cfg(target_os = "linux")]
+    {
+        state.skill_rt.skill_runner_path = make_echo_skill_runner(temp.path());
+        state.skill_rt.workspace_root = temp.path().to_path_buf();
+        state.skill_rt.skill_timeout_seconds = 5;
+        receipt_support::install_verified_test_package(temp.path(), "photo_organize");
+    }
 
     let chat_id = 92;
     let user_key = "user:photo-policy";
@@ -860,16 +865,18 @@ async fn run_skill_photo_organize_injects_registry_cropped_memory_args() {
         .to_string(),
     };
 
-    let outcome = super::run_skill_with_runner_outcome(
-        &state,
-        &task,
-        "photo_organize",
-        json!({"action": "prepare", "text": "请准备照片整理候选目录"}),
-    )
-    .await
-    .expect("run fake photo_organize");
-    let echoed_args: serde_json::Value =
-        serde_json::from_str(&outcome.text).expect("echoed args json");
+    let args = json!({"action": "prepare", "text": "请准备照片整理候选目录"});
+    #[cfg(target_os = "linux")]
+    let echoed_args: serde_json::Value = {
+        let outcome = super::run_skill_with_runner_outcome(&state, &task, "photo_organize", args)
+            .await
+            .expect("run fake photo_organize");
+        serde_json::from_str(&outcome.text).expect("echoed args json")
+    };
+    // The portable case uses the exact projection the runner invokes. Native
+    // subprocess isolation is covered by the dedicated custody tests.
+    #[cfg(not(target_os = "linux"))]
+    let echoed_args = super::inject_skill_memory_context(&state, &task, "photo_organize", args);
     let memory = echoed_args
         .get("_memory")
         .expect("memory args should be injected");

@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[cfg(target_os = "linux")]
 pub(super) fn make_echo_skill_runner(root: &Path) -> PathBuf {
     let path = root.join("echo-skill-runner");
     // Use the OS runtime already visible inside the real skill sandbox.
