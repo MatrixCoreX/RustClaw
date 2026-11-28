@@ -3,54 +3,37 @@ use std::path::{Path, PathBuf};
 
 pub(super) fn make_echo_skill_runner(root: &Path) -> PathBuf {
     let path = root.join("echo-skill-runner");
-    let python = std::process::Command::new("python3")
-        .args(["-c", "import sys; print(sys.executable)"])
-        .output()
-        .expect("resolve test Python interpreter");
-    assert!(python.status.success(), "resolve test Python interpreter");
-    let python = std::str::from_utf8(&python.stdout)
-        .expect("Python interpreter path")
-        .trim();
-    assert!(Path::new(python).is_absolute(), "absolute test Python path");
-    let script_path = root.join("echo-skill-runner.py");
-    fs::write(
-        &script_path,
-        r#"import json
-import sys
-
-request = json.loads(sys.stdin.readline())
-binding = {
-    "skill_name": request.get("skill_name"),
-    "version": request.get("expected_skill_version"),
-    "manifest_digest": request.get("expected_manifest_digest"),
-    "receipt_digest": request.get("expected_receipt_digest"),
-    "registry_generation": request.get("expected_registry_generation"),
-    "registry_generation_digest": request.get("expected_registry_generation_digest"),
-    "base_registry_digest": request.get("expected_base_registry_digest"),
-    "overlay_generation_digest": request.get("expected_overlay_generation_digest"),
-    "policy_digest": request.get("expected_policy_digest"),
-    "admission_receipt_digest": request.get("expected_admission_receipt_digest"),
-}
-print(json.dumps({
-    "request_id": request.get("request_id", ""),
-    "status": "ok",
-    "text": json.dumps(request.get("args", {}), ensure_ascii=False),
-    "error_text": None,
-    "extra": {"execution_binding": binding},
-}, ensure_ascii=False))
-"#,
-    )
-    .expect("write fake skill runner program");
-    let quote = |path: &str| format!("'{}'", path.replace('\'', "'\\''"));
+    // Use the OS runtime already visible inside the real skill sandbox.
     fs::write(
         &path,
-        format!(
-            "#!/bin/sh\nexec {} {} \"$@\"\n",
-            quote(python),
-            quote(script_path.to_str().expect("UTF-8 test script path"))
-        ),
+        r#"#!/usr/bin/perl
+use strict;
+use warnings;
+use JSON::PP qw(decode_json encode_json);
+
+my $request = decode_json(scalar <STDIN>);
+my $binding = {
+    skill_name => $request->{skill_name},
+    version => $request->{expected_skill_version},
+    manifest_digest => $request->{expected_manifest_digest},
+    receipt_digest => $request->{expected_receipt_digest},
+    registry_generation => $request->{expected_registry_generation},
+    registry_generation_digest => $request->{expected_registry_generation_digest},
+    base_registry_digest => $request->{expected_base_registry_digest},
+    overlay_generation_digest => $request->{expected_overlay_generation_digest},
+    policy_digest => $request->{expected_policy_digest},
+    admission_receipt_digest => $request->{expected_admission_receipt_digest},
+};
+print encode_json({
+    request_id => $request->{request_id} // "",
+    status => "ok",
+    text => JSON::PP->new->encode($request->{args} // {}),
+    error_text => undef,
+    extra => {execution_binding => $binding},
+}), "\n";
+"#,
     )
-    .expect("write fake skill runner launcher");
+    .expect("write fake skill runner");
     mark_executable(&path, "fake runner");
     path
 }
