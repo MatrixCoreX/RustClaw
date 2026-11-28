@@ -84,7 +84,7 @@ pub(crate) fn materialize_scoped_task_artifacts(
     let mut seen_ids = HashSet::new();
     let mut seen_digests = HashSet::new();
     let mut candidate_count = 0;
-    for source in sources {
+    for mut source in sources {
         if source
             .id
             .as_deref()
@@ -116,11 +116,19 @@ pub(crate) fn materialize_scoped_task_artifacts(
                 .or_else(|| source_path.file_name().and_then(|value| value.to_str()))
                 .unwrap_or("artifact.bin"),
         );
-        let mut artifact_id = source
-            .id
-            .as_deref()
-            .and_then(machine_id)
-            .unwrap_or_else(|| derived_artifact_id(task_id, &source.path));
+        let mut artifact_id = if let Some(id) = source.id.as_deref().and_then(machine_id) {
+            id
+        } else {
+            let input = crate::secure_workspace_fs::open_workspace_file(read_root, &source_path)?;
+            let (hash, size) = copy_and_hash(input, &mut io::sink())?;
+            if !artifact_digest_matches(&source, &hash, size) {
+                continue;
+            }
+            let id = format!("a_{}", &hash[..32]);
+            source.sha256 = Some(hash);
+            source.size_bytes = Some(size);
+            id
+        };
         if !seen_ids.insert(artifact_id.clone()) {
             artifact_id = derived_artifact_id(task_id, &source.path);
             if !seen_ids.insert(artifact_id.clone()) {
@@ -1019,6 +1027,20 @@ fn publish_artifact_file(
     if source == destination {
         let (hash, size) = copy_and_hash(input, &mut io::sink())?;
         return Ok(artifact_digest_matches(expected, &hash, size).then_some((hash, size)));
+    }
+    // Only reuse a same-task host snapshot bound to both the complete digest
+    // and size. Tenant-owned invocation files still require isolated publication.
+    if let (Some(expected_hash), Some(expected_size)) =
+        (expected.sha256.as_deref(), expected.size_bytes)
+    {
+        if let Ok(published) = crate::secure_workspace_fs::open_workspace_file(delivery_root, destination)
+        {
+            if let Ok((hash, size)) = copy_and_hash(published, &mut io::sink()) {
+                if hash == expected_hash && size == expected_size {
+                    return Ok(Some((hash, size)));
+                }
+            }
+        }
     }
     let mut mismatch = false;
     let result = crate::secure_workspace_fs::replace_workspace_stream(

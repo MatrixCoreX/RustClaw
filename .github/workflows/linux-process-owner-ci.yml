@@ -109,6 +109,11 @@ jobs:
           set -euo pipefail
           cargo build --locked -p clawd --bin clawd
           cargo build --locked -p clawd --bin pty-session-runner
+          runner_bin="$(cargo metadata --locked --no-deps --format-version=1 |
+            python3 -c 'import json,pathlib,sys; print(pathlib.Path(json.load(sys.stdin)["target_directory"]) / "debug" / "pty-session-runner")')"
+          test -x "$runner_bin"
+          export APP_PTY_SESSION_RUNNER="$runner_bin"
+          printf 'APP_PTY_SESSION_RUNNER=%s\n' "$runner_bin" >> "$GITHUB_ENV"
           APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test --locked -p clawd --bin clawd local_process_owner::entry::tests::entry_executable_protocol_acceptance -- --exact --ignored --test-threads=1 --nocapture
           APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test --locked -p clawd --bin clawd local_process_owner::authority_entry::tests::entry_executable_authority_acceptance -- --exact --ignored --test-threads=1 --nocapture
           APP_OWNER_ENTRY_TEST_BINARY="$PWD/target/debug/clawd" cargo test --locked -p clawd --bin clawd skills::runner::owner_custody_tests::entry_executable_sdk_custody_acceptance -- --exact --ignored --test-threads=1 --nocapture

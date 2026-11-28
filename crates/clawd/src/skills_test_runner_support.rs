@@ -3,10 +3,19 @@ use std::path::{Path, PathBuf};
 
 pub(super) fn make_echo_skill_runner(root: &Path) -> PathBuf {
     let path = root.join("echo-skill-runner");
+    let python = std::process::Command::new("python3")
+        .args(["-c", "import sys; print(sys.executable)"])
+        .output()
+        .expect("resolve test Python interpreter");
+    assert!(python.status.success(), "resolve test Python interpreter");
+    let python = std::str::from_utf8(&python.stdout)
+        .expect("Python interpreter path")
+        .trim();
+    assert!(Path::new(python).is_absolute(), "absolute test Python path");
+    let script_path = root.join("echo-skill-runner.py");
     fs::write(
-        &path,
-        r#"#!/usr/bin/env python3
-import json
+        &script_path,
+        r#"import json
 import sys
 
 request = json.loads(sys.stdin.readline())
@@ -31,7 +40,17 @@ print(json.dumps({
 }, ensure_ascii=False))
 "#,
     )
-    .expect("write fake skill runner");
+    .expect("write fake skill runner program");
+    let quote = |path: &str| format!("'{}'", path.replace('\'', "'\\''"));
+    fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\nexec {} {} \"$@\"\n",
+            quote(python),
+            quote(script_path.to_str().expect("UTF-8 test script path"))
+        ),
+    )
+    .expect("write fake skill runner launcher");
     mark_executable(&path, "fake runner");
     path
 }

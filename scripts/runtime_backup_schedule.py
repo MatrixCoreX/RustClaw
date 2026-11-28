@@ -84,7 +84,14 @@ def run_cycle(settings,*,retry_only=False):
                     verified_source_revision=verified_revision,
                     current_source_covered=(current_revision==verified_revision) if current_known and verified_revision else None)
     write_json(root/'data/runtime-backup-capacity.json',capacity)
-    changed=changed or (state.get('phase')=='complete' and capacity['current_source_covered'] is False)
+    cohort_recovered = (
+        state.get('phase') == 'attention'
+        and state.get('error_code') == 'checkpoint_cohort_mismatch'
+        and current_known
+    )
+    changed = changed or cohort_recovered or (
+        state.get('phase') == 'complete' and capacity['current_source_covered'] is False
+    )
     # A small hourly telemetry sample supports capacity estimates. Failure of a
     # console sample must never suppress a backup or trigger a model request.
     if now-state.get('last_inventory_at_ts',0)>=3600:

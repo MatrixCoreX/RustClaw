@@ -92,9 +92,9 @@ quick-xml = "0.41"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 reqwest-mcp = { package = "reqwest", version = "0.13", default-features = false, features = ["rustls"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
-rmcp = { version = "2.2.0", default-features = false, features = ["auth", "client", "transport-child-process", "transport-streamable-http-client-reqwest", "reqwest"] }
+rmcp = { version = "3.9.0", default-features = false, features = ["auth", "client", "transport-child-process", "transport-streamable-http-client-reqwest", "reqwest"] }
 # bundled：从源码编译 SQLite，交叉编译 aarch64 时无需目标平台 libsqlite3
-rusqlite = { version = "0.39", features = ["bundled", "fallible_uint"] }
+rusqlite = { version = "0.41", features = ["bundled", "fallible_uint"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 sha2 = "0.10"
@@ -113,7 +113,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 unicode-normalization = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
-url = "2"
+url = "2.5.9"
 wait-timeout = "0.2"
 
 # Full debug symbols make the clawd test binary hundreds of MiB and cause slow,

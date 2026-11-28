@@ -135,6 +135,14 @@ class ScheduleTests(unittest.TestCase):
         with patch.object(schedule,'create_local',side_effect=self.create),patch.object(schedule,'send_remote',return_value={'status':'verified'}):
             self.assertEqual(schedule.run_cycle(self.settings,retry_only=True)['status'],'verified')
 
+    def test_retry_resumes_after_deployed_cohort_is_recognized(self):
+        with patch.object(schedule.checkpoint, 'running_revision', side_effect=RuntimeError('checkpoint_cohort_mismatch')), patch.object(schedule, 'create_local', side_effect=RuntimeError('checkpoint_cohort_mismatch')):
+            first = schedule.run_cycle(self.settings)
+        self.assertEqual(first['status'], 'attention_required')
+        with patch.object(schedule, 'create_local', side_effect=self.create), patch.object(schedule, 'send_remote', return_value={'status': 'verified'}):
+            second = schedule.run_cycle(self.settings, retry_only=True)
+        self.assertEqual(second['status'], 'verified')
+
     def test_new_running_cohort_requests_one_fresh_backup_after_success(self):
         with patch.object(schedule,'create_local',side_effect=self.create),patch.object(schedule,'send_remote',return_value={'status':'verified'}):
             self.assertEqual(schedule.run_cycle(self.settings)['status'],'verified')

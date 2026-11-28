@@ -342,12 +342,34 @@ pub(crate) async fn transcribe_attached_videos_for_ask(
 }
 
 /// Transcribe one already authenticated upload for a typed attachment job.
+pub(crate) struct TranscriptJobError {
+    pub(crate) error_code: String,
+    pub(crate) message_key: String,
+    pub(crate) retryable: bool,
+}
+
+impl From<String> for TranscriptJobError {
+    fn from(error_code: String) -> Self {
+        Self {
+            error_code,
+            message_key: "skill.transcript_job.failed".to_owned(),
+            retryable: false,
+        }
+    }
+}
+
+impl From<&str> for TranscriptJobError {
+    fn from(error_code: &str) -> Self {
+        Self::from(error_code.to_owned())
+    }
+}
+
 pub(crate) async fn transcribe_single_attachment(
     state: &AppState,
     task: &ClaimedTask,
     attachment: &Value,
     video: bool,
-) -> Result<String, String> {
+) -> Result<String, TranscriptJobError> {
     let input = audio_arg_from_payload(attachment)
         .filter(|value| value.get("path").is_some())
         .ok_or("aipp_transcript_attachment_invalid")?;
@@ -361,10 +383,13 @@ pub(crate) async fn transcribe_single_attachment(
         )
         .await
         .map_err(|error| {
-            video_failure_record(0, "extract_audio", &error)["error_code"]
-                .as_str()
-                .unwrap_or("video_transcription_unavailable")
-                .to_owned()
+            let (error_code, message_key, retryable, _) = structured_skill_failure_fields(
+                &error,
+                "video_transcription_unavailable",
+                "skill.video_transcribe.transcription_unavailable",
+                true,
+            );
+            TranscriptJobError { error_code, message_key, retryable }
         })?;
         let path = extracted
             .extra
@@ -379,7 +404,10 @@ pub(crate) async fn transcribe_single_attachment(
     transcribe_with_configured_stt(state, task, audio, &json!({}))
         .await
         .map(|evidence| evidence.text)
-        .map_err(|error| audio_failure_fields(&error).0)
+        .map_err(|error| {
+            let (error_code, message_key, retryable) = audio_failure_fields(&error);
+            TranscriptJobError { error_code, message_key, retryable }
+        })
 }
 
 async fn transcribe_with_configured_stt(
@@ -658,6 +686,9 @@ fn structured_skill_failure_fields(
     default_message_key: &str,
     default_retryable: bool,
 ) -> (String, String, bool, Value) {
+    if let Some(policy) = crate::skills::parse_policy_block_error(error) {
+        return (policy.reason_code, "clawd.msg.skill.policy_blocked".to_owned(), false, Value::Null);
+    }
     let Some(structured) = crate::skills::parse_structured_skill_error(error) else {
         return (
             default_error_code.to_string(),

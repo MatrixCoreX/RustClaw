@@ -441,7 +441,20 @@ pub(crate) async fn maybe_notify_schedule_result(
         state, task, payload, &message,
     ) {
         Ok(envelope) => {
-            crate::delivery_service::deliver_task_envelope(state, task, payload, &envelope).await
+            use crate::delivery_service::{deliver_task_envelope, ChannelDeliveryServiceStatus};
+            let mut result = deliver_task_envelope(state, task, payload, &envelope).await;
+            for delay in [2, 4] {
+                if !result.as_ref().is_ok_and(|outcome| {
+                    outcome.status == ChannelDeliveryServiceStatus::Failed && outcome.retryable
+                }) {
+                    break;
+                }
+                // Reuse the same envelope and receipt claim. A prior accepted
+                // or ambiguous dispatch will be returned without resending.
+                tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                result = deliver_task_envelope(state, task, payload, &envelope).await;
+            }
+            result
         }
         Err(err) => Err(err),
     };

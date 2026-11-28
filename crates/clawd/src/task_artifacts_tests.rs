@@ -429,6 +429,53 @@ fn final_projection_restores_every_artifact_preserved_before_journal_compaction(
 }
 
 #[test]
+fn reuses_single_delivery_snapshot_between_legacy_and_typed_result() {
+    let workspace = TempWorkspace::new();
+    let output = workspace.path().join("clip.mp4");
+    fs::write(&output, b"video-fixture").unwrap();
+    let digest = sha256_file(&output).unwrap();
+    let artifact_id = format!("a_{}", &digest[..32]);
+    let initial = json!({
+        "output_path": output.display().to_string()
+    });
+    let terminal = json!({
+        "task_journal": {"trace": {"capability_results": [{
+            "status": "ok",
+            "artifacts": [{
+                "id": artifact_id,
+                "path": output.display().to_string(),
+                "filename": "clip.mp4",
+                "media_type": "video/mp4",
+                "size_bytes": 13,
+                "sha256": digest,
+                "visibility": "user_delivery"
+            }]
+        }]}}
+    });
+    let parse = |raw: &Value| {
+        let result = materialize_task_result_artifacts(
+            workspace.path(),
+            "task-single-video",
+            &raw.to_string(),
+        )
+        .unwrap();
+        serde_json::from_str::<Value>(&result).unwrap()
+    };
+    let first = parse(&initial);
+    let first_manifests = manifests_from_result(Some(&first));
+    let second = parse(&terminal);
+    assert_eq!(first_manifests.len(), 1);
+    assert_eq!(manifests_from_result(Some(&second)), first_manifests);
+    let path = delivery_artifact_path(
+        workspace.path(),
+        "task-single-video",
+        &artifact_id,
+        "clip.mp4",
+    );
+    assert_eq!(fs::read_dir(path.parent().unwrap().parent().unwrap()).unwrap().count(), 1);
+}
+
+#[test]
 fn rematerializes_from_durable_task_copy_after_async_source_cleanup() {
     let workspace = TempWorkspace::new();
     let output = workspace.path().join("downloads").join("clip.mp4");

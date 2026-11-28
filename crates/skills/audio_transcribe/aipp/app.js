@@ -4,6 +4,7 @@ const labels = {
     title: "音视频转写", intro: "把录音或视频里的语音转成文字。", uploadLabel: "选择音频或视频",
     start: "开始转写", resultTitle: "转写结果", copy: "复制文字", save: "下载 TXT",
     historyTitle: "我的转写记录", refresh: "刷新", more: "查看更多",
+    permissionDenied: "当前账号没有转写权限，请联系管理员。", temporarilyUnavailable: "转写暂时不可用，请稍后重试。",
     fromAgent: "来自 Agent", fromApp: "来自 AiAPP", historyFileUnavailable: "这条记录的转写文件已无法读取。",
     limit: "单个文件最大 {size} MB。", idle: "上传文件，或从历史记录打开转写结果。",
     opening: "正在连接…", listing: "正在加载记录…", empty: "还没有转写记录。",
@@ -21,6 +22,7 @@ const labels = {
     title: "Audio and video transcription", intro: "Turn speech from recordings or videos into text.",
     uploadLabel: "Choose an audio or video file", start: "Transcribe", resultTitle: "Transcript",
     copy: "Copy text", save: "Download TXT", historyTitle: "My transcripts", refresh: "Refresh", more: "Load more",
+    permissionDenied: "This account does not have transcription permission. Contact your administrator.", temporarilyUnavailable: "Transcription is temporarily unavailable. Try again shortly.",
     fromAgent: "From Agent", fromApp: "From AiAPP", historyFileUnavailable: "This transcript file is no longer available.",
     limit: "Maximum file size is {size} MB.", idle: "Upload a file or open a transcript from your history.",
     opening: "Connecting…", listing: "Loading history…", empty: "No transcripts yet.", uploading: "Uploading…",
@@ -81,6 +83,7 @@ function statusLabel(value) {
 }
 
 function submitError(code) {
+  if (code === "skill_policy_denied") return words.permissionDenied;
   if (code === "ui_attachment_too_large") return words.tooLarge;
   if (code === "ui_attachment_upload_busy") return words.busy;
   if (code === "aipp_transcript_attachment_invalid") return words.invalid;
@@ -88,11 +91,12 @@ function submitError(code) {
   return words.uploadFailed;
 }
 
-function jobError(code) {
+function jobError(code, retryable) {
+  if (code === "skill_policy_denied") return words.permissionDenied;
   if (code === "aipp_not_available" || code === "workspace_scope_unavailable") return words.unavailable;
   if (code === "aipp_transcript_attachment_invalid" || code?.startsWith("ui_attachment_")) return words.fileExpired;
   if (code?.startsWith("video_")) return words.decodeFailed;
-  return words.providerFailed;
+  return retryable === true ? words.temporarilyUnavailable : words.providerFailed;
 }
 
 function redrawHistory() {
@@ -169,7 +173,7 @@ async function openJob(taskId, fromPoll = false, failures = 0) {
       redrawHistory();
     }
     if (job.status === "succeeded" && job.text) showText(job.text);
-    if (job.status === "failed") status("resultStatus", jobError(job.error_code), true);
+    if (job.status === "failed") status("resultStatus", jobError(job.error_code, job.retryable), true);
     else status("resultStatus", [job.name, statusLabel(job.status)].filter(Boolean).join(" · "));
     if (!settled.has(job.status)) pollTimer = setTimeout(() => { void openJob(taskId, true); }, 2000);
   } catch (error) {

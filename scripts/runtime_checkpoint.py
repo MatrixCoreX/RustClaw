@@ -7,6 +7,7 @@ import hashlib
 import json
 import lzma
 import os
+import re
 from pathlib import Path
 import shutil
 import signal
@@ -51,8 +52,27 @@ def running_revision(root):
     request=urllib.request.Request('http://127.0.0.1:8787/v1/system/host-summary',headers={'x-agent-key':key[0]})
     with urllib.request.urlopen(request,timeout=10) as response:report=json.load(response)
     version=report['data']['version'];revision=version.get('build_revision')
-    if not revision or version.get('source_match')=='different':raise RuntimeError('checkpoint_cohort_mismatch')
+    if not isinstance(revision, str) or not re.fullmatch(r'[0-9a-f]{40}', revision):
+        raise RuntimeError('checkpoint_cohort_mismatch')
+    if version.get('source_match') == 'different' and not deployed_revision_matches(root, revision):
+        raise RuntimeError('checkpoint_cohort_mismatch')
     return revision
+
+
+def deployed_revision_matches(root, revision):
+    # The verified release installer writes these markers alongside the actual
+    # runtime files. A development checkout can advance independently.
+    tag = root / '.release-tag'
+    digest = root / '.release-manifest-digest'
+    try:
+        for marker in (tag, digest):
+            if marker.is_symlink() or not marker.is_file() or marker.stat().st_size > 256:
+                return False
+        release = re.fullmatch(r'(?:ubuntu-x86_64|pi-aarch64|macos-(?:aarch64|x86_64))-(?P<sha>[0-9a-f]{12})', tag.read_text().strip())
+        return bool(release and release['sha'] == revision[:12]
+                    and re.fullmatch(r'[0-9a-f]{64}', digest.read_text().strip()))
+    except (OSError, UnicodeError):
+        return False
 
 
 def controller(mode, unit, action):

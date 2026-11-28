@@ -40,6 +40,7 @@ enum HistoryTranscript {
     App {
         text: Option<String>,
         error_code: Option<String>,
+        retryable: Option<bool>,
     },
     AgentArtifact(crate::task_artifacts::TaskArtifactManifest),
     AgentInline(String),
@@ -56,6 +57,7 @@ fn history_transcript(
         return Some(HistoryTranscript::App {
             text: field("text"),
             error_code: field("error_code"),
+            retryable: result.as_ref().and_then(|value| value["retryable"].as_bool()),
         });
     }
     let result = result?;
@@ -196,10 +198,10 @@ async fn read_aipp_transcript(
         })();
         match result {
             Ok(Some((_, item, transcript))) => {
-                let (text, error_code) = match transcript {
-                    HistoryTranscript::App { text, error_code } =>
-                        (text.filter(|_| item.status == "succeeded"), error_code),
-                    HistoryTranscript::AgentInline(text) => (Some(text), None),
+                let (text, error_code, retryable) = match transcript {
+                    HistoryTranscript::App { text, error_code, retryable } =>
+                        (text.filter(|_| item.status == "succeeded"), error_code, retryable),
+                    HistoryTranscript::AgentInline(text) => (Some(text), None, None),
                     HistoryTranscript::AgentArtifact(manifest) => {
                         let workspace = &state.skill_rt.workspace_root;
                         let owner = state.identity_files_root(&actor).ok();
@@ -209,11 +211,12 @@ async fn read_aipp_transcript(
                         let Some(text) = text else {
                             return aipp_api_error(StatusCode::GONE, "aipp_transcript_file_unavailable");
                         };
-                        (Some(text), None)
+                        (Some(text), None, None)
                     }
                 };
                 crate::api_ok(json!({ "task_id": item.task_id, "status": item.status,
-                    "name": item.name, "source": item.source, "text": text, "error_code": error_code }))
+                    "name": item.name, "source": item.source, "text": text, "error_code": error_code,
+                    "retryable": retryable }))
             }
             Ok(None) => aipp_api_error(StatusCode::NOT_FOUND, "aipp_transcript_not_found"),
             Err(error) => {

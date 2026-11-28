@@ -26,6 +26,20 @@ class Checkpoints(unittest.TestCase):
         subprocess.run(['git','-C',str(self.root),'-c','user.name=fixture','-c','user.email=fixture@example.invalid','commit','--allow-empty','-qm','fixture'],check=True)
     def create(self):
         return checkpoint.create(self.root,self.destination,mode='offline',unit='',offline=True,reserve=0)
+    def test_deployed_revision_requires_both_verified_install_markers(self):
+        revision = 'a' * 40
+        unrelated_revision = 'b' * 40
+        tag = self.root / '.release-tag'
+        digest = self.root / '.release-manifest-digest'
+        tag.write_text('ubuntu-x86_64-' + revision[:12] + '\n')
+        self.assertFalse(checkpoint.deployed_revision_matches(self.root, revision))
+        digest.write_text('c' * 64 + '\n')
+        self.assertTrue(checkpoint.deployed_revision_matches(self.root, revision))
+        self.assertFalse(checkpoint.deployed_revision_matches(self.root, unrelated_revision))
+        digest.unlink()
+        digest.symlink_to(tag)
+        self.assertFalse(checkpoint.deployed_revision_matches(self.root, revision))
+
     def test_lossless_restore_and_retirement_only_after_verified_success(self):
         result=self.create();backup=Path(result['checkpoint']);verify_checkpoint(backup)
         output=self.base/'restored';report=restore_checkpoint(backup,output);self.assertFalse(report['activated'])

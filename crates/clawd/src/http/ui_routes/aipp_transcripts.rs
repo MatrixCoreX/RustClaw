@@ -50,12 +50,13 @@ async fn submit_aipp_transcript(
     if request.package_version != app.manifest.package.version {
         return aipp_api_error(StatusCode::CONFLICT, "aipp_package_changed");
     }
-    if transcript_upload_kind(&request.attachment).is_none() {
+    let Some(kind) = transcript_upload_kind(&request.attachment) else {
         return aipp_api_error(
             StatusCode::BAD_REQUEST,
             "aipp_transcript_attachment_invalid",
         );
-    }
+    };
+    let video = kind == "video";
     let root = match state.identity_files_root(&identity) {
         Ok(root) => root,
         Err(_) => {
@@ -79,6 +80,19 @@ async fn submit_aipp_transcript(
         &mut payload,
     ) {
         return aipp_api_error(StatusCode::BAD_REQUEST, &code);
+    }
+    let allowed = |tokens: &[&str]| {
+        state.skill_rt.tools_policy.allowed_for_identity(
+            tokens,
+            state.core.active_provider_type.as_deref(),
+            Some(&identity),
+        )
+    };
+    if !allowed(&["skill:audio_transcribe", "capability:audio.preview_transcribe"])
+        || (video
+            && !allowed(&["skill:video_transcribe", "capability:video.extract_audio"]))
+    {
+        return aipp_api_error(StatusCode::FORBIDDEN, "skill_policy_denied");
     }
     let submit = claw_core::types::SubmitTaskRequest {
         kind: claw_core::types::TaskKind::Ask,
@@ -120,14 +134,14 @@ pub(crate) async fn process_aipp_transcript_job(
             task.claim_attempt,
             &json!({ "schema_version": 1, "text": text }).to_string(),
         ),
-        Err(error_code) => crate::repo::update_task_failure_with_result(
+        Err(error) => crate::repo::update_task_failure_with_result(
             state,
             &task.task_id,
             task.claim_attempt,
-            &json!({"schema_version": 1, "error_code": error_code,
-                       "message_key": "skill.transcript_job.failed"})
+            &json!({"schema_version": 1, "error_code": error.error_code,
+                       "message_key": error.message_key, "retryable": error.retryable})
             .to_string(),
-            &error_code,
+            &error.error_code,
         ),
     }
 }
@@ -136,7 +150,7 @@ async fn execute_aipp_transcript_job(
     state: &AppState,
     task: &ClaimedTask,
     payload: &Value,
-) -> Result<String, String> {
+) -> Result<String, crate::ask_flow::TranscriptJobError> {
     let skill = payload["aipp_skill"].as_str().unwrap_or_default();
     let key = task
         .user_key
