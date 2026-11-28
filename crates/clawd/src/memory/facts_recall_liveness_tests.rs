@@ -379,8 +379,8 @@ fn warmed_scoped_recall_with_foreign_expiry_does_not_attempt_a_wal_writer() {
     fixture.expire_later(foreign);
     let before = fixture.fact_snapshot(foreign);
     {
-        let first = fixture.state.core.db.get().unwrap();
-        let second = fixture.state.core.db.get().unwrap();
+        let mut first = fixture.state.core.db.get().unwrap();
+        let mut second = fixture.state.core.db.get().unwrap();
         first.busy_handler(Some(count_busy_attempt)).unwrap();
         second.busy_handler(Some(count_busy_attempt)).unwrap();
     }

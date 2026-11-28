@@ -26,8 +26,8 @@ where
     F: FnOnce(&crate::AppState) -> anyhow::Result<T> + Send + 'static,
 {
     {
-        let first = fixture.state().core.db.get().unwrap();
-        let second = fixture.state().core.db.get().unwrap();
+        let mut first = fixture.state().core.db.get().unwrap();
+        let mut second = fixture.state().core.db.get().unwrap();
         first.busy_handler(Some(wait_for_commit)).unwrap();
         second.busy_handler(Some(wait_for_commit)).unwrap();
     }

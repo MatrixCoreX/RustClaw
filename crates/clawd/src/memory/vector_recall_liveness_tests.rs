@@ -261,8 +261,8 @@ fn count_busy_attempt(_attempt: i32) -> bool {
 fn warmed_ordinary_recall_does_not_attempt_an_independent_wal_writer() {
     let fixture = Fixture::new();
     {
-        let first = fixture.state.core.db.get().unwrap();
-        let second = fixture.state.core.db.get().unwrap();
+        let mut first = fixture.state.core.db.get().unwrap();
+        let mut second = fixture.state.core.db.get().unwrap();
         first.busy_handler(Some(count_busy_attempt)).unwrap();
         second.busy_handler(Some(count_busy_attempt)).unwrap();
     }
