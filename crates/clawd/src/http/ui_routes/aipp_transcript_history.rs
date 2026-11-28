@@ -214,9 +214,12 @@ async fn read_aipp_transcript(
                         (Some(text), None, None)
                     }
                 };
-                crate::api_ok(json!({ "task_id": item.task_id, "status": item.status,
-                    "name": item.name, "source": item.source, "text": text, "error_code": error_code,
-                    "retryable": retryable }))
+                let mut result = json!({ "task_id": item.task_id, "status": item.status,
+                    "name": item.name, "source": item.source, "text": text, "error_code": error_code });
+                if let Some(retryable) = retryable {
+                    result["retryable"] = json!(retryable);
+                }
+                crate::api_ok(result)
             }
             Ok(None) => aipp_api_error(StatusCode::NOT_FOUND, "aipp_transcript_not_found"),
             Err(error) => {
